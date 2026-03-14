@@ -13,19 +13,72 @@ import Morning from './components/morning/Morning.jsx'
 import RRGPage from './components/rrg/RRGPage.jsx'
 import EdgeLab from './components/edgelab/EdgeLab.jsx'
 import ImportModal from './components/import/ImportModal.jsx'
+import LoginPage from './components/auth/LoginPage.jsx'
 import { useSettingsStore } from './store/useSettingsStore.js'
+import { useAuthStore } from './store/useAuthStore.js'
+import { useTradeStore } from './store/useTradeStore.js'
+import { supabase } from './lib/supabase.js'
+import { Loader } from 'lucide-react'
 
 export default function App() {
   const [page, setPage] = useState('dashboard')
   const [showImport, setShowImport] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState('All')
   const { theme } = useSettingsStore()
+  const { user, loading: authLoading, setSession } = useAuthStore()
+  const { loadFromCloud, clearLocalState } = useTradeStore()
 
-  // Apply theme to <html> data-theme attribute
+  // Apply theme
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme || 'dark')
   }, [theme])
 
+  // Bootstrap Supabase auth session on mount
+  useEffect(() => {
+    if (!supabase) {
+      // No Supabase configured — run in local-only mode (no login required)
+      setSession(null)
+      return
+    }
+
+    // Restore existing session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      if (session?.user) loadFromCloud(session.user.id)
+    })
+
+    // Listen for sign-in / sign-out events
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setSession(session)
+      if (event === 'SIGNED_IN' && session?.user) {
+        loadFromCloud(session.user.id)
+      }
+      if (event === 'SIGNED_OUT') {
+        clearLocalState()
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Loading spinner while we check for an existing session ───────────────
+  if (supabase && authLoading) {
+    return (
+      <div className="flex h-screen bg-surface items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-gray-500">
+          <Loader size={28} className="animate-spin text-accent-blue" />
+          <span className="text-sm">Loading…</span>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Login gate (only when Supabase is configured) ─────────────────────────
+  if (supabase && !user) {
+    return <LoginPage />
+  }
+
+  // ── Main app ──────────────────────────────────────────────────────────────
   const pageProps = { selectedAccount }
 
   return (
