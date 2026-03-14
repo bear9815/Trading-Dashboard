@@ -1,0 +1,307 @@
+import { useMemo, useState, useEffect, useRef } from 'react'
+import { Settings2, Loader } from 'lucide-react'
+import { formatCurrency, formatDate } from '../../utils/formatters.js'
+import { calcRiskPerTrade } from '../../utils/riskCalcs.js'
+import { useSettingsStore } from '../../store/useSettingsStore.js'
+import { classifySymbolTheme } from '../../utils/ai.js'
+import TickerTooltip from '../shared/TickerTooltip.jsx'
+
+const ALL_COLUMNS = [
+  { key: 'account',    label: 'Account' },
+  { key: 'entryDate',  label: 'Entry Date' },
+  { key: 'held',       label: 'Held' },
+  { key: 'entryPrice', label: 'Entry' },
+  { key: 'stop',       label: 'Stop' },
+  { key: 'target',     label: 'Target' },
+  { key: 'riskDollar', label: 'Risk $' },
+  { key: 'riskPct',    label: 'Risk %' },
+  { key: 'sector',     label: 'Sector' },
+  { key: 'theme',      label: 'Theme' },
+]
+
+const WEIGHTS = {
+  _symbol:    14,
+  account:     9,
+  entryDate:  10,
+  held:        5,
+  entryPrice:  9,
+  stop:        9,
+  target:      9,
+  riskDollar:  9,
+  riskPct:     7,
+  sector:     12,
+  theme:      14,
+}
+
+function daysHeld(entryDate) {
+  if (!entryDate) return null
+  return Math.floor((Date.now() - new Date(entryDate)) / 86_400_000)
+}
+
+/** Consolidate multiple lots of the same symbol into one row */
+function consolidateLots(openTrades) {
+  const groups = {}
+  for (const t of openTrades) {
+    const key = t.symbol || '__unknown__'
+    if (!groups[key]) groups[key] = []
+    groups[key].push(t)
+  }
+
+  return Object.values(groups).map(lots => {
+    if (lots.length === 1) return { ...lots[0], _lots: 1 }
+
+    const totalSize = lots.reduce((s, t) => s + (t.positionSize || 0), 0)
+    const avgEntry = totalSize > 0
+      ? lots.reduce((s, t) => s + (t.entryPrice || 0) * (t.positionSize || 0), 0) / totalSize
+      : lots[0].entryPrice
+    const totalRisk = lots.reduce((s, t) => s + calcRiskPerTrade(t), 0)
+    const earliest = lots.reduce(
+      (min, t) => (new Date(t.entryDate) < new Date(min) ? t.entryDate : min),
+      lots[0].entryDate
+    )
+    // Use the most common account; show stop/target from first lot as representative
+    return {
+      ...lots[0],
+      positionSize: totalSize,
+      entryPrice: avgEntry,
+      entryDate: earliest,
+      _lots: lots.length,
+      _totalRisk: totalRisk,
+    }
+  }).sort((a, b) => new Date(b.entryDate) - new Date(a.entryDate))
+}
+
+/** Resolve cached theme/sector from stored value (handles both string legacy and new object format) */
+function resolveCache(cached) {
+  if (!cached) return { sector: null, theme: null }
+  if (typeof cached === 'string') return { sector: null, theme: cached }
+  return { sector: cached.sector || null, theme: cached.theme || null }
+}
+
+export default function OpenPositions({ openTrades, accountBalance }) {
+  const {
+    apiKey,
+    openPositionsColumns, setOpenPositionsColumns,
+    symbolThemes, setSymbolTheme,
+  } = useSettingsStore()
+
+  const [showMenu, setShowMenu] = useState(false)
+  const [loadingThemes, setLoadingThemes] = useState({})
+  const menuRef = useRef(null)
+
+  const visibleKeys = openPositionsColumns || ALL_COLUMNS.map(c => c.key)
+  const show = key => visibleKeys.includes(key)
+  const needsAI = show('sector') || show('theme')
+
+  function toggleColumn(key) {
+    setOpenPositionsColumns(
+      visibleKeys.includes(key)
+        ? visibleKeys.filter(k => k !== key)
+        : [...visibleKeys, key]
+    )
+  }
+
+  useEffect(() => {
+    if (!showMenu) return
+    function handler(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setShowMenu(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showMenu])
+
+  // Auto-classify symbols not yet cached
+  useEffect(() => {
+    if (!apiKey || !needsAI) return
+    const symbols = [...new Set(openTrades.map(t => t.symbol).filter(Boolean))]
+    symbols.forEach(sym => {
+      const cached = symbolThemes[sym]
+      // Skip if already an object with both fields
+      if (cached && typeof cached === 'object' && cached.sector && cached.theme) return
+      if (loadingThemes[sym]) return
+      setLoadingThemes(prev => ({ ...prev, [sym]: true }))
+      classifySymbolTheme(sym, apiKey)
+        .then(result => setSymbolTheme(sym, result))
+        .catch(() => setSymbolTheme(sym, { sector: '—', theme: '—' }))
+        .finally(() => setLoadingThemes(prev => { const n = { ...prev }; delete n[sym]; return n }))
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openTrades, apiKey, needsAI])
+
+  const positions = useMemo(() => consolidateLots(openTrades), [openTrades])
+
+  // Proportional column widths based on visible columns
+  const visibleCols = ['_symbol', ...visibleKeys]
+  const totalWeight = visibleCols.reduce((s, k) => s + (WEIGHTS[k] || 10), 0)
+  const colWidth = key => `${((WEIGHTS[key] || 10) / totalWeight * 100).toFixed(1)}%`
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-medium text-gray-300">Open Positions</h3>
+          <span className="text-xs text-gray-500">{positions.length} open</span>
+        </div>
+        <div className="relative" ref={menuRef}>
+          <button
+            onClick={() => setShowMenu(v => !v)}
+            className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+            title="Toggle columns"
+          >
+            <Settings2 size={14} />
+          </button>
+          {showMenu && (
+            <div className="absolute right-0 top-7 z-50 bg-surface-100 border border-white/10 rounded-lg shadow-xl p-2 min-w-36">
+              <p className="text-xs text-gray-500 px-2 pb-1.5 border-b border-white/5 mb-1">Columns</p>
+              {ALL_COLUMNS.map(col => (
+                <button
+                  key={col.key}
+                  onClick={() => toggleColumn(col.key)}
+                  className="flex items-center gap-2 w-full px-2 py-1 rounded hover:bg-white/5 text-xs text-left transition-colors"
+                >
+                  <span className={`w-3 h-3 rounded-sm border flex items-center justify-center shrink-0 ${
+                    visibleKeys.includes(col.key) ? 'bg-accent-blue border-accent-blue' : 'border-white/20'
+                  }`}>
+                    {visibleKeys.includes(col.key) && (
+                      <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
+                        <path d="M1 3l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    )}
+                  </span>
+                  <span className={visibleKeys.includes(col.key) ? 'text-gray-200' : 'text-gray-500'}>{col.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {positions.length === 0 ? (
+        <p className="text-sm text-gray-500 text-center py-5">No open positions · All trades closed</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs table-fixed">
+            <colgroup>
+              <col style={{ width: colWidth('_symbol') }} />
+              {show('account')    && <col style={{ width: colWidth('account') }} />}
+              {show('entryDate')  && <col style={{ width: colWidth('entryDate') }} />}
+              {show('held')       && <col style={{ width: colWidth('held') }} />}
+              {show('entryPrice') && <col style={{ width: colWidth('entryPrice') }} />}
+              {show('stop')       && <col style={{ width: colWidth('stop') }} />}
+              {show('target')     && <col style={{ width: colWidth('target') }} />}
+              {show('riskDollar') && <col style={{ width: colWidth('riskDollar') }} />}
+              {show('riskPct')    && <col style={{ width: colWidth('riskPct') }} />}
+              {show('sector')     && <col style={{ width: colWidth('sector') }} />}
+              {show('theme')      && <col style={{ width: colWidth('theme') }} />}
+            </colgroup>
+            <thead>
+              <tr className="text-xs text-gray-500 border-b border-white/5">
+                <th className="text-left pb-2 px-2 font-medium">Symbol</th>
+                {show('account')    && <th className="text-left pb-2 px-2 font-medium">Account</th>}
+                {show('entryDate')  && <th className="text-left pb-2 px-2 font-medium">Entry Date</th>}
+                {show('held')       && <th className="text-right pb-2 px-2 font-medium">Held</th>}
+                {show('entryPrice') && <th className="text-right pb-2 px-2 font-medium">Entry</th>}
+                {show('stop')       && <th className="text-right pb-2 px-2 font-medium">Stop</th>}
+                {show('target')     && <th className="text-right pb-2 px-2 font-medium">Target</th>}
+                {show('riskDollar') && <th className="text-right pb-2 px-2 font-medium">Risk $</th>}
+                {show('riskPct')    && <th className="text-right pb-2 px-2 font-medium">Risk %</th>}
+                {show('sector')     && <th className="text-left pb-2 px-2 font-medium">Sector</th>}
+                {show('theme')      && <th className="text-left pb-2 px-2 font-medium">Theme</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {positions.map(t => {
+                const risk = t._totalRisk ?? calcRiskPerTrade(t)
+                const riskPct = accountBalance > 0 ? (risk / accountBalance) * 100 : null
+                const days = daysHeld(t.entryDate)
+                const isLong = (t.position || '').toLowerCase() !== 'short'
+                const { sector, theme } = resolveCache(symbolThemes[t.symbol])
+                const isLoading = loadingThemes[t.symbol]
+
+                const aiCell = (content) => (
+                  <span>
+                    {isLoading
+                      ? <Loader size={11} className="text-gray-600 animate-spin inline" />
+                      : content
+                        ? <span className="text-gray-400">{content}</span>
+                        : apiKey
+                          ? <span className="text-gray-600">—</span>
+                          : <span className="text-gray-600 italic text-xs">no key</span>
+                    }
+                  </span>
+                )
+
+                return (
+                  <tr key={t.id} className="hover:bg-white/3 transition-colors">
+                    <td className="py-2 px-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <TickerTooltip symbol={t.symbol}>
+                          <span className="font-semibold mono text-white truncate">{t.symbol}</span>
+                        </TickerTooltip>
+                        <span className={`shrink-0 px-1.5 py-0.5 rounded font-medium ${
+                          isLong ? 'bg-accent-green/15 text-accent-green' : 'bg-accent-red/15 text-accent-red'
+                        }`}>{t.position || 'Long'}</span>
+                        {t._lots > 1 && (
+                          <span className="shrink-0 px-1.5 py-0.5 rounded bg-white/8 text-gray-400">
+                            {t._lots}×
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    {show('account') && (
+                      <td className="py-2 px-2 text-gray-400 truncate">{t.account || '—'}</td>
+                    )}
+                    {show('entryDate') && (
+                      <td className="py-2 px-2 text-gray-400 truncate">{formatDate(t.entryDate)}</td>
+                    )}
+                    {show('held') && (
+                      <td className="py-2 px-2 text-right text-gray-400 mono">
+                        {days != null ? `${days}d` : '—'}
+                      </td>
+                    )}
+                    {show('entryPrice') && (
+                      <td className="py-2 px-2 text-right mono text-gray-300">
+                        {t.entryPrice != null ? formatCurrency(t.entryPrice) : '—'}
+                      </td>
+                    )}
+                    {show('stop') && (
+                      <td className="py-2 px-2 text-right mono text-accent-red">
+                        {t.stopLoss != null ? formatCurrency(t.stopLoss) : '—'}
+                      </td>
+                    )}
+                    {show('target') && (
+                      <td className="py-2 px-2 text-right mono text-accent-green">
+                        {t.takeProfit != null ? formatCurrency(t.takeProfit) : '—'}
+                      </td>
+                    )}
+                    {show('riskDollar') && (
+                      <td className={`py-2 px-2 text-right mono font-medium ${risk > 0 ? 'text-accent-red' : 'text-gray-500'}`}>
+                        {risk > 0 ? formatCurrency(risk) : '—'}
+                      </td>
+                    )}
+                    {show('riskPct') && (
+                      <td className={`py-2 px-2 text-right mono font-medium ${
+                        !riskPct || risk === 0 ? 'text-gray-500'
+                        : riskPct >= 4 ? 'text-accent-red'
+                        : riskPct >= 2 ? 'text-accent-yellow'
+                        : 'text-accent-green'
+                      }`}>
+                        {riskPct != null && risk > 0 ? `${riskPct.toFixed(2)}%` : '—'}
+                      </td>
+                    )}
+                    {show('sector') && (
+                      <td className="py-2 px-2 truncate">{aiCell(sector)}</td>
+                    )}
+                    {show('theme') && (
+                      <td className="py-2 px-2 truncate">{aiCell(theme)}</td>
+                    )}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
