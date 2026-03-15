@@ -209,8 +209,8 @@ export async function fetchQuote(symbol) {
     return await fetchQuoteStooq(symbol)
   } catch { /* fall through */ }
 
-  // 3. Yahoo Finance (last resort)
-  const url = `${BASE}/${encodeURIComponent(symbol)}?interval=1m&range=1d`
+  // 3. Yahoo Finance (last resort) — use 1d interval (less likely to be blocked than 1m)
+  const url = `${BASE}/${encodeURIComponent(symbol)}?interval=1d&range=5d`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const json = await res.json()
@@ -540,15 +540,19 @@ export async function fetchEarningsDates(symbols) {
       } catch { /* fall through */ }
     }
 
-    // 2. Yahoo Finance calendarEvents (fallback)
-    try {
-      const res  = await fetch(`${YF}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=calendarEvents`)
-      const json = await res.json()
-      const dates = json?.quoteSummary?.result?.[0]?.calendarEvents?.earnings?.earningsDate
-      if (dates?.length) {
-        results.push({ symbol, date: new Date(dates[0].raw * 1000) })
-      }
-    } catch { /* skip */ }
+    // 2. Yahoo Finance calendarEvents (try v10 then v11)
+    for (const ver of ['v10', 'v11']) {
+      try {
+        const res  = await fetch(`${YF}/${ver}/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=calendarEvents`)
+        if (!res.ok) continue
+        const json = await res.json()
+        const dates = json?.quoteSummary?.result?.[0]?.calendarEvents?.earnings?.earningsDate
+        if (dates?.length) {
+          results.push({ symbol, date: new Date(dates[0].raw * 1000) })
+          break
+        }
+      } catch { /* try next */ }
+    }
   }))
 
   return results.sort((a, b) => a.date - b.date)
