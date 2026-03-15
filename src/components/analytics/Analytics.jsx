@@ -45,10 +45,11 @@ const MAE_LIMIT = 20 // max trades to fetch MAE/MFE for
 export default function Analytics({ selectedAccount }) {
   const { trades, accountActivities, getAccountBalance } = useTradeStore()
   const accountBalance = getAccountBalance(selectedAccount)
-  const { excludedSymbols } = useSettingsStore()
+  const { excludedSymbols, analyticsTimeframe, setAnalyticsTimeframe } = useSettingsStore()
   const { entries: morningEntries } = useMorningStore()
 
-  const [timeframe, setTimeframe] = useState('All')
+  const timeframe    = analyticsTimeframe ?? 'All'
+  const setTimeframe = setAnalyticsTimeframe
 
   // MAE/MFE state
   const [maemfeData, setMaemfeData] = useState([])
