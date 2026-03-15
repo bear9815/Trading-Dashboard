@@ -1051,19 +1051,12 @@ export default function RiskPanel({ selectedAccount }) {
                           </td>
                           <td className="py-2 text-right mono text-gray-300">
                             {group.entryPrice != null ? `$${group.entryPrice.toFixed(2)}` : '—'}
-                            {isMulti && <span className="text-[10px] text-gray-600 ml-1">avg</span>}
                           </td>
                           <td className="py-2 text-right" onClick={e => e.stopPropagation()}>
-                            {isMulti
-                              ? <span className="mono text-xs text-accent-red/80">{group.stopLoss != null ? `$${group.stopLoss.toFixed(2)}` : <span className="text-gray-600">—</span>}</span>
-                              : <StopLossInput value={group.stopLoss} onSave={val => updateTrade(group.lots[0].id, { stopLoss: val })} />
-                            }
+                            <StopLossInput value={group.stopLoss} onSave={val => updateTrade(group.lots[0].id, { stopLoss: val })} />
                           </td>
                           <td className="py-2 text-right" onClick={e => e.stopPropagation()}>
-                            {isMulti
-                              ? <span className="mono text-xs text-accent-yellow/80">{effectiveTP != null ? `$${effectiveTP.toFixed(2)}` : <span className="text-gray-600">—</span>}</span>
-                              : <TakeProfitInput value={effectiveTP} onSave={val => updateTrade(group.lots[0].id, { takeProfit: val })} />
-                            }
+                            <TakeProfitInput value={effectiveTP} onSave={val => updateTrade(group.lots[0].id, { takeProfit: val })} />
                           </td>
                           <td className="py-2 text-right mono text-xs">
                             {currentR != null
