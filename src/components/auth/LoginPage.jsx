@@ -3,8 +3,8 @@ import { useAuthStore } from '../../store/useAuthStore.js'
 import { TrendingUp, Loader } from 'lucide-react'
 
 export default function LoginPage() {
-  const { signIn, signUp } = useAuthStore()
-  const [mode,     setMode]     = useState('signin') // 'signin' | 'signup'
+  const { signIn, signUp, resetPassword } = useAuthStore()
+  const [mode,     setMode]     = useState('signin') // 'signin' | 'signup' | 'reset'
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')
   const [loading,  setLoading]  = useState(false)
@@ -21,9 +21,12 @@ export default function LoginPage() {
         await signUp(email, password)
         setSuccess('Account created — check your email to confirm, then sign in.')
         setMode('signin')
+      } else if (mode === 'reset') {
+        await resetPassword(email)
+        setSuccess('Password reset email sent — check your inbox.')
+        setMode('signin')
       } else {
         await signIn(email, password)
-        // App.jsx will detect the session change and render the main app
       }
     } catch (err) {
       setError(err.message || 'Something went wrong')
@@ -47,12 +50,14 @@ export default function LoginPage() {
         {/* Card */}
         <div className="card p-6">
           <h1 className="text-lg font-semibold text-white mb-1">
-            {mode === 'signin' ? 'Sign in' : 'Create account'}
+            {mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Create account' : 'Reset password'}
           </h1>
           <p className="text-sm text-gray-500 mb-6">
             {mode === 'signin'
               ? 'Your trades sync automatically across all devices.'
-              : 'Set up your cloud account to sync trades everywhere.'}
+              : mode === 'signup'
+              ? 'Set up your cloud account to sync trades everywhere.'
+              : "Enter your email and we'll send you a reset link."}
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -67,18 +72,31 @@ export default function LoginPage() {
                 className="input w-full mt-1"
               />
             </div>
-            <div>
-              <label className="label">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder={mode === 'signup' ? 'Min. 6 characters' : '••••••••'}
-                required
-                minLength={6}
-                className="input w-full mt-1"
-              />
-            </div>
+            {mode !== 'reset' && (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="label">Password</label>
+                  {mode === 'signin' && (
+                    <button
+                      type="button"
+                      onClick={() => { setMode('reset'); setError(''); setSuccess('') }}
+                      className="text-xs text-gray-500 hover:text-accent-blue transition-colors"
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder={mode === 'signup' ? 'Min. 6 characters' : '••••••••'}
+                  required
+                  minLength={6}
+                  className="input w-full"
+                />
+              </div>
+            )}
 
             {error && (
               <p className="text-sm text-accent-red bg-accent-red/10 border border-accent-red/20 rounded-md px-3 py-2">
@@ -97,20 +115,19 @@ export default function LoginPage() {
               className="btn btn-primary w-full flex items-center justify-center gap-2"
             >
               {loading && <Loader size={14} className="animate-spin" />}
-              {mode === 'signin' ? 'Sign in' : 'Create account'}
+              {mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Create account' : 'Send reset link'}
             </button>
           </form>
         </div>
 
         {/* Toggle mode */}
         <p className="text-center text-sm text-gray-500 mt-4">
-          {mode === 'signin' ? "Don't have an account? " : 'Already have an account? '}
-          <button
-            onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(''); setSuccess('') }}
-            className="text-accent-blue hover:text-accent-blue/80 transition-colors font-medium"
-          >
-            {mode === 'signin' ? 'Sign up' : 'Sign in'}
-          </button>
+          {mode === 'reset'
+            ? <>Remember it? <button onClick={() => { setMode('signin'); setError(''); setSuccess('') }} className="text-accent-blue hover:text-accent-blue/80 transition-colors font-medium">Sign in</button></>
+            : mode === 'signin'
+            ? <>Don't have an account? <button onClick={() => { setMode('signup'); setError(''); setSuccess('') }} className="text-accent-blue hover:text-accent-blue/80 transition-colors font-medium">Sign up</button></>
+            : <>Already have an account? <button onClick={() => { setMode('signin'); setError(''); setSuccess('') }} className="text-accent-blue hover:text-accent-blue/80 transition-colors font-medium">Sign in</button></>
+          }
         </p>
       </div>
     </div>

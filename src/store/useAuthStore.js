@@ -27,6 +27,14 @@ export const useAuthStore = create((set) => ({
     return data
   },
 
+  resetPassword: async (email) => {
+    if (!supabase) throw new Error('Supabase not configured')
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    })
+    if (error) throw error
+  },
+
   signOut: async () => {
     if (supabase) await supabase.auth.signOut()
     set({ user: null, session: null })
