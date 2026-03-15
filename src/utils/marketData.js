@@ -2,15 +2,17 @@
  * Market data utilities
  *
  * Fetch priority:
- *   1. Alpaca Markets (primary) — requires API key + secret in settings
- *   2. Finnhub (backup)         — requires API token in settings
- *   3. Yahoo Finance (fallback) — no key required, unofficial API, may break
+ *   1. Alpaca Markets  — requires API key + secret in settings
+ *   2. Stooq           — free, no key, reliable for US stocks (CSV API)
+ *   3. Finnhub         — requires API token in settings
+ *   4. Yahoo Finance   — no key, unofficial, last resort
  *
  * Keys are read from localStorage (Zustand persist) at call time.
  */
 
-const YF   = '/api/yf'
-const BASE = `${YF}/v8/finance/chart`
+const YF     = '/api/yf'
+const STOOQ  = '/api/stooq'
+const BASE   = `${YF}/v8/finance/chart`
 
 function toDateStr(unixSec) {
   return new Date(unixSec * 1000).toISOString().slice(0, 10)
@@ -62,6 +64,65 @@ async function fetchHistoryAlpaca(symbol, startDate, endDate, apiKey, apiSecret)
     close:  b.c,
     volume: b.v,
   })).filter(c => c.open != null && c.close != null)
+}
+
+// ── Stooq (free, no key needed) ───────────────────────────────────────────────
+
+/** Convert a US ticker to Stooq symbol format (e.g. AAPL → aapl.us) */
+function stooqSym(symbol) {
+  return encodeURIComponent(symbol.toLowerCase() + '.us')
+}
+
+/** Parse Stooq CSV response into OHLCV bars */
+function parseStooqCSV(csv) {
+  const lines = csv.trim().split('\n')
+  if (lines.length < 2) throw new Error('No Stooq data')
+  return lines.slice(1).map(line => {
+    const [date, open, high, low, close, volume] = line.split(',')
+    return {
+      time:   date?.trim(),
+      open:   parseFloat(open),
+      high:   parseFloat(high),
+      low:    parseFloat(low),
+      close:  parseFloat(close),
+      volume: parseInt(volume) || 0,
+    }
+  }).filter(c => c.time && !isNaN(c.open) && !isNaN(c.close))
+}
+
+async function fetchHistoryStooq(symbol, startDate, endDate) {
+  const d1 = new Date(startDate).toISOString().slice(0, 10).replace(/-/g, '')
+  const d2 = new Date(endDate).toISOString().slice(0, 10).replace(/-/g, '')
+  const url = `${STOOQ}/q/d/l/?s=${stooqSym(symbol)}&d1=${d1}&d2=${d2}&i=d`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Stooq HTTP ${res.status}`)
+  const text = await res.text()
+  if (text.includes('No data') || text.includes('Exceeded')) throw new Error('Stooq: no data or rate limit')
+  const bars = parseStooqCSV(text)
+  if (!bars.length) throw new Error('Stooq: empty response')
+  return bars
+}
+
+async function fetchQuoteStooq(symbol) {
+  // Stooq latest quote: /q/l/?s=aapl.us&f=sd2t2ohlcv&e=csv
+  // Returns: Symbol,Date,Time,Close,Open,High,Low,Volume
+  const url = `${STOOQ}/q/l/?s=${stooqSym(symbol)}&f=sd2t2ohlcv&e=csv`
+  const res  = await fetch(url)
+  if (!res.ok) throw new Error(`Stooq HTTP ${res.status}`)
+  const text = await res.text()
+  const parts = text.trim().split('\n')[1]?.split(',')
+  if (!parts || parts.length < 8) throw new Error('Stooq: bad quote response')
+  const [, , , close, open, , , ] = parts
+  const price = parseFloat(close)
+  const prev  = parseFloat(open)  // best proxy without yesterday's close
+  if (isNaN(price)) throw new Error('Stooq: invalid price')
+  return {
+    symbol,
+    price,
+    previousClose: prev,
+    change:    price - prev,
+    changePct: prev ? ((price - prev) / prev) * 100 : 0,
+  }
 }
 
 // ── Finnhub ───────────────────────────────────────────────────────────────────
@@ -118,13 +179,13 @@ async function fetchHistoryYahoo(symbol, startDate, endDate, interval = '1d') {
 
 /**
  * Fetch the current quote for a symbol.
- * Tries Finnhub first (if key present), then Yahoo Finance proxy.
+ * Cascade: Finnhub (if key) → Stooq → Yahoo Finance
  * Returns { symbol, price, previousClose, change, changePct }
  */
 export async function fetchQuote(symbol) {
   const { finnhubApiKey } = getApiKeys()
 
-  // Try Finnhub quote
+  // 1. Finnhub (real-time, requires key)
   if (finnhubApiKey) {
     try {
       const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${finnhubApiKey}`)
@@ -143,7 +204,12 @@ export async function fetchQuote(symbol) {
     } catch { /* fall through */ }
   }
 
-  // Yahoo Finance fallback
+  // 2. Stooq (free, no key)
+  try {
+    return await fetchQuoteStooq(symbol)
+  } catch { /* fall through */ }
+
+  // 3. Yahoo Finance (last resort)
   const url = `${BASE}/${encodeURIComponent(symbol)}?interval=1m&range=1d`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -151,21 +217,21 @@ export async function fetchQuote(symbol) {
   const result = json.chart?.result?.[0]
   if (!result) throw new Error('No data returned')
 
-  const meta = result.meta
+  const meta  = result.meta
   const price = meta.regularMarketPrice ?? meta.previousClose
-  const prev = meta.previousClose ?? price
+  const prev  = meta.previousClose ?? price
   return {
     symbol,
     price,
     previousClose: prev,
-    change: price - prev,
+    change:    price - prev,
     changePct: prev ? ((price - prev) / prev) * 100 : 0,
   }
 }
 
 /**
  * Fetch daily OHLCV candles for a date range.
- * Cascade: Alpaca → Finnhub → Yahoo Finance
+ * Cascade: Alpaca → Stooq → Finnhub → Yahoo Finance
  * startDate / endDate: ISO string or Date object
  * Returns array of { time: 'YYYY-MM-DD', open, high, low, close, volume }
  */
@@ -173,7 +239,7 @@ export async function fetchHistory(symbol, startDate, endDate, interval = '1d') 
   const { alpacaApiKey, alpacaApiSecret, finnhubApiKey } = getApiKeys()
   const errors = []
 
-  // 1. Alpaca (primary)
+  // 1. Alpaca (primary — best quality, requires keys)
   if (alpacaApiKey && alpacaApiSecret) {
     try {
       const bars = await fetchHistoryAlpaca(symbol, startDate, endDate, alpacaApiKey, alpacaApiSecret)
@@ -183,7 +249,15 @@ export async function fetchHistory(symbol, startDate, endDate, interval = '1d') 
     }
   }
 
-  // 2. Finnhub (backup)
+  // 2. Stooq (free, no key, reliable)
+  try {
+    const bars = await fetchHistoryStooq(symbol, startDate, endDate)
+    if (bars.length) return bars
+  } catch (e) {
+    errors.push(`Stooq: ${e.message}`)
+  }
+
+  // 3. Finnhub (requires key)
   if (finnhubApiKey) {
     try {
       const bars = await fetchHistoryFinnhub(symbol, startDate, endDate, finnhubApiKey)
@@ -193,7 +267,7 @@ export async function fetchHistory(symbol, startDate, endDate, interval = '1d') 
     }
   }
 
-  // 3. Yahoo Finance (fallback — no key needed)
+  // 4. Yahoo Finance (last resort)
   try {
     const bars = await fetchHistoryYahoo(symbol, startDate, endDate, interval)
     if (bars.length) return bars
@@ -443,8 +517,30 @@ export async function computeTradeMAEMFE(trade) {
  * Returns an array sorted by date ascending: [{ symbol, date }]
  */
 export async function fetchEarningsDates(symbols) {
+  const { finnhubApiKey } = getApiKeys()
   const results = []
+
   await Promise.all(symbols.map(async (symbol) => {
+    // 1. Finnhub earnings calendar (if key present)
+    if (finnhubApiKey) {
+      try {
+        const from = new Date().toISOString().slice(0, 10)
+        const to   = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10)
+        const res  = await fetch(
+          `https://finnhub.io/api/v1/calendar/earnings?from=${from}&to=${to}&symbol=${encodeURIComponent(symbol)}&token=${finnhubApiKey}`
+        )
+        if (res.ok) {
+          const json = await res.json()
+          const entry = json?.earningsCalendar?.[0]
+          if (entry?.date) {
+            results.push({ symbol, date: new Date(entry.date) })
+            return
+          }
+        }
+      } catch { /* fall through */ }
+    }
+
+    // 2. Yahoo Finance calendarEvents (fallback)
     try {
       const res  = await fetch(`${YF}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=calendarEvents`)
       const json = await res.json()
@@ -454,5 +550,6 @@ export async function fetchEarningsDates(symbols) {
       }
     } catch { /* skip */ }
   }))
+
   return results.sort((a, b) => a.date - b.date)
 }
