@@ -1,19 +1,21 @@
 import { useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Loader } from 'lucide-react'
+import { Loader, Copy, Check } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { getSymbolProfile } from '../../utils/ai.js'
 
 export default function TickerTooltip({ symbol, children }) {
   const { apiKey, symbolThemes, setSymbolTheme } = useSettingsStore()
-  const [visible, setVisible] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [visible,  setVisible]  = useState(false)
+  const [loading,  setLoading]  = useState(false)
+  const [copied,   setCopied]   = useState(false)
   const [tooltipStyle, setTooltipStyle] = useState({})
   const wrapRef  = useRef(null)
   const timerRef = useRef(null)
   const loadRef  = useRef(false)
 
   function open() {
+    clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
       const rect = wrapRef.current?.getBoundingClientRect()
       if (!rect) return
@@ -45,7 +47,23 @@ export default function TickerTooltip({ symbol, children }) {
 
   function close() {
     clearTimeout(timerRef.current)
-    setVisible(false)
+    // Small delay so mouse can travel from trigger into the tooltip without it closing
+    timerRef.current = setTimeout(() => setVisible(false), 150)
+  }
+
+  function cancelClose() {
+    clearTimeout(timerRef.current)
+  }
+
+  function handleCopy() {
+    const lines = [symbol]
+    if (theme) lines.push(`Theme: ${theme}`)
+    if (companyName) lines.push('', companyName)
+    if (description.length) lines.push('', ...description)
+    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
   }
 
   const cached      = symbolThemes[symbol] || {}
@@ -67,10 +85,28 @@ export default function TickerTooltip({ symbol, children }) {
 
       {visible && createPortal(
         <div
-          className="fixed z-[9999] rounded-lg border border-white/10 bg-surface-100 shadow-2xl p-4 pointer-events-none"
+          className="fixed z-[9999] rounded-lg border border-white/10 bg-surface-100 shadow-2xl p-4"
           style={tooltipStyle}
+          onMouseEnter={cancelClose}
+          onMouseLeave={close}
         >
-          <p className="font-bold text-white text-sm mono mb-0.5">{symbol}</p>
+          {/* Header row: symbol + copy button */}
+          <div className="flex items-start justify-between gap-2 mb-0.5">
+            <p className="font-bold text-white text-sm mono">{symbol}</p>
+            {hasProfile && (
+              <button
+                onClick={handleCopy}
+                title="Copy for TradingView"
+                className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                {copied
+                  ? <><Check size={11} className="text-accent-green" /><span className="text-accent-green">Copied</span></>
+                  : <><Copy size={11} /><span>Copy</span></>
+                }
+              </button>
+            )}
+          </div>
+
           {theme && (
             <p className="text-xs font-semibold text-accent-blue mb-3">Theme: {theme}</p>
           )}
