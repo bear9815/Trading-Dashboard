@@ -48,6 +48,8 @@ export default function Analytics({ selectedAccount }) {
   const { excludedSymbols } = useSettingsStore()
   const { entries: morningEntries } = useMorningStore()
 
+  const [timeframe, setTimeframe] = useState('All')
+
   // MAE/MFE state
   const [maemfeData, setMaemfeData] = useState([])
   const [maemfeLoading, setMaemfeLoading] = useState(false)
@@ -88,7 +90,19 @@ export default function Analytics({ selectedAccount }) {
     return accountFiltered.filter(t => !excludedSet.has((t.symbol || '').toUpperCase()))
   }, [trades, selectedAccount, excludedSet])
 
-  const closed = filtered.filter(t => t.status === 'Win' || t.status === 'Loss')
+  const tfFiltered = useMemo(() => {
+    if (timeframe === 'All') return filtered
+    const now = new Date()
+    let cutoff
+    if (timeframe === '1M') { cutoff = new Date(now); cutoff.setMonth(cutoff.getMonth() - 1) }
+    else if (timeframe === '3M') { cutoff = new Date(now); cutoff.setMonth(cutoff.getMonth() - 3) }
+    else if (timeframe === '6M') { cutoff = new Date(now); cutoff.setMonth(cutoff.getMonth() - 6) }
+    else if (timeframe === 'YTD') { cutoff = new Date(now.getFullYear(), 0, 1) }
+    else if (timeframe === '1Y') { cutoff = new Date(now); cutoff.setFullYear(cutoff.getFullYear() - 1) }
+    return filtered.filter(t => t.entryDate && new Date(t.entryDate) >= cutoff)
+  }, [filtered, timeframe])
+
+  const closed = tfFiltered.filter(t => t.status === 'Win' || t.status === 'Loss')
 
   // ── Rolling win rate ───────────────────────────────────────────────────────
   const closedSorted = useMemo(
@@ -479,7 +493,7 @@ export default function Analytics({ selectedAccount }) {
     { name: 'Loss', value: losses },
   ]
 
-  const rDist = calcRMultipleDistribution(filtered)
+  const rDist = calcRMultipleDistribution(tfFiltered)
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const byDow = Object.fromEntries(dayNames.map(d => [d, { total: 0, count: 0 }]))
@@ -529,12 +543,12 @@ export default function Analytics({ selectedAccount }) {
     }))
     .sort((a, b) => b.winRate - a.winRate)
 
-  const { avgWin, avgLoss } = calcAvgWinLoss(filtered)
+  const { avgWin, avgLoss } = calcAvgWinLoss(tfFiltered)
   const payoffRatio = Math.abs(avgLoss) > 0 ? avgWin / Math.abs(avgLoss) : null
-  const profitFactor = calcProfitFactor(filtered)
-  const expectancy = calcExpectancy(filtered)
-  const avgR = calcAvgR(filtered)
-  const winRate = calcWinRate(filtered)
+  const profitFactor = calcProfitFactor(tfFiltered)
+  const expectancy = calcExpectancy(tfFiltered)
+  const avgR = calcAvgR(tfFiltered)
+  const winRate = calcWinRate(tfFiltered)
 
   // ── Streaks ──────────────────────────────────────────────────────────────
   const streaks = useMemo(() => {
@@ -665,6 +679,23 @@ export default function Analytics({ selectedAccount }) {
 
   return (
     <div className="p-4 flex flex-col gap-6">
+
+      {/* Timeframe filter */}
+      <div className="flex items-center gap-1">
+        {['1M', '3M', '6M', 'YTD', '1Y', 'All'].map(tf => (
+          <button
+            key={tf}
+            onClick={() => setTimeframe(tf)}
+            className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+              timeframe === tf
+                ? 'bg-accent-blue text-white'
+                : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+            }`}
+          >
+            {tf}
+          </button>
+        ))}
+      </div>
 
       {/* Summary stats */}
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
