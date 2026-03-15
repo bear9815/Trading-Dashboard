@@ -9,8 +9,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Risk Tool',
-        short_name: 'Risk Tool',
+        name: 'Trading Dashboard',
+        short_name: 'Trading Dashboard',
         description: 'Local-first trading analytics & risk management',
         theme_color: '#0f1117',
         background_color: '#0f1117',

@@ -41,7 +41,7 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
         <div className="w-8 h-8 rounded-lg bg-accent-blue flex items-center justify-center shrink-0">
           <TrendingUp size={16} className="text-white" />
         </div>
-        <span className="hidden md:block font-semibold text-white text-sm tracking-wide">Risk Tool</span>
+        <span className="hidden md:block font-semibold text-white text-sm tracking-wide">Trading Dashboard</span>
       </div>
 
       {/* ── Account Selector — desktop ── */}

@@ -44,7 +44,7 @@ export default function LoginPage() {
           <div className="w-9 h-9 rounded-lg bg-accent-blue/20 border border-accent-blue/30 flex items-center justify-center">
             <TrendingUp size={18} className="text-accent-blue" />
           </div>
-          <span className="text-xl font-bold text-white tracking-tight">Risk Tool</span>
+          <span className="text-xl font-bold text-white tracking-tight">Trading Dashboard</span>
         </div>
 
         {/* Card */}

@@ -684,7 +684,7 @@ export default function Settings() {
 
       {/* About */}
       <div className="card text-xs text-gray-500 space-y-1">
-        <p className="font-medium text-gray-400">Risk Tool v0.1.0</p>
+        <p className="font-medium text-gray-400">Trading Dashboard v0.1.0</p>
         <p>All data stored locally in your browser. No accounts, no cloud.</p>
         <p>Supports ThinkorSwim, Interactive Brokers, and Fidelity CSV imports.</p>
       </div>

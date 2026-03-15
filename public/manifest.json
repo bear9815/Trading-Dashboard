@@ -1,6 +1,6 @@
 {
-  "name": "Risk Tool",
-  "short_name": "Risk Tool",
+  "name": "Trading Dashboard",
+  "short_name": "Trading Dashboard",
   "description": "Trading journal and risk analytics",
   "start_url": "/",
   "display": "standalone",

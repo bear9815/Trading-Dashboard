@@ -290,7 +290,7 @@ function QuotesTicker() {
 export default function TopBar({ page, onImport }) {
   return (
     <header className="h-14 bg-surface-50/80 backdrop-blur border-b border-white/10 flex items-center px-4 shrink-0 sticky top-0 z-10 gap-3">
-      <h1 className="text-base font-semibold text-white flex-shrink-0">{PAGE_TITLES[page] || 'Risk Tool'}</h1>
+      <h1 className="text-base font-semibold text-white flex-shrink-0">{PAGE_TITLES[page] || 'Trading Dashboard'}</h1>
 
       {/* Quotes ticker — fills remaining space between title and import button */}
       <QuotesTicker />
