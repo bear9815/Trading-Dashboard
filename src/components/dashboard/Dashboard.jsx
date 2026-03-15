@@ -4,6 +4,7 @@ import MetricCard from './MetricCard.jsx'
 import EquityCurve from './EquityCurve.jsx'
 import CalendarHeatmap from './CalendarHeatmap.jsx'
 import OpenPositions from './OpenPositions.jsx'
+import EarningsCalendar from './EarningsCalendar.jsx'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import {
@@ -197,6 +198,9 @@ export default function Dashboard({ selectedAccount }) {
 
       {/* ── Open Positions ────────────────────────────────────────────────── */}
       <OpenPositions openTrades={openTrades} accountBalance={accountBalance} />
+
+      {/* ── Earnings Calendar ─────────────────────────────────────────────── */}
+      <EarningsCalendar openTrades={openTrades} />
 
       {/* ── Quick Notes ───────────────────────────────────────────────────── */}
       <div className="card">

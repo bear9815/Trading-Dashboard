@@ -13,6 +13,7 @@ import Morning from './components/morning/Morning.jsx'
 import RRGPage from './components/rrg/RRGPage.jsx'
 import EdgeLab from './components/edgelab/EdgeLab.jsx'
 import ImportModal from './components/import/ImportModal.jsx'
+import QuickAddTrade from './components/quicktrade/QuickAddTrade.jsx'
 import LoginPage from './components/auth/LoginPage.jsx'
 import { useSettingsStore } from './store/useSettingsStore.js'
 import { useAuthStore } from './store/useAuthStore.js'
@@ -112,6 +113,7 @@ export default function App() {
       </div>
 
       {showImport && <ImportModal onClose={() => setShowImport(false)} />}
+      <QuickAddTrade />
     </div>
   )
 }

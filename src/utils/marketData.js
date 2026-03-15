@@ -435,3 +435,24 @@ export async function computeTradeMAEMFE(trade) {
     efficiency: mfe > 0 ? Math.round((pl / (mfe * Math.abs(trade.positionSize || 1))) * 1000) / 10 : null,
   }
 }
+
+// ── Earnings Calendar ─────────────────────────────────────────────────────────
+
+/**
+ * Fetch upcoming earnings dates for a list of symbols via Yahoo Finance.
+ * Returns an array sorted by date ascending: [{ symbol, date }]
+ */
+export async function fetchEarningsDates(symbols) {
+  const results = []
+  await Promise.all(symbols.map(async (symbol) => {
+    try {
+      const res  = await fetch(`${YF}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=calendarEvents`)
+      const json = await res.json()
+      const dates = json?.quoteSummary?.result?.[0]?.calendarEvents?.earnings?.earningsDate
+      if (dates?.length) {
+        results.push({ symbol, date: new Date(dates[0].raw * 1000) })
+      }
+    } catch { /* skip */ }
+  }))
+  return results.sort((a, b) => a.date - b.date)
+}
