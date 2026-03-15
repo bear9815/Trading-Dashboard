@@ -45,7 +45,7 @@ const MAE_LIMIT = 20 // max trades to fetch MAE/MFE for
 export default function Analytics({ selectedAccount }) {
   const { trades, accountActivities, getAccountBalance } = useTradeStore()
   const accountBalance = getAccountBalance(selectedAccount)
-  const { excludedSymbols, analyticsTimeframe, setAnalyticsTimeframe } = useSettingsStore()
+  const { excludedSymbols, analyticsTimeframe, setAnalyticsTimeframe, analyticsWinLossMode, setAnalyticsWinLossMode } = useSettingsStore()
   const { entries: morningEntries } = useMorningStore()
 
   const timeframe    = analyticsTimeframe ?? 'All'
@@ -317,7 +317,8 @@ export default function Analytics({ selectedAccount }) {
   const hasRollingData = rollingWinData.some(d => d.w10 != null)
 
   // ── Monthly breakdown ─────────────────────────────────────────────────────
-  const [winLossMode, setWinLossMode] = useState('$') // '$' | 'R'
+  const winLossMode    = analyticsWinLossMode ?? '$'
+  const setWinLossMode = setAnalyticsWinLossMode
   const [monthSort, setMonthSort] = useState({ field: 'month', dir: 'asc' })
 
   function toggleSort(field) {

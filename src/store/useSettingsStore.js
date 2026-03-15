@@ -20,6 +20,7 @@ export const useSettingsStore = create(
       // Dashboard preferences
       equityCurveRange: 'All',     // default range shown on equity curve
       analyticsTimeframe: 'All',   // persisted timeframe filter on Analytics page
+      analyticsWinLossMode: '$',   // '$' | 'R' — Avg Win/Loss display mode
       dashboardNote: '',        // quick sticky note on dashboard
       openPositionsColumns: ['entryDate', 'held', 'entryPrice', 'stop', 'target', 'riskDollar', 'riskPct', 'sector', 'theme'],
       symbolThemes: {},         // { [symbol]: 'AI Infrastructure', ... } — AI-classified cache
@@ -43,6 +44,7 @@ export const useSettingsStore = create(
       })),
       setEquityCurveRange: (v) => set({ equityCurveRange: v }),
       setAnalyticsTimeframe: (v) => set({ analyticsTimeframe: v }),
+      setAnalyticsWinLossMode: (v) => set({ analyticsWinLossMode: v }),
       setDashboardNote: (v) => set({ dashboardNote: v }),
       setOpenPositionsColumns: (cols) => set({ openPositionsColumns: cols }),
       setSymbolTheme: (symbol, theme) => set(s => ({ symbolThemes: { ...s.symbolThemes, [symbol]: theme } })),
