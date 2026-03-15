@@ -317,6 +317,7 @@ export default function Analytics({ selectedAccount }) {
   const hasRollingData = rollingWinData.some(d => d.w10 != null)
 
   // ── Monthly breakdown ─────────────────────────────────────────────────────
+  const [winLossMode, setWinLossMode] = useState('$') // '$' | 'R'
   const [monthSort, setMonthSort] = useState({ field: 'month', dir: 'asc' })
 
   function toggleSort(field) {
@@ -546,6 +547,8 @@ export default function Analytics({ selectedAccount }) {
 
   const { avgWin, avgLoss } = calcAvgWinLoss(tfFiltered)
   const payoffRatio = Math.abs(avgLoss) > 0 ? avgWin / Math.abs(avgLoss) : null
+  const avgWinR  = useMemo(() => { const w = closed.filter(t => t.status === 'Win'  && t.rMultiple != null); return w.length ? w.reduce((s, t) => s + t.rMultiple, 0) / w.length : null }, [closed])
+  const avgLossR = useMemo(() => { const l = closed.filter(t => t.status === 'Loss' && t.rMultiple != null); return l.length ? l.reduce((s, t) => s + t.rMultiple, 0) / l.length : null }, [closed])
   const profitFactor = calcProfitFactor(tfFiltered)
   const expectancy = calcExpectancy(tfFiltered)
   const avgR = calcAvgR(tfFiltered)
@@ -709,14 +712,36 @@ export default function Analytics({ selectedAccount }) {
       </div>
 
       {/* Avg Win vs Loss */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="card text-center">
-          <p className="text-xs text-gray-500 mb-1">Avg Win</p>
-          <p className="text-xl font-bold mono text-accent-green">+{formatCurrency(avgWin, true)}</p>
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-semibold text-gray-300">Avg Win / Loss</p>
+          <div className="flex rounded overflow-hidden border border-white/10 text-xs">
+            {['$', 'R'].map(m => (
+              <button
+                key={m}
+                onClick={() => setWinLossMode(m)}
+                className={`px-2.5 py-0.5 font-medium transition-colors ${
+                  winLossMode === m ? 'bg-accent-blue text-white' : 'text-gray-500 hover:text-gray-300'
+                }`}
+              >{m}</button>
+            ))}
+          </div>
         </div>
-        <div className="card text-center">
-          <p className="text-xs text-gray-500 mb-1">Avg Loss</p>
-          <p className="text-xl font-bold mono text-accent-red">{formatCurrency(avgLoss, true)}</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="card-sm text-center">
+            <p className="text-xs text-gray-500 mb-1">Avg Win</p>
+            {winLossMode === '$'
+              ? <p className="text-xl font-bold mono text-accent-green">+{formatCurrency(avgWin, true)}</p>
+              : <p className="text-xl font-bold mono text-accent-green">{avgWinR != null ? `+${avgWinR.toFixed(2)}R` : '—'}</p>
+            }
+          </div>
+          <div className="card-sm text-center">
+            <p className="text-xs text-gray-500 mb-1">Avg Loss</p>
+            {winLossMode === '$'
+              ? <p className="text-xl font-bold mono text-accent-red">{formatCurrency(avgLoss, true)}</p>
+              : <p className="text-xl font-bold mono text-accent-red">{avgLossR != null ? `${avgLossR.toFixed(2)}R` : '—'}</p>
+            }
+          </div>
         </div>
       </div>
 
