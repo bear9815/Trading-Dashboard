@@ -1183,7 +1183,7 @@ export default function RiskPanel({ selectedAccount }) {
                     const rColor = totalCurrentR == null ? '' : totalCurrentR >= 0 ? 'text-accent-green' : 'text-accent-red'
                     const plColor = totalUnrealPL == null ? '' : totalUnrealPL >= 0 ? 'text-accent-green' : 'text-accent-red'
                     return (
-                      <tr className="border-t border-white/10 text-xs text-gray-400 font-semibold">
+                      <tr className="border-t border-white/10 text-sm text-gray-400 font-semibold">
                         <td className="pt-2">Total</td>
                         <td /><td /><td /><td />
                         <td className={`pt-2 text-right mono ${rColor}`}>
