@@ -8,6 +8,7 @@ import { enrichTrade } from '../../utils/enrichTrade.js'
 import { calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor, calcTotalR } from '../../utils/metrics.js'
 import TradeChart from './TradeChart.jsx'
 import ChartGallery from '../shared/ChartGallery.jsx'
+import TickerTooltip from '../shared/TickerTooltip.jsx'
 
 const STATUS_OPTS = ['All', 'Win', 'Loss', 'Open', 'Scratch']
 const POSITION_OPTS = ['All', 'Long', 'Short']
@@ -976,13 +977,15 @@ export default function TradeLog({ selectedAccount }) {
                         {expanded === trade.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={e => { e.stopPropagation(); setSymbolModal(trade.symbol) }}
-                          className="font-bold mono text-white hover:text-accent-blue transition-colors"
-                          title={`View ${trade.symbol} stats`}
-                        >
-                          {trade.symbol}
-                        </button>
+                        <TickerTooltip symbol={trade.symbol}>
+                          <button
+                            onClick={e => { e.stopPropagation(); setSymbolModal(trade.symbol) }}
+                            className="font-bold mono text-white hover:text-accent-blue transition-colors"
+                            title={`View ${trade.symbol} stats`}
+                          >
+                            {trade.symbol}
+                          </button>
+                        </TickerTooltip>
                       </td>
                       <td className="px-3 py-3 text-gray-400 text-xs">{formatDate(trade.entryDate)}</td>
                       <td className="px-3 py-3 text-gray-400 text-xs">{trade.account}</td>

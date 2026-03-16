@@ -5,6 +5,7 @@ import {
   ScatterChart, Scatter, ZAxis, ComposedChart
 } from 'recharts'
 import { RefreshCw, ChevronUp, ChevronDown, Clock, TrendingDown, Brain, AlertTriangle, Maximize2, X } from 'lucide-react'
+import TickerTooltip from '../shared/TickerTooltip.jsx'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
@@ -1189,6 +1190,20 @@ export default function Analytics({ selectedAccount }) {
             </Bar>
           </BarChart>
         </ResponsiveContainer>
+        <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-white/5">
+          {symbolData.map(e => (
+            <TickerTooltip key={e.symbol} symbol={e.symbol}>
+              <span className={`inline-flex items-center gap-1.5 text-xs mono px-2.5 py-1 rounded-full border cursor-default
+                ${e.pl >= 0
+                  ? 'text-accent-green border-accent-green/20 bg-accent-green/5'
+                  : 'text-accent-red border-accent-red/20 bg-accent-red/5'}`}
+              >
+                {e.symbol}
+                <span className="opacity-60">{e.pl >= 0 ? '+' : ''}{formatCurrency(e.pl, true)}</span>
+              </span>
+            </TickerTooltip>
+          ))}
+        </div>
       </div>
 
       {/* ── Process Grade vs P&L ────────────────────────────────────────── */}
