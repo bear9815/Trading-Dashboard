@@ -1,11 +1,11 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   Sparkles, AlertCircle, ChevronDown, ChevronUp,
-  Send, Search, MessageSquare, TrendingUp, X, Zap, Building2,
+  Send, Search, MessageSquare, TrendingUp, X, Zap, Building2, BookOpen,
 } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
-import { analyzePortfolio, chatWithPortfolio, analyzeSingleTradeDeep, findWorstHabit, analyzeStockBrief } from '../../utils/ai.js'
+import { analyzePortfolio, chatWithPortfolio, analyzeSingleTradeDeep, findWorstHabit, analyzeStockBrief, getSymbolProfile } from '../../utils/ai.js'
 import { formatCurrency } from '../../utils/formatters.js'
 
 // ── Grade badge ──────────────────────────────────────────────────────────────
@@ -102,6 +102,12 @@ export default function AIFeedback({ selectedAccount }) {
   const [briefResult,  setBriefResult]  = useState(null)
   const [briefError,   setBriefError]   = useState(null)
   const [briefExpanded, setBriefExpanded] = useState({})
+
+  // Symbol profile
+  const [profileTicker,  setProfileTicker]  = useState('')
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileResult,  setProfileResult]  = useState(null)
+  const [profileError,   setProfileError]   = useState(null)
 
   // Derived data
   const filteredTrades = useMemo(() =>
@@ -224,6 +230,26 @@ export default function AIFeedback({ selectedAccount }) {
     }
   }
 
+  // ── Symbol profile ─────────────────────────────────────────────────────────
+  async function runSymbolProfile() {
+    const sym = profileTicker.trim().toUpperCase()
+    if (!sym) return
+    setProfileLoading(true)
+    setProfileError(null)
+    setProfileResult(null)
+    try {
+      const res = await getSymbolProfile(sym, apiKey)
+      setProfileResult({ symbol: sym, ...res })
+      // Cache in symbolThemes so TickerTooltip also shows it instantly
+      const { setSymbolTheme, symbolThemes } = useSettingsStore.getState()
+      setSymbolTheme(sym, { ...(symbolThemes[sym] || {}), ...res })
+    } catch (e) {
+      setProfileError(e.message || 'Failed to load profile.')
+    } finally {
+      setProfileLoading(false)
+    }
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="p-4 flex flex-col gap-4 max-w-3xl">
@@ -240,6 +266,7 @@ export default function AIFeedback({ selectedAccount }) {
             { id: 'portfolio', label: 'Portfolio',   Icon: TrendingUp  },
             { id: 'trade',     label: 'Trade Dive',  Icon: Search      },
             { id: 'stock',     label: 'Stock Brief', Icon: Building2   },
+            { id: 'profile',   label: 'Symbol Profile', Icon: BookOpen },
           ].map(({ id, label, Icon }) => (
             <button
               key={id}
@@ -762,6 +789,76 @@ export default function AIFeedback({ selectedAccount }) {
               <Building2 size={34} className="mx-auto mb-3 opacity-20" />
               <p className="font-medium text-gray-400 mb-1">Company Brief</p>
               <p className="text-xs">Type a ticker above to generate a 7-point analyst brief — how the business works, how it makes money, and what protects its economics.</p>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ════ SYMBOL PROFILE TAB ═══════════════════════════════════════════════ */}
+      {activeTab === 'profile' && (
+        <>
+          <div className="card">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Quick Symbol Profile</p>
+            <p className="text-xs text-gray-500 mb-3">
+              Research any stock before trading — get a concise overview of the business and why it matters to investors.
+            </p>
+            <div className="flex gap-2">
+              <input
+                className="input flex-1 text-sm font-mono uppercase"
+                placeholder="e.g. NVDA, AAPL, PLTR"
+                value={profileTicker}
+                onChange={e => setProfileTicker(e.target.value.toUpperCase())}
+                onKeyDown={e => { if (e.key === 'Enter') runSymbolProfile() }}
+                maxLength={10}
+                autoFocus
+              />
+              <button
+                onClick={runSymbolProfile}
+                disabled={profileLoading || !apiKey || !profileTicker.trim()}
+                className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <BookOpen size={13} />
+                {profileLoading ? 'Loading…' : 'Look Up'}
+              </button>
+            </div>
+          </div>
+
+          {profileError && (
+            <div className="card border-accent-red/30 bg-accent-red/5 text-accent-red text-sm flex items-start gap-2">
+              <AlertCircle size={14} className="shrink-0 mt-0.5" />
+              {profileError}
+            </div>
+          )}
+
+          {profileLoading && (
+            <div className="card flex items-center gap-3 text-gray-400 text-sm">
+              <Spinner />
+              Loading profile for {profileTicker}…
+            </div>
+          )}
+
+          {profileResult && !profileLoading && (
+            <div className="card space-y-3">
+              <div className="flex items-baseline gap-3">
+                <span className="text-2xl font-bold mono text-white">{profileResult.symbol}</span>
+                <span className="text-sm text-accent-blue font-medium">{profileResult.companyName}</span>
+              </div>
+              <div className="space-y-2 pt-1 border-t border-white/5">
+                {profileResult.description?.map((para, i) => (
+                  <p key={i} className="text-sm text-gray-300 leading-relaxed">{para}</p>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-600">
+                Profile cached — hovering this ticker anywhere in the app will show this instantly.
+              </p>
+            </div>
+          )}
+
+          {!profileResult && !profileLoading && !profileError && (
+            <div className="card text-center py-14 text-gray-500 text-sm">
+              <BookOpen size={34} className="mx-auto mb-3 opacity-20" />
+              <p className="font-medium text-gray-400 mb-1">Symbol Lookup</p>
+              <p className="text-xs">Type any ticker to get a quick 2-paragraph business overview — great for researching setups before taking a position.</p>
             </div>
           )}
         </>
