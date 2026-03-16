@@ -824,6 +824,55 @@ Rules:
 }
 
 /**
+ * 7-Point Company Brief — replicates the user's Gemini Gem for equity analysis.
+ * Input: a ticker symbol (e.g. "STX", "NVDA")
+ * Returns a structured brief with executive summary + 7 analytical sections.
+ */
+export async function analyzeStockBrief(ticker, apiKey) {
+  if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
+  const model = getModel(apiKey)
+  const sym = ticker.trim().toUpperCase()
+
+  const prompt = `You are a professional equity analyst writing a high-quality company brief for long-term investors.
+
+Analyze ${sym} using the 7-point framework below.
+
+Use only verifiable, factual information (annual reports, investor presentations, filings, earnings transcripts, and reputable financial sources). Be concise, analytical, and concrete — no filler or marketing language.
+
+Return ONLY valid JSON (no markdown, no code fences):
+{
+  "ticker": "${sym}",
+  "companyName": "Full legal company name",
+  "oneLiner": "One sentence describing this business to an investor",
+  "executiveSummary": "150–200 word summary of how the company makes money, its economic quality, and where its edge and risks lie",
+  "sections": [
+    { "title": "What They Sell and Who Buys",  "bullets": ["specific point with data", "..."] },
+    { "title": "How They Make Money",           "bullets": ["revenue model detail", "..."] },
+    { "title": "Revenue Quality",               "bullets": ["predictability / concentration / cycles", "..."] },
+    { "title": "Cost Structure",                "bullets": ["major cost drivers + actual margin figures", "..."] },
+    { "title": "Capital Intensity",             "bullets": ["CapEx, working capital, cash conversion", "..."] },
+    { "title": "Growth Drivers",                "bullets": ["structural vs cyclical levers", "..."] },
+    { "title": "Competitive Edge",              "bullets": ["moat type + financial evidence (ROIC, margins, retention)", "..."] }
+  ],
+  "dataAsOf": "e.g. Q2 FY2026 or March 2025 — the approximate date of the latest data used"
+}
+
+Rules:
+- Each bullet must be a concrete, specific insight or data point — no generic statements
+- Include actual numbers (margins, growth rates, market share) wherever available
+- Tone: analytical, neutral, precise
+- If the ticker is unknown or not a real company, return { "error": "Unknown ticker: ${sym}" }`
+
+  const result = await model.generateContent(prompt)
+  const text = result.response.text()
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) throw new Error('AI returned an unrecognised format.')
+  const parsed = JSON.parse(jsonMatch[0])
+  if (parsed.error) throw new Error(parsed.error)
+  return parsed
+}
+
+/**
  * Classify a stock symbol into a GICS sector and a short market theme.
  * Returns { sector: string, theme: string }
  * Result is cached by the caller — do not call on every render.

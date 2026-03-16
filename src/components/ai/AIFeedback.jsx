@@ -1,11 +1,11 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   Sparkles, AlertCircle, ChevronDown, ChevronUp,
-  Send, Search, MessageSquare, TrendingUp, X, Zap,
+  Send, Search, MessageSquare, TrendingUp, X, Zap, Building2,
 } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
-import { analyzePortfolio, chatWithPortfolio, analyzeSingleTradeDeep, findWorstHabit } from '../../utils/ai.js'
+import { analyzePortfolio, chatWithPortfolio, analyzeSingleTradeDeep, findWorstHabit, analyzeStockBrief } from '../../utils/ai.js'
 import { formatCurrency } from '../../utils/formatters.js'
 
 // ── Grade badge ──────────────────────────────────────────────────────────────
@@ -95,6 +95,13 @@ export default function AIFeedback({ selectedAccount }) {
   const [habitLoading, setHabitLoading] = useState(false)
   const [habitResult, setHabitResult]   = useState(null)
   const [habitError, setHabitError]     = useState(null)
+
+  // Stock brief
+  const [briefTicker,  setBriefTicker]  = useState('')
+  const [briefLoading, setBriefLoading] = useState(false)
+  const [briefResult,  setBriefResult]  = useState(null)
+  const [briefError,   setBriefError]   = useState(null)
+  const [briefExpanded, setBriefExpanded] = useState({})
 
   // Derived data
   const filteredTrades = useMemo(() =>
@@ -195,6 +202,28 @@ export default function AIFeedback({ selectedAccount }) {
     }
   }
 
+  // ── Stock brief ────────────────────────────────────────────────────────────
+  async function runStockBrief() {
+    const sym = briefTicker.trim()
+    if (!sym) return
+    setBriefLoading(true)
+    setBriefError(null)
+    setBriefResult(null)
+    setBriefExpanded({})
+    try {
+      const res = await analyzeStockBrief(sym, apiKey)
+      setBriefResult(res)
+      // Start with all sections collapsed
+      const init = {}
+      res.sections?.forEach((_, i) => { init[i] = false })
+      setBriefExpanded(init)
+    } catch (e) {
+      setBriefError(e.message)
+    } finally {
+      setBriefLoading(false)
+    }
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="p-4 flex flex-col gap-4 max-w-3xl">
@@ -208,8 +237,9 @@ export default function AIFeedback({ selectedAccount }) {
         {/* Tab switcher */}
         <div className="flex rounded-lg overflow-hidden border border-surface-200 shrink-0">
           {[
-            { id: 'portfolio', label: 'Portfolio', Icon: TrendingUp },
-            { id: 'trade',     label: 'Trade Dive', Icon: Search },
+            { id: 'portfolio', label: 'Portfolio',   Icon: TrendingUp  },
+            { id: 'trade',     label: 'Trade Dive',  Icon: Search      },
+            { id: 'stock',     label: 'Stock Brief', Icon: Building2   },
           ].map(({ id, label, Icon }) => (
             <button
               key={id}
@@ -589,6 +619,149 @@ export default function AIFeedback({ selectedAccount }) {
               <Search size={34} className="mx-auto mb-3 opacity-20" />
               <p className="font-medium text-gray-400 mb-1">Trade Deep Dive</p>
               <p className="text-xs">Select a trade above and hit "Deep Dive" for a graded AI breakdown of execution, risk management, and psychology.</p>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ════ STOCK BRIEF TAB ══════════════════════════════════════════════════ */}
+      {activeTab === 'stock' && (
+        <>
+          {/* Ticker input */}
+          <div className="card">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">7-Point Company Brief</p>
+            <p className="text-xs text-gray-500 mb-3">
+              Enter any ticker to generate a structured equity brief — business model, revenue quality, cost structure, moat, and growth drivers.
+            </p>
+            <div className="flex gap-2">
+              <input
+                className="input flex-1 text-sm font-mono uppercase"
+                placeholder="e.g. NVDA, STX, MSFT"
+                value={briefTicker}
+                onChange={e => setBriefTicker(e.target.value.toUpperCase())}
+                onKeyDown={e => { if (e.key === 'Enter') runStockBrief() }}
+                maxLength={10}
+              />
+              <button
+                onClick={runStockBrief}
+                disabled={briefLoading || !apiKey || !briefTicker.trim()}
+                className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Building2 size={13} />
+                {briefLoading ? 'Generating…' : 'Generate Brief'}
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-600 mt-2">
+              ⚠ Analysis is based on Gemini's training data — figures may not reflect the most recent quarter.
+            </p>
+          </div>
+
+          {/* Error */}
+          {briefError && (
+            <div className="card border-accent-red/30 bg-accent-red/5 text-accent-red text-sm flex items-start gap-2">
+              <AlertCircle size={14} className="shrink-0 mt-0.5" />
+              {briefError}
+            </div>
+          )}
+
+          {/* Loading */}
+          {briefLoading && (
+            <div className="card flex items-center gap-3 text-gray-400 text-sm">
+              <Spinner />
+              Generating company brief for {briefTicker}…
+            </div>
+          )}
+
+          {/* Result */}
+          {briefResult && !briefLoading && (
+            <div className="space-y-3">
+
+              {/* Hero — ticker, name, one-liner */}
+              <div className="card bg-accent-blue/5 border-accent-blue/20">
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div>
+                    <span className="text-2xl font-bold mono text-white">{briefResult.ticker}</span>
+                    <span className="text-sm text-gray-400 ml-2">{briefResult.companyName}</span>
+                  </div>
+                  {briefResult.dataAsOf && (
+                    <span className="text-[11px] text-gray-600 shrink-0 mt-1">Data: {briefResult.dataAsOf}</span>
+                  )}
+                </div>
+                {briefResult.oneLiner && (
+                  <p className="text-sm text-accent-blue font-medium italic leading-snug">
+                    "{briefResult.oneLiner}"
+                  </p>
+                )}
+              </div>
+
+              {/* Executive Summary */}
+              {briefResult.executiveSummary && (
+                <div className="card">
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Executive Summary</p>
+                  <p className="text-sm text-gray-300 leading-relaxed">{briefResult.executiveSummary}</p>
+                </div>
+              )}
+
+              {/* 7 sections — accordion */}
+              {briefResult.sections?.map((section, i) => (
+                <div key={i} className="card">
+                  <button
+                    className="w-full flex items-center justify-between"
+                    onClick={() => setBriefExpanded(e => ({ ...e, [i]: !e[i] }))}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-gray-600 mono w-5 shrink-0">{i + 1}</span>
+                      <span className="text-sm font-semibold text-gray-200">{section.title}</span>
+                    </div>
+                    {briefExpanded[i]
+                      ? <ChevronUp size={13} className="text-gray-500 shrink-0" />
+                      : <ChevronDown size={13} className="text-gray-500 shrink-0" />}
+                  </button>
+                  {briefExpanded[i] && section.bullets?.length > 0 && (
+                    <ul className="mt-3 space-y-2">
+                      {section.bullets.map((bullet, j) => (
+                        <li key={j} className="flex items-start gap-2 text-sm text-gray-300">
+                          <span className="w-1.5 h-1.5 rounded-full bg-accent-blue mt-1.5 shrink-0" />
+                          {bullet}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+
+              {/* Expand all / collapse all */}
+              <div className="flex gap-3 text-xs text-gray-500">
+                <button
+                  onClick={() => setBriefExpanded(Object.fromEntries(briefResult.sections?.map((_, i) => [i, true]) ?? []))}
+                  className="hover:text-gray-300 transition-colors"
+                >
+                  Expand all
+                </button>
+                <span>·</span>
+                <button
+                  onClick={() => setBriefExpanded(Object.fromEntries(briefResult.sections?.map((_, i) => [i, false]) ?? []))}
+                  className="hover:text-gray-300 transition-colors"
+                >
+                  Collapse all
+                </button>
+                <span>·</span>
+                <button
+                  onClick={() => { setBriefResult(null); setBriefTicker('') }}
+                  className="hover:text-gray-300 transition-colors"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!briefResult && !briefLoading && !briefError && (
+            <div className="card text-center py-14 text-gray-500 text-sm">
+              <Building2 size={34} className="mx-auto mb-3 opacity-20" />
+              <p className="font-medium text-gray-400 mb-1">Company Brief</p>
+              <p className="text-xs">Type a ticker above to generate a 7-point analyst brief — how the business works, how it makes money, and what protects its economics.</p>
             </div>
           )}
         </>
