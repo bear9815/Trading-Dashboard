@@ -90,6 +90,49 @@ export function groupByField(trades, field) {
   }, {})
 }
 
+/**
+ * Sharpe Ratio (annualized) from equity curve
+ */
+export function calcSharpe(equityCurve, riskFreeRate = 0.05) {
+  if (equityCurve.length < 3) return null
+  const dailyRFR = riskFreeRate / 252
+  const returns = []
+  for (let i = 1; i < equityCurve.length; i++) {
+    const prev = equityCurve[i - 1].balance
+    const cur  = equityCurve[i].balance
+    if (prev > 0) returns.push((cur - prev) / prev)
+  }
+  if (returns.length < 2) return null
+  const mean = returns.reduce((s, r) => s + r, 0) / returns.length
+  const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / (returns.length - 1)
+  const std = Math.sqrt(variance)
+  if (std === 0) return null
+  return ((mean - dailyRFR) / std) * Math.sqrt(252)
+}
+
+/**
+ * Sortino Ratio (annualized) from equity curve
+ */
+export function calcSortino(equityCurve, riskFreeRate = 0.05) {
+  if (equityCurve.length < 3) return null
+  const dailyRFR = riskFreeRate / 252
+  const returns = []
+  for (let i = 1; i < equityCurve.length; i++) {
+    const prev = equityCurve[i - 1].balance
+    const cur  = equityCurve[i].balance
+    if (prev > 0) returns.push((cur - prev) / prev)
+  }
+  if (returns.length < 2) return null
+  const mean = returns.reduce((s, r) => s + r, 0) / returns.length
+  const downsideVariance = returns.reduce((s, r) => {
+    const d = Math.min(r - dailyRFR, 0)
+    return s + d ** 2
+  }, 0) / (returns.length - 1)
+  const downsideStd = Math.sqrt(downsideVariance)
+  if (downsideStd === 0) return null
+  return ((mean - dailyRFR) / downsideStd) * Math.sqrt(252)
+}
+
 export function calcRMultipleDistribution(trades) {
   const buckets = {}
   trades

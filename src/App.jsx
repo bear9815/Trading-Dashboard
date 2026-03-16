@@ -18,6 +18,8 @@ import LoginPage from './components/auth/LoginPage.jsx'
 import { useSettingsStore } from './store/useSettingsStore.js'
 import { useAuthStore } from './store/useAuthStore.js'
 import { useTradeStore } from './store/useTradeStore.js'
+import { useJournalStore } from './store/useJournalStore.js'
+import { useMorningStore } from './store/useMorningStore.js'
 import { supabase } from './lib/supabase.js'
 import { Loader } from 'lucide-react'
 
@@ -25,9 +27,11 @@ export default function App() {
   const [page, setPage] = useState('dashboard')
   const [showImport, setShowImport] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState('All')
-  const { theme } = useSettingsStore()
+  const { theme, loadFromCloud: loadSettings } = useSettingsStore()
   const { user, loading: authLoading, setSession } = useAuthStore()
   const { loadFromCloud, clearLocalState } = useTradeStore()
+  const { loadFromCloud: loadJournal, clearLocalState: clearJournal } = useJournalStore()
+  const { loadFromCloud: loadMorning, clearLocalState: clearMorning } = useMorningStore()
 
   // Apply theme
   useEffect(() => {
@@ -45,7 +49,12 @@ export default function App() {
     // Restore existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
-      if (session?.user) loadFromCloud(session.user.id)
+      if (session?.user) {
+        loadFromCloud(session.user.id)
+        loadJournal(session.user.id)
+        loadMorning(session.user.id)
+        loadSettings(session.user.id)
+      }
     })
 
     // Listen for sign-in / sign-out events
@@ -53,9 +62,14 @@ export default function App() {
       setSession(session)
       if (event === 'SIGNED_IN' && session?.user) {
         loadFromCloud(session.user.id)
+        loadJournal(session.user.id)
+        loadMorning(session.user.id)
+        loadSettings(session.user.id)
       }
       if (event === 'SIGNED_OUT') {
         clearLocalState()
+        clearJournal()
+        clearMorning()
       }
     })
 

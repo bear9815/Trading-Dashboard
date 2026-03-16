@@ -677,6 +677,22 @@ export default function RiskPanel({ selectedAccount }) {
   const [closeTarget, setCloseTarget]         = useState(null) // single position to close
   const [closeAllTarget, setCloseAllTarget]   = useState(null) // multi-lot group to close
   const [expandedSymbols, setExpandedSymbols] = useState(new Set())
+  const [ladderSymbols,   setLadderSymbols]   = useState(new Set())
+
+  // ── Avg loser hold time (for position age flag) ────────────────────────────
+  const avgLossDays = useMemo(() => {
+    const losses = trades.filter(t => t.status === 'Loss')
+    const days = losses.map(t => {
+      if (typeof t.duration === 'number') return t.duration
+      const exits = t.exits?.filter(e => e.exitDate)
+      if (exits?.length) {
+        const last = new Date(Math.max(...exits.map(e => new Date(e.exitDate).getTime())))
+        return (last - new Date(t.entryDate)) / (1000 * 60 * 60 * 24)
+      }
+      return null
+    }).filter(d => d != null && !isNaN(d) && d >= 0)
+    return days.length ? days.reduce((s, d) => s + d, 0) / days.length : null
+  }, [trades])
 
   // ATR / Effective Exposure state
   const defaultBenchmarkAtr = benchmarkSymbol === 'QQQ' ? 1.8 : 1.1
@@ -690,6 +706,9 @@ export default function RiskPanel({ selectedAccount }) {
   const [sectorsLoading, setSectorsLoading] = useState(false)
   const [sectorsError, setSectorsError]     = useState(null)
   const [sectorViewMode, setSectorViewMode] = useState('deployed') // 'deployed' | 'account' | 'atr'
+
+  // ATR Stress Test state
+  const [stressScenario, setStressScenario] = useState(null) // null | 1 | 2 | 3 | 5
 
   const { excludedSymbols } = useSettingsStore()
   const excludedSet = useMemo(
@@ -895,6 +914,33 @@ export default function RiskPanel({ selectedAccount }) {
   const maxPainAccount = accountBalance > 0 ? Math.max(accountBalance - nep, 0) : 0
   const maxPainPct = accountBalance > 0 ? (nep / accountBalance) * 100 : 0
 
+  // ── Portfolio Daily Move Estimate (ATR-based) ──────────────────────────────
+  const dailyMoveEstimate = useMemo(() => {
+    if (atrData.size === 0) return 0
+    return openTrades.reduce((sum, t) => {
+      const atrPct = atrData.get(t.symbol)?.atrPct
+      if (!atrPct || !t.positionSize || !t.entryPrice) return sum
+      return sum + Math.abs(t.positionSize * t.entryPrice) * (atrPct / 100)
+    }, 0)
+  }, [openTrades, atrData])
+
+  // ── ATR Stress Test ────────────────────────────────────────────────────────
+  const stressResult = useMemo(() => {
+    if (!stressScenario || atrData.size === 0 || !benchmarkAtrPct) return null
+    const scenarioPct = stressScenario / 100
+    const benchAtr    = benchmarkAtrPct / 100
+    const rows = openTrades.map(t => {
+      const posAtrPct = atrData.get(t.symbol)?.atrPct
+      if (!posAtrPct || !t.positionSize || !t.entryPrice) return null
+      const notional = Math.abs(t.positionSize * t.entryPrice)
+      const isLong   = (t.position ?? 'Long').toLowerCase() !== 'short'
+      const impact   = (scenarioPct / benchAtr) * (posAtrPct / 100) * notional
+      return { symbol: t.symbol, impact: isLong ? -impact : impact }
+    }).filter(Boolean)
+    const totalImpact = rows.reduce((s, r) => s + r.impact, 0)
+    return { rows, totalImpact }
+  }, [stressScenario, openTrades, atrData, benchmarkAtrPct])
+
   return (
     <div className="p-4 flex flex-col gap-4">
       <h2 className="text-base font-semibold text-white">Risk Overview</h2>
@@ -933,6 +979,15 @@ export default function RiskPanel({ selectedAccount }) {
             <p className="label">Open Positions</p>
             <p className="text-xl font-semibold mono text-accent-blue">{openTrades.length}</p>
           </div>
+          {dailyMoveEstimate > 0 && (
+            <div className="border-t border-white/10 pt-3">
+              <p className="label">Est. Daily Move</p>
+              <p className="text-xl font-semibold mono text-accent-yellow">{formatCurrency(dailyMoveEstimate)}</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {accountBalance > 0 ? `${(dailyMoveEstimate / accountBalance * 100).toFixed(2)}% of account · ` : ''}ATR-based expected daily portfolio swing
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1007,6 +1062,15 @@ export default function RiskPanel({ selectedAccount }) {
                       : null
                     const plColor = unrealizedPL == null ? '' : unrealizedPL >= 0 ? 'text-accent-green' : 'text-accent-red'
 
+                    // Position age (days since first lot entry)
+                    const daysSinceEntry = group.entryDate
+                      ? Math.floor((Date.now() - new Date(group.entryDate).getTime()) / (1000 * 60 * 60 * 24))
+                      : null
+                    // Stale loser: held longer than avg loss AND still negative R
+                    const isStale = daysSinceEntry != null && avgLossDays != null
+                      && daysSinceEntry > avgLossDays
+                      && (currentR == null || currentR < 0)
+
                     function toggleExpand(e) {
                       e.stopPropagation()
                       setExpandedSymbols(prev => {
@@ -1043,6 +1107,19 @@ export default function RiskPanel({ selectedAccount }) {
                             {group.positionSize > 0 && (
                               <div className="text-[11px] text-gray-400 font-normal leading-tight mt-0.5">
                                 {group.positionSize.toLocaleString()} sh
+                              </div>
+                            )}
+                            {daysSinceEntry != null && (
+                              <div
+                                className={`text-[10px] font-normal leading-tight mt-0.5 flex items-center gap-1 ${
+                                  isStale ? 'text-accent-yellow' : 'text-gray-600'
+                                }`}
+                                title={isStale && avgLossDays != null
+                                  ? `Open ${daysSinceEntry}d — longer than avg loss (${avgLossDays.toFixed(1)}d) with negative R`
+                                  : `Open ${daysSinceEntry} day${daysSinceEntry !== 1 ? 's' : ''}`}
+                              >
+                                {isStale && <span>⚠</span>}
+                                {daysSinceEntry}d
                               </div>
                             )}
                           </td>
@@ -1088,14 +1165,60 @@ export default function RiskPanel({ selectedAccount }) {
                             </div>
                           </td>
                           <td className="py-2 pl-3" onClick={e => e.stopPropagation()}>
-                            <button
-                              onClick={() => isMulti ? setCloseAllTarget(group) : setCloseTarget(group.lots[0])}
-                              className="text-[11px] px-2 py-1 rounded border border-accent-red/30 text-accent-red hover:bg-accent-red/10 transition-all whitespace-nowrap"
-                            >
-                              {isMulti ? 'Close All' : 'Close'}
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              {group.entryPrice && group.stopLoss && (
+                                <button
+                                  onClick={() => setLadderSymbols(prev => {
+                                    const next = new Set(prev)
+                                    next.has(group.symbol) ? next.delete(group.symbol) : next.add(group.symbol)
+                                    return next
+                                  })}
+                                  title="Toggle R levels"
+                                  className={`text-[10px] px-1.5 py-1 rounded border transition-all whitespace-nowrap ${
+                                    ladderSymbols.has(group.symbol)
+                                      ? 'border-accent-blue/50 bg-accent-blue/15 text-accent-blue'
+                                      : 'border-white/10 text-gray-600 hover:text-gray-400 hover:border-white/20'
+                                  }`}
+                                >
+                                  R
+                                </button>
+                              )}
+                              <button
+                                onClick={() => isMulti ? setCloseAllTarget(group) : setCloseTarget(group.lots[0])}
+                                className="text-[11px] px-2 py-1 rounded border border-accent-red/30 text-accent-red hover:bg-accent-red/10 transition-all whitespace-nowrap"
+                              >
+                                {isMulti ? 'Close All' : 'Close'}
+                              </button>
+                            </div>
                           </td>
                         </tr>
+
+                        {/* ── P&L Ladder sub-row ── */}
+                        {group.entryPrice && group.stopLoss && ladderSymbols.has(group.symbol) && (() => {
+                          const rps = Math.abs(group.entryPrice - group.stopLoss)
+                          const isLong = (group.position ?? 'Long').toLowerCase() !== 'short'
+                          const levels = [-1, 1, 2, 3].map(r => ({
+                            r,
+                            price: group.entryPrice + (isLong ? 1 : -1) * r * rps,
+                          }))
+                          return (
+                            <tr className="bg-white/[0.01]">
+                              <td colSpan={11} className="pb-2 pt-0 px-2">
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <span className="text-[10px] text-gray-600 shrink-0 mr-0.5">R Levels:</span>
+                                  {levels.map(l => (
+                                    <span key={l.r} className={`text-[10px] mono px-1.5 py-0.5 rounded ${
+                                      l.r < 0 ? 'bg-accent-red/10 text-accent-red/80'
+                                      : 'bg-accent-green/10 text-accent-green/80'
+                                    }`}>
+                                      {l.r > 0 ? '+' : ''}{l.r}R: ${l.price.toFixed(2)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })()}
 
                         {/* ── Individual lot sub-rows (expanded) ── */}
                         {isMulti && isExpanded && group.lots.map((lot, lotIdx) => {
@@ -1267,6 +1390,56 @@ export default function RiskPanel({ selectedAccount }) {
               ⚠ {positionsWithoutStop.length} position(s) have no stop set — not included above.
             </p>
           )}
+
+          {/* ATR Stress Test */}
+          <div className="mt-4 pt-3 border-t border-white/10">
+            <p className="text-xs text-gray-500 mb-2">ATR Stress Test — estimated impact if market drops:</p>
+            <div className="flex items-center gap-1.5 flex-wrap mb-3">
+              {[1, 2, 3, 5].map(pct => (
+                <button
+                  key={pct}
+                  onClick={() => setStressScenario(stressScenario === pct ? null : pct)}
+                  disabled={atrData.size === 0}
+                  className={`text-xs px-2.5 py-1 rounded border transition-all disabled:opacity-30 ${
+                    stressScenario === pct
+                      ? 'bg-accent-red/20 border-accent-red/50 text-accent-red font-medium'
+                      : 'border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                  }`}
+                >
+                  -{pct}%
+                </button>
+              ))}
+              {atrData.size === 0 && (
+                <span className="text-[10px] text-gray-600 italic">Fetch ATR data to enable</span>
+              )}
+            </div>
+            {stressResult && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="text-gray-400">Total estimated impact</span>
+                  <span className={`font-bold mono text-sm ${stressResult.totalImpact < 0 ? 'text-accent-red' : 'text-accent-green'}`}>
+                    {stressResult.totalImpact >= 0 ? '+' : ''}{formatCurrency(stressResult.totalImpact)}
+                    {accountBalance > 0 && (
+                      <span className="text-xs font-normal text-gray-500 ml-1">
+                        ({(stressResult.totalImpact / accountBalance * 100).toFixed(2)}%)
+                      </span>
+                    )}
+                  </span>
+                </div>
+                {stressResult.rows.sort((a, b) => a.impact - b.impact).map(r => (
+                  <div key={r.symbol} className="flex items-center justify-between text-xs">
+                    <span className="mono text-gray-400">{r.symbol}</span>
+                    <span className={`mono ${r.impact < 0 ? 'text-accent-red/80' : 'text-accent-green/80'}`}>
+                      {r.impact >= 0 ? '+' : ''}{formatCurrency(r.impact)}
+                    </span>
+                  </div>
+                ))}
+                <p className="text-[10px] text-gray-600 mt-1">
+                  Based on ATR-relative move: ({stressScenario}% / {benchmarkAtrPct.toFixed(2)}% {benchmarkSymbol} ATR) × each position's ATR × notional
+                </p>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Effective Market Exposure */}

@@ -11,7 +11,8 @@ import { useMorningStore } from '../../store/useMorningStore.js'
 import { buildEquityCurve } from '../../utils/equityCurve.js'
 import {
   calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor,
-  calcRMultipleDistribution, groupByField, calcAvgWinLoss, calcTotalR
+  calcRMultipleDistribution, groupByField, calcAvgWinLoss, calcTotalR,
+  calcSharpe, calcSortino
 } from '../../utils/metrics.js'
 import { formatCurrency, formatR, formatDate } from '../../utils/formatters.js'
 import { computeTradeMAEMFE, fetchHistory, fetchATR14 } from '../../utils/marketData.js'
@@ -511,6 +512,49 @@ export default function Analytics({ selectedAccount }) {
     avg: byDow[d].count ? byDow[d].total / byDow[d].count : 0
   }))
 
+  // ── Hour × Day Heatmap ─────────────────────────────────────────────────────
+  const heatmapData = useMemo(() => {
+    const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+    // grid: bucketKey → dayName → { totalPL, count }
+    const grid = {}
+    TIME_BUCKETS.forEach(b => { grid[b.key] = {} })
+
+    for (const t of closed) {
+      if (!t.entryDate) continue
+      const hasTime = t.entryDate.includes('T') || t.entryDate.includes(' ')
+      if (!hasTime) continue
+      const d = new Date(t.entryDate)
+      const mins = d.getHours() * 60 + d.getMinutes()
+      if (mins === 0) continue
+      const bucket = TIME_BUCKETS.find(b => mins >= b.minMin && mins < b.maxMin)
+      if (!bucket) continue
+      const dow = DAYS[d.getDay() - 1] // Mon=1→0, Fri=5→4
+      if (!dow) continue
+      if (!grid[bucket.key][dow]) grid[bucket.key][dow] = { totalPL: 0, count: 0 }
+      grid[bucket.key][dow].totalPL += t.pl || 0
+      grid[bucket.key][dow].count++
+    }
+
+    // Only include session buckets that have at least one trade somewhere
+    const activeBuckets = TIME_BUCKETS.filter(b =>
+      DAYS.some(d => grid[b.key][d]?.count > 0)
+    )
+
+    // Compute global max abs avg for color scaling
+    let maxAbs = 0
+    activeBuckets.forEach(b => {
+      DAYS.forEach(d => {
+        const cell = grid[b.key][d]
+        if (cell?.count) {
+          const avg = Math.abs(cell.totalPL / cell.count)
+          if (avg > maxAbs) maxAbs = avg
+        }
+      })
+    })
+
+    return { grid, DAYS, activeBuckets, maxAbs }
+  }, [closed]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const bySymbol = groupByField(closed, 'symbol')
   const symbolData = Object.entries(bySymbol)
     .map(([sym, ts]) => ({ symbol: sym, pl: ts.reduce((s, t) => s + (t.pl || 0), 0), count: ts.length }))
@@ -602,6 +646,27 @@ export default function Analytics({ selectedAccount }) {
     return buckets.filter(b => b.trades.length > 0)
   }, [closed])
 
+  // ── Avg Hold: Winners vs Losers ───────────────────────────────────────────
+  const holdComparison = useMemo(() => {
+    const getDays = (t) => {
+      if (typeof t.duration === 'number') return t.duration
+      const exits = t.exits?.filter(e => e.exitDate)
+      if (exits?.length) {
+        const lastExit = new Date(Math.max(...exits.map(e => new Date(e.exitDate).getTime())))
+        return (lastExit - new Date(t.entryDate)) / (1000 * 60 * 60 * 24)
+      }
+      return null
+    }
+    const wins   = closed.filter(t => t.status === 'Win')
+    const losses = closed.filter(t => t.status === 'Loss')
+    const winDays  = wins.map(getDays).filter(d => d != null && !isNaN(d))
+    const lossDays = losses.map(getDays).filter(d => d != null && !isNaN(d))
+    if (!winDays.length && !lossDays.length) return null
+    const avgWin  = winDays.length  ? winDays.reduce((s, d) => s + d, 0)  / winDays.length  : null
+    const avgLoss = lossDays.length ? lossDays.reduce((s, d) => s + d, 0) / lossDays.length : null
+    return { avgWin, avgLoss, healthy: avgWin != null && avgLoss != null && avgWin > avgLoss }
+  }, [closed])
+
   // ── Mood → P&L Correlation ────────────────────────────────────────────────
   const moodCorrelation = useMemo(() => {
     if (!morningEntries?.length) return null
@@ -664,6 +729,12 @@ export default function Analytics({ selectedAccount }) {
     return { points, confBars, stateBars, bestConf, worstConf, sampleSize: points.length }
   }, [morningEntries, closed])
 
+  // ── Sharpe / Sortino ──────────────────────────────────────────────────────
+  const { sharpe, sortino } = useMemo(() => {
+    const curve = buildEquityCurve(trades, accountActivities)
+    return { sharpe: calcSharpe(curve), sortino: calcSortino(curve) }
+  }, [trades, accountActivities])
+
   // ── Drawdown Simulator ────────────────────────────────────────────────────
   const drawdownSim = useMemo(() => {
     const avgLossAbs = closed.filter(t => t.status === 'Loss' && t.pl < 0)
@@ -703,13 +774,15 @@ export default function Analytics({ selectedAccount }) {
       </div>
 
       {/* Summary stats */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+      <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
         <StatCard label="Win Rate" value={`${winRate.toFixed(1)}%`} valueClass={winRate >= 50 ? 'text-accent-green' : 'text-accent-red'} />
         <StatCard label="Avg R-Multiple" value={formatR(avgR)} valueClass={avgR >= 0 ? 'text-accent-green' : 'text-accent-red'} />
         <StatCard label="Total R" value={formatR(totalR)} valueClass={totalR >= 0 ? 'text-accent-green' : 'text-accent-red'} />
         <StatCard label="Profit Factor" value={isFinite(profitFactor) ? profitFactor.toFixed(2) : '∞'} valueClass={profitFactor >= 1.5 ? 'text-accent-green' : profitFactor >= 1 ? 'text-accent-yellow' : 'text-accent-red'} />
         <StatCard label="Expectancy / Trade" value={formatCurrency(expectancy, true)} valueClass={expectancy >= 0 ? 'text-accent-green' : 'text-accent-red'} />
         <StatCard label="Payoff Ratio" value={payoffRatio != null ? `${payoffRatio.toFixed(2)}x` : '—'} valueClass={payoffRatio == null ? 'text-gray-500' : payoffRatio >= 1.5 ? 'text-accent-green' : payoffRatio >= 1 ? 'text-accent-yellow' : 'text-accent-red'} />
+        <StatCard label="Sharpe Ratio" value={sharpe != null ? sharpe.toFixed(2) : '—'} valueClass={sharpe == null ? 'text-gray-500' : sharpe >= 1 ? 'text-accent-green' : sharpe >= 0 ? 'text-accent-yellow' : 'text-accent-red'} />
+        <StatCard label="Sortino Ratio" value={sortino != null ? sortino.toFixed(2) : '—'} valueClass={sortino == null ? 'text-gray-500' : sortino >= 1.5 ? 'text-accent-green' : sortino >= 0 ? 'text-accent-yellow' : 'text-accent-red'} />
       </div>
 
       {/* Avg Win vs Loss */}
@@ -1038,6 +1111,70 @@ export default function Analytics({ selectedAccount }) {
         </ResponsiveContainer>
       </div>
 
+      {/* Hour × Day P&L Heatmap */}
+      {heatmapData.activeBuckets.length > 0 && (
+        <div className="card">
+          <SectionTitle>P&amp;L Heatmap — Session × Day</SectionTitle>
+          <p className="text-xs text-gray-500 mb-3">Avg P&amp;L per trade by time of day and weekday. Green = profitable, red = losing.</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr>
+                  <th className="text-left text-gray-500 font-normal pb-2 pr-3 w-28">Session</th>
+                  {heatmapData.DAYS.map(d => (
+                    <th key={d} className="text-center text-gray-500 font-medium pb-2 px-1 min-w-[54px]">{d}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="space-y-1">
+                {heatmapData.activeBuckets.map(bucket => (
+                  <tr key={bucket.key}>
+                    <td className="text-gray-400 pr-3 py-1 text-[11px] leading-tight whitespace-nowrap">
+                      {bucket.label}
+                    </td>
+                    {heatmapData.DAYS.map(day => {
+                      const cell = heatmapData.grid[bucket.key][day]
+                      if (!cell?.count) {
+                        return (
+                          <td key={day} className="px-1 py-1">
+                            <div className="h-9 rounded bg-white/[0.02] flex items-center justify-center">
+                              <span className="text-gray-700 text-[10px]">—</span>
+                            </div>
+                          </td>
+                        )
+                      }
+                      const avg = cell.totalPL / cell.count
+                      const intensity = heatmapData.maxAbs > 0 ? Math.min(Math.abs(avg) / heatmapData.maxAbs, 1) : 0
+                      const alpha = Math.round(10 + intensity * 50)
+                      const bg = avg >= 0
+                        ? `rgba(0, 208, 132, ${(alpha / 100).toFixed(2)})`
+                        : `rgba(255, 71, 87, ${(alpha / 100).toFixed(2)})`
+                      const textColor = avg >= 0 ? '#00d084' : '#ff4757'
+                      return (
+                        <td key={day} className="px-1 py-1">
+                          <div
+                            className="h-9 rounded flex flex-col items-center justify-center gap-0.5 cursor-default"
+                            style={{ backgroundColor: bg }}
+                            title={`${bucket.label} ${day}: avg ${avg >= 0 ? '+' : ''}${avg.toFixed(0)} | ${cell.count} trade${cell.count !== 1 ? 's' : ''}`}
+                          >
+                            <span className="font-semibold mono leading-none" style={{ color: textColor, fontSize: 11 }}>
+                              {avg >= 0 ? '+' : ''}{avg.toFixed(0)}
+                            </span>
+                            <span className="text-gray-500 leading-none" style={{ fontSize: 9 }}>
+                              {cell.count}t
+                            </span>
+                          </div>
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* P&L by Symbol */}
       <div className="card">
         <SectionTitle>P&L by Symbol (Top 10)</SectionTitle>
@@ -1234,6 +1371,36 @@ export default function Analytics({ selectedAccount }) {
           <p className="text-xs text-gray-500 mb-3">
             Win rate and avg R broken down by how long you held each trade. Helps identify whether you're better suited as a day trader, swing trader, or position trader.
           </p>
+          {/* Avg Hold: Winners vs Losers — key swing-trader metric */}
+          {holdComparison && (
+            <div className={`flex items-center gap-4 mb-4 px-3 py-2.5 rounded-lg border ${
+              holdComparison.healthy ? 'bg-accent-green/5 border-accent-green/20' : 'bg-accent-red/5 border-accent-red/20'
+            }`}>
+              <div className="flex items-center gap-6 flex-1">
+                <div>
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wide mb-0.5">Avg Win Hold</p>
+                  <p className="text-base font-bold mono text-accent-green">
+                    {holdComparison.avgWin != null ? `${holdComparison.avgWin.toFixed(1)}d` : '—'}
+                  </p>
+                </div>
+                <div className="text-gray-600 text-xs">vs</div>
+                <div>
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wide mb-0.5">Avg Loss Hold</p>
+                  <p className="text-base font-bold mono text-accent-red">
+                    {holdComparison.avgLoss != null ? `${holdComparison.avgLoss.toFixed(1)}d` : '—'}
+                  </p>
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                {holdComparison.avgWin != null && holdComparison.avgLoss != null && (
+                  <p className={`text-xs font-semibold ${holdComparison.healthy ? 'text-accent-green' : 'text-accent-red'}`}>
+                    {holdComparison.healthy ? '✓ Letting winners run' : '⚠ Cutting winners short'}
+                  </p>
+                )}
+                <p className="text-[10px] text-gray-500 mt-0.5">Winners should hold longer than losers</p>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {holdDurationData.map(b => {
               const wr   = b.trades.length > 0 ? (b.wins / b.trades.length) * 100 : 0
@@ -1398,9 +1565,40 @@ export default function Analytics({ selectedAccount }) {
                 ))}
               </tbody>
             </table>
+            {/* Runup Capture % summary */}
+            {(() => {
+              const withEff = maemfeData.filter(d => d.efficiency != null)
+              if (!withEff.length) return null
+              const winData  = withEff.filter(d => d.pl > 0)
+              const lossData = withEff.filter(d => d.pl <= 0)
+              const avg      = v => v.length ? v.reduce((s, d) => s + d.efficiency, 0) / v.length : null
+              const avgAll   = avg(withEff)
+              const avgWin   = avg(winData)
+              const avgLoss  = avg(lossData)
+              return (
+                <div className="mt-4 pt-3 border-t border-white/5 grid grid-cols-3 gap-3">
+                  {[
+                    { label: 'Avg Runup Captured', val: avgAll, alwaysShow: true },
+                    { label: 'On Winning Trades',  val: avgWin  },
+                    { label: 'On Losing Trades',   val: avgLoss },
+                  ].map(({ label, val, alwaysShow }) => val != null || alwaysShow ? (
+                    <div key={label} className="text-center">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">{label}</p>
+                      <p className={`text-lg font-bold mono ${
+                        val == null ? 'text-gray-600'
+                        : val >= 60 ? 'text-accent-green'
+                        : val >= 35 ? 'text-accent-yellow'
+                        : 'text-accent-red'
+                      }`}>
+                        {val != null ? `${val.toFixed(1)}%` : '—'}
+                      </p>
+                    </div>
+                  ) : null)}
+                </div>
+              )
+            })()}
             <p className="text-xs text-gray-600 mt-3">
-              <strong>Efficiency</strong> = how much of the MFE move you captured as actual P&L. Higher is better.
-              Low efficiency on winning trades may indicate cutting winners too early.
+              <strong>Runup Capture</strong> = what % of the max favorable move (MFE) you kept as actual P&L. As a swing trader, aim for &gt;50% on winners — lower values mean you're leaving gains on the table by exiting too early.
             </p>
           </div>
         ) : (

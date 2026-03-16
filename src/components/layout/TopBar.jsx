@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Upload, Settings2, X, Plus, Check, ChevronDown, ChevronUp } from 'lucide-react'
+import { Upload, Settings2, X, Plus, Check, ChevronDown, ChevronUp, LogOut } from 'lucide-react'
 import { useQuotesStore } from '../../store/useQuotesStore'
+import { useAuthStore } from '../../store/useAuthStore'
 
 const PAGE_TITLES = {
   dashboard:   'Dashboard',
@@ -288,6 +289,8 @@ function QuotesTicker() {
 
 /* ─── TopBar ──────────────────────────────────────────────────────── */
 export default function TopBar({ page, onImport }) {
+  const { user, signOut } = useAuthStore()
+
   return (
     <header className="h-14 bg-surface-50/80 backdrop-blur border-b border-white/10 flex items-center px-4 shrink-0 sticky top-0 z-10 gap-3">
       <h1 className="text-base font-semibold text-white flex-shrink-0">{PAGE_TITLES[page] || 'Trading Dashboard'}</h1>
@@ -303,6 +306,16 @@ export default function TopBar({ page, onImport }) {
           <Upload size={14} />
           <span className="hidden sm:inline">Import</span>
         </button>
+        {user && (
+          <button
+            onClick={() => signOut()}
+            title={`Sign out (${user.email})`}
+            className="btn-ghost flex items-center gap-1.5 text-xs text-gray-400 hover:text-accent-red"
+          >
+            <LogOut size={14} />
+            <span className="hidden sm:inline">Sign Out</span>
+          </button>
+        )}
       </div>
     </header>
   )

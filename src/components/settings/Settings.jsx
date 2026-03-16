@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Trash2, Eye, EyeOff, Save, X } from 'lucide-react'
+import { Plus, Trash2, Eye, EyeOff, Save, X, LogOut } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useJournalStore } from '../../store/useJournalStore.js'
+import { useAuthStore } from '../../store/useAuthStore.js'
 
 const BROKERS = ['Schwab / ThinkorSwim', 'Interactive Brokers', 'Fidelity', 'Other']
 const BENCHMARKS = [
@@ -34,6 +35,7 @@ export default function Settings() {
 
   const { trades, accountActivities, clearTrades, clearActivities, recalcAllTrades, addActivity, deleteActivity, compressAllScreenshots } = useTradeStore()
   const { entries } = useJournalStore()
+  const { user, signOut } = useAuthStore()
 
   const [showKey, setShowKey]   = useState(false)
   const [keyInput, setKeyInput] = useState(apiKey)
@@ -681,6 +683,23 @@ export default function Settings() {
           </button>
         </div>
       </div>
+
+      {/* Account */}
+      {user && (
+        <div className="card flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-300">Signed in as</p>
+            <p className="text-xs text-gray-500 mt-0.5">{user.email}</p>
+          </div>
+          <button
+            onClick={() => signOut()}
+            className="btn-ghost flex items-center gap-2 text-sm text-accent-red hover:text-accent-red border-accent-red/20 hover:border-accent-red/40"
+          >
+            <LogOut size={14} />
+            Sign Out
+          </button>
+        </div>
+      )}
 
       {/* About */}
       <div className="card text-xs text-gray-500 space-y-1">

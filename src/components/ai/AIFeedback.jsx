@@ -1,11 +1,11 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   Sparkles, AlertCircle, ChevronDown, ChevronUp,
-  Send, Search, MessageSquare, TrendingUp, X,
+  Send, Search, MessageSquare, TrendingUp, X, Zap,
 } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
-import { analyzePortfolio, chatWithPortfolio, analyzeSingleTradeDeep } from '../../utils/ai.js'
+import { analyzePortfolio, chatWithPortfolio, analyzeSingleTradeDeep, findWorstHabit } from '../../utils/ai.js'
 import { formatCurrency } from '../../utils/formatters.js'
 
 // ── Grade badge ──────────────────────────────────────────────────────────────
@@ -91,6 +91,11 @@ export default function AIFeedback({ selectedAccount }) {
   const [tradeLoading, setTradeLoading] = useState(false)
   const [tradeError, setTradeError] = useState(null)
 
+  // Worst habit
+  const [habitLoading, setHabitLoading] = useState(false)
+  const [habitResult, setHabitResult]   = useState(null)
+  const [habitError, setHabitError]     = useState(null)
+
   // Derived data
   const filteredTrades = useMemo(() =>
     (!selectedAccount || selectedAccount === 'All')
@@ -172,6 +177,21 @@ export default function AIFeedback({ selectedAccount }) {
       setTradeError(e.message)
     } finally {
       setTradeLoading(false)
+    }
+  }
+
+  // ── Find worst habit ───────────────────────────────────────────────────────
+  async function findHabit() {
+    setHabitLoading(true)
+    setHabitError(null)
+    setHabitResult(null)
+    try {
+      const res = await findWorstHabit(filteredTrades, apiKey)
+      setHabitResult(res)
+    } catch (e) {
+      setHabitError(e.message)
+    } finally {
+      setHabitLoading(false)
     }
   }
 
@@ -351,6 +371,80 @@ export default function AIFeedback({ selectedAccount }) {
               <p className="text-xs">Click "Analyze My Trading" to get AI-powered insights on your performance, patterns, and recommendations.</p>
             </div>
           )}
+
+          {/* ── Find My Worst Habit ─────────────────────────────────────────── */}
+          <div className="card border-accent-red/20">
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2">
+                <Zap size={13} className="text-accent-red" />
+                <span className="text-sm font-semibold text-gray-200">Find My Worst Habit</span>
+              </div>
+              <button
+                onClick={findHabit}
+                disabled={habitLoading || !apiKey || closedCount < 5}
+                className="btn-primary flex items-center gap-1.5 text-xs py-1 px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {habitLoading ? <Spinner size={3} /> : <Zap size={11} />}
+                {habitLoading ? 'Scanning…' : 'Scan Now'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">AI scans your last 30 trades and identifies the single most costly repeated mistake.</p>
+
+            {habitError && (
+              <div className="flex items-start gap-2 text-accent-red text-xs mt-2">
+                <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                {habitError}
+              </div>
+            )}
+
+            {habitLoading && (
+              <div className="flex items-center gap-2 text-xs text-gray-500 mt-2">
+                <Spinner size={3} />
+                Analyzing patterns across last 30 trades…
+              </div>
+            )}
+
+            {habitResult && !habitLoading && (
+              <div className="space-y-3 mt-2">
+                {/* Habit name + frequency */}
+                <div className="bg-accent-red/10 border border-accent-red/20 rounded-lg px-3 py-2.5">
+                  <p className="text-sm font-semibold text-accent-red">{habitResult.habit}</p>
+                  <div className="flex flex-wrap gap-3 mt-1">
+                    <span className="text-xs text-gray-400">{habitResult.frequency}</span>
+                    {habitResult.costEstimate && (
+                      <span className="text-xs font-medium text-accent-red">{habitResult.costEstimate}</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Description */}
+                <p className="text-xs text-gray-300 leading-relaxed">{habitResult.description}</p>
+
+                {/* Evidence */}
+                {habitResult.evidence?.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Evidence</p>
+                    <ul className="space-y-1">
+                      {habitResult.evidence.map((e, i) => (
+                        <li key={i} className="flex items-start gap-2 text-xs text-gray-400">
+                          <span className="w-1 h-1 rounded-full bg-accent-red/60 shrink-0 mt-1.5" />
+                          {e}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Fix */}
+                {habitResult.fix && (
+                  <div className="bg-accent-green/10 border border-accent-green/20 rounded-lg px-3 py-2">
+                    <p className="text-[10px] font-semibold text-accent-green uppercase tracking-wide mb-1">The Fix</p>
+                    <p className="text-xs text-gray-300 leading-relaxed">{habitResult.fix}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </>
       )}
 

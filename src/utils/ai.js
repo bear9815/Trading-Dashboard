@@ -698,6 +698,64 @@ export async function getSymbolProfile(symbol, apiKey) {
 }
 
 /**
+ * Pattern Weakness — identifies the single most costly repeated mistake.
+ * Returns { habit, frequency, costEstimate, description, evidence[], fix }
+ */
+export async function findWorstHabit(trades, apiKey) {
+  if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
+  const model = getModel(apiKey)
+
+  const closed = trades
+    .filter(t => t.status === 'Win' || t.status === 'Loss')
+    .sort((a, b) => new Date(b.entryDate) - new Date(a.entryDate))
+    .slice(0, 30)
+
+  if (closed.length < 5) throw new Error('Need at least 5 closed trades to identify patterns.')
+
+  const tradeSummary = closed.map(t => ({
+    symbol:    t.symbol,
+    position:  t.position,
+    edges:     t.edges?.length > 0 ? t.edges : (t.strategy ? [t.strategy] : ['Unknown']),
+    rMultiple: t.rMultiple,
+    pl:        t.pl,
+    status:    t.status,
+    duration:  t.duration,
+    entryDate: t.entryDate?.toString().slice(0, 10),
+    lessons:   t.lessons || '',
+    exitNotes: t.exitNotes || '',
+  }))
+
+  const prompt = `You are an elite trading performance coach. Your job is to find the single most costly repeated mistake in a trader's recent history.
+
+Recent trades (most recent first):
+${JSON.stringify(tradeSummary, null, 2)}
+
+Identify the ONE habit, pattern, or mistake that is costing this trader the most money or R — not generic advice, but a specific behavioral pattern visible in this data.
+
+Return ONLY valid JSON (no markdown, no code fences):
+{
+  "habit": "Short name for the habit (4–6 words, e.g. 'Cutting winners too early')",
+  "frequency": "How often it appears (e.g. '6 of last 10 losses')",
+  "costEstimate": "Estimated cost in R or $ (e.g. '-8.4R lost to this pattern')",
+  "description": "2–3 sentences describing the pattern precisely, referencing specific trades or outcomes from the data.",
+  "evidence": ["specific trade or data point referencing symbol or date", "another specific example"],
+  "fix": "One concrete, actionable change to eliminate this habit — be specific to this trader's data, not generic."
+}
+
+Rules:
+- Reference specific symbols, R-multiples, or dates from the data
+- Only identify a pattern that actually appears multiple times
+- If data is mixed and no single habit dominates, identify the most statistically significant one
+- Never give generic advice like 'stick to your plan' — be specific to what this data shows`
+
+  const result = await model.generateContent(prompt)
+  const text = result.response.text()
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) throw new Error('AI returned an unrecognised format.')
+  return JSON.parse(jsonMatch[0])
+}
+
+/**
  * Classify a stock symbol into a GICS sector and a short market theme.
  * Returns { sector: string, theme: string }
  * Result is cached by the caller — do not call on every render.
