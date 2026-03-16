@@ -109,7 +109,7 @@ LIVE PRICE DATA (from our market feed — use for the index/futures/commodity/cu
 US Futures: ${grp(['ES=F', 'NQ=F', 'YM=F'])}
 Global Indices: ${grp(['^FTSE', '^GDAXI', '^N225', '^HSI'])}
 US ETFs: ${grp(['SPY', 'QQQ', 'IWM', 'DIA'])}
-Sectors: ${grp(['XLK', 'XLC', 'XLY', 'XLF', 'XLE', 'XLV', 'XLI', 'XLB', 'XLP', 'XLU', 'XLRE', 'ARKK'])}
+Sectors: ${grp(['XLK', 'XLC', 'XLY', 'XLF', 'XLE', 'XLV', 'XLI', 'XLB', 'XLP', 'XLU', 'XLRE'])}
 Commodities: ${grp(['CL=F', 'BZ=F', 'GC=F'])}
 Currencies: ${grp(['EURUSD=X', 'USDJPY=X', 'GBPUSD=X'])}
 10Y Treasury Yield: ${grp(['^TNX'])}

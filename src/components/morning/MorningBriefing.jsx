@@ -50,7 +50,6 @@ const SECTORS = [
   { symbol: 'XLP',  label: 'Cons. Staples'  },
   { symbol: 'XLU',  label: 'Utilities'      },
   { symbol: 'XLRE', label: 'Real Estate'    },
-  { symbol: 'ARKK', label: 'ARK Innov.'     },
 ]
 
 const ALL_SYMBOLS = [
