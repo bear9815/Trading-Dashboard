@@ -63,15 +63,26 @@ Focus on: R-multiple consistency, win rate vs expectancy, symbol/edge concentrat
   }
 }
 
+// ── Pre-Market Pulse system prompt (user's Gemini Gem) ───────────────────────
+const PRE_MARKET_PULSE_SYSTEM = `You ARE "Pre-Market Pulse," an expert financial analyst AI. Your mission is to provide a concise, actionable pre-market briefing specifically for an active US stock trader. Your focus MUST be on information that could materially impact US market sentiment and trading activity for the current trading day. You must always act as if you are generating this briefing before the US market opens, using the most current information available up to approximately 6:30 AM Eastern Time. You MUST source your information from reliable, major financial news outlets, economic calendars, and market data providers (Reuters, Bloomberg, CNBC, TradingEconomics). Crucially, you MUST cross-verify key data points (major indices, futures, oil, gold, 10-Yr yield) across at least two reliable sources to ensure accuracy before presenting them. Every sentence must reference a real catalyst, level, or data point — never use generic filler.`
+
 export async function generateMorningBrief(marketDataMap, openTrades, apiKey) {
   if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
-  const model = getModel(apiKey)
+
+  // Use search grounding so Gemini fetches today's live news, economic calendar,
+  // pre-market movers, Fed speakers, and geopolitical updates from the web.
+  const genAI = new GoogleGenerativeAI(apiKey)
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    systemInstruction: PRE_MARKET_PULSE_SYSTEM,
+    tools: [{ googleSearch: {} }],
+  })
 
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   })
 
-  // Build grouped market context from live quotes
+  // Build live price context from our fetched quotes (grounds the numbers)
   const fmtQ = (sym) => {
     const q = marketDataMap.get(sym)
     if (!q?.price) return null
@@ -82,12 +93,19 @@ export async function generateMorningBrief(marketDataMap, openTrades, apiKey) {
   const grp = (syms) => syms.map(fmtQ).filter(Boolean).join(' | ') || '(unavailable)'
 
   const openCtx = openTrades.length > 0
-    ? `\nOpen positions: ${openTrades.map(t => `${t.symbol} ${t.position}`).join(', ')}`
+    ? `\nTrader's open positions: ${openTrades.map(t => `${t.symbol} ${t.position}`).join(', ')}`
     : ''
 
-  const prompt = `You are an overnight and pre-market analyst preparing a US growth/momentum trader for the open. Today is ${today}.
+  const prompt = `Today is ${today}. Generate the Pre-Market Pulse briefing now.
 
-LIVE MARKET DATA:
+Use your Google Search access to find:
+- Today's actual pre-market movers with real % changes and catalysts
+- Today's US economic calendar (exact times, expectations, prior readings)
+- Any Fed speakers scheduled today
+- Significant news since yesterday's US market close
+- Current geopolitical developments with US market impact
+
+LIVE PRICE DATA (from our market feed — use for the index/futures/commodity/currency sections):
 US Futures: ${grp(['ES=F', 'NQ=F', 'YM=F'])}
 Global Indices: ${grp(['^FTSE', '^GDAXI', '^N225', '^HSI'])}
 US ETFs: ${grp(['SPY', 'QQQ', 'IWM', 'DIA'])}
@@ -97,42 +115,42 @@ Currencies: ${grp(['EURUSD=X', 'USDJPY=X', 'GBPUSD=X'])}
 10Y Treasury Yield: ${grp(['^TNX'])}
 VIX: ${grp(['^VIX'])}${openCtx}
 
-Return ONLY valid JSON — no markdown, no code fences:
+Return ONLY valid JSON — no markdown, no code fences, no citation brackets like [1]:
 {
   "marketTone": "risk-on",
   "toneScore": 2,
   "headline": "one punchy sentence: what happened overnight and what it sets up for today's open",
-  "narrative": "3–4 sentences: overnight story in one sentence, primary opportunity or risk at the open, which 1–2 sectors deserve focus in first hour, single most important level or catalyst to watch",
+  "narrative": "3–4 sentences: overnight story, primary opportunity or risk at open, which 1–2 sectors deserve focus first hour, single most important level or catalyst to watch",
   "indexDrivers": {
     "ES": "5–8 words: key driver for S&P 500 futures",
     "NQ": "5–8 words: key driver for Nasdaq 100 futures",
     "YM": "5–8 words: key driver for Dow futures",
-    "FTSE": "5–8 words: key driver for UK market",
-    "DAX": "5–8 words: key driver for Germany",
-    "N225": "5–8 words: key driver for Japan",
-    "HSI": "5–8 words: key driver for Hong Kong"
+    "FTSE": "5–8 words: key driver for FTSE 100",
+    "DAX": "5–8 words: key driver for DAX",
+    "N225": "5–8 words: key driver for Nikkei",
+    "HSI": "5–8 words: key driver for Hang Seng"
   },
-  "commodityContext": "2 sentences: what WTI/Brent and gold levels signal about risk appetite and inflation expectations for today.",
-  "bondVolContext": "2 sentences: what the 10Y yield level means for growth stock multiples, what VIX level implies for expected daily SPY/QQQ range and option premium.",
+  "commodityContext": "2 sentences: what WTI/Brent and gold signal about risk appetite and inflation for today.",
+  "bondVolContext": "2 sentences: what 10Y yield means for growth multiples today; what VIX implies for expected SPY/QQQ daily range.",
   "themes": [
     {
       "emoji": "🌏",
       "title": "Theme Title",
-      "body": "2–3 sentences covering the catalyst, why it matters for US growth/momentum, and which sectors or setups it creates.",
+      "body": "2–3 sentences: catalyst, why it matters for US growth/momentum, which sectors or setups it creates.",
       "sentiment": "bullish",
       "watchSymbols": ["NVDA", "SMH"]
     }
   ],
   "geopoliticalAlerts": [
     {
-      "headline": "brief description of market-moving geopolitical event",
+      "headline": "specific event with fresh update today",
       "impactSectors": ["Energy", "Defense"],
       "severity": "high"
     }
   ],
   "significantNews": [
     {
-      "headline": "notable market-moving news since yesterday's close",
+      "headline": "real market-moving news since yesterday's close — earnings, M&A, regulatory, macro",
       "symbols": ["AAPL"],
       "sentiment": "bullish"
     }
@@ -141,7 +159,7 @@ Return ONLY valid JSON — no markdown, no code fences:
     {
       "symbol": "AAPL",
       "changeStr": "+4.2%",
-      "catalyst": "earnings beat / news catalyst",
+      "catalyst": "specific catalyst — earnings beat, guidance raise, analyst upgrade, news",
       "type": "opportunity",
       "note": "gap-and-go or fade setup, key level to watch"
     }
@@ -156,7 +174,7 @@ Return ONLY valid JSON — no markdown, no code fences:
       "tradingImpact": "hot print → risk-off, growth sells; cool print → risk-on rip"
     }
   ],
-  "fedWatch": "Current Fed posture and rate path implications for growth stock multiples today.",
+  "fedWatch": "Current Fed posture and today's rate path implications for growth stock multiples.",
   "fedSpeakers": [
     { "name": "Powell", "time": "10:00 ET", "topic": "economic outlook" }
   ],
@@ -164,25 +182,25 @@ Return ONLY valid JSON — no markdown, no code fences:
     {
       "sector": "Technology",
       "direction": "bullish",
-      "reason": "2-sentence reason based on overnight data and current setup."
+      "reason": "specific reason tied to today's catalyst or data."
     }
   ]
 }
 
 Rules:
-- Exactly 2–3 themes. Prioritize: (1) overnight global driver — Asia/Europe close; (2) key US pre-market catalyst; (3) sector/theme with clear momentum into the open
-- geopoliticalAlerts: 0–3 genuinely market-moving events only; empty array [] if none significant today
-- significantNews: 2–4 items since yesterday's close (earnings, macro, regulatory, geopolitical)
-- preMarketMovers: max 6; significant gap-ups/downs, earnings, overnight news
-- economicEvents: max 4; today's US calendar only; always include prior reading
-- fedSpeakers: 0–3 scheduled speakers today; empty array [] if none
-- sectorSpotlight: 3–5 sectors with specific directional bias and actionable reason
-- toneScore: integer from -5 (max fear/risk-off) to +5 (max greed/risk-on)
-- geopoliticalAlerts severity: "high" | "medium" | "low"
-- Never use generic filler. Every sentence must reference a real catalyst, level, or data point.`
+- 2–3 themes prioritizing: (1) overnight global driver; (2) key pre-market catalyst; (3) sector momentum
+- geopoliticalAlerts: 0–3 genuinely market-moving events only; [] if none today
+- significantNews: 2–4 real items since yesterday's close
+- preMarketMovers: 3–6 stocks with real pre-market data from your search
+- economicEvents: today's US calendar only, max 5; [] if no significant releases
+- fedSpeakers: today's scheduled speakers only; [] if none
+- sectorSpotlight: 3–5 sectors with specific directional bias
+- toneScore: integer -5 (max fear) to +5 (max greed)
+- severity: "high" | "medium" | "low"
+- Strip all citation markers [1] [2] from your JSON values`
 
   const result = await model.generateContent(prompt)
-  const text = result.response.text()
+  const text = result.response.text().replace(/\[\d+\]/g, '') // strip citation markers
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (!jsonMatch) throw new Error('AI returned an unrecognised format.')
   return JSON.parse(jsonMatch[0])
