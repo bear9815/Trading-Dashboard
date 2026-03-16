@@ -151,6 +151,87 @@ async function fetchHistoryFinnhub(symbol, startDate, endDate, token) {
   })).filter(c => c.open != null && c.close != null)
 }
 
+// ── Yahoo Finance v7 Quote (pre-market aware, all symbol types) ───────────────
+
+/**
+ * Parse a Yahoo Finance v7 quote object into our standard format.
+ * Respects marketState so pre-market / after-hours prices are used when active.
+ */
+function parseYahooV7Quote(q) {
+  const marketState = q.marketState || 'REGULAR'
+  let price, change, changePct
+
+  if (marketState === 'PRE' && q.preMarketPrice != null) {
+    price     = q.preMarketPrice
+    change    = q.preMarketChange    ?? 0
+    changePct = q.preMarketChangePercent ?? 0
+  } else if ((marketState === 'POST' || marketState === 'POSTPOST') && q.postMarketPrice != null) {
+    price     = q.postMarketPrice
+    change    = q.postMarketChange    ?? 0
+    changePct = q.postMarketChangePercent ?? 0
+  } else {
+    price     = q.regularMarketPrice
+    change    = q.regularMarketChange    ?? 0
+    changePct = q.regularMarketChangePercent ?? 0
+  }
+
+  if (price == null) return null
+  return {
+    symbol:        q.symbol,
+    price,
+    previousClose: q.regularMarketPreviousClose ?? q.previousClose ?? price,
+    change,
+    changePct,
+    marketState,
+  }
+}
+
+const YF_V7_FIELDS = [
+  'regularMarketPrice', 'regularMarketChange', 'regularMarketChangePercent',
+  'regularMarketPreviousClose',
+  'preMarketPrice',    'preMarketChange',    'preMarketChangePercent',
+  'postMarketPrice',   'postMarketChange',   'postMarketChangePercent',
+  'previousClose', 'marketState',
+].join(',')
+
+/** Single-symbol quote via Yahoo Finance v7 — pre-market / post-market aware */
+async function fetchQuoteYahooV7(symbol) {
+  const url = `${YF}/v7/finance/quote?symbols=${encodeURIComponent(symbol)}&fields=${YF_V7_FIELDS}`
+  const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
+  if (!res.ok) throw new Error(`Yahoo v7 HTTP ${res.status}`)
+  const json = await res.json()
+  const q = json.quoteResponse?.result?.[0]
+  if (!q) throw new Error('Yahoo v7: no result')
+  const parsed = parseYahooV7Quote(q)
+  if (!parsed) throw new Error('Yahoo v7: no price')
+  return parsed
+}
+
+/** Batch-fetch up to ~20 symbols per request — much more efficient for the morning briefing */
+async function fetchQuotesBatchYahooV7(symbols) {
+  const CHUNK = 20
+  const results = new Map()
+  const chunks = []
+  for (let i = 0; i < symbols.length; i += CHUNK) chunks.push(symbols.slice(i, i + CHUNK))
+
+  await Promise.allSettled(chunks.map(async chunk => {
+    try {
+      const syms = chunk.map(s => encodeURIComponent(s)).join(',')
+      const url  = `${YF}/v7/finance/quote?symbols=${syms}&fields=${YF_V7_FIELDS}`
+      const res  = await fetch(url, { signal: AbortSignal.timeout(12000) })
+      if (!res.ok) return
+      const json   = await res.json()
+      const quotes = json.quoteResponse?.result || []
+      for (const q of quotes) {
+        const parsed = parseYahooV7Quote(q)
+        if (parsed) results.set(q.symbol, parsed)
+      }
+    } catch { /* silent — missing symbols handled below */ }
+  }))
+
+  return results
+}
+
 // ── Yahoo Finance (proxy fallback) ────────────────────────────────────────────
 
 async function fetchHistoryYahoo(symbol, startDate, endDate, interval = '1d') {
@@ -204,12 +285,19 @@ export async function fetchQuote(symbol) {
     } catch { /* fall through */ }
   }
 
-  // 2. Stooq (free, no key)
+  // 2. Yahoo Finance v7 (pre-market aware, supports futures / indices / FX)
   try {
-    return await fetchQuoteStooq(symbol)
+    return await fetchQuoteYahooV7(symbol)
   } catch { /* fall through */ }
 
-  // 3. Yahoo Finance (last resort) — use 1d interval (less likely to be blocked than 1m)
+  // 3. Stooq (free, no key, US stocks only — skip futures/index symbols)
+  if (!symbol.includes('=') && !symbol.startsWith('^')) {
+    try {
+      return await fetchQuoteStooq(symbol)
+    } catch { /* fall through */ }
+  }
+
+  // 4. Yahoo Finance v8 chart (last resort)
   const url = `${BASE}/${encodeURIComponent(symbol)}?interval=1d&range=5d`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -312,19 +400,27 @@ export async function fetchATR14(symbol) {
 
 /**
  * Fetch quotes for multiple symbols. Returns a Map of symbol -> quote.
- * Skips failed symbols silently.
+ * Uses Yahoo Finance v7 batch endpoint first (pre-market aware, 2 requests for 30+ symbols),
+ * then falls back to individual fetchQuote for any that failed.
  */
 export async function fetchQuotes(symbols) {
-  const results = new Map()
-  await Promise.allSettled(
-    [...new Set(symbols)].map(async sym => {
-      try {
-        results.set(sym, await fetchQuote(sym))
-      } catch {
-        // leave missing — UI shows stale / '—'
-      }
-    })
-  )
+  const uniq = [...new Set(symbols)]
+
+  // Batch fetch via Yahoo v7 (handles futures, indices, FX, pre-market)
+  const results = await fetchQuotesBatchYahooV7(uniq)
+
+  // Individual fallback for anything the batch missed
+  const missing = uniq.filter(s => !results.has(s))
+  if (missing.length > 0) {
+    await Promise.allSettled(
+      missing.map(async sym => {
+        try {
+          results.set(sym, await fetchQuote(sym))
+        } catch { /* leave missing — UI shows '—' */ }
+      })
+    )
+  }
+
   return results
 }
 
