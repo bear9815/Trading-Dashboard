@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState } from 'react'
-import { DollarSign, Percent, TrendingUp, Target, BarChart, Zap, AlertTriangle, ShieldAlert, StickyNote } from 'lucide-react'
+import { useMemo } from 'react'
+import { DollarSign, Percent, TrendingUp, Target, BarChart, Zap, AlertTriangle, ShieldAlert } from 'lucide-react'
 import MetricCard from './MetricCard.jsx'
 import EquityCurve from './EquityCurve.jsx'
 import CalendarHeatmap from './CalendarHeatmap.jsx'
 import OpenPositions from './OpenPositions.jsx'
 import EarningsCalendar from './EarningsCalendar.jsx'
+import TradingThoughts from './TradingThoughts.jsx'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import {
@@ -16,7 +17,7 @@ import { formatCurrency, formatR, signClass } from '../../utils/formatters.js'
 
 export default function Dashboard({ selectedAccount }) {
   const { trades, accountActivities } = useTradeStore()
-  const { dailyLossLimit, excludedSymbols, dashboardNote, setDashboardNote } = useSettingsStore()
+  const { dailyLossLimit, excludedSymbols } = useSettingsStore()
 
   // Uppercase set for fast lookup
   const excludedSet = useMemo(
@@ -71,23 +72,6 @@ export default function Dashboard({ selectedAccount }) {
   const todayLoss         = todayPL < 0 ? Math.abs(todayPL) : 0
   const dailyLimitReached = dailyLimitDollar > 0 && todayLoss >= dailyLimitDollar
   const dailyLimitWarning = dailyLimitDollar > 0 && !dailyLimitReached && todayLoss >= dailyLimitDollar * 0.75
-
-  // Quick Notes — debounced auto-save
-  const noteTimer = useRef(null)
-  const [noteText, setNoteText] = useState(dashboardNote || '')
-  const [noteSaved, setNoteSaved] = useState(false)
-
-  function handleNoteChange(e) {
-    const val = e.target.value
-    setNoteText(val)
-    setNoteSaved(false)
-    clearTimeout(noteTimer.current)
-    noteTimer.current = setTimeout(() => {
-      setDashboardNote(val)
-      setNoteSaved(true)
-      setTimeout(() => setNoteSaved(false), 1500)
-    }, 600)
-  }
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -188,6 +172,9 @@ export default function Dashboard({ selectedAccount }) {
         </div>
       )}
 
+      {/* ── Trading Thoughts ──────────────────────────────────────────────── */}
+      <TradingThoughts />
+
       {/* ── Charts row ────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
         <div className="lg:col-span-2 flex flex-col">
@@ -201,24 +188,6 @@ export default function Dashboard({ selectedAccount }) {
 
       {/* ── Earnings Calendar ─────────────────────────────────────────────── */}
       <EarningsCalendar openTrades={openTrades} />
-
-      {/* ── Quick Notes ───────────────────────────────────────────────────── */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <StickyNote size={14} className="text-accent-yellow" />
-            <h3 className="text-sm font-medium text-gray-300">Quick Notes</h3>
-          </div>
-          {noteSaved && <span className="text-xs text-accent-green">Saved</span>}
-        </div>
-        <textarea
-          value={noteText}
-          onChange={handleNoteChange}
-          placeholder="Today's game plan, reminders, key levels, mental notes..."
-          rows={4}
-          className="w-full bg-surface-200 border border-white/5 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-600 resize-none focus:outline-none focus:border-white/15 transition-colors"
-        />
-      </div>
     </div>
   )
 }

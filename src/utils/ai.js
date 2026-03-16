@@ -756,6 +756,74 @@ Rules:
 }
 
 /**
+ * Analyze a trader's mental log (trading thoughts) to surface psychology patterns.
+ * Returns { summary, mindsetScore, patterns[], recommendation }
+ */
+export async function analyzeTradingMindset(thoughts, trades, apiKey) {
+  if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
+  const model = getModel(apiKey)
+
+  const sorted = [...thoughts].sort((a, b) => b.timestamp - a.timestamp)
+  if (sorted.length < 3) throw new Error('Need at least 3 logged thoughts to analyze.')
+
+  const recentThoughts = sorted.slice(0, 60).map(t => ({
+    tag:  t.tag,
+    text: t.text,
+    date: new Date(t.timestamp).toISOString().slice(0, 10),
+    time: new Date(t.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+  }))
+
+  const recentTrades = [...trades]
+    .filter(t => t.status === 'Win' || t.status === 'Loss')
+    .sort((a, b) => new Date(b.entryDate) - new Date(a.entryDate))
+    .slice(0, 20)
+    .map(t => ({
+      symbol:    t.symbol,
+      status:    t.status,
+      pl:        t.pl,
+      rMultiple: t.rMultiple,
+      date:      t.entryDate?.toString().slice(0, 10),
+    }))
+
+  const prompt = `You are an elite trading psychologist and performance coach. Analyze this trader's mental log to identify behavioral and emotional patterns that are helping or hurting their trading.
+
+Mental Log (most recent first):
+${JSON.stringify(recentThoughts, null, 2)}
+
+Recent Trade Results (for correlation):
+${JSON.stringify(recentTrades, null, 2)}
+
+Analyze the mindset patterns. Look specifically for: FOMO indicators, discipline moments (avoided bad trades), revenge trading urges, overconfidence, fear/hesitation, learning patterns, emotional reactions to P&L, morning vs afternoon behavior differences.
+
+Return ONLY valid JSON (no markdown, no code fences):
+{
+  "summary": "2–3 sentences capturing the trader's current mental state, dominant tendencies, and overall pattern",
+  "mindsetScore": <integer 0–100 where 100 = elite discipline, 70+ = solid, 50+ = developing, below 50 = needs work>,
+  "patterns": [
+    {
+      "title": "Pattern name (4–6 words)",
+      "type": "strength | risk | neutral",
+      "description": "2 sentences: what this pattern looks like in their log and how it likely affects their trading results"
+    }
+  ],
+  "recommendation": "One specific, high-impact action they should take this week based on the dominant pattern in their log — be concrete, not generic"
+}
+
+Rules:
+- Only identify patterns that appear multiple times in the log
+- Reference specific thought entries or tag clusters in your descriptions
+- Correlate thoughts with trade outcomes where the data allows
+- Score honestly — most traders are not 90+
+- Max 4 patterns`
+
+  const result = await model.generateContent(prompt)
+  const text = result.response.text()
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) throw new Error('AI returned an unrecognised format.')
+  return JSON.parse(jsonMatch[0])
+}
+
+/**
  * Classify a stock symbol into a GICS sector and a short market theme.
  * Returns { sector: string, theme: string }
  * Result is cached by the caller — do not call on every render.

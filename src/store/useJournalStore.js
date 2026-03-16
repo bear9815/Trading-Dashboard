@@ -18,11 +18,12 @@ async function saveToCloud(state) {
 }
 
 export const useJournalStore = create((set, get) => ({
-  entries:    [],
-  priorities: [],
-  goals:      [],
-  checkins:   [],
-  cloudReady: false,
+  entries:         [],
+  priorities:      [],
+  goals:           [],
+  checkins:        [],
+  tradingThoughts: [],
+  cloudReady:      false,
 
   // ── Cloud ──────────────────────────────────────────────────────────────────
 
@@ -43,17 +44,17 @@ export const useJournalStore = create((set, get) => ({
 
     if (data?.data) {
       // Cloud data found — load it
-      const { entries = [], priorities = [], goals = [], checkins = [] } = data.data
-      set({ entries, priorities, goals, checkins, cloudReady: true })
+      const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [] } = data.data
+      set({ entries, priorities, goals, checkins, tradingThoughts, cloudReady: true })
     } else {
       // First-time user — migrate from localStorage if anything exists
       try {
         const raw = localStorage.getItem('risk-tool-journal')
         if (raw) {
           const parsed = JSON.parse(raw)
-          const { entries = [], priorities = [], goals = [], checkins = [] } = parsed?.state || {}
-          set({ entries, priorities, goals, checkins, cloudReady: true })
-          await saveToCloud({ entries, priorities, goals, checkins })
+          const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [] } = parsed?.state || {}
+          set({ entries, priorities, goals, checkins, tradingThoughts, cloudReady: true })
+          await saveToCloud({ entries, priorities, goals, checkins, tradingThoughts })
           localStorage.removeItem('risk-tool-journal')
           console.info('[cloud] Journal migrated from localStorage ✓')
         } else {
@@ -66,13 +67,13 @@ export const useJournalStore = create((set, get) => ({
   },
 
   clearLocalState: () => set({
-    entries: [], priorities: [], goals: [], checkins: [], cloudReady: false,
+    entries: [], priorities: [], goals: [], checkins: [], tradingThoughts: [], cloudReady: false,
   }),
 
   // ── Internal sync helper ───────────────────────────────────────────────────
   _sync: () => {
-    const { entries, priorities, goals, checkins } = get()
-    saveToCloud({ entries, priorities, goals, checkins })
+    const { entries, priorities, goals, checkins, tradingThoughts } = get()
+    saveToCloud({ entries, priorities, goals, checkins, tradingThoughts })
   },
 
   // ── Journal entries ────────────────────────────────────────────────────────
@@ -171,6 +172,24 @@ export const useJournalStore = create((set, get) => ({
 
   deleteCheckin: (id) => {
     set(s => ({ checkins: s.checkins.filter(c => c.id !== id) }))
+    get()._sync()
+  },
+
+  // ── Trading Thoughts ───────────────────────────────────────────────────────
+
+  addThought: (text, tag = 'note') => {
+    const thought = {
+      id:        uuidv4(),
+      text:      text.trim(),
+      tag,
+      timestamp: Date.now(),
+    }
+    set(s => ({ tradingThoughts: [thought, ...s.tradingThoughts] }))
+    get()._sync()
+  },
+
+  deleteThought: (id) => {
+    set(s => ({ tradingThoughts: s.tradingThoughts.filter(t => t.id !== id) }))
     get()._sync()
   },
 }))
