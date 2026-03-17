@@ -134,6 +134,24 @@ export function calcSortino(equityCurve, riskFreeRate = 0.05) {
 }
 
 /**
+ * Calmar Ratio = Annualized Return % / Max Drawdown %
+ * Measures return per unit of drawdown risk taken.
+ * Ratings: <0.5 poor | 0.5-1.0 acceptable | 1.0-2.0 good | 2.0-3.0 excellent | 3.0+ elite
+ */
+export function calcCalmar(equityCurve) {
+  if (equityCurve.length < 3) return null
+  const first = equityCurve[0].balance
+  const last  = equityCurve[equityCurve.length - 1].balance
+  if (first <= 0) return null
+  const n = equityCurve.length
+  const totalReturn = (last - first) / first
+  const annualizedReturn = ((1 + totalReturn) ** (252 / n) - 1) * 100
+  const { pct: maxDDPct } = calcMaxDrawdown(equityCurve)
+  if (!maxDDPct || maxDDPct === 0) return null
+  return annualizedReturn / maxDDPct
+}
+
+/**
  * Van Tharp's System Quality Number (SQN)
  * SQN = (mean(R) / stdev(R)) × sqrt(n)
  * Ratings: <1.6 poor | 1.6-1.9 below avg | 2.0-2.4 avg | 2.5-2.9 good | 3.0-5.0 excellent | 5.0+ holy grail

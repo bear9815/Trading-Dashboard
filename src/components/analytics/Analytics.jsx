@@ -14,7 +14,7 @@ import { buildEquityCurve } from '../../utils/equityCurve.js'
 import {
   calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor,
   calcRMultipleDistribution, groupByField, calcAvgWinLoss, calcTotalR,
-  calcSharpe, calcSortino, calcSQN
+  calcSharpe, calcSortino, calcSQN, calcCalmar
 } from '../../utils/metrics.js'
 import { formatCurrency, formatR, formatDate } from '../../utils/formatters.js'
 import { computeTradeMAEMFE, fetchHistory, fetchATR14 } from '../../utils/marketData.js'
@@ -34,33 +34,13 @@ function SectionTitle({ children }) {
   return <h3 className="text-sm font-semibold text-gray-300 mb-3">{children}</h3>
 }
 
-function StatCard({ label, value, valueClass = 'text-white' }) {
-  return (
-    <div className="card-sm text-center">
-      <p className="text-xs text-gray-500 mb-1">{label}</p>
-      <p className={`text-lg font-bold mono ${valueClass}`}>{value}</p>
-    </div>
-  )
-}
+// ── Shared tooltip hook ───────────────────────────────────────────────────────
 
-const SQN_RATINGS = [
-  { min: 5.0,  max: Infinity, label: 'Holy Grail',    cls: 'text-accent-blue'   },
-  { min: 3.0,  max: 5.0,      label: 'Excellent',     cls: 'text-accent-green'  },
-  { min: 2.5,  max: 3.0,      label: 'Good',          cls: 'text-accent-green'  },
-  { min: 2.0,  max: 2.5,      label: 'Average',       cls: 'text-accent-yellow' },
-  { min: 1.6,  max: 2.0,      label: 'Below Average', cls: 'text-accent-yellow' },
-  { min: -Infinity, max: 1.6, label: 'Poor',          cls: 'text-accent-red'    },
-]
-
-function sqnRating(v) {
-  return SQN_RATINGS.find(r => v >= r.min && v < r.max) ?? SQN_RATINGS[SQN_RATINGS.length - 1]
-}
-
-function SQNCard({ sqn }) {
+function useHoverTooltip(delay = 300) {
   const [visible, setVisible] = useState(false)
   const [style,   setStyle]   = useState({})
-  const ref    = useRef(null)
-  const timer  = useRef(null)
+  const ref   = useRef(null)
+  const timer = useRef(null)
 
   function open() {
     clearTimeout(timer.current)
@@ -72,20 +52,21 @@ function SQNCard({ sqn }) {
       if (left + w > window.innerWidth - 12) left = window.innerWidth - w - 12
       setStyle({ top: Math.round(rect.bottom) + 8, left, width: w })
       setVisible(true)
-    }, 300)
+    }, delay)
   }
   function close() {
     clearTimeout(timer.current)
     timer.current = setTimeout(() => setVisible(false), 120)
   }
+  function cancelClose() { clearTimeout(timer.current) }
 
-  const rating    = sqn != null ? sqnRating(sqn) : null
-  const valueText = sqn != null ? sqn.toFixed(2) : '—'
-  const valueCls  = sqn == null ? 'text-gray-500'
-    : sqn >= 2.5 ? 'text-accent-green'
-    : sqn >= 1.6 ? 'text-accent-yellow'
-    : 'text-accent-red'
+  return { ref, visible, style, open, close, cancelClose }
+}
 
+// ── StatCardWithTooltip ───────────────────────────────────────────────────────
+
+function StatCardWithTooltip({ label, value, valueClass = 'text-white', sub, tooltipContent }) {
+  const { ref, visible, style, open, close, cancelClose } = useHoverTooltip()
   return (
     <>
       <div
@@ -95,39 +76,20 @@ function SQNCard({ sqn }) {
         onMouseLeave={close}
       >
         <p className="text-xs text-gray-500 mb-1 flex items-center justify-center gap-1">
-          SQN <span className="text-[10px] text-gray-600 border border-gray-700 rounded-full w-3.5 h-3.5 flex items-center justify-center leading-none">?</span>
+          {label}
+          <span className="text-[10px] text-gray-600 border border-gray-700 rounded-full w-3.5 h-3.5 flex items-center justify-center leading-none shrink-0">?</span>
         </p>
-        <p className={`text-lg font-bold mono ${valueCls}`}>{valueText}</p>
-        {rating && <p className={`text-[10px] mt-0.5 font-medium ${rating.cls}`}>{rating.label}</p>}
+        <p className={`text-lg font-bold mono ${valueClass}`}>{value}</p>
+        {sub && <p className={`text-[10px] mt-0.5 font-medium ${sub.cls}`}>{sub.label}</p>}
       </div>
-
       {visible && createPortal(
         <div
           className="fixed z-[9999] rounded-lg border border-white/10 bg-surface-100 shadow-2xl p-4 text-xs"
           style={style}
-          onMouseEnter={() => clearTimeout(timer.current)}
+          onMouseEnter={cancelClose}
           onMouseLeave={close}
         >
-          <p className="font-bold text-white text-sm mb-1">System Quality Number (SQN)</p>
-          <p className="text-accent-blue font-medium text-[11px] mb-2">Van Tharp</p>
-          <p className="text-gray-400 leading-relaxed mb-3">
-            Measures how consistently your system produces R-multiples relative to their variability.
-            Formula: <span className="mono text-gray-300">(mean R ÷ stdev R) × √n</span>. Needs at least 30 trades to be meaningful.
-          </p>
-          <div className="space-y-1 mb-3">
-            {SQN_RATINGS.slice().reverse().map(r => (
-              <div key={r.label} className="flex items-center gap-2">
-                <span className={`font-semibold w-24 shrink-0 ${r.cls}`}>{r.label}</span>
-                <span className="text-gray-600">
-                  {r.min === -Infinity ? `< 1.6` : r.max === Infinity ? `≥ 5.0` : `${r.min}–${r.max}`}
-                </span>
-              </div>
-            ))}
-          </div>
-          <p className="text-gray-600 leading-relaxed">
-            A higher SQN means your edge is large relative to the noise in your results.
-            Use it to compare two systems or time periods — not as a standalone pass/fail.
-          </p>
+          {tooltipContent}
         </div>,
         document.body
       )}
@@ -135,12 +97,88 @@ function SQNCard({ sqn }) {
   )
 }
 
+// ── ToggleStatCard — two metrics, single card with toggle button ───────────────
+
+function ToggleStatCard({ options, activeKey, onToggle }) {
+  const active = options.find(o => o.key === activeKey) ?? options[0]
+  const other  = options.find(o => o.key !== activeKey) ?? options[1]
+  const { ref, visible, style, open, close, cancelClose } = useHoverTooltip()
+
+  return (
+    <>
+      <div
+        ref={ref}
+        className="card-sm text-center cursor-default relative"
+        onMouseEnter={open}
+        onMouseLeave={close}
+      >
+        {/* Toggle pill */}
+        <button
+          onClick={e => { e.stopPropagation(); onToggle(other.key) }}
+          className="absolute top-1.5 right-1.5 text-[9px] text-gray-600 hover:text-gray-300 border border-gray-700 hover:border-gray-500 rounded px-1 py-0.5 leading-none transition-colors"
+          title={`Switch to ${other.label}`}
+        >
+          {other.label}
+        </button>
+        <p className="text-xs text-gray-500 mb-1 flex items-center justify-center gap-1">
+          {active.label}
+          <span className="text-[10px] text-gray-600 border border-gray-700 rounded-full w-3.5 h-3.5 flex items-center justify-center leading-none shrink-0">?</span>
+        </p>
+        <p className={`text-lg font-bold mono ${active.valueClass}`}>{active.value}</p>
+        {active.sub && <p className={`text-[10px] mt-0.5 font-medium ${active.sub.cls}`}>{active.sub.label}</p>}
+      </div>
+      {visible && createPortal(
+        <div
+          className="fixed z-[9999] rounded-lg border border-white/10 bg-surface-100 shadow-2xl p-4 text-xs"
+          style={style}
+          onMouseEnter={cancelClose}
+          onMouseLeave={close}
+        >
+          {active.tooltipContent}
+          <div className="mt-3 pt-3 border-t border-white/8">
+            <p className="text-[11px] text-gray-600 mb-1">Toggle to: <span className="text-gray-400 font-medium">{other.label}</span></p>
+            <p className="text-[11px] text-gray-600">{other.shortDesc}</p>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
+// ── Rating helpers ────────────────────────────────────────────────────────────
+
+const SQN_RATINGS = [
+  { min: 5.0,       max: Infinity, label: 'Holy Grail',    cls: 'text-accent-blue'   },
+  { min: 3.0,       max: 5.0,      label: 'Excellent',     cls: 'text-accent-green'  },
+  { min: 2.5,       max: 3.0,      label: 'Good',          cls: 'text-accent-green'  },
+  { min: 2.0,       max: 2.5,      label: 'Average',       cls: 'text-accent-yellow' },
+  { min: 1.6,       max: 2.0,      label: 'Below Average', cls: 'text-accent-yellow' },
+  { min: -Infinity, max: 1.6,      label: 'Poor',          cls: 'text-accent-red'    },
+]
+function sqnRating(v)    { return SQN_RATINGS.find(r => v >= r.min && v < r.max) ?? SQN_RATINGS[SQN_RATINGS.length - 1] }
+
+const CALMAR_RATINGS = [
+  { min: 3.0,       max: Infinity, label: 'Elite',      cls: 'text-accent-blue'   },
+  { min: 2.0,       max: 3.0,      label: 'Excellent',  cls: 'text-accent-green'  },
+  { min: 1.0,       max: 2.0,      label: 'Good',       cls: 'text-accent-green'  },
+  { min: 0.5,       max: 1.0,      label: 'Acceptable', cls: 'text-accent-yellow' },
+  { min: -Infinity, max: 0.5,      label: 'Poor',       cls: 'text-accent-red'    },
+]
+function calmarRating(v) { return CALMAR_RATINGS.find(r => v >= r.min && v < r.max) ?? CALMAR_RATINGS[CALMAR_RATINGS.length - 1] }
+
 const MAE_LIMIT = 20 // max trades to fetch MAE/MFE for
 
 export default function Analytics({ selectedAccount }) {
   const { trades, accountActivities, getAccountBalance } = useTradeStore()
   const accountBalance = getAccountBalance(selectedAccount)
-  const { excludedSymbols, analyticsTimeframe, setAnalyticsTimeframe, analyticsWinLossMode, setAnalyticsWinLossMode } = useSettingsStore()
+  const {
+    excludedSymbols,
+    analyticsTimeframe, setAnalyticsTimeframe,
+    analyticsWinLossMode, setAnalyticsWinLossMode,
+    analyticsRiskMode, setAnalyticsRiskMode,
+    analyticsSqnMode,  setAnalyticsSqnMode,
+  } = useSettingsStore()
   const { entries: morningEntries } = useMorningStore()
 
   const timeframe    = analyticsTimeframe ?? 'All'
@@ -823,10 +861,10 @@ export default function Analytics({ selectedAccount }) {
     return { points, confBars, stateBars, bestConf, worstConf, sampleSize: points.length }
   }, [morningEntries, closed])
 
-  // ── Sharpe / Sortino ──────────────────────────────────────────────────────
-  const { sharpe, sortino } = useMemo(() => {
+  // ── Sharpe / Sortino / Calmar ─────────────────────────────────────────────
+  const { sharpe, sortino, calmar } = useMemo(() => {
     const curve = buildEquityCurve(trades, accountActivities)
-    return { sharpe: calcSharpe(curve), sortino: calcSortino(curve) }
+    return { sharpe: calcSharpe(curve), sortino: calcSortino(curve), calmar: calcCalmar(curve) }
   }, [trades, accountActivities])
 
   const sqn = useMemo(() => calcSQN(tfFiltered), [tfFiltered])
@@ -871,15 +909,182 @@ export default function Analytics({ selectedAccount }) {
 
       {/* Summary stats */}
       <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
-        <StatCard label="Win Rate" value={`${winRate.toFixed(1)}%`} valueClass={winRate >= 50 ? 'text-accent-green' : 'text-accent-red'} />
-        <StatCard label="Avg R-Multiple" value={formatR(avgR)} valueClass={avgR >= 0 ? 'text-accent-green' : 'text-accent-red'} />
-        <StatCard label="Total R" value={formatR(totalR)} valueClass={totalR >= 0 ? 'text-accent-green' : 'text-accent-red'} />
-        <StatCard label="Profit Factor" value={isFinite(profitFactor) ? profitFactor.toFixed(2) : '∞'} valueClass={profitFactor >= 1.5 ? 'text-accent-green' : profitFactor >= 1 ? 'text-accent-yellow' : 'text-accent-red'} />
-        <StatCard label="Expectancy / Trade" value={formatCurrency(expectancy, true)} valueClass={expectancy >= 0 ? 'text-accent-green' : 'text-accent-red'} />
-        <StatCard label="Payoff Ratio" value={payoffRatio != null ? `${payoffRatio.toFixed(2)}x` : '—'} valueClass={payoffRatio == null ? 'text-gray-500' : payoffRatio >= 1.5 ? 'text-accent-green' : payoffRatio >= 1 ? 'text-accent-yellow' : 'text-accent-red'} />
-        <StatCard label="Sharpe Ratio" value={sharpe != null ? sharpe.toFixed(2) : '—'} valueClass={sharpe == null ? 'text-gray-500' : sharpe >= 1 ? 'text-accent-green' : sharpe >= 0 ? 'text-accent-yellow' : 'text-accent-red'} />
-        <StatCard label="Sortino Ratio" value={sortino != null ? sortino.toFixed(2) : '—'} valueClass={sortino == null ? 'text-gray-500' : sortino >= 1.5 ? 'text-accent-green' : sortino >= 0 ? 'text-accent-yellow' : 'text-accent-red'} />
-        <SQNCard sqn={sqn} />
+
+        <StatCardWithTooltip
+          label="Win Rate" value={`${winRate.toFixed(1)}%`}
+          valueClass={winRate >= 50 ? 'text-accent-green' : 'text-accent-red'}
+          tooltipContent={<>
+            <p className="font-bold text-white text-sm mb-2">Win Rate</p>
+            <p className="text-gray-400 leading-relaxed mb-3">The percentage of closed trades that result in a profit. Higher isn't always better — a 40% win rate with large winners beats a 70% win rate with tiny gains.</p>
+            <div className="space-y-1 mb-3">
+              {[['> 60%','text-accent-green','Solid for most styles'],['50–60%','text-accent-yellow','Typical momentum'],['40–50%','text-accent-yellow','Fine with high payoff ratio'],['< 40%','text-accent-red','Needs strong avg winner']].map(([r,c,d])=>(
+                <div key={r} className="flex gap-2"><span className={`font-semibold w-16 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>
+              ))}
+            </div>
+            <p className="text-gray-600">Always read alongside Expectancy and Payoff Ratio — win rate alone tells you nothing about profitability.</p>
+          </>}
+        />
+
+        <StatCardWithTooltip
+          label="Avg R-Multiple" value={formatR(avgR)}
+          valueClass={avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}
+          tooltipContent={<>
+            <p className="font-bold text-white text-sm mb-2">Average R-Multiple</p>
+            <p className="text-gray-400 leading-relaxed mb-3">The average profit or loss per closed trade, expressed as a multiple of your initial risk (1R = the $ amount you risked on entry). Positive avg R means your edge is real.</p>
+            <div className="space-y-1 mb-3">
+              {[['> 1.0R','text-accent-green','Excellent'],['0.5–1.0R','text-accent-green','Healthy edge'],['0–0.5R','text-accent-yellow','Marginal — watch costs'],['< 0R','text-accent-red','No edge present']].map(([r,c,d])=>(
+                <div key={r} className="flex gap-2"><span className={`font-semibold w-20 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>
+              ))}
+            </div>
+            <p className="text-gray-600">Even a small positive avg R compounds significantly over many trades. Improving from 0.3R to 0.6R doubles long-term account growth.</p>
+          </>}
+        />
+
+        <StatCardWithTooltip
+          label="Total R" value={formatR(totalR)}
+          valueClass={totalR >= 0 ? 'text-accent-green' : 'text-accent-red'}
+          tooltipContent={<>
+            <p className="font-bold text-white text-sm mb-2">Total R</p>
+            <p className="text-gray-400 leading-relaxed mb-3">The sum of all R-multiples across every closed trade. Your cumulative "score" for the entire history. A consistent edge shows up as steady, linear growth in Total R over time.</p>
+            <p className="text-gray-400 leading-relaxed mb-2">A sudden dip in slope (not just Total R going negative) is often the earliest warning that an edge is degrading — before P&L even shows it clearly.</p>
+            <p className="text-gray-600">Use the equity curve to watch Total R grow — it should look like a steady upward trend, not a lottery.</p>
+          </>}
+        />
+
+        <StatCardWithTooltip
+          label="Profit Factor" value={isFinite(profitFactor) ? profitFactor.toFixed(2) : '∞'}
+          valueClass={profitFactor >= 1.5 ? 'text-accent-green' : profitFactor >= 1 ? 'text-accent-yellow' : 'text-accent-red'}
+          tooltipContent={<>
+            <p className="font-bold text-white text-sm mb-2">Profit Factor</p>
+            <p className="text-gray-400 leading-relaxed mb-2">Gross winning P&L ÷ Gross losing P&L. For every $1 lost, how many $ did you make? The most size-agnostic measure of system quality — works regardless of account size or position sizing.</p>
+            <div className="space-y-1 mb-3">
+              {[['> 2.0','text-accent-green','Excellent'],['1.5–2.0','text-accent-green','Solid'],['1.0–1.5','text-accent-yellow','Marginal after costs'],['< 1.0','text-accent-red','Net losing system']].map(([r,c,d])=>(
+                <div key={r} className="flex gap-2"><span className={`font-semibold w-16 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>
+              ))}
+            </div>
+            <p className="text-gray-600">∞ means no losing trades in the sample — treat with caution until sample size is large enough.</p>
+          </>}
+        />
+
+        <StatCardWithTooltip
+          label="Expectancy / Trade" value={formatCurrency(expectancy, true)}
+          valueClass={expectancy >= 0 ? 'text-accent-green' : 'text-accent-red'}
+          tooltipContent={<>
+            <p className="font-bold text-white text-sm mb-2">Expectancy Per Trade</p>
+            <p className="text-accent-blue font-medium text-[11px] mb-2">Van Tharp: "The most important statistic a trader can know"</p>
+            <p className="text-gray-400 leading-relaxed mb-3">The average $ return per trade across all wins and losses. Formula: <span className="mono text-gray-300">(Win% × Avg Win) − (Loss% × Avg Loss)</span>. This is the foundation of position sizing decisions.</p>
+            <p className="text-gray-400 leading-relaxed mb-2">Multiply by your monthly trade frequency to estimate expected monthly P&L at your current 1R risk level.</p>
+            <p className="text-gray-600">A positive expectancy, even small, compounded over hundreds of trades creates significant wealth. Negative expectancy cannot be saved by position sizing.</p>
+          </>}
+        />
+
+        <StatCardWithTooltip
+          label="Payoff Ratio" value={payoffRatio != null ? `${payoffRatio.toFixed(2)}x` : '—'}
+          valueClass={payoffRatio == null ? 'text-gray-500' : payoffRatio >= 1.5 ? 'text-accent-green' : payoffRatio >= 1 ? 'text-accent-yellow' : 'text-accent-red'}
+          tooltipContent={<>
+            <p className="font-bold text-white text-sm mb-2">Payoff Ratio</p>
+            <p className="text-gray-400 leading-relaxed mb-3">Average winning trade $ ÷ Average losing trade $. Shows how large your winners are relative to your losers. A 2.0x payoff means winners are twice the size of losers on average.</p>
+            <div className="space-y-1 mb-3">
+              {[['> 2.0x','text-accent-green','Letting winners run'],['1.5–2.0x','text-accent-green','Healthy asymmetry'],['1.0–1.5x','text-accent-yellow','Minimal edge — need high win rate'],['< 1.0x','text-accent-red','Losers bigger than winners']].map(([r,c,d])=>(
+                <div key={r} className="flex gap-2"><span className={`font-semibold w-20 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>
+              ))}
+            </div>
+            <p className="text-gray-600">A 45% win rate with a 2.0x payoff ratio is a highly profitable system. A 65% win rate with a 0.8x payoff ratio is often a net loser.</p>
+          </>}
+        />
+
+        <ToggleStatCard
+          activeKey={analyticsRiskMode ?? 'sharpe'}
+          onToggle={setAnalyticsRiskMode}
+          options={[
+            {
+              key: 'sharpe',
+              label: 'Sharpe',
+              value: sharpe != null ? sharpe.toFixed(2) : '—',
+              valueClass: sharpe == null ? 'text-gray-500' : sharpe >= 1 ? 'text-accent-green' : sharpe >= 0 ? 'text-accent-yellow' : 'text-accent-red',
+              shortDesc: 'Only penalizes downside volatility — better for asymmetric systems.',
+              tooltipContent: <>
+                <p className="font-bold text-white text-sm mb-2">Sharpe Ratio</p>
+                <p className="text-gray-400 leading-relaxed mb-3">Risk-adjusted return using total return volatility. Formula: <span className="mono text-gray-300">(Return − Risk-Free Rate) ÷ Stdev of Returns</span>, annualized. Penalizes <em>all</em> volatility — including big winning months.</p>
+                <div className="space-y-1 mb-3">
+                  {[['> 2.0','text-accent-green','Excellent'],['1.0–2.0','text-accent-green','Good'],['0–1.0','text-accent-yellow','Acceptable'],['< 0','text-accent-red','Underperforming risk-free']].map(([r,c,d])=>(
+                    <div key={r} className="flex gap-2"><span className={`font-semibold w-16 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>
+                  ))}
+                </div>
+                <p className="text-gray-600">Best for comparing systems. Drawback: punishes large up-months the same as large down-months. Toggle to Sortino to avoid this.</p>
+              </>,
+            },
+            {
+              key: 'sortino',
+              label: 'Sortino',
+              value: sortino != null ? sortino.toFixed(2) : '—',
+              valueClass: sortino == null ? 'text-gray-500' : sortino >= 1.5 ? 'text-accent-green' : sortino >= 0 ? 'text-accent-yellow' : 'text-accent-red',
+              shortDesc: 'Penalizes both upside and downside volatility equally.',
+              tooltipContent: <>
+                <p className="font-bold text-white text-sm mb-2">Sortino Ratio</p>
+                <p className="text-gray-400 leading-relaxed mb-3">Like Sharpe, but only penalizes <em>downside</em> volatility. Formula: <span className="mono text-gray-300">(Return − Risk-Free Rate) ÷ Downside Stdev</span>, annualized. Big winning months don't hurt your score.</p>
+                <div className="space-y-1 mb-3">
+                  {[['> 2.0','text-accent-green','Excellent'],['1.5–2.0','text-accent-green','Good'],['0–1.5','text-accent-yellow','Acceptable'],['< 0','text-accent-red','Underperforming risk-free']].map(([r,c,d])=>(
+                    <div key={r} className="flex gap-2"><span className={`font-semibold w-16 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>
+                  ))}
+                </div>
+                <p className="text-gray-600">Better than Sharpe for momentum and trend-following styles where large wins create high upside volatility. Sortino will typically be higher than Sharpe for profitable asymmetric systems.</p>
+              </>,
+            },
+          ]}
+        />
+
+        <ToggleStatCard
+          activeKey={analyticsSqnMode ?? 'sqn'}
+          onToggle={setAnalyticsSqnMode}
+          options={[
+            {
+              key: 'sqn',
+              label: 'SQN',
+              value: sqn != null ? sqn.toFixed(2) : '—',
+              valueClass: sqn == null ? 'text-gray-500' : sqn >= 2.5 ? 'text-accent-green' : sqn >= 1.6 ? 'text-accent-yellow' : 'text-accent-red',
+              sub: sqn != null ? sqnRating(sqn) : null,
+              shortDesc: 'Return per unit of drawdown — style-agnostic risk measure.',
+              tooltipContent: <>
+                <p className="font-bold text-white text-sm mb-2">System Quality Number (SQN)</p>
+                <p className="text-accent-blue font-medium text-[11px] mb-2">Van Tharp</p>
+                <p className="text-gray-400 leading-relaxed mb-2">Measures consistency of your R-multiples relative to their variability. Formula: <span className="mono text-gray-300">(mean R ÷ stdev R) × √n</span>. Needs 30+ trades to be meaningful.</p>
+                <p className="text-gray-400 leading-relaxed mb-3"><strong className="text-gray-300">Note:</strong> Can understate trend-following systems that have high R variance from occasional large winners.</p>
+                <div className="space-y-1 mb-2">
+                  {[...SQN_RATINGS].reverse().map(r=>(
+                    <div key={r.label} className="flex gap-2">
+                      <span className={`font-semibold w-24 shrink-0 ${r.cls}`}>{r.label}</span>
+                      <span className="text-gray-600">{r.min===-Infinity?'< 1.6':r.max===Infinity?'≥ 5.0':`${r.min}–${r.max}`}</span>
+                    </div>
+                  ))}
+                </div>
+              </>,
+            },
+            {
+              key: 'calmar',
+              label: 'Calmar',
+              value: calmar != null ? calmar.toFixed(2) : '—',
+              valueClass: calmar == null ? 'text-gray-500' : calmar >= 1.0 ? 'text-accent-green' : calmar >= 0.5 ? 'text-accent-yellow' : 'text-accent-red',
+              sub: calmar != null ? calmarRating(calmar) : null,
+              shortDesc: 'Consistency of R-multiples relative to variability.',
+              tooltipContent: <>
+                <p className="font-bold text-white text-sm mb-2">Calmar Ratio</p>
+                <p className="text-gray-400 leading-relaxed mb-2">Annualized return ÷ max drawdown %. Measures how much return you generate per unit of drawdown risk taken. Style-agnostic — works equally well for trend followers and momentum traders.</p>
+                <p className="text-gray-400 leading-relaxed mb-3">Formula: <span className="mono text-gray-300">Annualized Return% ÷ Max Drawdown%</span>. A Calmar of 2.0 means you earn 2% annualized for every 1% of max drawdown absorbed.</p>
+                <div className="space-y-1 mb-2">
+                  {[...CALMAR_RATINGS].reverse().map(r=>(
+                    <div key={r.label} className="flex gap-2">
+                      <span className={`font-semibold w-20 shrink-0 ${r.cls}`}>{r.label}</span>
+                      <span className="text-gray-600">{r.min===-Infinity?'< 0.5':r.max===Infinity?'≥ 3.0':`${r.min}–${r.max}`}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-gray-600">Top hedge funds target Calmar > 1.0. Elite funds run 3.0+. Addresses SQN's weakness with trend-following systems.</p>
+              </>,
+            },
+          ]}
+        />
+
       </div>
 
       {/* Avg Win vs Loss */}
