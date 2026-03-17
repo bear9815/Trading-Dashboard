@@ -133,6 +133,24 @@ export function calcSortino(equityCurve, riskFreeRate = 0.05) {
   return ((mean - dailyRFR) / downsideStd) * Math.sqrt(252)
 }
 
+/**
+ * Van Tharp's System Quality Number (SQN)
+ * SQN = (mean(R) / stdev(R)) × sqrt(n)
+ * Ratings: <1.6 poor | 1.6-1.9 below avg | 2.0-2.4 avg | 2.5-2.9 good | 3.0-5.0 excellent | 5.0+ holy grail
+ */
+export function calcSQN(trades) {
+  const rs = trades
+    .filter(t => (t.status === 'Win' || t.status === 'Loss') && t.rMultiple != null)
+    .map(t => t.rMultiple)
+  const n = rs.length
+  if (n < 5) return null
+  const mean = rs.reduce((s, r) => s + r, 0) / n
+  const variance = rs.reduce((s, r) => s + (r - mean) ** 2, 0) / (n - 1)
+  const std = Math.sqrt(variance)
+  if (std === 0) return null
+  return (mean / std) * Math.sqrt(n)
+}
+
 export function calcRMultipleDistribution(trades) {
   const buckets = {}
   trades

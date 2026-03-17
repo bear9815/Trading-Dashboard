@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
   CartesianGrid, LineChart, Line, ReferenceLine, Legend, AreaChart, Area,
@@ -13,7 +14,7 @@ import { buildEquityCurve } from '../../utils/equityCurve.js'
 import {
   calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor,
   calcRMultipleDistribution, groupByField, calcAvgWinLoss, calcTotalR,
-  calcSharpe, calcSortino
+  calcSharpe, calcSortino, calcSQN
 } from '../../utils/metrics.js'
 import { formatCurrency, formatR, formatDate } from '../../utils/formatters.js'
 import { computeTradeMAEMFE, fetchHistory, fetchATR14 } from '../../utils/marketData.js'
@@ -39,6 +40,98 @@ function StatCard({ label, value, valueClass = 'text-white' }) {
       <p className="text-xs text-gray-500 mb-1">{label}</p>
       <p className={`text-lg font-bold mono ${valueClass}`}>{value}</p>
     </div>
+  )
+}
+
+const SQN_RATINGS = [
+  { min: 5.0,  max: Infinity, label: 'Holy Grail',    cls: 'text-accent-blue'   },
+  { min: 3.0,  max: 5.0,      label: 'Excellent',     cls: 'text-accent-green'  },
+  { min: 2.5,  max: 3.0,      label: 'Good',          cls: 'text-accent-green'  },
+  { min: 2.0,  max: 2.5,      label: 'Average',       cls: 'text-accent-yellow' },
+  { min: 1.6,  max: 2.0,      label: 'Below Average', cls: 'text-accent-yellow' },
+  { min: -Infinity, max: 1.6, label: 'Poor',          cls: 'text-accent-red'    },
+]
+
+function sqnRating(v) {
+  return SQN_RATINGS.find(r => v >= r.min && v < r.max) ?? SQN_RATINGS[SQN_RATINGS.length - 1]
+}
+
+function SQNCard({ sqn }) {
+  const [visible, setVisible] = useState(false)
+  const [style,   setStyle]   = useState({})
+  const ref    = useRef(null)
+  const timer  = useRef(null)
+
+  function open() {
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      const rect = ref.current?.getBoundingClientRect()
+      if (!rect) return
+      const w = 300
+      let left = Math.round(rect.left)
+      if (left + w > window.innerWidth - 12) left = window.innerWidth - w - 12
+      setStyle({ top: Math.round(rect.bottom) + 8, left, width: w })
+      setVisible(true)
+    }, 300)
+  }
+  function close() {
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setVisible(false), 120)
+  }
+
+  const rating    = sqn != null ? sqnRating(sqn) : null
+  const valueText = sqn != null ? sqn.toFixed(2) : '—'
+  const valueCls  = sqn == null ? 'text-gray-500'
+    : sqn >= 2.5 ? 'text-accent-green'
+    : sqn >= 1.6 ? 'text-accent-yellow'
+    : 'text-accent-red'
+
+  return (
+    <>
+      <div
+        ref={ref}
+        className="card-sm text-center cursor-default"
+        onMouseEnter={open}
+        onMouseLeave={close}
+      >
+        <p className="text-xs text-gray-500 mb-1 flex items-center justify-center gap-1">
+          SQN <span className="text-[10px] text-gray-600 border border-gray-700 rounded-full w-3.5 h-3.5 flex items-center justify-center leading-none">?</span>
+        </p>
+        <p className={`text-lg font-bold mono ${valueCls}`}>{valueText}</p>
+        {rating && <p className={`text-[10px] mt-0.5 font-medium ${rating.cls}`}>{rating.label}</p>}
+      </div>
+
+      {visible && createPortal(
+        <div
+          className="fixed z-[9999] rounded-lg border border-white/10 bg-surface-100 shadow-2xl p-4 text-xs"
+          style={style}
+          onMouseEnter={() => clearTimeout(timer.current)}
+          onMouseLeave={close}
+        >
+          <p className="font-bold text-white text-sm mb-1">System Quality Number (SQN)</p>
+          <p className="text-accent-blue font-medium text-[11px] mb-2">Van Tharp</p>
+          <p className="text-gray-400 leading-relaxed mb-3">
+            Measures how consistently your system produces R-multiples relative to their variability.
+            Formula: <span className="mono text-gray-300">(mean R ÷ stdev R) × √n</span>. Needs at least 30 trades to be meaningful.
+          </p>
+          <div className="space-y-1 mb-3">
+            {SQN_RATINGS.slice().reverse().map(r => (
+              <div key={r.label} className="flex items-center gap-2">
+                <span className={`font-semibold w-24 shrink-0 ${r.cls}`}>{r.label}</span>
+                <span className="text-gray-600">
+                  {r.min === -Infinity ? `< 1.6` : r.max === Infinity ? `≥ 5.0` : `${r.min}–${r.max}`}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="text-gray-600 leading-relaxed">
+            A higher SQN means your edge is large relative to the noise in your results.
+            Use it to compare two systems or time periods — not as a standalone pass/fail.
+          </p>
+        </div>,
+        document.body
+      )}
+    </>
   )
 }
 
@@ -736,6 +829,8 @@ export default function Analytics({ selectedAccount }) {
     return { sharpe: calcSharpe(curve), sortino: calcSortino(curve) }
   }, [trades, accountActivities])
 
+  const sqn = useMemo(() => calcSQN(tfFiltered), [tfFiltered])
+
   // ── Drawdown Simulator ────────────────────────────────────────────────────
   const drawdownSim = useMemo(() => {
     const avgLossAbs = closed.filter(t => t.status === 'Loss' && t.pl < 0)
@@ -775,7 +870,7 @@ export default function Analytics({ selectedAccount }) {
       </div>
 
       {/* Summary stats */}
-      <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
         <StatCard label="Win Rate" value={`${winRate.toFixed(1)}%`} valueClass={winRate >= 50 ? 'text-accent-green' : 'text-accent-red'} />
         <StatCard label="Avg R-Multiple" value={formatR(avgR)} valueClass={avgR >= 0 ? 'text-accent-green' : 'text-accent-red'} />
         <StatCard label="Total R" value={formatR(totalR)} valueClass={totalR >= 0 ? 'text-accent-green' : 'text-accent-red'} />
@@ -784,6 +879,7 @@ export default function Analytics({ selectedAccount }) {
         <StatCard label="Payoff Ratio" value={payoffRatio != null ? `${payoffRatio.toFixed(2)}x` : '—'} valueClass={payoffRatio == null ? 'text-gray-500' : payoffRatio >= 1.5 ? 'text-accent-green' : payoffRatio >= 1 ? 'text-accent-yellow' : 'text-accent-red'} />
         <StatCard label="Sharpe Ratio" value={sharpe != null ? sharpe.toFixed(2) : '—'} valueClass={sharpe == null ? 'text-gray-500' : sharpe >= 1 ? 'text-accent-green' : sharpe >= 0 ? 'text-accent-yellow' : 'text-accent-red'} />
         <StatCard label="Sortino Ratio" value={sortino != null ? sortino.toFixed(2) : '—'} valueClass={sortino == null ? 'text-gray-500' : sortino >= 1.5 ? 'text-accent-green' : sortino >= 0 ? 'text-accent-yellow' : 'text-accent-red'} />
+        <SQNCard sqn={sqn} />
       </div>
 
       {/* Avg Win vs Loss */}
