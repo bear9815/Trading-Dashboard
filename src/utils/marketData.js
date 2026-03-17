@@ -555,6 +555,30 @@ export async function fetchSectors(symbols) {
   return results
 }
 
+/**
+ * Resolve a ticker to its official company name via Yahoo Finance.
+ * Used to ground AI prompts so lesser-known tickers are identified correctly.
+ * Returns { longName, shortName, exchange } or null on failure.
+ */
+export async function resolveTickerToName(symbol) {
+  try {
+    const fields = 'longName,shortName,exchange,fullExchangeName,quoteType'
+    const url = `${YF}/v7/finance/quote?symbols=${encodeURIComponent(symbol)}&fields=${fields}`
+    const res = await fetch(url, { signal: AbortSignal.timeout(4000) })
+    if (!res.ok) return null
+    const json = await res.json()
+    const q = json.quoteResponse?.result?.[0]
+    if (!q) return null
+    return {
+      longName:  q.longName  || q.shortName || null,
+      shortName: q.shortName || null,
+      exchange:  q.fullExchangeName || q.exchange || null,
+    }
+  } catch {
+    return null
+  }
+}
+
 // ── MAE / MFE ─────────────────────────────────────────────────────────────────
 
 /**

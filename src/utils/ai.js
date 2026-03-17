@@ -7,6 +7,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import Anthropic from '@anthropic-ai/sdk'
 import { calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor, calcAvgWinLoss } from './metrics.js'
 import { formatCurrency } from './formatters.js'
+import { resolveTickerToName } from './marketData.js'
 
 // ── Anthropic fallback key (set at app startup from useSettingsStore) ──────────
 let _anthropicFallbackKey = ''
@@ -731,16 +732,25 @@ Return ONLY valid JSON (no markdown, no code fences):
 
 /**
  * Fetch a 2-paragraph company profile for a ticker symbol.
+ * @param {string}      symbol
+ * @param {string}      apiKey
+ * @param {string|null} companyHint  - pre-resolved company name to ground the AI (prevents misidentification)
  * Returns { companyName, description: [para1, para2] }
  * Call lazily on hover — result is cached by caller.
  */
-export async function getSymbolProfile(symbol, apiKey) {
+export async function getSymbolProfile(symbol, apiKey, companyHint = null) {
   if (!apiKey) throw new Error('No API key configured')
+
+  // Ground the AI with the confirmed company name so it can't confuse tickers
+  const nameCtx = companyHint
+    ? `The ticker ${symbol} refers to "${companyHint}". `
+    : `The stock ticker is ${symbol}. `
+
   const profilePrompt =
-    `You are writing a concise company profile for a US equity trader. For the stock ticker ${symbol}, provide:\n` +
-    `1. The full company name\n` +
+    `You are writing a concise company profile for a US equity trader. ${nameCtx}Provide:\n` +
+    `1. The full official company name\n` +
     `2. Two paragraphs (2-3 sentences each). First paragraph: what the company does and its main products/services. Second paragraph: its core business model and why it matters to investors right now.\n` +
-    `Write clearly for someone who trades stocks. Do not use jargon.\n` +
+    `Write clearly for someone who trades stocks. Do not use jargon. Be specific — no generic filler.\n` +
     `Reply only with valid JSON, no markdown:\n` +
     `{ "companyName": "Full Company Name", "description": ["Paragraph 1.", "Paragraph 2."] }`
   const text = (await callAI(apiKey, profilePrompt)).trim()
@@ -751,7 +761,7 @@ export async function getSymbolProfile(symbol, apiKey) {
       if (parsed.companyName && Array.isArray(parsed.description)) return parsed
     } catch {}
   }
-  return { companyName: symbol, description: [text.slice(0, 300)] }
+  return { companyName: companyHint || symbol, description: [text.slice(0, 300)] }
 }
 
 /**
@@ -760,7 +770,6 @@ export async function getSymbolProfile(symbol, apiKey) {
  */
 export async function findWorstHabit(trades, apiKey) {
   if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
-  const model = getModel(apiKey)
 
   const closed = trades
     .filter(t => t.status === 'Win' || t.status === 'Loss')

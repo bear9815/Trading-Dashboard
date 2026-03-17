@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Loader, Copy, Check } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { getSymbolProfile } from '../../utils/ai.js'
+import { resolveTickerToName } from '../../utils/marketData.js'
 
 export default function TickerTooltip({ symbol, children }) {
   const { apiKey, symbolThemes, setSymbolTheme } = useSettingsStore()
@@ -34,7 +35,9 @@ export default function TickerTooltip({ symbol, children }) {
       if (!hasProfile && apiKey && !loadRef.current) {
         loadRef.current = true
         setLoading(true)
-        getSymbolProfile(symbol, apiKey)
+        // Resolve real company name first so AI can't misidentify the ticker
+        resolveTickerToName(symbol)
+          .then(info => getSymbolProfile(symbol, apiKey, info?.longName || null))
           .then(profile => {
             const fresh = useSettingsStore.getState().symbolThemes[symbol] || {}
             setSymbolTheme(symbol, { ...fresh, ...profile })
