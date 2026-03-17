@@ -1,20 +1,83 @@
 /**
- * Google Gemini API integration for trade analysis
- * All calls are made client-side with the user's API key
+ * AI integration for trade analysis — Gemini primary, Claude fallback on rate limit.
+ * All calls are made client-side with the user's API key(s).
  */
 
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import Anthropic from '@anthropic-ai/sdk'
 import { calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor, calcAvgWinLoss } from './metrics.js'
 import { formatCurrency } from './formatters.js'
 
-function getModel(apiKey, modelName = 'gemini-2.5-flash') {
-  const genAI = new GoogleGenerativeAI(apiKey)
-  return genAI.getGenerativeModel({ model: modelName })
+// ── Anthropic fallback key (set at app startup from useSettingsStore) ──────────
+let _anthropicFallbackKey = ''
+export function setAnthropicFallbackKey(key) { _anthropicFallbackKey = key }
+
+function isRateLimitError(err) {
+  const msg = (err?.message || '').toLowerCase()
+  return (
+    err?.status === 429 ||
+    msg.includes('429') ||
+    msg.includes('quota') ||
+    msg.includes('exhausted') ||
+    msg.includes('rate limit') ||
+    msg.includes('resource has been exhausted')
+  )
+}
+
+/**
+ * Unified AI call — tries Gemini first, falls back to Claude on quota/rate errors.
+ * @param {string}       geminiKey
+ * @param {string|Array} prompt   - string or [{inlineData:{data,mimeType}}, ...] for vision
+ * @param {{ systemInstruction?: string, tools?: any[], modelName?: string }} opts
+ * @returns {Promise<string>}
+ */
+async function callAI(geminiKey, prompt, opts = {}) {
+  const { systemInstruction, tools, modelName = 'gemini-2.5-flash' } = opts
+
+  // ── Try Gemini ─────────────────────────────────────────────────────────────
+  try {
+    const genAI = new GoogleGenerativeAI(geminiKey)
+    const modelCfg = { model: modelName }
+    if (systemInstruction) modelCfg.systemInstruction = systemInstruction
+    if (tools)             modelCfg.tools             = tools
+    const model = genAI.getGenerativeModel(modelCfg)
+    const result = await model.generateContent(prompt)
+    return result.response.text()
+  } catch (err) {
+    if (!isRateLimitError(err) || !_anthropicFallbackKey) throw err
+    console.warn('[AI] Gemini rate limit hit — falling back to Claude')
+  }
+
+  // ── Fallback: Claude ───────────────────────────────────────────────────────
+  const client = new Anthropic({ apiKey: _anthropicFallbackKey, dangerouslyAllowBrowser: true })
+
+  // Convert Gemini-style prompt to Anthropic content format
+  let content
+  if (typeof prompt === 'string') {
+    content = prompt
+  } else if (Array.isArray(prompt)) {
+    content = prompt.map(part => {
+      if (typeof part === 'string') return { type: 'text', text: part }
+      if (part?.inlineData) {
+        return { type: 'image', source: { type: 'base64', media_type: part.inlineData.mimeType, data: part.inlineData.data } }
+      }
+      return { type: 'text', text: String(part) }
+    })
+  } else {
+    content = String(prompt)
+  }
+
+  const resp = await client.messages.create({
+    model: 'claude-opus-4-5',
+    max_tokens: 8192,
+    ...(systemInstruction ? { system: systemInstruction } : {}),
+    messages: [{ role: 'user', content }],
+  })
+  return resp.content[0].text
 }
 
 export async function analyzePortfolio(trades, apiKey) {
   if (!apiKey) throw new Error('No API key configured. Add your Google Gemini API key in Settings.')
-  const model = getModel(apiKey)
 
   const closed = trades.filter(t => t.status === 'Win' || t.status === 'Loss')
   if (!closed.length) throw new Error('No closed trades to analyze.')
@@ -53,8 +116,7 @@ Provide analysis in this exact JSON format:
 
 Focus on: R-multiple consistency, win rate vs expectancy, symbol/edge concentration, trade sizing patterns, which edges are producing positive expectancy. Reference specific data points.`
 
-  const result = await model.generateContent(prompt)
-  const text = result.response.text()
+  const text = await callAI(apiKey, prompt)
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     return jsonMatch ? JSON.parse(jsonMatch[0]) : { summary: text, strengths: [], weaknesses: [], patterns: [], recommendations: [] }
@@ -68,15 +130,6 @@ const PRE_MARKET_PULSE_SYSTEM = `You ARE "Pre-Market Pulse," an expert financial
 
 export async function generateMorningBrief(marketDataMap, openTrades, apiKey) {
   if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
-
-  // Use search grounding so Gemini fetches today's live news, economic calendar,
-  // pre-market movers, Fed speakers, and geopolitical updates from the web.
-  const genAI = new GoogleGenerativeAI(apiKey)
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    systemInstruction: PRE_MARKET_PULSE_SYSTEM,
-    tools: [{ googleSearch: {} }],
-  })
 
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -199,8 +252,11 @@ Rules:
 - severity: "high" | "medium" | "low"
 - Strip all citation markers [1] [2] from your JSON values`
 
-  const result = await model.generateContent(prompt)
-  const text = result.response.text().replace(/\[\d+\]/g, '') // strip citation markers
+  const raw = await callAI(apiKey, prompt, {
+    systemInstruction: PRE_MARKET_PULSE_SYSTEM,
+    tools: [{ googleSearch: {} }],
+  })
+  const text = raw.replace(/\[\d+\]/g, '') // strip citation markers
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (!jsonMatch) throw new Error('AI returned an unrecognised format.')
   return JSON.parse(jsonMatch[0])
@@ -208,7 +264,6 @@ Rules:
 
 export async function analyzeSingleTrade(trade, apiKey) {
   if (!apiKey) throw new Error('No API key configured. Add your Google Gemini API key in Settings.')
-  const model = getModel(apiKey)
 
   const prompt = `Analyze this single trade as a trading coach. Be concise and specific.
 
@@ -231,8 +286,7 @@ Trade: ${JSON.stringify({
 
 Give 2-3 sentences of feedback on: execution quality, risk management, and one specific improvement.`
 
-  const result = await model.generateContent(prompt)
-  return result.response.text()
+  return callAI(apiKey, prompt)
 }
 
 /**
@@ -240,7 +294,6 @@ Give 2-3 sentences of feedback on: execution quality, risk management, and one s
  */
 export async function analyzeSingleTradeDeep(trade, apiKey) {
   if (!apiKey) throw new Error('No API key configured. Add your Google Gemini API key in Settings.')
-  const model = getModel(apiKey)
 
   const prompt = `You are a professional trading coach. Analyze this trade in depth and be specific.
 
@@ -275,8 +328,7 @@ Return ONLY valid JSON (no markdown, no code fences):
 Grade scale: A = excellent/textbook, B = good with minor flaws, C = average with notable mistakes, D = poor execution, F = major rule violations.
 Keep each array to 1–2 items max. Be direct, reference specific numbers from the data.`
 
-  const result = await model.generateContent(prompt)
-  const text = result.response.text()
+  const text = await callAI(apiKey, prompt)
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     return jsonMatch
@@ -292,7 +344,6 @@ Keep each array to 1–2 items max. Be direct, reference specific numbers from t
  */
 export async function chatWithPortfolio(trades, chatHistory, userMessage, apiKey) {
   if (!apiKey) throw new Error('No API key configured. Add your Google Gemini API key in Settings.')
-  const model = getModel(apiKey)
 
   const closed = trades.filter(t => t.status === 'Win' || t.status === 'Loss')
 
@@ -326,8 +377,8 @@ ${JSON.stringify(stats, null, 2)}
 ${historyText}Trader: ${userMessage}
 Coach:`
 
-  const result = await model.generateContent(prompt)
-  return result.response.text().trim()
+  const text = await callAI(apiKey, prompt)
+  return text.trim()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -340,7 +391,6 @@ Coach:`
  */
 export async function analyzeTradeDNA(trades, apiKey) {
   if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
-  const model = getModel(apiKey)
 
   const closed = trades.filter(t => t.status === 'Win' || t.status === 'Loss')
   if (closed.length < 5) throw new Error('Need at least 5 closed trades for DNA analysis.')
@@ -410,8 +460,7 @@ Return ONLY valid JSON (no markdown, no code fences):
 
 Be ruthlessly specific — reference actual counts, percentages, and R-multiples from the data. No generic advice.`
 
-  const result = await model.generateContent(prompt)
-  const text = result.response.text()
+  const text = await callAI(apiKey, prompt)
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (!jsonMatch) throw new Error('AI returned an unrecognised format.')
   return JSON.parse(jsonMatch[0])
@@ -422,7 +471,6 @@ Be ruthlessly specific — reference actual counts, percentages, and R-multiples
  */
 export async function buildPlaybook(trades, apiKey) {
   if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
-  const model = getModel(apiKey)
 
   const closed = trades.filter(t => t.status === 'Win' || t.status === 'Loss')
   if (closed.length < 5) throw new Error('Need at least 5 closed trades to build a playbook.')
@@ -469,8 +517,7 @@ Return ONLY valid JSON (no markdown, no code fences):
 
 Create 2–4 setup cards. Each must be grounded in the actual trade data. Use specific symbols, R-multiples, and patterns from the trades provided.`
 
-  const result = await model.generateContent(prompt)
-  const text = result.response.text()
+  const text = await callAI(apiKey, prompt)
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (!jsonMatch) throw new Error('AI returned an unrecognised format.')
   return JSON.parse(jsonMatch[0])
@@ -481,7 +528,6 @@ Create 2–4 setup cards. Each must be grounded in the actual trade data. Use sp
  */
 export async function generateWeeklyReview(trades, morningEntries, apiKey) {
   if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
-  const model = getModel(apiKey)
 
   // Get trades from the last 7 days
   const cutoff = new Date()
@@ -552,8 +598,7 @@ Return ONLY valid JSON (no markdown, no code fences):
 Grade scale: A=excellent, B=good, C=average, D=below average, F=rule violations. Use +/- modifiers.
 If fewer than 3 trades this week, focus on process quality and mental game from the morning entries.`
 
-  const result = await model.generateContent(prompt)
-  const text = result.response.text()
+  const text = await callAI(apiKey, prompt)
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (!jsonMatch) throw new Error('AI returned an unrecognised format.')
   return JSON.parse(jsonMatch[0])
@@ -564,7 +609,6 @@ If fewer than 3 trades this week, focus on process quality and mental game from 
  */
 export async function scorePreTrade(setup, trades, apiKey) {
   if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
-  const model = getModel(apiKey)
 
   const closed = trades.filter(t => t.status === 'Win' || t.status === 'Loss')
 
@@ -624,8 +668,7 @@ Return ONLY valid JSON (no markdown, no code fences):
 
 Be specific. Reference the trader's actual historical win rate and R-multiples for this edge type. If the edge is new/unknown, say so and score conservatively.`
 
-  const result = await model.generateContent(prompt)
-  const text = result.response.text()
+  const text = await callAI(apiKey, prompt)
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (!jsonMatch) throw new Error('AI returned an unrecognised format.')
   return JSON.parse(jsonMatch[0])
@@ -640,7 +683,6 @@ Be specific. Reference the trader's actual historical win rate and R-multiples f
  */
 export async function analyzeChartImage(base64, mimeType, context = {}, apiKey) {
   if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
-  const model = getModel(apiKey)
 
   const isMarket = context.type === 'market'
   const contextStr = [
@@ -682,8 +724,7 @@ Return ONLY valid JSON (no markdown, no code fences):
 }`
 
   const imagePart = { inlineData: { data: base64, mimeType } }
-  const result = await model.generateContent([prompt, imagePart])
-  const text = result.response.text()
+  const text = await callAI(apiKey, [prompt, imagePart])
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   return jsonMatch ? JSON.parse(jsonMatch[0]) : { notes: text }
 }
@@ -695,16 +736,14 @@ Return ONLY valid JSON (no markdown, no code fences):
  */
 export async function getSymbolProfile(symbol, apiKey) {
   if (!apiKey) throw new Error('No API key configured')
-  const model = getModel(apiKey)
-  const result = await model.generateContent(
+  const profilePrompt =
     `You are writing a concise company profile for a US equity trader. For the stock ticker ${symbol}, provide:\n` +
     `1. The full company name\n` +
     `2. Two paragraphs (2-3 sentences each). First paragraph: what the company does and its main products/services. Second paragraph: its core business model and why it matters to investors right now.\n` +
     `Write clearly for someone who trades stocks. Do not use jargon.\n` +
     `Reply only with valid JSON, no markdown:\n` +
     `{ "companyName": "Full Company Name", "description": ["Paragraph 1.", "Paragraph 2."] }`
-  )
-  const text = result.response.text().trim()
+  const text = (await callAI(apiKey, profilePrompt)).trim()
   const match = text.match(/\{[\s\S]*\}/)
   if (match) {
     try {
@@ -766,8 +805,7 @@ Rules:
 - If data is mixed and no single habit dominates, identify the most statistically significant one
 - Never give generic advice like 'stick to your plan' — be specific to what this data shows`
 
-  const result = await model.generateContent(prompt)
-  const text = result.response.text()
+  const text = await callAI(apiKey, prompt)
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (!jsonMatch) throw new Error('AI returned an unrecognised format.')
   return JSON.parse(jsonMatch[0])
@@ -779,7 +817,6 @@ Rules:
  */
 export async function analyzeTradingMindset(thoughts, trades, apiKey) {
   if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
-  const model = getModel(apiKey)
 
   const sorted = [...thoughts].sort((a, b) => b.timestamp - a.timestamp)
   if (sorted.length < 3) throw new Error('Need at least 3 logged thoughts to analyze.')
@@ -834,8 +871,7 @@ Rules:
 - Score honestly — most traders are not 90+
 - Max 4 patterns`
 
-  const result = await model.generateContent(prompt)
-  const text = result.response.text()
+  const text = await callAI(apiKey, prompt)
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (!jsonMatch) throw new Error('AI returned an unrecognised format.')
   return JSON.parse(jsonMatch[0])
@@ -848,7 +884,6 @@ Rules:
  */
 export async function analyzeStockBrief(ticker, apiKey) {
   if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
-  const model = getModel(apiKey)
   const sym = ticker.trim().toUpperCase()
 
   const prompt = `You are a professional equity analyst writing a high-quality company brief for long-term investors.
@@ -881,8 +916,7 @@ Rules:
 - Tone: analytical, neutral, precise
 - If the ticker is unknown or not a real company, return { "error": "Unknown ticker: ${sym}" }`
 
-  const result = await model.generateContent(prompt)
-  const text = result.response.text()
+  const text = await callAI(apiKey, prompt)
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (!jsonMatch) throw new Error('AI returned an unrecognised format.')
   const parsed = JSON.parse(jsonMatch[0])
@@ -897,14 +931,12 @@ Rules:
  */
 export async function classifySymbolTheme(symbol, apiKey) {
   if (!apiKey) throw new Error('No API key configured')
-  const model = getModel(apiKey)
-  const result = await model.generateContent(
+  const classifyPrompt =
     `Classify the stock ${symbol} with two labels:\n` +
     `1. "sector": one standard GICS sector (Technology, Healthcare, Financials, Energy, Consumer Discretionary, Consumer Staples, Industrials, Materials, Real Estate, Utilities, Communication Services)\n` +
     `2. "theme": a 2-5 word market sub-theme (e.g. AI Infrastructure, Biotech Drug Discovery, Cloud SaaS, Semiconductor Equipment, Electric Vehicles, Defense Aerospace)\n` +
     `Reply only with valid JSON, no markdown: { "sector": "...", "theme": "..." }`
-  )
-  const text = result.response.text().trim()
+  const text = (await callAI(apiKey, classifyPrompt)).trim()
   const match = text.match(/\{[\s\S]*?\}/)
   if (match) {
     try { return JSON.parse(match[0]) } catch {}

@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase.js'
 
 // Fields synced to Supabase (business data that must match across devices)
 const CLOUD_FIELDS = [
-  'apiKey', 'alpacaApiKey', 'alpacaApiSecret', 'finnhubApiKey',
+  'apiKey', 'anthropicApiKey', 'alpacaApiKey', 'alpacaApiSecret', 'finnhubApiKey',
   'theme', 'accounts', 'dailyLossLimit', 'maxDrawdownLimit',
   'benchmarkSymbol', 'tpMultiplier',
   'equityCurveRange', 'analyticsTimeframe', 'analyticsWinLossMode',
@@ -34,6 +34,7 @@ export const useSettingsStore = create(
   persist(
     (set, get) => ({
       apiKey: '',
+      anthropicApiKey: '',
       theme: 'dark',
       accounts: [],           // [{ name, broker, balance }]
       dailyLossLimit: 2,
@@ -89,7 +90,8 @@ export const useSettingsStore = create(
 
       // ── Setters ────────────────────────────────────────────────────────────
 
-      setApiKey:           (key)           => { set({ apiKey: key });           saveToCloud({ ...get(), apiKey: key })           },
+      setApiKey:           (key)           => { set({ apiKey: key });            saveToCloud({ ...get(), apiKey: key })            },
+      setAnthropicApiKey:  (key)           => { set({ anthropicApiKey: key });  saveToCloud({ ...get(), anthropicApiKey: key })  },
       setAlpacaKeys:       (key, secret)   => { set({ alpacaApiKey: key, alpacaApiSecret: secret }); saveToCloud({ ...get(), alpacaApiKey: key, alpacaApiSecret: secret }) },
       setFinnhubApiKey:    (key)           => { set({ finnhubApiKey: key });    saveToCloud({ ...get(), finnhubApiKey: key })    },
       setTheme:            (theme)         => { set({ theme });                 saveToCloud({ ...get(), theme })                 },

@@ -20,6 +20,7 @@ function SectionTitle({ children }) {
 export default function Settings() {
   const {
     apiKey, setApiKey,
+    anthropicApiKey, setAnthropicApiKey,
     theme, setTheme,
     alpacaApiKey, alpacaApiSecret, setAlpacaKeys,
     finnhubApiKey, setFinnhubApiKey,
@@ -40,6 +41,11 @@ export default function Settings() {
   const [showKey, setShowKey]   = useState(false)
   const [keyInput, setKeyInput] = useState(apiKey)
   const [keySaved, setKeySaved] = useState(false)
+
+  // Anthropic fallback key
+  const [anthropicInput, setAnthropicInput] = useState(anthropicApiKey)
+  const [showAnthropic,  setShowAnthropic]  = useState(false)
+  const [anthropicSaved, setAnthropicSaved] = useState(false)
   const [newAcct, setNewAcct]   = useState({ name: '', broker: BROKERS[0], balance: '' })
 
   // Alpaca keys
@@ -110,6 +116,12 @@ export default function Settings() {
     setApiKey(keyInput.trim())
     setKeySaved(true)
     setTimeout(() => setKeySaved(false), 2000)
+  }
+
+  function saveAnthropic() {
+    setAnthropicApiKey(anthropicInput.trim())
+    setAnthropicSaved(true)
+    setTimeout(() => setAnthropicSaved(false), 2000)
   }
 
   function handleAddAccount() {
@@ -278,6 +290,38 @@ export default function Settings() {
           Used for AI trade analysis <strong className="text-gray-400">and Voice Journal</strong>. Get a free key at{' '}
           <span className="text-accent-blue">aistudio.google.com</span>
         </p>
+      </div>
+
+      {/* Claude Backup Key */}
+      <div className="card space-y-3">
+        <div className="flex items-center gap-2">
+          <SectionTitle>Claude (Anthropic) — Backup AI</SectionTitle>
+        </div>
+        <p className="text-xs text-gray-400">
+          Optional fallback. If Gemini hits its rate limit, all AI features automatically retry using Claude instead.
+          Get a key at <span className="text-accent-blue">console.anthropic.com</span>.
+        </p>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <input
+              type={showAnthropic ? 'text' : 'password'}
+              value={anthropicInput}
+              onChange={e => setAnthropicInput(e.target.value)}
+              placeholder="sk-ant-..."
+              className="input pr-10 font-mono text-xs"
+            />
+            <button onClick={() => setShowAnthropic(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300">
+              {showAnthropic ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+          <button onClick={saveAnthropic} className="btn-primary flex items-center gap-1.5 shrink-0">
+            <Save size={14} />
+            {anthropicSaved ? 'Saved!' : 'Save'}
+          </button>
+        </div>
+        {anthropicApiKey && (
+          <p className="text-xs text-accent-green">✓ Claude fallback configured — will activate on Gemini rate limit</p>
+        )}
       </div>
 
       {/* Market Data APIs */}

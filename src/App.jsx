@@ -16,6 +16,7 @@ import ImportModal from './components/import/ImportModal.jsx'
 import QuickAddTrade from './components/quicktrade/QuickAddTrade.jsx'
 import LoginPage from './components/auth/LoginPage.jsx'
 import { useSettingsStore } from './store/useSettingsStore.js'
+import { setAnthropicFallbackKey } from './utils/ai.js'
 import { useAuthStore } from './store/useAuthStore.js'
 import { useTradeStore } from './store/useTradeStore.js'
 import { useJournalStore } from './store/useJournalStore.js'
@@ -27,7 +28,7 @@ export default function App() {
   const [page, setPage] = useState('dashboard')
   const [showImport, setShowImport] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState('All')
-  const { theme, loadFromCloud: loadSettings } = useSettingsStore()
+  const { theme, anthropicApiKey, loadFromCloud: loadSettings } = useSettingsStore()
   const { user, loading: authLoading, setSession } = useAuthStore()
   const { loadFromCloud, clearLocalState } = useTradeStore()
   const { loadFromCloud: loadJournal, clearLocalState: clearJournal } = useJournalStore()
@@ -37,6 +38,11 @@ export default function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme || 'dark')
   }, [theme])
+
+  // Keep Anthropic fallback key in sync with settings store
+  useEffect(() => {
+    setAnthropicFallbackKey(anthropicApiKey || '')
+  }, [anthropicApiKey])
 
   // Bootstrap Supabase auth session on mount
   useEffect(() => {
