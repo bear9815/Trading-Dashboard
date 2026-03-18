@@ -16,7 +16,7 @@ import {
   ExternalLink, Upload, Sparkles, RefreshCw, X, Plus, Edit2,
   Check, TrendingUp, TrendingDown, Minus, BarChart2, Brain,
   ChevronDown, ChevronUp, Eye, EyeOff, Trash2, AlertTriangle,
-  Link, ArrowRight,
+  Link, ArrowRight, Clipboard,
 } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { analyzeChartImage, synthesizeMarketBias } from '../../utils/ai.js'
@@ -134,9 +134,10 @@ function UrlRow({ entry, onUpdate, onDelete }) {
 
 // ── Chart card (one per URL) ──────────────────────────────────────────────────
 
-function ChartCard({ urlEntry, chart, onUpload, onAnalyze, onClear, analyzing }) {
+function ChartCard({ urlEntry, chart, onUpload, onAnalyze, onClear, onPasteClipboard, onHover, analyzing }) {
   const [dragOver, setDragOver] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [pasting,  setPasting]  = useState(false)
   const inputRef = useRef(null)
   const ai = chart?.aiAnalysis
 
@@ -144,6 +145,12 @@ function ChartCard({ urlEntry, chart, onUpload, onAnalyze, onClear, analyzing })
     e.preventDefault(); setDragOver(false)
     const file = [...(e.dataTransfer?.files || [])].find(f => f.type.startsWith('image/'))
     if (file) onUpload(urlEntry.id, file)
+  }
+
+  async function handlePasteClipboard() {
+    setPasting(true)
+    try { await onPasteClipboard(urlEntry.id) }
+    finally { setPasting(false) }
   }
 
   const hasTone = ai?.marketTone
@@ -163,6 +170,8 @@ function ChartCard({ urlEntry, chart, onUpload, onAnalyze, onClear, analyzing })
       onDragOver={e => { e.preventDefault(); setDragOver(true) }}
       onDragLeave={() => setDragOver(false)}
       onDrop={handleDrop}
+      onMouseEnter={() => onHover(urlEntry.id)}
+      onMouseLeave={() => onHover(null)}
     >
       {/* Top: name + link + actions */}
       <div className="flex items-center gap-1.5 px-2 pt-1.5 pb-1">
@@ -176,6 +185,14 @@ function ChartCard({ urlEntry, chart, onUpload, onAnalyze, onClear, analyzing })
         >
           <ExternalLink size={10} />
         </a>
+        <button
+          onClick={handlePasteClipboard}
+          disabled={pasting}
+          title="Paste from clipboard (⌘V)"
+          className="p-0.5 rounded text-gray-500 hover:text-accent-blue disabled:opacity-40"
+        >
+          {pasting ? <RefreshCw size={10} className="animate-spin" /> : <Clipboard size={10} />}
+        </button>
         {chart?.base64 && (
           <>
             <button
@@ -250,7 +267,7 @@ function ChartCard({ urlEntry, chart, onUpload, onAnalyze, onClear, analyzing })
           onClick={() => inputRef.current?.click()}
         >
           <Upload size={12} />
-          <span>Paste or drop</span>
+          <span>Drop, paste, or click</span>
         </div>
       )}
 
@@ -390,6 +407,7 @@ export default function MarketBiasTab() {
   const [addingUrl, setAddingUrl]       = useState(false)
   const [newName, setNewName]           = useState('')
   const [newUrl, setNewUrl]             = useState('')
+  const hoveredCardId = useRef(null)  // track which card is hovered for targeted paste
 
   // Persist URLs whenever they change
   useEffect(() => { saveJson(URLS_KEY, urls) }, [urls])
@@ -398,18 +416,18 @@ export default function MarketBiasTab() {
   // Persist bias result whenever it changes
   useEffect(() => { saveJson(resultKey(today), biasResult) }, [biasResult, today])
 
-  // Global paste handler — paste goes to the first chart without an image
+  // Global paste handler — routes to hovered card, else first empty slot
   useEffect(() => {
     function handlePaste(e) {
       const items = e.clipboardData?.items
       if (!items) return
       const imgItem = [...items].find(i => i.type.startsWith('image/'))
       if (!imgItem) return
-      // Find first URL without a chart
-      const target = urls.find(u => !charts[u.id])
-      if (!target) return
+      // Prefer the card the mouse is over; fall back to first empty slot
+      const targetId = hoveredCardId.current || urls.find(u => !charts[u.id])?.id
+      if (!targetId) return
       const file = imgItem.getAsFile()
-      if (file) processUpload(target.id, file)
+      if (file) processUpload(targetId, file)
     }
     window.addEventListener('paste', handlePaste)
     return () => window.removeEventListener('paste', handlePaste)
@@ -434,6 +452,31 @@ export default function MarketBiasTab() {
   }
 
   // ── Chart upload ────────────────────────────────────────────────────────────
+
+  // Read image directly from the Clipboard API (for the per-card paste button)
+  const pasteFromClipboard = useCallback(async (urlId) => {
+    try {
+      if (!navigator.clipboard?.read) throw new Error('Clipboard API not supported in this browser.')
+      const items = await navigator.clipboard.read()
+      for (const item of items) {
+        const imgType = item.types.find(t => t.startsWith('image/'))
+        if (imgType) {
+          const blob = await item.getType(imgType)
+          const file = new File([blob], 'paste.png', { type: imgType })
+          await processUpload(urlId, file)
+          return
+        }
+      }
+      setError('No image found in clipboard. Copy a screenshot first.')
+    } catch (e) {
+      // Permission denied or unsupported — guide user to use ⌘V instead
+      if (e.name === 'NotAllowedError') {
+        setError('Clipboard permission denied. Click on the page first, then press ⌘V to paste.')
+      } else {
+        setError(e.message)
+      }
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const processUpload = useCallback(async (urlId, file) => {
     try {
@@ -637,7 +680,8 @@ export default function MarketBiasTab() {
       {/* Paste hint */}
       {urls.length > 0 && uploadedCount < urls.length && (
         <p className="text-[11px] text-gray-600 text-center">
-          Open charts · take a screenshot · press <kbd className="text-[10px] px-1 py-0.5 bg-white/10 rounded">⌘V</kbd> to paste, or drag & drop onto a card
+          Hover a card + press <kbd className="text-[10px] px-1 py-0.5 bg-white/10 rounded">⌘V</kbd> to paste there,
+          or click the <Clipboard size={10} className="inline mb-0.5" /> button on any card, or drag & drop
         </p>
       )}
 
@@ -658,6 +702,8 @@ export default function MarketBiasTab() {
               onUpload={processUpload}
               onAnalyze={analyzeOne}
               onClear={clearChart}
+              onPasteClipboard={pasteFromClipboard}
+              onHover={id => { hoveredCardId.current = id }}
               analyzing={analyzingId === u.id || analyzingAll}
             />
           ))}
