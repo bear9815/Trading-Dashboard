@@ -5,6 +5,7 @@ import {
   TrendingUp, TrendingDown, Newspaper, Image,
 } from 'lucide-react'
 import MorningBriefing from './MorningBriefing.jsx'
+import MarketBiasTab from './MarketBiasTab.jsx'
 import VoiceRecorder from './VoiceRecorder.jsx'
 import ChartGallery from '../shared/ChartGallery.jsx'
 import {
@@ -1215,6 +1216,7 @@ export default function Morning() {
         <div className="flex rounded border border-white/10 overflow-hidden text-xs">
           {[
             { id: 'brief',    label: 'Market Brief', icon: Newspaper },
+            { id: 'bias',     label: 'Chart Bias',   icon: Image     },
             { id: 'log',      label: 'Journal',      icon: Sun       },
             { id: 'analysis', label: 'Analysis',     icon: BarChart2 },
           ].map(({ id, label, icon: Icon }) => (
@@ -1236,6 +1238,7 @@ export default function Morning() {
 
       {/* Content */}
       {tab === 'brief'    && <MorningBriefing />}
+      {tab === 'bias'     && <MarketBiasTab />}
       {tab === 'log'      && <LogTab />}
       {tab === 'analysis' && <AnalysisTab entries={entries} />}
     </div>

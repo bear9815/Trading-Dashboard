@@ -731,6 +731,51 @@ Return ONLY valid JSON (no markdown, no code fences):
 }
 
 /**
+ * Synthesize a unified market bias from multiple chart analyses.
+ * @param {Array}  chartAnalyses  - [{name, symbol, trend, marketTone, pattern, keyLevels, notes}]
+ * @param {string} apiKey
+ * @returns {Promise<{overall, score, summary, keyObservations, sectorTones, tradingImplications}>}
+ */
+export async function synthesizeMarketBias(chartAnalyses, apiKey) {
+  if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
+  if (!chartAnalyses?.length) throw new Error('No chart analyses to synthesize.')
+
+  const prompt = `You are an expert market technician synthesizing a morning market bias from ${chartAnalyses.length} chart analyses.
+
+Chart analyses:
+${JSON.stringify(chartAnalyses, null, 2)}
+
+Synthesize these into a unified morning market bias. Weight breadth indicators and indices most heavily, then sectors, then individual names.
+
+Return ONLY valid JSON (no markdown, no code fences):
+{
+  "overall": "Bullish | Bearish | Neutral | Cautiously Bullish | Cautiously Bearish",
+  "score": <integer -5 to +5, where -5 = strongly bearish, 0 = neutral, +5 = strongly bullish>,
+  "headline": "one punchy sentence capturing the market setup for today",
+  "summary": "2-3 sentences: what the charts collectively say, what's confirming or diverging, and the key watch level or catalyst",
+  "keyObservations": [
+    "specific observation from the charts — reference actual chart names, patterns, or levels"
+  ],
+  "sectorTones": [
+    { "name": "sector or index name", "bias": "bullish | bearish | neutral", "note": "one specific reason from the chart" }
+  ],
+  "tradingImplications": "2-3 sentences: specific, actionable guidance — what setups to focus on, what to avoid, key levels to watch today",
+  "conflictingSignals": "any charts that disagree with the overall bias, or empty string if none"
+}
+
+Rules:
+- keyObservations: 3-5 items, each referencing specific chart names/data from the analyses
+- sectorTones: include only charts that had a clear directional read
+- Be specific and reference actual patterns, levels, and symbols from the data
+- tradingImplications must be actionable, not generic`
+
+  const text = await callAI(apiKey, prompt)
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) throw new Error('AI returned an unrecognised format.')
+  return JSON.parse(jsonMatch[0])
+}
+
+/**
  * Fetch a 2-paragraph company profile for a ticker symbol.
  * @param {string}      symbol
  * @param {string}      apiKey
