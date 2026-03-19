@@ -30,7 +30,7 @@ const TABS = [
 async function fetchPrices(symbol) {
   // Use range=max to get all available history regardless of ETF inception date.
   // VLUE/MTUM/QUAL launched in 2013, so period1-based lookbacks can cause 404s.
-  const url = `/api/yf/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=max`
+  const url = `/api/yf/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=10y`
   const res  = await fetch(url, { signal: AbortSignal.timeout(15000) })
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${symbol}`)
   const text = await res.text()
