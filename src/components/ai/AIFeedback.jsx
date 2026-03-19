@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   Sparkles, AlertCircle, ChevronDown, ChevronUp,
-  Send, Search, MessageSquare, TrendingUp, X, Zap, Building2, BookOpen,
+  Send, Search, MessageSquare, TrendingUp, X, Zap, Building2, BookOpen, Copy, Check,
 } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
@@ -113,6 +113,7 @@ export default function AIFeedback({ selectedAccount }) {
   const [resolvedName,    setResolvedName]    = useState(null)   // auto-resolved from Yahoo
   const [resolving,       setResolving]       = useState(false)
   const [resolveTried,    setResolveTried]    = useState(false)
+  const [profileCopied,   setProfileCopied]   = useState(false)
   const resolveTimerRef = useRef(null)
 
   // Derived data
@@ -900,10 +901,52 @@ export default function AIFeedback({ selectedAccount }) {
 
           {profileResult && !profileLoading && (
             <div className="card space-y-3">
-              <div className="flex items-baseline gap-3">
-                <span className="text-2xl font-bold mono text-white">{profileResult.symbol}</span>
-                <span className="text-sm text-accent-blue font-medium">{profileResult.companyName}</span>
+              {/* Header: ticker + name + copy button */}
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-baseline gap-3 flex-wrap">
+                  <span className="text-2xl font-bold mono text-white">{profileResult.symbol}</span>
+                  <span className="text-sm text-accent-blue font-medium">{profileResult.companyName}</span>
+                </div>
+                <button
+                  onClick={() => {
+                    const lines = [
+                      `${profileResult.symbol} — ${profileResult.companyName}`,
+                      profileResult.sector && `Sector: ${profileResult.sector}`,
+                      profileResult.theme  && `Theme: ${profileResult.theme}`,
+                      '',
+                      ...(profileResult.description || []),
+                    ].filter(l => l !== false && l != null)
+                    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+                      setProfileCopied(true)
+                      setTimeout(() => setProfileCopied(false), 2000)
+                    })
+                  }}
+                  className="shrink-0 flex items-center gap-1 px-2 py-1 rounded text-xs text-gray-500 hover:text-white hover:bg-white/10 transition-colors"
+                  title="Copy profile"
+                >
+                  {profileCopied
+                    ? <><Check size={12} className="text-accent-green" /><span className="text-accent-green">Copied</span></>
+                    : <><Copy size={12} /><span>Copy</span></>
+                  }
+                </button>
               </div>
+
+              {/* Sector + Theme chips */}
+              {(profileResult.sector || profileResult.theme) && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {profileResult.sector && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-accent-blue/10 text-accent-blue border border-accent-blue/20">
+                      {profileResult.sector}
+                    </span>
+                  )}
+                  {profileResult.theme && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/5 text-gray-400 border border-white/10">
+                      {profileResult.theme}
+                    </span>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-2 pt-1 border-t border-white/5">
                 {profileResult.description?.map((para, i) => (
                   <p key={i} className="text-sm text-gray-300 leading-relaxed">{para}</p>

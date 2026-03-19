@@ -71,6 +71,7 @@ export default function TickerTooltip({ symbol, children }) {
 
   const cached      = symbolThemes[symbol] || {}
   const theme       = cached.theme       || null
+  const sector      = cached.sector      || null
   const companyName = cached.companyName || null
   const description = cached.description || []
   const hasProfile  = companyName && description.length > 0
@@ -110,8 +111,19 @@ export default function TickerTooltip({ symbol, children }) {
             )}
           </div>
 
-          {theme && (
-            <p className="text-xs font-semibold text-accent-blue mb-3">Theme: {theme}</p>
+          {(sector || theme) && (
+            <div className="flex items-center gap-1.5 flex-wrap mb-3">
+              {sector && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent-blue/10 text-accent-blue border border-accent-blue/20">
+                  {sector}
+                </span>
+              )}
+              {theme && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 text-gray-400 border border-white/10">
+                  {theme}
+                </span>
+              )}
+            </div>
           )}
 
           {loading ? (

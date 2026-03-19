@@ -794,10 +794,12 @@ export async function getSymbolProfile(symbol, apiKey, companyHint = null) {
   const profilePrompt =
     `You are writing a concise company profile for a US equity trader. ${nameCtx}Provide:\n` +
     `1. The full official company name\n` +
-    `2. Two paragraphs (2-3 sentences each). First paragraph: what the company does and its main products/services. Second paragraph: its core business model and why it matters to investors right now.\n` +
+    `2. The GICS sector (e.g. Technology, Healthcare, Financials, Energy, Industrials, Consumer Discretionary, Consumer Staples, Materials, Real Estate, Utilities, Communication Services)\n` +
+    `3. A 2-5 word market theme or sub-industry (e.g. "AI Infrastructure", "Solar Energy Equipment", "Cloud SaaS", "Semiconductor Equipment")\n` +
+    `4. Two paragraphs (2-3 sentences each). First paragraph: what the company does and its main products/services. Second paragraph: its core business model and why it matters to investors right now.\n` +
     `Write clearly for someone who trades stocks. Do not use jargon. Be specific — no generic filler.\n` +
     `Reply only with valid JSON, no markdown:\n` +
-    `{ "companyName": "Full Company Name", "description": ["Paragraph 1.", "Paragraph 2."] }`
+    `{ "companyName": "Full Company Name", "sector": "Technology", "theme": "Solar Energy Equipment", "description": ["Paragraph 1.", "Paragraph 2."] }`
   const text = (await callAI(apiKey, profilePrompt)).trim()
   const match = text.match(/\{[\s\S]*\}/)
   if (match) {
