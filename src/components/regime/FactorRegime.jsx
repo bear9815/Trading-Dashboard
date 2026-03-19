@@ -28,21 +28,38 @@ const TABS = [
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
-// Uses fetchHistory (Alpaca → Stooq → Finnhub → Yahoo fallback chain).
-// Stooq is free, no key needed, and is the reliable workhorse here.
+// Stooq caps responses at ~1000 rows (~4 years). Fetch in 2-year chunks and
+// merge so we reliably get 10 years of daily data.
 async function fetchPrices(symbol) {
-  const endDate   = new Date().toISOString().slice(0, 10)
-  const startDate = new Date(Date.now() - 10 * 365.25 * 24 * 60 * 60 * 1000)
-    .toISOString().slice(0, 10)
+  const now     = Date.now()
+  const YEAR_MS = 365.25 * 24 * 60 * 60 * 1000
+  const YEARS   = 10
+  const CHUNK   = 2  // years per request
 
-  const bars = await fetchHistory(symbol, startDate, endDate)
-  if (!bars?.length) throw new Error(`No data returned for ${symbol}`)
+  // Build non-overlapping 2-year date ranges going back YEARS years
+  const chunks = []
+  for (let y = YEARS; y > 0; y -= CHUNK) {
+    const chunkStart = new Date(now - y * YEAR_MS).toISOString().slice(0, 10)
+    const chunkEnd   = new Date(now - Math.max(0, y - CHUNK) * YEAR_MS).toISOString().slice(0, 10)
+    chunks.push([chunkStart, chunkEnd])
+  }
 
-  const prices = {}
-  bars.forEach(b => {
-    if (b.close != null) prices[b.time] = b.close
-  })
-  return prices
+  const settled = await Promise.allSettled(
+    chunks.map(([s, e]) => fetchHistory(symbol, s, e))
+  )
+
+  // Merge all chunks, deduplicate by date, sort ascending
+  const priceMap = {}
+  for (const r of settled) {
+    if (r.status === 'fulfilled' && r.value) {
+      for (const b of r.value) {
+        if (b.close != null) priceMap[b.time] = b.close
+      }
+    }
+  }
+
+  if (!Object.keys(priceMap).length) throw new Error(`No data returned for ${symbol}`)
+  return priceMap
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
