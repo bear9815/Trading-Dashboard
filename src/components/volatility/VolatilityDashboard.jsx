@@ -7,7 +7,7 @@ import {
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { callVolatilityAI } from '../../utils/ai.js'
 
-const YF = '/api/yf'
+const STOOQ = '/api/stooq'
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
 
@@ -252,25 +252,21 @@ export default function VolatilityDashboard() {
     setLoading(true)
     setError(null)
     try {
-      const symbols = ['^VIX', '^VIX3M', '^VVIX', '^SKEW'].map(encodeURIComponent).join(',')
-      const fields  = 'regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketPreviousClose'
-      const res  = await fetch(`${YF}/v7/finance/quote?symbols=${symbols}&fields=${fields}`)
+      // /api/vix is a dedicated server-side endpoint that calls Yahoo/CBOE directly
+      const res  = await fetch('/api/vix')
       const json = await res.json()
 
-      if (!res.ok) throw new Error(`YF quote error ${res.status}`)
+      if (!res.ok || json.error) throw new Error(json.error || `VIX fetch failed (${res.status})`)
+      if (!json.VIX?.close)      throw new Error('Could not retrieve VIX data')
 
-      const results = json.quoteResponse?.result || []
-      const by = {}
-      for (const q of results) by[q.symbol] = q.regularMarketPrice
-
-      const vix  = by['^VIX']
-      const vix3m = by['^VIX3M']
-      const vvix = by['^VVIX']
-      const skew = by['^SKEW']
-
-      if (!vix) throw new Error('Could not fetch VIX data — Yahoo Finance may be unavailable')
-
-      setQuotes({ vix, vix3m, vvix, skew })
+      setQuotes({
+        vix:  json.VIX?.close  ?? null,
+        vix3m: json.VIX3M?.close ?? null,
+        vvix: json.VVIX?.close ?? null,
+        skew: json.SKEW?.close ?? null,
+        change:    json.VIX?.change    ?? null,
+        changePct: json.VIX?.changePct ?? null,
+      })
     } catch (e) {
       setError(e.message)
     } finally {
@@ -282,19 +278,26 @@ export default function VolatilityDashboard() {
 
   const fetchHistory = useCallback(async () => {
     try {
-      const p2 = Math.floor(Date.now() / 1000)
-      const p1 = p2 - 365 * 24 * 3600
-      const res  = await fetch(`${YF}/v8/finance/chart/%5EVIX?interval=1d&period1=${p1}&period2=${p2}`)
-      const json = await res.json()
-      const result = json.chart?.result?.[0]
-      if (!result) return
-      const ts     = result.timestamp || []
-      const closes = result.indicators?.quote?.[0]?.close || []
-      const data   = ts.map((t, i) => ({
-        date:  new Date(t * 1000).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
-        vix:   closes[i] != null ? +closes[i].toFixed(2) : null,
-      })).filter(d => d.vix !== null)
-      setHistory(data)
+      // Use Stooq for historical VIX — symbol is %5Evix (%5E = ^), no API key needed
+      const end   = new Date()
+      const start = new Date(end - 365 * 24 * 3600 * 1000)
+      const d1 = start.toISOString().slice(0, 10).replace(/-/g, '')
+      const d2 = end.toISOString().slice(0, 10).replace(/-/g, '')
+      const res = await fetch(`${STOOQ}/q/d/l/?s=%5Evix&d1=${d1}&d2=${d2}&i=d`)
+      const txt = await res.text()
+
+      // Parse CSV: Date,Open,High,Low,Close,Volume
+      const lines = txt.trim().split('\n').slice(1) // skip header
+      const data = lines.map(l => {
+        const cols = l.split(',')
+        const vix  = parseFloat(cols[4])
+        if (!cols[0] || isNaN(vix)) return null
+        const [y, m, d] = cols[0].split('-')
+        const label = new Date(+y, +m - 1, +d).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+        return { date: label, vix }
+      }).filter(Boolean)
+
+      if (data.length > 0) setHistory(data)
     } catch { /* chart is optional */ }
   }, [])
 
