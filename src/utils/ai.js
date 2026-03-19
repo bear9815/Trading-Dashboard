@@ -1000,3 +1000,23 @@ export async function classifySymbolTheme(symbol, apiKey) {
   return { sector: '—', theme: text.slice(0, 40) }
 }
 
+
+/**
+ * Generate a short AI market read for the VIX Volatility Dashboard.
+ */
+export async function callVolatilityAI(metrics, apiKey) {
+  if (!apiKey) throw new Error('No API key configured')
+  const { vix, vix3m, vvix, skew, termRatio, composite, moodLabel, vixScore, termScore, vvixScore, skewScore } = metrics
+  const prompt =
+    `You are a volatility analyst advising an active growth stock trader who uses CAN SLIM-style breakout strategies.\n\n` +
+    `Current volatility readings:\n` +
+    `- VIX: ${vix?.toFixed(1)} (score ${vixScore}/100)\n` +
+    `- VIX3M: ${vix3m?.toFixed(1) ?? 'N/A'}, Term Ratio (VIX/VIX3M): ${termRatio?.toFixed(3) ?? 'N/A'} (score ${termScore ?? 'N/A'}/100)\n` +
+    `- VVIX: ${vvix?.toFixed(1) ?? 'N/A'} (score ${vvixScore ?? 'N/A'}/100)\n` +
+    `- SKEW Index: ${skew != null ? Math.round(skew) : 'N/A'} (score ${skewScore ?? 'N/A'}/100)\n` +
+    `- Composite Score: ${composite?.toFixed(0)}/100 — ${moodLabel}\n\n` +
+    `Write 3-5 sentences of direct, actionable guidance for a growth stock trader. ` +
+    `Cover: what this volatility environment means for breakout reliability, recommended position sizing, stop-loss approach, and when/whether to be aggressive or defensive. ` +
+    `Be specific with numbers where relevant. Write as a single flowing paragraph with no headers or bullets.`
+  return callAI(apiKey, prompt)
+}

@@ -13,6 +13,7 @@ import Morning from './components/morning/Morning.jsx'
 import RRGPage from './components/rrg/RRGPage.jsx'
 import EdgeLab from './components/edgelab/EdgeLab.jsx'
 import FactorRegime from './components/regime/FactorRegime.jsx'
+import VolatilityDashboard from './components/volatility/VolatilityDashboard.jsx'
 import ImportModal from './components/import/ImportModal.jsx'
 import QuickAddTrade from './components/quicktrade/QuickAddTrade.jsx'
 import LoginPage from './components/auth/LoginPage.jsx'
@@ -145,6 +146,7 @@ export default function App() {
           {page === 'ai'          && <AIFeedback    {...pageProps} />}
           {page === 'edgelab'     && <EdgeLab       {...pageProps} />}
           {page === 'regime'      && <FactorRegime />}
+          {page === 'volatility'  && <VolatilityDashboard />}
           {page === 'settings'    && <Settings />}
           {page === 'rrg'         && <div className="h-full"><RRGPage /></div>}
         </main>
