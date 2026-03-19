@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import { RefreshCw, TrendingUp, TrendingDown, Settings2, Info } from 'lucide-react'
 import { computeFactorRegime, runBacktest, calcRegimeStats } from '../../utils/regimeCalcs.js'
+import { fetchHistory } from '../../utils/marketData.js'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -27,26 +28,19 @@ const TABS = [
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
+// Uses fetchHistory (Alpaca → Stooq → Finnhub → Yahoo fallback chain).
+// Stooq is free, no key needed, and is the reliable workhorse here.
 async function fetchPrices(symbol) {
-  // Use range=max to get all available history regardless of ETF inception date.
-  // VLUE/MTUM/QUAL launched in 2013, so period1-based lookbacks can cause 404s.
-  const url = `/api/yf/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=10y`
-  const res  = await fetch(url, { signal: AbortSignal.timeout(15000) })
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${symbol}`)
-  const text = await res.text()
-  let data
-  try { data = JSON.parse(text) } catch { throw new Error(`Bad JSON for ${symbol}: ${text.slice(0, 80)}`) }
-  const result = data.chart?.result?.[0]
-  if (!result) return null
+  const endDate   = new Date().toISOString().slice(0, 10)
+  const startDate = new Date(Date.now() - 10 * 365.25 * 24 * 60 * 60 * 1000)
+    .toISOString().slice(0, 10)
 
-  const timestamps = result.timestamp || []
-  const closes     = result.indicators?.quote?.[0]?.close || []
+  const bars = await fetchHistory(symbol, startDate, endDate)
+  if (!bars?.length) throw new Error(`No data returned for ${symbol}`)
 
   const prices = {}
-  timestamps.forEach((ts, i) => {
-    if (closes[i] != null) {
-      prices[new Date(ts * 1000).toISOString().slice(0, 10)] = closes[i]
-    }
+  bars.forEach(b => {
+    if (b.close != null) prices[b.time] = b.close
   })
   return prices
 }
