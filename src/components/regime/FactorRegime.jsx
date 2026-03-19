@@ -27,9 +27,15 @@ const TABS = [
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
 async function fetchPrices(symbol) {
-  const url = `/api/yf/v8/finance/chart/${symbol}?interval=1d&range=15y`
-  const res  = await fetch(url, { signal: AbortSignal.timeout(12000) })
-  const data = await res.json()
+  // period1 = ~15 years ago, period2 = now (Yahoo doesn't support range=15y)
+  const p1  = Math.floor((Date.now() - 15 * 365.25 * 24 * 60 * 60 * 1000) / 1000)
+  const p2  = Math.floor(Date.now() / 1000)
+  const url = `/api/yf/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${p1}&period2=${p2}`
+  const res  = await fetch(url, { signal: AbortSignal.timeout(15000) })
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${symbol}`)
+  const text = await res.text()
+  let data
+  try { data = JSON.parse(text) } catch { throw new Error(`Bad JSON for ${symbol}: ${text.slice(0, 80)}`) }
   const result = data.chart?.result?.[0]
   if (!result) return null
 
