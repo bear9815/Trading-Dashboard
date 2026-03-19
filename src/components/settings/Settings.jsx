@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Trash2, Eye, EyeOff, Save, X, LogOut } from 'lucide-react'
+import { Plus, Trash2, Eye, EyeOff, Save, X, LogOut, Wifi, WifiOff, RefreshCw, ExternalLink } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useJournalStore } from '../../store/useJournalStore.js'
 import { useAuthStore } from '../../store/useAuthStore.js'
+import { useSchwabStore } from '../../store/useSchwabStore.js'
 
 const BROKERS = ['Schwab / ThinkorSwim', 'Interactive Brokers', 'Fidelity', 'Other']
 const BENCHMARKS = [
@@ -37,6 +38,17 @@ export default function Settings() {
   const { trades, accountActivities, clearTrades, clearActivities, recalcAllTrades, addActivity, deleteActivity, compressAllScreenshots } = useTradeStore()
   const { entries } = useJournalStore()
   const { user, signOut } = useAuthStore()
+  const {
+    connected: schwabConnected,
+    loading: schwabLoading,
+    accounts: schwabAccounts,
+    lastSync: schwabLastSync,
+    error: schwabError,
+    startOAuth,
+    disconnect: schwabDisconnect,
+    loadTokens: schwabLoadTokens,
+    syncAccounts: schwabSyncAccounts,
+  } = useSchwabStore()
 
   const [showKey, setShowKey]   = useState(false)
   const [keyInput, setKeyInput] = useState(apiKey)
@@ -391,6 +403,98 @@ export default function Settings() {
         <div className="rounded-lg bg-surface-200 px-3 py-2 text-xs text-gray-500">
           <strong className="text-gray-400">No keys?</strong> Yahoo Finance is used as a fallback with no key required, but it is unofficial and may fail. Adding Alpaca gives you reliable, free historical data.
         </div>
+      </div>
+
+      {/* ── Schwab Connection ── */}
+      <div className="card space-y-4">
+        <div className="flex items-center justify-between">
+          <SectionTitle>Charles Schwab — Live Data</SectionTitle>
+          {schwabConnected && (
+            <span className="flex items-center gap-1 text-[10px] text-accent-green">
+              <Wifi size={11} /> Connected
+            </span>
+          )}
+        </div>
+
+        {!schwabConnected ? (
+          <>
+            <p className="text-xs text-gray-400">
+              Connect your Schwab account to see live positions, real-time quotes, and pull market data directly from Schwab's API.
+              Requires a registered app at{' '}
+              <a
+                href="https://developer.schwab.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent-blue hover:underline inline-flex items-center gap-0.5"
+              >
+                developer.schwab.com <ExternalLink size={10} />
+              </a>
+            </p>
+            <div className="rounded-lg bg-surface-200 border border-white/5 p-3 text-xs space-y-1.5 text-gray-400">
+              <p className="font-medium text-gray-300">Setup checklist</p>
+              <p>1. Register an app on the Schwab Developer Portal</p>
+              <p>2. Set redirect URI to <span className="mono text-gray-300">/api/schwab/callback</span> on your Vercel domain</p>
+              <p>3. Add <span className="mono text-gray-300">SCHWAB_APP_KEY</span>, <span className="mono text-gray-300">SCHWAB_APP_SECRET</span>, <span className="mono text-gray-300">SCHWAB_REDIRECT_URI</span>, <span className="mono text-gray-300">APP_URL</span>, and <span className="mono text-gray-300">SUPABASE_SERVICE_ROLE_KEY</span> to Vercel environment variables</p>
+              <p>4. Click Connect below</p>
+            </div>
+            {schwabError && (
+              <p className="text-xs text-accent-red">{schwabError}</p>
+            )}
+            <button
+              onClick={startOAuth}
+              disabled={schwabLoading}
+              className="btn-primary flex items-center gap-2 text-sm disabled:opacity-50"
+            >
+              <Wifi size={14} />
+              {schwabLoading ? 'Connecting…' : 'Connect Schwab'}
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="space-y-2">
+              {schwabAccounts.map(a => (
+                <div key={a.hashValue} className="flex items-center justify-between card-sm text-xs">
+                  <div>
+                    <p className="font-medium text-gray-200">{a.type} Account</p>
+                    {a.balances?.liquidationValue && (
+                      <p className="text-gray-500 mono">
+                        ${a.balances.liquidationValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} liquidation value
+                      </p>
+                    )}
+                  </div>
+                  <Wifi size={12} className="text-accent-green" />
+                </div>
+              ))}
+              {schwabAccounts.length === 0 && (
+                <p className="text-xs text-gray-600">No accounts loaded yet. Click Refresh.</p>
+              )}
+            </div>
+
+            {schwabLastSync && (
+              <p className="text-[10px] text-gray-600">
+                Last synced: {schwabLastSync.toLocaleTimeString()}
+              </p>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                onClick={schwabSyncAccounts}
+                disabled={schwabLoading}
+                className="btn-ghost flex items-center gap-1.5 text-xs disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={schwabLoading ? 'animate-spin' : ''} />
+                {schwabLoading ? 'Syncing…' : 'Refresh Accounts'}
+              </button>
+              <button
+                onClick={() => { if (confirm('Disconnect Schwab? You can reconnect at any time.')) schwabDisconnect() }}
+                className="btn-ghost flex items-center gap-1.5 text-xs text-accent-red border-accent-red/20 hover:border-accent-red/40"
+              >
+                <WifiOff size={12} />
+                Disconnect
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Risk Limits */}

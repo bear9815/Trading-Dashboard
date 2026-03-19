@@ -18,6 +18,7 @@ import LoginPage from './components/auth/LoginPage.jsx'
 import { useSettingsStore } from './store/useSettingsStore.js'
 import { setAnthropicFallbackKey } from './utils/ai.js'
 import { useAuthStore } from './store/useAuthStore.js'
+import { useSchwabStore } from './store/useSchwabStore.js'
 import { useTradeStore } from './store/useTradeStore.js'
 import { useJournalStore } from './store/useJournalStore.js'
 import { useMorningStore } from './store/useMorningStore.js'
@@ -29,6 +30,7 @@ export default function App() {
   const [showImport, setShowImport] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState('All')
   const { theme, anthropicApiKey, loadFromCloud: loadSettings } = useSettingsStore()
+  const { loadTokens: loadSchwabTokens } = useSchwabStore()
   const { user, loading: authLoading, setSession } = useAuthStore()
   const { loadFromCloud, clearLocalState } = useTradeStore()
   const { loadFromCloud: loadJournal, clearLocalState: clearJournal } = useJournalStore()
@@ -38,6 +40,20 @@ export default function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme || 'dark')
   }, [theme])
+
+  // Handle OAuth callback redirect from Schwab (?schwab=connected)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const schwabStatus = params.get('schwab')
+    if (schwabStatus === 'connected') {
+      // Clean the URL, load tokens, and go to settings
+      window.history.replaceState({}, '', window.location.pathname)
+      loadSchwabTokens()
+      setPage('settings')
+    } else if (schwabStatus === 'denied' || schwabStatus === 'error') {
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep Anthropic fallback key in sync with settings store
   useEffect(() => {

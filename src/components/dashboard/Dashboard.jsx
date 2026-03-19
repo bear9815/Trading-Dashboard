@@ -6,6 +6,7 @@ import CalendarHeatmap from './CalendarHeatmap.jsx'
 import OpenPositions from './OpenPositions.jsx'
 import EarningsCalendar from './EarningsCalendar.jsx'
 import TradingThoughts from './TradingThoughts.jsx'
+import LivePositions from './LivePositions.jsx'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import {
@@ -188,6 +189,9 @@ export default function Dashboard({ selectedAccount }) {
 
       {/* ── Earnings Calendar ─────────────────────────────────────────────── */}
       <EarningsCalendar openTrades={openTrades} />
+
+      {/* ── Live Schwab Positions ──────────────────────────────────────────── */}
+      <LivePositions />
     </div>
   )
 }
