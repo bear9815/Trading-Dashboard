@@ -9,10 +9,9 @@ import { fetchHistory } from '../../utils/marketData.js'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-// SIZE ETF was delisted/merged — IWM (Russell 2000) is the standard size-factor proxy
 const FACTORS = [
   { symbol: 'VLUE', label: 'Value',    color: '#f59e0b' },
-  { symbol: 'IWM',  label: 'Size',     color: '#06b6d4' },
+  { symbol: 'SIZE', label: 'Size',     color: '#06b6d4' },
   { symbol: 'MTUM', label: 'Momentum', color: '#3d84ff' },
   { symbol: 'QUAL', label: 'Quality',  color: '#10b981' },
   { symbol: 'IWF',  label: 'Growth',   color: '#a855f7' },
