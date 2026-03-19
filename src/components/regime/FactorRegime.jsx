@@ -8,9 +8,10 @@ import { computeFactorRegime, runBacktest, calcRegimeStats } from '../../utils/r
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
+// SIZE ETF was delisted/merged — IWM (Russell 2000) is the standard size-factor proxy
 const FACTORS = [
   { symbol: 'VLUE', label: 'Value',    color: '#f59e0b' },
-  { symbol: 'SIZE', label: 'Size',     color: '#06b6d4' },
+  { symbol: 'IWM',  label: 'Size',     color: '#06b6d4' },
   { symbol: 'MTUM', label: 'Momentum', color: '#3d84ff' },
   { symbol: 'QUAL', label: 'Quality',  color: '#10b981' },
   { symbol: 'IWF',  label: 'Growth',   color: '#a855f7' },
@@ -27,10 +28,9 @@ const TABS = [
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
 async function fetchPrices(symbol) {
-  // period1 = ~15 years ago, period2 = now (Yahoo doesn't support range=15y)
-  const p1  = Math.floor((Date.now() - 15 * 365.25 * 24 * 60 * 60 * 1000) / 1000)
-  const p2  = Math.floor(Date.now() / 1000)
-  const url = `/api/yf/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${p1}&period2=${p2}`
+  // Use range=max to get all available history regardless of ETF inception date.
+  // VLUE/MTUM/QUAL launched in 2013, so period1-based lookbacks can cause 404s.
+  const url = `/api/yf/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=max`
   const res  = await fetch(url, { signal: AbortSignal.timeout(15000) })
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${symbol}`)
   const text = await res.text()
@@ -71,7 +71,7 @@ function RegimeCard({ factor, result }) {
   )
 }
 
-function ZScoreChart({ chartRows, height = 340 }) {
+function ZScoreChart({ chartRows, height = 340, factors = FACTORS }) {
   const fmt = (v) => typeof v === 'number' ? v.toFixed(2) : '-'
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -100,7 +100,7 @@ function ZScoreChart({ chartRows, height = 340 }) {
           wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
           formatter={(value) => <span style={{ color: '#9ca3af' }}>{value}</span>}
         />
-        {FACTORS.map(f => (
+        {factors.map(f => (
           <Line
             key={f.symbol}
             type="monotone"
@@ -119,12 +119,12 @@ function ZScoreChart({ chartRows, height = 340 }) {
 
 // ── Tab: Dashboard ────────────────────────────────────────────────────────────
 
-function TabDashboard({ regimes, combinedRows }) {
+function TabDashboard({ regimes, combinedRows, factors }) {
   return (
     <div className="space-y-5">
       {/* Factor regime cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {FACTORS.map(f => (
+        {factors.map(f => (
           <RegimeCard key={f.symbol} factor={f} result={regimes[f.symbol]} />
         ))}
       </div>
@@ -132,7 +132,7 @@ function TabDashboard({ regimes, combinedRows }) {
       {/* Main z-score chart */}
       <div className="card">
         <p className="text-sm font-semibold text-white mb-4">Smoothed Z-Scores Over Time</p>
-        <ZScoreChart chartRows={combinedRows} />
+        <ZScoreChart chartRows={combinedRows} factors={factors} />
       </div>
 
       {/* Methodology */}
@@ -216,10 +216,10 @@ function SingleFactorChart({ factor, result }) {
   )
 }
 
-function TabCharts({ regimes }) {
+function TabCharts({ regimes, factors }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      {FACTORS.map(f => (
+      {factors.map(f => (
         <SingleFactorChart key={f.symbol} factor={f} result={regimes[f.symbol]} />
       ))}
     </div>
@@ -228,10 +228,10 @@ function TabCharts({ regimes }) {
 
 // ── Tab: Statistics ───────────────────────────────────────────────────────────
 
-function TabStatistics({ regimes }) {
+function TabStatistics({ regimes, factors }) {
   const stats = useMemo(() =>
-    Object.fromEntries(FACTORS.map(f => [f.symbol, calcRegimeStats(regimes[f.symbol])])),
-    [regimes]
+    Object.fromEntries(factors.map(f => [f.symbol, calcRegimeStats(regimes[f.symbol])])),
+    [regimes, factors]
   )
 
   return (
@@ -254,7 +254,7 @@ function TabStatistics({ regimes }) {
             </tr>
           </thead>
           <tbody>
-            {FACTORS.map(f => {
+            {factors.map(f => {
               const r = regimes[f.symbol]
               const s = stats[f.symbol]
               const isBull = r.currentRegime === 'BULL'
@@ -292,7 +292,7 @@ function TabStatistics({ regimes }) {
 
       {/* Bull/Bear duration breakdown per factor */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {FACTORS.map(f => {
+        {factors.map(f => {
           const r = regimes[f.symbol]
           const s = stats[f.symbol]
           return (
@@ -475,28 +475,46 @@ export default function FactorRegime() {
     setError(null)
 
     try {
-      // Fetch all prices in parallel
-      const results = await Promise.all(ALL_SYMBOLS.map(fetchPrices))
+      // Fetch all prices in parallel — use allSettled so one failure doesn't block the rest
+      const settled = await Promise.allSettled(ALL_SYMBOLS.map(fetchPrices))
       const priceMap = {}
-      ALL_SYMBOLS.forEach((sym, i) => { priceMap[sym] = results[i] })
+      const failed   = []
+      ALL_SYMBOLS.forEach((sym, i) => {
+        if (settled[i].status === 'fulfilled' && settled[i].value) {
+          priceMap[sym] = settled[i].value
+        } else {
+          failed.push(`${sym} (${settled[i].reason?.message ?? 'no data'})`)
+        }
+      })
 
-      // Check for failures
-      const failed = ALL_SYMBOLS.filter(s => !priceMap[s])
       if (failed.length > 0) {
-        setError(`Failed to fetch data for: ${failed.join(', ')}`)
+        setError(`Could not load: ${failed.join(' · ')}`)
+      }
+
+      // Need at minimum the 5 factor ETFs + SPY
+      const missing = ALL_SYMBOLS.filter(s => !priceMap[s])
+      if (missing.length >= ALL_SYMBOLS.length - 1) {
         setLoading(false)
         return
       }
 
-      // Align to common dates
-      const sets    = ALL_SYMBOLS.map(s => new Set(Object.keys(priceMap[s])))
-      const common  = [...sets[0]].filter(d => sets.every(s => s.has(d))).sort()
+      // Align to common dates — only use symbols that loaded successfully
+      const loadedSyms = ALL_SYMBOLS.filter(s => priceMap[s])
+      const sets       = loadedSyms.map(s => new Set(Object.keys(priceMap[s])))
+      const common     = [...sets[0]].filter(d => sets.every(s => s.has(d))).sort()
+
+      if (!priceMap.SPY || common.length < 100) {
+        setError('Insufficient data to compute regimes — check connection and retry.')
+        setLoading(false)
+        return
+      }
 
       const spyPrices = common.map(d => priceMap.SPY[d])
       const config    = { halflife1, halflife2, minPeriods }
 
       const computed = {}
       for (const f of FACTORS) {
+        if (!priceMap[f.symbol]) continue
         const prices = common.map(d => priceMap[f.symbol][d])
         computed[f.symbol] = computeFactorRegime(prices, spyPrices, common, config)
       }
@@ -520,6 +538,7 @@ export default function FactorRegime() {
     const config = { halflife1, halflife2, minPeriods }
     const computed = {}
     for (const f of FACTORS) {
+      if (!priceMap[f.symbol]) continue
       const prices = common.map(d => priceMap[f.symbol][d])
       computed[f.symbol] = computeFactorRegime(prices, spyPrices, common, config)
     }
@@ -528,12 +547,18 @@ export default function FactorRegime() {
 
   const activeRegimes = recomputed?.computed ?? regimes?.computed
 
+  // Active factors = only those we have data for
+  const activeFactors = useMemo(
+    () => FACTORS.filter(f => activeRegimes?.[f.symbol]),
+    [activeRegimes]
+  )
+
   // Build combined rows for the main z-score chart
   const combinedRows = useMemo(() => {
-    if (!activeRegimes) return []
+    if (!activeRegimes || activeFactors.length === 0) return []
 
-    // Use VLUE dates as the backbone (all factors share the same dates)
-    const backbone = activeRegimes[FACTORS[0].symbol].chartData
+    // Use first available factor's dates as the backbone
+    const backbone = activeRegimes[activeFactors[0].symbol].chartData
 
     // Downsample for performance
     const step = Math.max(1, Math.ceil(backbone.length / 2000))
@@ -549,19 +574,19 @@ export default function FactorRegime() {
         })
         return out
       })
-  }, [activeRegimes])
+  }, [activeRegimes, activeFactors])
 
   // Backtest
   const backtestResult = useMemo(() => {
-    if (!activeRegimes || !recomputed) return null
-    const { common, spyPrices } = recomputed
+    if (!activeRegimes || !recomputed || activeFactors.length === 0) return null
+    const { common } = recomputed
 
     const factorRets = {}
-    FACTORS.forEach(f => { factorRets[f.symbol] = activeRegimes[f.symbol].factorRet })
-    const spyRet = activeRegimes[FACTORS[0].symbol].spyRet
+    activeFactors.forEach(f => { factorRets[f.symbol] = activeRegimes[f.symbol].factorRet })
+    const spyRet = activeRegimes[activeFactors[0].symbol].spyRet
 
     return runBacktest(activeRegimes, common, factorRets, spyRet)
-  }, [activeRegimes, recomputed])
+  }, [activeRegimes, recomputed, activeFactors])
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -657,9 +682,9 @@ export default function FactorRegime() {
             ))}
           </div>
 
-          {tab === 'dashboard'  && <TabDashboard   regimes={activeRegimes} combinedRows={combinedRows} />}
-          {tab === 'charts'     && <TabCharts       regimes={activeRegimes} />}
-          {tab === 'statistics' && <TabStatistics   regimes={activeRegimes} />}
+          {tab === 'dashboard'  && <TabDashboard   regimes={activeRegimes} combinedRows={combinedRows} factors={activeFactors} />}
+          {tab === 'charts'     && <TabCharts       regimes={activeRegimes} factors={activeFactors} />}
+          {tab === 'statistics' && <TabStatistics   regimes={activeRegimes} factors={activeFactors} />}
           {tab === 'backtest'   && backtestResult   && <TabBacktest backtestResult={backtestResult} />}
         </>
       )}
