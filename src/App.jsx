@@ -1,22 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import Sidebar from './components/layout/Sidebar.jsx'
 import TopBar from './components/layout/TopBar.jsx'
-import Dashboard from './components/dashboard/Dashboard.jsx'
-import TradeLog from './components/tradelog/TradeLog.jsx'
-import RiskPanel from './components/risk/RiskPanel.jsx'
-import Analytics from './components/analytics/Analytics.jsx'
-import Journal from './components/journal/Journal.jsx'
-import AIFeedback from './components/ai/AIFeedback.jsx'
-import Settings from './components/settings/Settings.jsx'
-import TradeReview from './components/chartreview/TradeReview.jsx'
-import Morning from './components/morning/Morning.jsx'
-import RRGPage from './components/rrg/RRGPage.jsx'
-import EdgeLab from './components/edgelab/EdgeLab.jsx'
-import FactorRegime from './components/regime/FactorRegime.jsx'
-import VolatilityDashboard from './components/volatility/VolatilityDashboard.jsx'
+import LoginPage from './components/auth/LoginPage.jsx'
 import ImportModal from './components/import/ImportModal.jsx'
 import QuickAddTrade from './components/quicktrade/QuickAddTrade.jsx'
-import LoginPage from './components/auth/LoginPage.jsx'
 import { useSettingsStore } from './store/useSettingsStore.js'
 import { setAnthropicFallbackKey } from './utils/ai.js'
 import { setSchwabToken, setSchwabTokenGetter } from './utils/marketData.js'
@@ -27,6 +14,34 @@ import { useJournalStore } from './store/useJournalStore.js'
 import { useMorningStore } from './store/useMorningStore.js'
 import { supabase } from './lib/supabase.js'
 import { Loader } from 'lucide-react'
+
+// ── Lazy-loaded pages (each splits into its own chunk) ────────────────────────
+// Only the page you're on gets downloaded — everything else costs nothing until navigated to.
+const Dashboard          = lazy(() => import('./components/dashboard/Dashboard.jsx'))
+const TradeLog           = lazy(() => import('./components/tradelog/TradeLog.jsx'))
+const RiskPanel          = lazy(() => import('./components/risk/RiskPanel.jsx'))
+const Analytics          = lazy(() => import('./components/analytics/Analytics.jsx'))
+const Journal            = lazy(() => import('./components/journal/Journal.jsx'))
+const AIFeedback         = lazy(() => import('./components/ai/AIFeedback.jsx'))
+const Settings           = lazy(() => import('./components/settings/Settings.jsx'))
+const TradeReview        = lazy(() => import('./components/chartreview/TradeReview.jsx'))
+const Morning            = lazy(() => import('./components/morning/Morning.jsx'))
+const RRGPage            = lazy(() => import('./components/rrg/RRGPage.jsx'))
+const EdgeLab            = lazy(() => import('./components/edgelab/EdgeLab.jsx'))
+const FactorRegime       = lazy(() => import('./components/regime/FactorRegime.jsx'))
+const VolatilityDashboard = lazy(() => import('./components/volatility/VolatilityDashboard.jsx'))
+
+// ── Page-transition loading fallback ─────────────────────────────────────────
+function PageLoader() {
+  return (
+    <div className="flex h-full items-center justify-center text-gray-500">
+      <div className="flex flex-col items-center gap-3">
+        <Loader size={24} className="animate-spin text-accent-blue" />
+        <span className="text-xs">Loading…</span>
+      </div>
+    </div>
+  )
+}
 
 export default function App() {
   const [page, setPage] = useState('dashboard')
@@ -49,7 +64,6 @@ export default function App() {
     const params = new URLSearchParams(window.location.search)
     const schwabStatus = params.get('schwab')
     if (schwabStatus === 'connected') {
-      // Clean the URL, load tokens, and go to settings
       window.history.replaceState({}, '', window.location.pathname)
       loadSchwabTokens()
       setPage('settings')
@@ -92,12 +106,10 @@ export default function App() {
   // Bootstrap Supabase auth session on mount
   useEffect(() => {
     if (!supabase) {
-      // No Supabase configured — run in local-only mode (no login required)
       setSession(null)
       return
     }
 
-    // Restore existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
       if (session?.user) {
@@ -109,7 +121,6 @@ export default function App() {
       }
     })
 
-    // Listen for sign-in / sign-out events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session)
       if (event === 'SIGNED_IN' && session?.user) {
@@ -129,7 +140,7 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Loading spinner while we check for an existing session ───────────────
+  // ── Loading spinner while checking for existing session ───────────────────
   if (supabase && authLoading) {
     return (
       <div className="flex h-screen bg-surface items-center justify-center">
@@ -165,19 +176,21 @@ export default function App() {
         />
 
         <main className={`flex-1 ${page === 'rrg' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          {page === 'dashboard'   && <Dashboard    {...pageProps} />}
-          {page === 'trades'      && <TradeLog      {...pageProps} />}
-          {page === 'risk'        && <RiskPanel     {...pageProps} />}
-          {page === 'analytics'   && <Analytics     {...pageProps} />}
-          {page === 'chartreview' && <TradeReview   {...pageProps} />}
-          {page === 'morning'     && <Morning />}
-          {page === 'journal'     && <Journal       {...pageProps} />}
-          {page === 'ai'          && <AIFeedback    {...pageProps} />}
-          {page === 'edgelab'     && <EdgeLab       {...pageProps} />}
-          {page === 'regime'      && <FactorRegime />}
-          {page === 'volatility'  && <VolatilityDashboard />}
-          {page === 'settings'    && <Settings />}
-          {page === 'rrg'         && <div className="h-full"><RRGPage /></div>}
+          <Suspense fallback={<PageLoader />}>
+            {page === 'dashboard'   && <Dashboard    {...pageProps} />}
+            {page === 'trades'      && <TradeLog      {...pageProps} />}
+            {page === 'risk'        && <RiskPanel     {...pageProps} />}
+            {page === 'analytics'   && <Analytics     {...pageProps} />}
+            {page === 'chartreview' && <TradeReview   {...pageProps} />}
+            {page === 'morning'     && <Morning />}
+            {page === 'journal'     && <Journal       {...pageProps} />}
+            {page === 'ai'          && <AIFeedback    {...pageProps} />}
+            {page === 'edgelab'     && <EdgeLab       {...pageProps} />}
+            {page === 'regime'      && <FactorRegime />}
+            {page === 'volatility'  && <VolatilityDashboard />}
+            {page === 'settings'    && <Settings />}
+            {page === 'rrg'         && <div className="h-full"><RRGPage /></div>}
+          </Suspense>
         </main>
       </div>
 
