@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { Upload, Settings2, X, Plus, Check, ChevronDown, ChevronUp, LogOut } from 'lucide-react'
 import { useQuotesStore } from '../../store/useQuotesStore'
 import { useAuthStore } from '../../store/useAuthStore'
+import { useSchwabStore } from '../../store/useSchwabStore'
 
 const PAGE_TITLES = {
   dashboard:   'Dashboard',
@@ -290,6 +291,7 @@ function QuotesTicker() {
 /* ─── TopBar ──────────────────────────────────────────────────────── */
 export default function TopBar({ page, onImport }) {
   const { user, signOut } = useAuthStore()
+  const { connected } = useSchwabStore()
 
   return (
     <header className="h-14 bg-surface-50/80 backdrop-blur border-b border-white/10 flex items-center px-4 shrink-0 sticky top-0 z-10 gap-3">
@@ -299,6 +301,15 @@ export default function TopBar({ page, onImport }) {
       <QuotesTicker />
 
       <div className="flex items-center gap-2 flex-shrink-0">
+        {connected && (
+          <div
+            title="Schwab connected — price history sourced from Schwab API"
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent-green/10 border border-accent-green/25 text-accent-green text-[11px] font-medium"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse" />
+            Schwab
+          </div>
+        )}
         <button
           onClick={onImport}
           className="btn-primary flex items-center gap-1.5 text-xs"
