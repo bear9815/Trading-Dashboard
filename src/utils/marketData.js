@@ -450,11 +450,45 @@ export async function fetchATR14(symbol) {
  */
 export async function fetchQuotes(symbols) {
   const uniq = [...new Set(symbols)]
+  const results = new Map()
 
-  // Batch fetch via Yahoo v7 (handles futures, indices, FX, pre-market)
-  const results = await fetchQuotesBatchYahooV7(uniq)
+  // 0. Schwab (when connected) — single batch call, most reliable
+  if (_schwabToken) {
+    try {
+      const params = new URLSearchParams({
+        path:    '/marketdata/v1/quotes',
+        symbols: uniq.join(','),
+        token:   _schwabToken,
+      })
+      const res  = await fetch(`/api/schwab/proxy?${params}`)
+      if (res.ok) {
+        const data = await res.json()
+        for (const [sym, info] of Object.entries(data)) {
+          const q = info.quote || {}
+          const price = q.lastPrice ?? q.mark ?? null
+          if (price != null) {
+            results.set(sym, {
+              symbol:        sym,
+              price,
+              previousClose: q.closePrice ?? price,
+              change:        q.netChange       ?? 0,
+              changePct:     q.netPercentChange ?? 0,
+              marketState:   'REGULAR',
+            })
+          }
+        }
+      }
+    } catch { /* fall through */ }
+  }
 
-  // Individual fallback for anything the batch missed
+  // 1. Yahoo v7 batch for anything Schwab didn't cover
+  const needYahoo = uniq.filter(s => !results.has(s))
+  if (needYahoo.length > 0) {
+    const yahooResults = await fetchQuotesBatchYahooV7(needYahoo)
+    for (const [sym, q] of yahooResults) results.set(sym, q)
+  }
+
+  // 2. Individual fallback for anything still missing
   const missing = uniq.filter(s => !results.has(s))
   if (missing.length > 0) {
     await Promise.allSettled(
