@@ -14,6 +14,10 @@ const YF     = '/api/yf'
 const STOOQ  = '/api/stooq'
 const BASE   = `${YF}/v8/finance/chart`
 
+// ── Schwab token (injected from App.jsx) ──────────────────────────────────────
+let _schwabToken = null
+export function setSchwabToken(token) { _schwabToken = token }
+
 function toDateStr(unixSec) {
   return new Date(unixSec * 1000).toISOString().slice(0, 10)
 }
@@ -64,6 +68,39 @@ async function fetchHistoryAlpaca(symbol, startDate, endDate, apiKey, apiSecret)
     close:  b.c,
     volume: b.v,
   })).filter(c => c.open != null && c.close != null)
+}
+
+// ── Schwab (via /api/schwab/proxy) ────────────────────────────────────────────
+
+async function fetchHistorySchwab(symbol, startDate, endDate, token) {
+  const start = new Date(startDate).getTime() // epoch ms
+  const end   = new Date(endDate).getTime()
+
+  const params = new URLSearchParams({
+    path:                   '/marketdata/v1/pricehistory',
+    token,
+    symbol,
+    periodType:             'year',
+    frequencyType:          'daily',
+    frequency:              '1',
+    startDate:              start.toString(),
+    endDate:                end.toString(),
+    needExtendedHoursData:  'false',
+  })
+
+  const res  = await fetch(`/api/schwab/proxy?${params}`)
+  if (!res.ok) throw new Error(`Schwab HTTP ${res.status}`)
+  const data = await res.json()
+  if (!data.candles?.length) throw new Error('No Schwab data')
+
+  return data.candles.map(c => ({
+    time:   new Date(c.datetime).toISOString().slice(0, 10),
+    open:   c.open,
+    high:   c.high,
+    low:    c.low,
+    close:  c.close,
+    volume: c.volume,
+  }))
 }
 
 // ── Stooq (free, no key needed) ───────────────────────────────────────────────
@@ -326,6 +363,16 @@ export async function fetchQuote(symbol) {
 export async function fetchHistory(symbol, startDate, endDate, interval = '1d') {
   const { alpacaApiKey, alpacaApiSecret, finnhubApiKey } = getApiKeys()
   const errors = []
+
+  // 0. Schwab (best — authenticated, no rate limits, when connected)
+  if (_schwabToken) {
+    try {
+      const bars = await fetchHistorySchwab(symbol, startDate, endDate, _schwabToken)
+      if (bars.length) return bars
+    } catch (e) {
+      errors.push(`Schwab: ${e.message}`)
+    }
+  }
 
   // 1. Alpaca (primary — best quality, requires keys)
   if (alpacaApiKey && alpacaApiSecret) {

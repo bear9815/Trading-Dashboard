@@ -19,6 +19,7 @@ import QuickAddTrade from './components/quicktrade/QuickAddTrade.jsx'
 import LoginPage from './components/auth/LoginPage.jsx'
 import { useSettingsStore } from './store/useSettingsStore.js'
 import { setAnthropicFallbackKey } from './utils/ai.js'
+import { setSchwabToken } from './utils/marketData.js'
 import { useAuthStore } from './store/useAuthStore.js'
 import { useSchwabStore } from './store/useSchwabStore.js'
 import { useTradeStore } from './store/useTradeStore.js'
@@ -32,7 +33,7 @@ export default function App() {
   const [showImport, setShowImport] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState('All')
   const { theme, anthropicApiKey, loadFromCloud: loadSettings } = useSettingsStore()
-  const { loadTokens: loadSchwabTokens } = useSchwabStore()
+  const { loadTokens: loadSchwabTokens, _accessToken: schwabAccessToken } = useSchwabStore()
   const { user, loading: authLoading, setSession } = useAuthStore()
   const { loadFromCloud, clearLocalState } = useTradeStore()
   const { loadFromCloud: loadJournal, clearLocalState: clearJournal } = useJournalStore()
@@ -61,6 +62,11 @@ export default function App() {
   useEffect(() => {
     setAnthropicFallbackKey(anthropicApiKey || '')
   }, [anthropicApiKey])
+
+  // Push Schwab access token into marketData.js so all fetchHistory calls use it
+  useEffect(() => {
+    setSchwabToken(schwabAccessToken || null)
+  }, [schwabAccessToken])
 
   // Bootstrap Supabase auth session on mount
   useEffect(() => {
