@@ -19,7 +19,7 @@ import QuickAddTrade from './components/quicktrade/QuickAddTrade.jsx'
 import LoginPage from './components/auth/LoginPage.jsx'
 import { useSettingsStore } from './store/useSettingsStore.js'
 import { setAnthropicFallbackKey } from './utils/ai.js'
-import { setSchwabToken } from './utils/marketData.js'
+import { setSchwabToken, setSchwabTokenGetter } from './utils/marketData.js'
 import { useAuthStore } from './store/useAuthStore.js'
 import { useSchwabStore } from './store/useSchwabStore.js'
 import { useTradeStore } from './store/useTradeStore.js'
@@ -83,6 +83,11 @@ export default function App() {
   useEffect(() => {
     setSchwabToken(schwabAccessToken || null)
   }, [schwabAccessToken])
+
+  // Register a getter so marketData always gets a fresh (auto-refreshed) token
+  useEffect(() => {
+    setSchwabTokenGetter(() => useSchwabStore.getState().getValidToken())
+  }, [])
 
   // Bootstrap Supabase auth session on mount
   useEffect(() => {

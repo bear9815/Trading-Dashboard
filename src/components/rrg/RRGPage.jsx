@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSettingsStore } from "../../store/useSettingsStore.js";
-import { fetchHistory } from "../../utils/marketData.js";
+import { fetchHistory, fetchQuotes } from "../../utils/marketData.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const BENCHMARKS = [
@@ -281,13 +281,32 @@ const useReturnData = (universe) => {
     }
 
     const thisYear = new Date().getFullYear().toString();
+
+    // Fetch live quotes for real-time "Today" returns (Schwab → Yahoo → Stooq)
+    const allSymbols = universe.map(i => i.ticker);
+    let liveQuotes = new Map();
+    try {
+      liveQuotes = await fetchQuotes(allSymbols);
+    } catch { /* non-fatal — fall back to last close */ }
+
     const computed = {};
     for (const item of universe) {
       const c = localCache[item.ticker];
       if (!c?.closes?.length) continue;
       const { closes, dates = [] } = c;
       const n = closes.length;
-      const last = closes[n - 1];
+      const prevClose = closes[n - 1]; // last historical close (yesterday)
+
+      // Use live quote if available, otherwise fall back to last historical close
+      const liveQ    = liveQuotes.get(item.ticker);
+      const livePrice = liveQ?.price ?? null;
+      const last      = livePrice ?? prevClose;
+
+      // d1 = live price vs yesterday's close (true intraday); others from history
+      const d1 = livePrice != null && prevClose
+        ? ((livePrice - prevClose) / prevClose) * 100
+        : (closes.length >= 2 ? ((prevClose - closes[n - 2]) / closes[n - 2]) * 100 : null);
+
       const pct = (lb) => {
         if (n < lb + 1) return null;
         const base = closes[n - 1 - lb];
@@ -302,7 +321,7 @@ const useReturnData = (universe) => {
           if (base) ytd = ((last - base) / base) * 100;
         }
       }
-      computed[item.id] = { d1: pct(1), d5: pct(5), d21: pct(21), d63: pct(63), ytd };
+      computed[item.id] = { d1, d5: pct(5), d21: pct(21), d63: pct(63), ytd };
     }
     setData(computed); setStatus("done");
   }, [universe]); // eslint-disable-line react-hooks/exhaustive-deps

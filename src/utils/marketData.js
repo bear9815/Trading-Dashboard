@@ -15,8 +15,22 @@ const STOOQ  = '/api/stooq'
 const BASE   = `${YF}/v8/finance/chart`
 
 // ── Schwab token (injected from App.jsx) ──────────────────────────────────────
+// _schwabToken: static snapshot (fallback)
+// _schwabTokenGetter: async fn that calls useSchwabStore.getValidToken()
+//   — always returns a fresh token, handling auto-refresh transparently
 let _schwabToken = null
+let _schwabTokenGetter = null
+
 export function setSchwabToken(token) { _schwabToken = token }
+export function setSchwabTokenGetter(fn) { _schwabTokenGetter = fn }
+
+/** Returns a valid Schwab token, refreshing if needed. Null if not connected. */
+async function getActiveSchwabToken() {
+  if (_schwabTokenGetter) {
+    try { return await _schwabTokenGetter() } catch { /* fall through */ }
+  }
+  return _schwabToken
+}
 
 function toDateStr(unixSec) {
   return new Date(unixSec * 1000).toISOString().slice(0, 10)
@@ -304,11 +318,12 @@ export async function fetchQuote(symbol) {
   const { finnhubApiKey } = getApiKeys()
 
   // 0. Schwab (when connected) — best quality, real-time
-  if (_schwabToken) {
+  const schwabTok0 = await getActiveSchwabToken()
+  if (schwabTok0) {
     try {
       const params = new URLSearchParams({
         path:   `/marketdata/v1/quotes/${encodeURIComponent(symbol)}`,
-        token:  _schwabToken,
+        token:  schwabTok0,
       })
       const res = await fetch(`/api/schwab/proxy?${params}`)
       if (res.ok) {
@@ -392,9 +407,10 @@ export async function fetchHistory(symbol, startDate, endDate, interval = '1d') 
   const errors = []
 
   // 0. Schwab (best — authenticated, no rate limits, when connected)
-  if (_schwabToken) {
+  const schwabTokH = await getActiveSchwabToken()
+  if (schwabTokH) {
     try {
-      const bars = await fetchHistorySchwab(symbol, startDate, endDate, _schwabToken)
+      const bars = await fetchHistorySchwab(symbol, startDate, endDate, schwabTokH)
       if (bars.length) return bars
     } catch (e) {
       errors.push(`Schwab: ${e.message}`)
@@ -480,12 +496,13 @@ export async function fetchQuotes(symbols) {
   const results = new Map()
 
   // 0. Schwab (when connected) — single batch call, most reliable
-  if (_schwabToken) {
+  const schwabTokQ = await getActiveSchwabToken()
+  if (schwabTokQ) {
     try {
       const params = new URLSearchParams({
         path:    '/marketdata/v1/quotes',
         symbols: uniq.join(','),
-        token:   _schwabToken,
+        token:   schwabTokQ,
       })
       const res  = await fetch(`/api/schwab/proxy?${params}`)
       if (res.ok) {
