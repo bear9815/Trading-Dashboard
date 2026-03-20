@@ -84,6 +84,7 @@ export default function App() {
         loadJournal(session.user.id)
         loadMorning(session.user.id)
         loadSettings(session.user.id)
+        loadSchwabTokens()
       }
     })
 
@@ -95,6 +96,7 @@ export default function App() {
         loadJournal(session.user.id)
         loadMorning(session.user.id)
         loadSettings(session.user.id)
+        loadSchwabTokens()
       }
       if (event === 'SIGNED_OUT') {
         clearLocalState()
