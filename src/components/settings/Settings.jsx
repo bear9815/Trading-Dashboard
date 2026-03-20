@@ -1,10 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Trash2, Eye, EyeOff, Save, X, LogOut, Wifi, WifiOff, RefreshCw, ExternalLink } from 'lucide-react'
+import { Plus, Trash2, Eye, EyeOff, Save, X, LogOut, Wifi, WifiOff, RefreshCw, ExternalLink, CheckCircle, AlertCircle, Clock } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useJournalStore } from '../../store/useJournalStore.js'
 import { useAuthStore } from '../../store/useAuthStore.js'
 import { useSchwabStore } from '../../store/useSchwabStore.js'
+import { supabase } from '../../lib/supabase.js'
+
+const IS_LOCALHOST = typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
 
 const BROKERS = ['Schwab / ThinkorSwim', 'Interactive Brokers', 'Fidelity', 'Other']
 const BENCHMARKS = [
@@ -49,6 +53,38 @@ export default function Settings() {
     loadTokens: schwabLoadTokens,
     syncAccounts: schwabSyncAccounts,
   } = useSchwabStore()
+
+  // ── Schwab token status (reads Supabase directly — works on localhost too) ──
+  const [schwabRecord,     setSchwabRecord]     = useState(null)  // raw Supabase row
+  const [schwabRecordLoading, setSchwabRecordLoading] = useState(true)
+  const [testResult,       setTestResult]       = useState(null)  // null | 'ok' | 'fail'
+  const [testLoading,      setTestLoading]      = useState(false)
+
+  useEffect(() => {
+    if (!supabase || !user) { setSchwabRecordLoading(false); return }
+    supabase
+      .from('schwab_tokens')
+      .select('expires_at, updated_at')
+      .eq('user_id', user.id)
+      .single()
+      .then(({ data }) => { setSchwabRecord(data ?? null); setSchwabRecordLoading(false) })
+  }, [user])
+
+  const handleTestConnection = useCallback(async () => {
+    setTestLoading(true)
+    setTestResult(null)
+    try {
+      const { getValidToken } = useSchwabStore.getState()
+      const token = await getValidToken()
+      if (!token) { setTestResult('no-token'); return }
+      const res = await fetch(`/api/schwab/proxy?path=/marketdata/v1/quotes&symbols=SPY&token=${encodeURIComponent(token)}`)
+      setTestResult(res.ok ? 'ok' : 'fail')
+    } catch {
+      setTestResult('fail')
+    } finally {
+      setTestLoading(false)
+    }
+  }, [])
 
   const [showKey, setShowKey]   = useState(false)
   const [keyInput, setKeyInput] = useState(apiKey)
@@ -410,47 +446,71 @@ export default function Settings() {
         <div className="flex items-center justify-between">
           <SectionTitle>Charles Schwab — Live Data</SectionTitle>
           {schwabConnected && (
-            <span className="flex items-center gap-1 text-[10px] text-accent-green">
-              <Wifi size={11} /> Connected
+            <span className="flex items-center gap-1.5 text-[10px] font-medium text-accent-green">
+              <span className="w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse" />
+              Live
             </span>
           )}
         </div>
 
-        {!schwabConnected ? (
-          <>
-            <p className="text-xs text-gray-400">
-              Connect your Schwab account to see live positions, real-time quotes, and pull market data directly from Schwab's API.
-              Requires a registered app at{' '}
-              <a
-                href="https://developer.schwab.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-accent-blue hover:underline inline-flex items-center gap-0.5"
-              >
-                developer.schwab.com <ExternalLink size={10} />
-              </a>
-            </p>
-            <div className="rounded-lg bg-surface-200 border border-white/5 p-3 text-xs space-y-1.5 text-gray-400">
-              <p className="font-medium text-gray-300">Setup checklist</p>
-              <p>1. Register an app on the Schwab Developer Portal</p>
-              <p>2. Set redirect URI to <span className="mono text-gray-300">/api/schwab/callback</span> on your Vercel domain</p>
-              <p>3. Add <span className="mono text-gray-300">SCHWAB_APP_KEY</span>, <span className="mono text-gray-300">SCHWAB_APP_SECRET</span>, <span className="mono text-gray-300">SCHWAB_REDIRECT_URI</span>, <span className="mono text-gray-300">APP_URL</span>, and <span className="mono text-gray-300">SUPABASE_SERVICE_ROLE_KEY</span> to Vercel environment variables</p>
-              <p>4. Click Connect below</p>
+        {/* ── Supabase token record (always visible, works on localhost) ── */}
+        <div className="rounded-lg bg-surface-200 border border-white/5 p-3 text-xs space-y-2">
+          <p className="font-medium text-gray-300 flex items-center gap-1.5">
+            <span>Token Status</span>
+            {schwabRecordLoading && <RefreshCw size={10} className="animate-spin text-gray-500" />}
+          </p>
+          {schwabRecordLoading ? (
+            <p className="text-gray-600">Checking Supabase…</p>
+          ) : schwabRecord ? (
+            <>
+              <div className="flex items-center gap-2">
+                <CheckCircle size={12} className="text-accent-green flex-shrink-0" />
+                <span className="text-gray-300">Tokens stored in Supabase</span>
+              </div>
+              {schwabRecord.expires_at && (() => {
+                const exp     = new Date(schwabRecord.expires_at)
+                const expired = exp < new Date()
+                const mins    = Math.round((exp - Date.now()) / 60000)
+                return (
+                  <div className={`flex items-center gap-2 ${expired ? 'text-accent-red' : mins < 10 ? 'text-accent-yellow' : 'text-gray-400'}`}>
+                    <Clock size={11} className="flex-shrink-0" />
+                    {expired
+                      ? `Access token expired ${Math.abs(mins)} min ago — will auto-refresh next page load`
+                      : `Access token valid for ~${mins} min`}
+                  </div>
+                )
+              })()}
+              {schwabRecord.updated_at && (
+                <p className="text-gray-600">Last auth: {new Date(schwabRecord.updated_at).toLocaleString()}</p>
+              )}
+            </>
+          ) : (
+            <div className="flex items-center gap-2 text-gray-500">
+              <AlertCircle size={12} className="flex-shrink-0" />
+              No tokens found — connect below
             </div>
-            {schwabError && (
-              <p className="text-xs text-accent-red">{schwabError}</p>
-            )}
-            <button
-              onClick={startOAuth}
-              disabled={schwabLoading}
-              className="btn-primary flex items-center gap-2 text-sm disabled:opacity-50"
-            >
-              <Wifi size={14} />
-              {schwabLoading ? 'Connecting…' : 'Connect Schwab'}
-            </button>
-          </>
-        ) : (
-          <>
+          )}
+        </div>
+
+        {/* ── Live session status ── */}
+        {schwabConnected && (
+          <div className="space-y-3">
+            {/* Test connection button */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleTestConnection}
+                disabled={testLoading}
+                className="btn-ghost flex items-center gap-1.5 text-xs disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={testLoading ? 'animate-spin' : ''} />
+                {testLoading ? 'Testing…' : 'Test Connection'}
+              </button>
+              {testResult === 'ok'       && <span className="text-xs text-accent-green flex items-center gap-1"><CheckCircle size={11} /> SPY quote received — Schwab API working</span>}
+              {testResult === 'fail'     && <span className="text-xs text-accent-red  flex items-center gap-1"><AlertCircle size={11} /> API call failed — token may need refresh</span>}
+              {testResult === 'no-token' && <span className="text-xs text-accent-yellow flex items-center gap-1"><AlertCircle size={11} /> No valid token in memory</span>}
+            </div>
+
+            {/* Accounts */}
             <div className="space-y-2">
               {schwabAccounts.map(a => (
                 <div key={a.hashValue} className="flex items-center justify-between card-sm text-xs">
@@ -466,14 +526,12 @@ export default function Settings() {
                 </div>
               ))}
               {schwabAccounts.length === 0 && (
-                <p className="text-xs text-gray-600">No accounts loaded yet. Click Refresh.</p>
+                <p className="text-xs text-gray-600">No accounts loaded. Click Refresh Accounts.</p>
               )}
             </div>
 
             {schwabLastSync && (
-              <p className="text-[10px] text-gray-600">
-                Last synced: {schwabLastSync.toLocaleTimeString()}
-              </p>
+              <p className="text-[10px] text-gray-600">Last synced: {schwabLastSync.toLocaleTimeString()}</p>
             )}
 
             <div className="flex gap-2">
@@ -493,6 +551,38 @@ export default function Settings() {
                 Disconnect
               </button>
             </div>
+          </div>
+        )}
+
+        {/* ── Not connected ── */}
+        {!schwabConnected && (
+          <>
+            {IS_LOCALHOST ? (
+              <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 p-3 text-xs text-amber-300 space-y-1">
+                <p className="font-medium">Running on localhost</p>
+                <p className="text-amber-400/70">Schwab API endpoints only run on Vercel. To connect or verify your connection, visit your <a href="https://vercel.com/dashboard" target="_blank" rel="noopener noreferrer" className="underline">deployed app URL</a>.</p>
+                <p className="text-amber-400/70">If you already connected on Vercel, the token status above confirms it's stored.</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-gray-400">
+                  Connect your Schwab account for live quotes and real-time price data across all dashboard tools.
+                </p>
+                {schwabError && (
+                  <p className="text-xs text-accent-red flex items-center gap-1.5">
+                    <AlertCircle size={11} /> {schwabError}
+                  </p>
+                )}
+                <button
+                  onClick={startOAuth}
+                  disabled={schwabLoading}
+                  className="btn-primary flex items-center gap-2 text-sm disabled:opacity-50"
+                >
+                  <Wifi size={14} />
+                  {schwabLoading ? 'Connecting…' : 'Connect Schwab'}
+                </button>
+              </>
+            )}
           </>
         )}
       </div>
