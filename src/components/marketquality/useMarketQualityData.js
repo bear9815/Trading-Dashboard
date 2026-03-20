@@ -369,20 +369,50 @@ export function useMarketQualityData() {
     setError(null)
 
     try {
+      // ── Symbol translation ───────────────────────────────────────────────────
+      // Schwab-native index symbols don't work with Yahoo/Stooq fallbacks.
+      // Map each Schwab symbol to its Yahoo-compatible equivalent so we can
+      // retry individually if the batch/Schwab call returns null.
+      const INDEX_FALLBACKS = {
+        '$VIX.X':   '^VIX',
+        '$VIX3M.X': '^VIX3M',
+        '$VVIX.X':  '^VVIX',
+        '$SKEW.X':  '^SKEW',
+        '$TNX.X':   '^TNX',
+        '$DXY':     'DX-Y.NYB',
+      }
+
       // ── 1. Batch quote fetch ────────────────────────────────────────────────
-      // Vol Dashboard symbols: $VIX3M.X and $SKEW.X added alongside VIX/VVIX
       const quoteSymbols = [
         '$VIX.X', '$VIX3M.X', '$VVIX.X', '$SKEW.X', '$TNX.X', '$DXY',
         'SPY', 'QQQ',
         'XLK', 'XLF', 'XLE', 'XLV', 'XLI', 'XLY', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC',
       ]
       const qmap = await fetchQuotes(quoteSymbols)
+
+      // For any index symbol that returned null, retry with Yahoo-compatible symbol
+      const indexMissing = Object.entries(INDEX_FALLBACKS)
+        .filter(([schwab]) => qmap.get(schwab)?.price == null)
+      if (indexMissing.length > 0) {
+        const fallbackResults = await Promise.allSettled(
+          indexMissing.map(([schwab, yahoo]) =>
+            fetchHistory(yahoo, new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10),
+              new Date().toISOString().slice(0, 10))
+              .then(bars => ({ schwab, price: bars.at(-1)?.close ?? null }))
+          )
+        )
+        for (const r of fallbackResults) {
+          if (r.status === 'fulfilled' && r.value.price != null) {
+            qmap.set(r.value.schwab, { price: r.value.price, change: null, changePct: null })
+          }
+        }
+      }
+
       const q    = sym => qmap.get(sym)?.price    ?? null
       const chg  = sym => qmap.get(sym)?.change   ?? null
       const pct  = sym => qmap.get(sym)?.changePct ?? null
 
       // ── 2. History fetches — all in parallel ────────────────────────────────
-      // SPY/QQQ/VIX for existing metrics + 5 factor ETFs for regime computation
       const today = new Date().toISOString().slice(0, 10)
       const d252  = new Date(Date.now() - 375 * 86400000).toISOString().slice(0, 10)
       const d60   = new Date(Date.now() -  88 * 86400000).toISOString().slice(0, 10)
@@ -390,7 +420,9 @@ export function useMarketQualityData() {
       const [spyR, qqqR, vixR, mtumR, iwfR, qualR, sizeR, vlueR] = await Promise.allSettled([
         fetchHistory('SPY',    d252, today),
         fetchHistory('QQQ',    d60,  today),
-        fetchHistory('$VIX.X', d252, today),
+        // Try Schwab-native $VIX.X first; if empty, fall back to ^VIX for Yahoo/Stooq
+        fetchHistory('$VIX.X', d252, today)
+          .then(bars => bars.length > 0 ? bars : fetchHistory('^VIX', d252, today)),
         fetchHistory('MTUM',   d252, today),
         fetchHistory('IWF',    d252, today),
         fetchHistory('QUAL',   d252, today),
@@ -441,6 +473,8 @@ export function useMarketQualityData() {
         :                    { text: 'Steep Backwdn.',  color: '#ff4757' }
 
       // ── 5. Macro ─────────────────────────────────────────────────────────────
+      // The index fallback (step 1) already populates $TNX.X/$DXY via ^TNX/DX-Y.NYB
+      // when Schwab quotes are unavailable, so these will have values in most cases.
       const tnxLevel  = q('$TNX.X')
       const tnxChange = chg('$TNX.X')
       const dxyPrice  = q('$DXY')
