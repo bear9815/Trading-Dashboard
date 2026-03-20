@@ -384,12 +384,18 @@ export async function fetchHistory(symbol, startDate, endDate, interval = '1d') 
     }
   }
 
-  // 2. Stooq (free, no key, reliable)
+  // 2. /api/history — server-side endpoint (Yahoo → Stooq), bypasses CORS/IP blocking
   try {
-    const bars = await fetchHistoryStooq(symbol, startDate, endDate)
-    if (bars.length) return bars
+    const start = new Date(startDate).toISOString().slice(0, 10)
+    const end   = new Date(endDate).toISOString().slice(0, 10)
+    const res   = await fetch(`/api/history?symbol=${encodeURIComponent(symbol)}&start=${start}&end=${end}`)
+    if (res.ok) {
+      const json = await res.json()
+      if (json.bars?.length) return json.bars
+    }
+    errors.push('api/history: no bars returned')
   } catch (e) {
-    errors.push(`Stooq: ${e.message}`)
+    errors.push(`api/history: ${e.message}`)
   }
 
   // 3. Finnhub (requires key)
@@ -400,14 +406,6 @@ export async function fetchHistory(symbol, startDate, endDate, interval = '1d') 
     } catch (e) {
       errors.push(`Finnhub: ${e.message}`)
     }
-  }
-
-  // 4. Yahoo Finance (last resort)
-  try {
-    const bars = await fetchHistoryYahoo(symbol, startDate, endDate, interval)
-    if (bars.length) return bars
-  } catch (e) {
-    errors.push(`Yahoo: ${e.message}`)
   }
 
   throw new Error(errors.length ? errors.join(' | ') : 'No historical data available')
