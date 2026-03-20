@@ -286,7 +286,8 @@ export const useSchwabStore = create((set, get) => ({
 
       const quotes = {}
       for (const [sym, info] of Object.entries(data)) {
-        const q = info.quote || {}
+        // Index symbols (e.g. $VIX.X) may return flat structure without a nested "quote" key
+        const q = info.quote || info || {}
         quotes[sym] = {
           lastPrice:      q.lastPrice      ?? q.mark ?? 0,
           bidPrice:       q.bidPrice       ?? 0,

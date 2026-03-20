@@ -508,7 +508,8 @@ export async function fetchQuotes(symbols) {
       if (res.ok) {
         const data = await res.json()
         for (const [sym, info] of Object.entries(data)) {
-          const q = info.quote || {}
+          // Index symbols (e.g. $VIX.X) may return flat structure without a nested "quote" key
+          const q = info.quote || info || {}
           const price = q.lastPrice ?? q.mark ?? null
           if (price != null) {
             results.set(sym, {

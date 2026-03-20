@@ -423,7 +423,8 @@ export function useMarketQualityData() {
       const regime   = classifyRegime(vs20d, vs50d, vs200d)
 
       // ── 4. Vol Dashboard metrics ─────────────────────────────────────────────
-      const vixLevel  = q('$VIX.X')
+      // Fall back to last historical close if live quote is unavailable
+      const vixLevel  = q('$VIX.X') ?? vixC.at(-1) ?? null
       const vix3m     = q('$VIX3M.X')
       const vvix      = q('$VVIX.X')
       const skew      = q('$SKEW.X')
