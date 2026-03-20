@@ -5,9 +5,9 @@ import {
   ReferenceLine, CartesianGrid,
 } from 'recharts'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
+import { useSchwabStore } from '../../store/useSchwabStore.js'
 import { callVolatilityAI } from '../../utils/ai.js'
-
-const STOOQ = '/api/stooq'
+import { fetchHistory } from '../../utils/marketData.js'
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
 
@@ -235,6 +235,7 @@ const DEFAULT_WEIGHTS = { vix: 35, term: 25, skew: 25, vvix: 15 }
 
 export default function VolatilityDashboard() {
   const { apiKey } = useSettingsStore()
+  const { connected, syncQuotes, quotes: schwabQuotes } = useSchwabStore()
 
   const [quotes,   setQuotes]   = useState(null)
   const [history,  setHistory]  = useState([])
@@ -252,7 +253,27 @@ export default function VolatilityDashboard() {
     setLoading(true)
     setError(null)
     try {
-      // /api/vix is a dedicated server-side endpoint that calls Yahoo/CBOE directly
+      // Try Schwab first ($VIX.X etc.) when connected
+      if (connected) {
+        await syncQuotes(['$VIX.X', '$VIX3M.X', '$VVIX.X', '$SKEW.X'])
+        const sq = useSchwabStore.getState().quotes
+        if (sq['$VIX.X']?.lastPrice) {
+          const vix  = sq['$VIX.X'].lastPrice
+          setQuotes({
+            vix,
+            vix3m: sq['$VIX3M.X']?.lastPrice ?? null,
+            vvix:  sq['$VVIX.X']?.lastPrice  ?? null,
+            skew:  sq['$SKEW.X']?.lastPrice  ?? null,
+            change:    sq['$VIX.X'].netChange    ?? null,
+            changePct: sq['$VIX.X'].netPctChange ?? null,
+            source: 'schwab',
+          })
+          setLoading(false)
+          return
+        }
+      }
+
+      // Fall back to /api/vix (Yahoo server-side + CBOE CSV)
       const res  = await fetch('/api/vix')
       const json = await res.json()
 
@@ -260,51 +281,42 @@ export default function VolatilityDashboard() {
       if (!json.VIX?.close)      throw new Error('Could not retrieve VIX data')
 
       setQuotes({
-        vix:  json.VIX?.close  ?? null,
-        vix3m: json.VIX3M?.close ?? null,
-        vvix: json.VVIX?.close ?? null,
-        skew: json.SKEW?.close ?? null,
+        vix:       json.VIX?.close   ?? null,
+        vix3m:     json.VIX3M?.close ?? null,
+        vvix:      json.VVIX?.close  ?? null,
+        skew:      json.SKEW?.close  ?? null,
         change:    json.VIX?.change    ?? null,
         changePct: json.VIX?.changePct ?? null,
+        source: 'api/vix',
       })
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [connected, syncQuotes])
 
   // ── Fetch historical VIX for sparkline ────────────────────────────────────
 
-  const fetchHistory = useCallback(async () => {
+  const fetchHistoryData = useCallback(async () => {
     try {
-      // Use Stooq for historical VIX — symbol is %5Evix (%5E = ^), no API key needed
       const end   = new Date()
       const start = new Date(end - 365 * 24 * 3600 * 1000)
-      const d1 = start.toISOString().slice(0, 10).replace(/-/g, '')
-      const d2 = end.toISOString().slice(0, 10).replace(/-/g, '')
-      const res = await fetch(`${STOOQ}/q/d/l/?s=%5Evix&d1=${d1}&d2=${d2}&i=d`)
-      const txt = await res.text()
-
-      // Parse CSV: Date,Open,High,Low,Close,Volume
-      const lines = txt.trim().split('\n').slice(1) // skip header
-      const data = lines.map(l => {
-        const cols = l.split(',')
-        const vix  = parseFloat(cols[4])
-        if (!cols[0] || isNaN(vix)) return null
-        const [y, m, d] = cols[0].split('-')
+      // fetchHistory uses Schwab → /api/history (Yahoo/Stooq server-side)
+      const bars = await fetchHistory('^VIX', start.toISOString(), end.toISOString())
+      const data = bars.map(b => {
+        const [y, m, d] = b.time.split('-')
         const label = new Date(+y, +m - 1, +d).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
-        return { date: label, vix }
-      }).filter(Boolean)
-
+        return { date: label, vix: b.close }
+      })
       if (data.length > 0) setHistory(data)
     } catch { /* chart is optional */ }
   }, [])
 
   useEffect(() => {
     fetchData()
-    fetchHistory()
-  }, [fetchData, fetchHistory])
+    fetchHistoryData()
+  }, [fetchData, fetchHistoryData])
 
   // ── Compute scores ────────────────────────────────────────────────────────
 
@@ -354,8 +366,8 @@ export default function VolatilityDashboard() {
   const handleRefresh = useCallback(() => {
     setAiText('')
     fetchData()
-    fetchHistory()
-  }, [fetchData, fetchHistory])
+    fetchHistoryData()
+  }, [fetchData, fetchHistoryData])
 
   // ── Render ────────────────────────────────────────────────────────────────
 
