@@ -297,11 +297,38 @@ async function fetchHistoryYahoo(symbol, startDate, endDate, interval = '1d') {
 
 /**
  * Fetch the current quote for a symbol.
- * Cascade: Finnhub (if key) → Stooq → Yahoo Finance
+ * Cascade: Schwab → Finnhub (if key) → Yahoo Finance v7 → Stooq → Yahoo v8
  * Returns { symbol, price, previousClose, change, changePct }
  */
 export async function fetchQuote(symbol) {
   const { finnhubApiKey } = getApiKeys()
+
+  // 0. Schwab (when connected) — best quality, real-time
+  if (_schwabToken) {
+    try {
+      const params = new URLSearchParams({
+        path:   `/marketdata/v1/quotes/${encodeURIComponent(symbol)}`,
+        token:  _schwabToken,
+      })
+      const res = await fetch(`/api/schwab/proxy?${params}`)
+      if (res.ok) {
+        const data = await res.json()
+        const entry = data[symbol] || data[symbol.toUpperCase()]
+        const q = entry?.quote || entry || {}
+        const price = q.lastPrice ?? q.mark ?? null
+        if (price != null) {
+          return {
+            symbol,
+            price,
+            previousClose: q.closePrice ?? price,
+            change:        q.netChange        ?? 0,
+            changePct:     q.netPercentChange  ?? 0,
+            marketState:   'REGULAR',
+          }
+        }
+      }
+    } catch { /* fall through */ }
+  }
 
   // 1. Finnhub (real-time, requires key)
   if (finnhubApiKey) {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSettingsStore } from "../../store/useSettingsStore.js";
+import { fetchHistory } from "../../utils/marketData.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const BENCHMARKS = [
@@ -178,55 +179,19 @@ const lsSet = (key, data) => {
 
 // ─── Fetch ────────────────────────────────────────────────────────────────────
 
-// Yahoo Finance fallback — uses the existing /api/yf proxy in vite.config.js
-const fetchClosesYahoo = async (sym, days = 260) => {
-  try {
-    const range = days <= 130 ? '6mo' : '1y';
-    const r = await fetch(`/api/yf/v8/finance/chart/${sym.toUpperCase()}?interval=1d&range=${range}`);
-    if (!r.ok) return null;
-    const json = await r.json();
-    const result = json.chart?.result?.[0];
-    if (!result?.timestamp) return null;
-    const ts = result.timestamp;
-    const qClose = result.indicators.quote[0].close;
-    const closes = [], dates = [];
-    const start = Math.max(0, ts.length - days);
-    for (let i = start; i < ts.length; i++) {
-      const c = qClose[i];
-      if (c != null && !isNaN(c)) {
-        closes.push(c);
-        dates.push(new Date(ts[i] * 1000).toISOString().slice(0, 10));
-      }
-    }
-    return closes.length >= 30 ? { closes, dates } : null;
-  } catch { return null; }
-};
-
+// Uses fetchHistory from marketData.js: Schwab → /api/history (Yahoo/Stooq server-side)
 const fetchCloses = async (sym, days = 260) => {
-  // 1. Try stooq with a hard 7s timeout so failures don't stall the load bar
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 7000);
-    const r = await fetch(`/api/stooq/q/d/l/?s=${sym.toLowerCase()}.us&i=d`, { signal: ctrl.signal });
-    clearTimeout(timer);
-    if (r.ok) {
-      const text = await r.text();
-      const lines = text.trim().split("\n").slice(1);
-      if (lines.length >= 30) {
-        const closes = [], dates = [];
-        lines.slice(-days).forEach(line => {
-          const p = line.split(",");
-          if (p.length < 5) return;
-          const c = parseFloat(p[4]);
-          if (!isNaN(c)) { closes.push(c); dates.push(p[0]); }
-        });
-        if (closes.length >= 30) return { closes, dates };
-      }
-    }
-  } catch { /* fall through to Yahoo */ }
-
-  // 2. Yahoo Finance fallback (via /api/yf proxy)
-  return fetchClosesYahoo(sym, days);
+    const end   = new Date();
+    // Request extra days to account for weekends/holidays
+    const start = new Date(end - Math.ceil(days * 1.5) * 24 * 3600 * 1000);
+    const bars  = await fetchHistory(sym, start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
+    if (!bars || bars.length < 30) return null;
+    const slice  = bars.slice(-days);
+    const closes = slice.map(b => b.close);
+    const dates  = slice.map(b => b.time);
+    return { closes, dates };
+  } catch { return null; }
 };
 
 // ─── RRG Math ─────────────────────────────────────────────────────────────────
