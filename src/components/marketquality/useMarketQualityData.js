@@ -1,9 +1,10 @@
 /**
  * useMarketQualityData — data fetching + scoring for Market Dashboard
  *
- * All data sourced from Schwab (via fetchQuotes / fetchHistory which use
- * getActiveSchwabToken → getValidToken for auto-refresh).
- * If a symbol is unavailable the corresponding metric shows null (N/A in UI).
+ * Volatility panel: VIX + VIX3M term structure + VVIX + SKEW  (from Vol Dashboard)
+ * Factor Regime panel: MTUM/IWF/QUAL/SIZE/VLUE vs SPY momentum  (from Factor Regime)
+ *
+ * All data from Schwab. Symbol unavailable → null → N/A in UI.
  */
 
 import { useState, useCallback } from 'react'
@@ -26,7 +27,7 @@ const JOBS_2026 = [
   '2026-09-04', '2026-10-02', '2026-11-06', '2026-12-04',
 ]
 
-// ── Sector config (exported for component use) ────────────────────────────────
+// ── Sector + Factor config ─────────────────────────────────────────────────────
 
 export const SECTORS = [
   { id: 'XLK',  label: 'Technology',     color: '#4db8ff' },
@@ -42,14 +43,26 @@ export const SECTORS = [
   { id: 'XLC',  label: 'Comm. Services', color: '#fb923c' },
 ]
 
-// ── Score weights per mode ────────────────────────────────────────────────────
+// Factor definitions — ordered by relevance to swing/position trading
+export const FACTORS = [
+  { id: 'MTUM', label: 'Momentum', desc: 'Are momentum strategies working?',          swingWeight: 0.30, posWeight: 0.20, invert: false },
+  { id: 'IWF',  label: 'Growth',   desc: 'Is growth/tech leading?',                   swingWeight: 0.15, posWeight: 0.20, invert: false },
+  { id: 'QUAL', label: 'Quality',  desc: 'Defensive rotation? (BULL = risk-off)',      swingWeight: 0.10, posWeight: 0.15, invert: true  },
+  { id: 'SIZE', label: 'Small Cap', desc: 'Broad participation / risk appetite',       swingWeight: 0.10, posWeight: 0.10, invert: false },
+  { id: 'VLUE', label: 'Value',    desc: 'Value vs Growth rotation (BULL = rotation)', swingWeight: 0.00, posWeight: 0.00, invert: true  },
+  // VLUE weight = 0 — used for display/context only, not scored
+]
+// Factor breadth gets remaining weight (35% swing / 35% position)
+const FACTOR_BREADTH_WEIGHT = { swing: 0.35, position: 0.35 }
+
+// ── Score weights per mode ─────────────────────────────────────────────────────
 
 export const WEIGHTS = {
-  swing:    { volatility: 25, trend: 20, breadth: 20, momentum: 25, macro: 10 },
-  position: { volatility: 15, trend: 30, breadth: 25, momentum: 15, macro: 15 },
+  swing:    { volatility: 25, trend: 20, factorRegime: 20, momentum: 25, macro: 10 },
+  position: { volatility: 15, trend: 30, factorRegime: 25, momentum: 15, macro: 15 },
 }
 
-// ── Calendar helpers ──────────────────────────────────────────────────────────
+// ── Calendar helpers ───────────────────────────────────────────────────────────
 
 function daysUntil(dateStr) {
   const today = new Date(); today.setHours(0, 0, 0, 0)
@@ -62,10 +75,8 @@ export function getUpcomingEvents() {
     for (const d of dates) {
       const days = daysUntil(d)
       if (days >= 0 && days <= 7) {
-        events.push({
-          type, label, date: d, daysAway: days,
-          urgency: days === 0 ? 'high' : days <= 2 ? 'medium' : 'low',
-        })
+        events.push({ type, label, date: d, daysAway: days,
+          urgency: days === 0 ? 'high' : days <= 2 ? 'medium' : 'low' })
       }
     }
   }
@@ -80,7 +91,7 @@ function nearestFomcDays() {
   return upcoming.length ? Math.min(...upcoming) : 999
 }
 
-// ── Math helpers ──────────────────────────────────────────────────────────────
+// ── Math helpers ───────────────────────────────────────────────────────────────
 
 function sma(arr, n) {
   if (!arr || arr.length < n) return null
@@ -101,109 +112,191 @@ function calcRSI14(closes) {
 
 function calcPercentile(arr, value) {
   if (!arr?.length || value == null) return null
-  const below = arr.filter(x => x <= value).length
-  return Math.round((below / arr.length) * 100)
+  return Math.round((arr.filter(x => x <= value).length / arr.length) * 100)
 }
 
 function calcSlope5d(arr) {
   if (!arr || arr.length < 5) return null
   const last = arr.slice(-5)
-  // Simple linear regression slope
-  const n = 5, xs = [0, 1, 2, 3, 4]
-  const mx = 2, my = last.reduce((s, x) => s + x, 0) / n
-  const num = xs.reduce((s, x, i) => s + (x - mx) * (last[i] - my), 0)
-  const den = xs.reduce((s, x) => s + (x - mx) ** 2, 0)
+  const mx = 2, my = last.reduce((s, x) => s + x, 0) / 5
+  const num = [0,1,2,3,4].reduce((s, x, i) => s + (x - mx) * (last[i] - my), 0)
+  const den = [0,1,2,3,4].reduce((s, x) => s + (x - mx) ** 2, 0)
   return den ? num / den : 0
 }
 
 export function classifyRegime(vs20d, vs50d, vs200d) {
-  if (vs200d == null) return { label: 'Unknown',   detail: 'Insufficient data',    color: '#64748b' }
-  if (vs200d > 0 && vs50d > 0 && vs20d > 0) return { label: 'Uptrend',    detail: 'Full bull stack',   color: '#00d084' }
-  if (vs200d > 0 && vs50d > 0 && vs20d < 0) return { label: 'Pullback',   detail: 'In uptrend',        color: '#ffa502' }
-  if (vs200d > 0 && vs50d  < 0)             return { label: 'Correcting', detail: 'Below 50d MA',      color: '#ffa502' }
-  if (vs200d < 0 && vs50d  < 0 && vs20d < 0) return { label: 'Downtrend', detail: 'Bear stack',        color: '#ff4757' }
+  if (vs200d == null) return { label: 'Unknown',   detail: 'Insufficient data', color: '#64748b' }
+  if (vs200d > 0 && vs50d > 0 && vs20d > 0) return { label: 'Uptrend',    detail: 'Full bull stack',  color: '#00d084' }
+  if (vs200d > 0 && vs50d > 0 && vs20d < 0) return { label: 'Pullback',   detail: 'In uptrend',       color: '#ffa502' }
+  if (vs200d > 0 && vs50d  < 0)             return { label: 'Correcting', detail: 'Below 50d MA',     color: '#ffa502' }
+  if (vs200d < 0 && vs50d  < 0 && vs20d < 0) return { label: 'Downtrend', detail: 'Bear stack',       color: '#ff4757' }
   return { label: 'Choppy', detail: 'Mixed signals', color: '#94a3b8' }
 }
 
 export function deriveFedStance(tnxLevel) {
   if (tnxLevel == null) return null
-  if (tnxLevel > 4.8)  return { label: 'Hawkish',        color: '#ff4757' }
-  if (tnxLevel > 4.2)  return { label: 'Neutral-Hawkish', color: '#ffa502' }
-  if (tnxLevel > 3.6)  return { label: 'Neutral',         color: '#94a3b8' }
-  if (tnxLevel > 3.0)  return { label: 'Neutral-Dovish',  color: '#00d084' }
+  if (tnxLevel > 4.8) return { label: 'Hawkish',         color: '#ff4757' }
+  if (tnxLevel > 4.2) return { label: 'Neutral-Hawkish', color: '#ffa502' }
+  if (tnxLevel > 3.6) return { label: 'Neutral',         color: '#94a3b8' }
+  if (tnxLevel > 3.0) return { label: 'Neutral-Dovish',  color: '#00d084' }
   return { label: 'Dovish', color: '#00d084' }
 }
 
-// ── Scoring functions (all return 0–100 or null) ──────────────────────────────
+// ── Factor regime computation ──────────────────────────────────────────────────
 
-export function scoreVolatility(vixLevel, vixSlope, vixPctile) {
+/**
+ * Given 252d of history for one factor and SPY, compute:
+ *  1. Active returns (factor ret - SPY ret)
+ *  2. EWMA (halflife = 63d) of active returns
+ *  3. Expanding Z-score of the EWMA
+ *  4. Second EWMA smoothing (halflife = 21d)
+ *  Returns { zScore, regime: 'BULL'|'BEAR', strength: |z| }
+ */
+function computeOneFactorRegime(factorBars, spyBars) {
+  if (!factorBars?.length || !spyBars?.length) return null
+  const spyMap = new Map(spyBars.map(b => [b.time, b.close]))
+  const aligned = factorBars.filter(b => spyMap.has(b.time))
+  if (aligned.length < 60) return null
+
+  // Active daily returns
+  const activeRets = []
+  for (let i = 1; i < aligned.length; i++) {
+    const fRet  = (aligned[i].close - aligned[i-1].close) / aligned[i-1].close
+    const sPrev = spyMap.get(aligned[i-1].time)
+    const sCurr = spyMap.get(aligned[i].time)
+    if (!sPrev || !sCurr) continue
+    activeRets.push(fRet - (sCurr - sPrev) / sPrev)
+  }
+  if (activeRets.length < 40) return null
+
+  // EWMA (halflife = 63)
+  const a1   = 1 - Math.exp(-Math.LN2 / 63)
+  const ewma = [activeRets[0]]
+  for (let i = 1; i < activeRets.length; i++)
+    ewma.push(a1 * activeRets[i] + (1 - a1) * ewma[i-1])
+
+  // Expanding Z-score (min window 30)
+  const zscores = []
+  for (let i = 30; i < ewma.length; i++) {
+    const slice = ewma.slice(0, i + 1)
+    const mean  = slice.reduce((s, x) => s + x, 0) / slice.length
+    const std   = Math.sqrt(slice.reduce((s, x) => s + (x - mean) ** 2, 0) / slice.length)
+    zscores.push(std > 0 ? (ewma[i] - mean) / std : 0)
+  }
+  if (!zscores.length) return null
+
+  // Second EWMA smoothing (halflife = 21)
+  const a2      = 1 - Math.exp(-Math.LN2 / 21)
+  const smoothZ = [zscores[0]]
+  for (let i = 1; i < zscores.length; i++)
+    smoothZ.push(a2 * zscores[i] + (1 - a2) * smoothZ[i-1])
+
+  const z = smoothZ[smoothZ.length - 1] ?? 0
+  return { zScore: z, regime: z > 0 ? 'BULL' : 'BEAR', strength: Math.abs(z) }
+}
+
+// ── Scoring functions (all return 0–100 or null) ───────────────────────────────
+
+/**
+ * Volatility score — mirrors Vol Dashboard's composite:
+ *  VIX level (35%) + VIX slope (20%) + VIX percentile (20%)
+ *  + Term structure ratio (15%) + VVIX (5%) + SKEW (5%)
+ */
+export function scoreVolatility(vixLevel, vixSlope, vixPctile, termRatio, vvix, skew) {
   if (vixLevel == null) return null
 
-  // Level: sweet spot for swing is 14–22
-  let levelS
-  if      (vixLevel < 12) levelS = 50   // too calm / complacency
-  else if (vixLevel < 16) levelS = 85
-  else if (vixLevel < 20) levelS = 75
-  else if (vixLevel < 25) levelS = 50
-  else if (vixLevel < 30) levelS = 28
-  else                    levelS = 8
+  // VIX level — sweet spot for swing: 14–22
+  const levelS = vixLevel < 12 ? 50 : vixLevel < 16 ? 85 : vixLevel < 20 ? 75
+               : vixLevel < 25 ? 48 : vixLevel < 30 ? 26 : 8
 
-  // Slope (5d): falling = improving, rising = deteriorating
+  // VIX 5d slope — falling = improving conditions
   let slopeS = 58
-  if (vixSlope != null) {
-    if      (vixSlope < -2.0) slopeS = 92
-    else if (vixSlope < -0.5) slopeS = 75
-    else if (vixSlope <  0.5) slopeS = 58
-    else if (vixSlope <  2.0) slopeS = 32
-    else                      slopeS = 10
-  }
+  if (vixSlope != null)
+    slopeS = vixSlope < -2 ? 92 : vixSlope < -0.5 ? 75 : vixSlope < 0.5 ? 58
+           : vixSlope < 2  ? 30 : 10
 
-  // Percentile: lower = historically calm
+  // VIX percentile — lower = historically calm
   let pctS = 58
-  if (vixPctile != null) {
-    if      (vixPctile < 20) pctS = 88
-    else if (vixPctile < 40) pctS = 72
-    else if (vixPctile < 60) pctS = 50
-    else if (vixPctile < 80) pctS = 28
-    else                     pctS = 10
-  }
+  if (vixPctile != null)
+    pctS = vixPctile < 20 ? 88 : vixPctile < 40 ? 72 : vixPctile < 60 ? 50
+         : vixPctile < 80 ? 26 : 10
 
-  return Math.round(levelS * 0.45 + slopeS * 0.30 + pctS * 0.25)
+  // Term structure (VIX / VIX3M)
+  // < 1 = contango (calm), > 1 = backwardation (fear spike)
+  let termS = 65
+  if (termRatio != null)
+    termS = termRatio < 0.88 ? 92 : termRatio < 0.95 ? 82 : termRatio < 1.00 ? 70
+          : termRatio < 1.05 ? 42 : termRatio < 1.10 ? 20 : 8
+
+  // VVIX — volatility of volatility; high = unstable vol regime
+  let vvixS = 65
+  if (vvix != null)
+    vvixS = vvix < 85 ? 90 : vvix < 95 ? 75 : vvix < 108 ? 50 : vvix < 120 ? 24 : 8
+
+  // SKEW — high = expensive tail risk / hidden fear
+  let skewS = 65
+  if (skew != null)
+    skewS = skew < 115 ? 88 : skew < 125 ? 74 : skew < 135 ? 55 : skew < 145 ? 30 : 10
+
+  return Math.round(levelS*0.35 + slopeS*0.20 + pctS*0.20 + termS*0.15 + vvixS*0.05 + skewS*0.05)
 }
 
 export function scoreTrend(vs20d, vs50d, vs200d, rsi14) {
   let score = 0
-
-  // MA stack (60 pts)
   if (vs200d != null) score += vs200d > 0 ? 25 : 0
   if (vs50d  != null) score += vs50d  > 0 ? 20 : 0
   if (vs20d  != null) score += vs20d  > 0 ? 15 : 0
-
-  // RSI-14 (40 pts)
   let rsiS = 50
-  if (rsi14 != null) {
-    if      (rsi14 > 70) rsiS = 65
-    else if (rsi14 > 55) rsiS = 90
-    else if (rsi14 > 45) rsiS = 62
-    else if (rsi14 > 30) rsiS = 28
-    else                 rsiS = 8
-  }
-  score += rsiS * 0.40
-
-  return Math.round(Math.min(100, score))
+  if (rsi14 != null)
+    rsiS = rsi14 > 70 ? 65 : rsi14 > 55 ? 90 : rsi14 > 45 ? 62 : rsi14 > 30 ? 28 : 8
+  return Math.round(Math.min(100, score + rsiS * 0.40))
 }
 
-export function scoreBreadth(spxa50r, spxa200r, spxa20r, adRatio, hlRatio) {
-  let total = 0, wsum = 0
-  const add = (val, fn, w) => {
-    if (val != null && !isNaN(val)) { total += fn(val) * w; wsum += w }
-  }
-  add(spxa50r,  v => v > 70 ? 90 : v > 55 ? 72 : v > 40 ? 45 : v > 25 ? 20 : 8,  0.30)
-  add(spxa200r, v => v > 65 ? 88 : v > 50 ? 70 : v > 35 ? 42 : v > 20 ? 18 : 5,  0.25)
-  add(spxa20r,  v => v > 70 ? 85 : v > 55 ? 68 : v > 40 ? 42 : v > 25 ? 18 : 5,  0.20)
-  add(adRatio,  v => v > 0.65 ? 88 : v > 0.55 ? 70 : v > 0.45 ? 50 : v > 0.35 ? 25 : 8, 0.15)
-  add(hlRatio,  v => v > 0.65 ? 88 : v > 0.5  ? 65 : v > 0.35 ? 38 : v > 0.2  ? 15 : 5, 0.10)
-  return wsum > 0 ? Math.round(total / wsum) : null
+/**
+ * Factor Regime score — replaces breadth.
+ * Swing:    MTUM 30% + Breadth 35% + Growth(IWF) 15% + Quality(inv) 10% + Size 10%
+ * Position: MTUM 20% + Breadth 35% + Growth(IWF) 20% + Quality(inv) 15% + Size 10%
+ *
+ * QUAL and VLUE are inverted — BULL means defensive/value rotation (negative for growth traders)
+ */
+export function scoreFactorRegime(regimes, mode) {
+  if (!regimes) return null
+  const available = FACTORS.map(f => f.id).filter(id => regimes[id] != null)
+  if (!available.length) return null
+
+  const bull = id => regimes[id]?.regime === 'BULL'
+  const z    = id => regimes[id]?.zScore ?? 0
+
+  // Factor breadth: how many non-inverted factors are BULL
+  const bullCount = ['MTUM', 'IWF', 'SIZE'].filter(id => regimes[id] && bull(id)).length
+  const total     = ['MTUM', 'IWF', 'SIZE'].filter(id => regimes[id]).length
+  const breadthPct = total > 0 ? bullCount / total : 0.5
+  const breadthS  = breadthPct > 0.85 ? 94 : breadthPct > 0.65 ? 78 : breadthPct > 0.45 ? 55 : breadthPct > 0.25 ? 28 : 10
+
+  // MTUM — most important for swing: are momentum strategies being rewarded?
+  const mtumS = !regimes['MTUM'] ? 50 : bull('MTUM') ? (z('MTUM') > 1.2 ? 92 : 74) : (z('MTUM') < -1.2 ? 8 : 28)
+
+  // IWF Growth — risk-on leadership
+  const growthS = !regimes['IWF'] ? 50 : bull('IWF') ? 84 : 24
+
+  // QUAL — inverted: BULL = defensive rotation = cautionary for aggressive swing trading
+  const qualS = !regimes['QUAL'] ? 50 : bull('QUAL') ? 22 : 78
+
+  // SIZE — broad participation signal
+  const sizeS = !regimes['SIZE'] ? 50 : bull('SIZE') ? 80 : 30
+
+  const bw = FACTOR_BREADTH_WEIGHT[mode] ?? 0.35
+  const weights = mode === 'position'
+    ? { breadth: bw, mtum: 0.20, growth: 0.20, qual: 0.15, size: 0.10 }
+    : { breadth: bw, mtum: 0.30, growth: 0.15, qual: 0.10, size: 0.10 }
+
+  return Math.round(
+    breadthS  * weights.breadth +
+    mtumS     * weights.mtum   +
+    growthS   * weights.growth +
+    qualS     * weights.qual   +
+    sizeS     * weights.size
+  )
 }
 
 export function scoreMomentum(sectorChanges) {
@@ -238,9 +331,9 @@ export function scoreMacro(tnxLevel, tnxChange, dxyChange, fomcDays) {
     else if (dxyChange >  0.5) score -= 6
     else if (dxyChange < -0.5) score += 6
   }
-  if (fomcDays === 0)       score -= 20
-  else if (fomcDays <= 2)   score -= 12
-  else if (fomcDays <= 7)   score -= 4
+  if (fomcDays === 0)     score -= 20
+  else if (fomcDays <= 2) score -= 12
+  else if (fomcDays <= 7) score -= 4
   return Math.round(Math.max(0, Math.min(100, score)))
 }
 
@@ -262,7 +355,7 @@ export function getDecision(score, mode) {
   return 'NO'
 }
 
-// ── Main hook ─────────────────────────────────────────────────────────────────
+// ── Main hook ──────────────────────────────────────────────────────────────────
 
 export function useMarketQualityData() {
   const [raw,         setRaw]         = useState(null)
@@ -276,40 +369,46 @@ export function useMarketQualityData() {
     setError(null)
 
     try {
-      // ── 1. Batch quote fetch (Schwab → fallback) ────────────────────────────
+      // ── 1. Batch quote fetch ────────────────────────────────────────────────
+      // Vol Dashboard symbols: $VIX3M.X and $SKEW.X added alongside VIX/VVIX
       const quoteSymbols = [
-        '$VIX.X', '$VVIX.X', '$TNX.X', '$DXY',
+        '$VIX.X', '$VIX3M.X', '$VVIX.X', '$SKEW.X', '$TNX.X', '$DXY',
         'SPY', 'QQQ',
         'XLK', 'XLF', 'XLE', 'XLV', 'XLI', 'XLY', 'XLP', 'XLU', 'XLB', 'XLRE', 'XLC',
-        '$SPXA50R', '$SPXA200R', '$SPXA20R',
-        '$ADVN', '$DECN', '$NAHI1D', '$NALO1D',
       ]
       const qmap = await fetchQuotes(quoteSymbols)
       const q    = sym => qmap.get(sym)?.price    ?? null
       const chg  = sym => qmap.get(sym)?.change   ?? null
       const pct  = sym => qmap.get(sym)?.changePct ?? null
 
-      // ── 2. History fetches (parallel) ───────────────────────────────────────
-      const today   = new Date().toISOString().slice(0, 10)
-      const d252    = new Date(Date.now() - 375 * 86400000).toISOString().slice(0, 10)
-      const d60     = new Date(Date.now() -  88 * 86400000).toISOString().slice(0, 10)
+      // ── 2. History fetches — all in parallel ────────────────────────────────
+      // SPY/QQQ/VIX for existing metrics + 5 factor ETFs for regime computation
+      const today = new Date().toISOString().slice(0, 10)
+      const d252  = new Date(Date.now() - 375 * 86400000).toISOString().slice(0, 10)
+      const d60   = new Date(Date.now() -  88 * 86400000).toISOString().slice(0, 10)
 
-      const [spyR, qqqR, vixR] = await Promise.allSettled([
+      const [spyR, qqqR, vixR, mtumR, iwfR, qualR, sizeR, vlueR] = await Promise.allSettled([
         fetchHistory('SPY',    d252, today),
         fetchHistory('QQQ',    d60,  today),
         fetchHistory('$VIX.X', d252, today),
+        fetchHistory('MTUM',   d252, today),
+        fetchHistory('IWF',    d252, today),
+        fetchHistory('QUAL',   d252, today),
+        fetchHistory('SIZE',   d252, today),
+        fetchHistory('VLUE',   d252, today),
       ])
-      const spyBars = spyR.status === 'fulfilled' ? spyR.value : []
-      const qqqBars = qqqR.status === 'fulfilled' ? qqqR.value : []
-      const vixBars = vixR.status === 'fulfilled' ? vixR.value : []
+
+      const spyBars  = spyR.status  === 'fulfilled' ? spyR.value  : []
+      const qqqBars  = qqqR.status  === 'fulfilled' ? qqqR.value  : []
+      const vixBars  = vixR.status  === 'fulfilled' ? vixR.value  : []
 
       const spyC = spyBars.map(b => b.close)
       const qqqC = qqqBars.map(b => b.close)
       const vixC = vixBars.map(b => b.close)
 
       // ── 3. SPY / QQQ derived metrics ────────────────────────────────────────
-      const spyPrice = q('SPY') ?? spyC[spyC.length - 1] ?? null
-      const qqqPrice = q('QQQ') ?? qqqC[qqqC.length - 1] ?? null
+      const spyPrice = q('SPY') ?? spyC.at(-1) ?? null
+      const qqqPrice = q('QQQ') ?? qqqC.at(-1) ?? null
 
       const ma20  = sma(spyC, 20)
       const ma50  = sma(spyC, 50)
@@ -323,13 +422,24 @@ export function useMarketQualityData() {
       const rsi14    = calcRSI14(spyC)
       const regime   = classifyRegime(vs20d, vs50d, vs200d)
 
-      // ── 4. VIX metrics ──────────────────────────────────────────────────────
+      // ── 4. Vol Dashboard metrics ─────────────────────────────────────────────
       const vixLevel  = q('$VIX.X')
+      const vix3m     = q('$VIX3M.X')
+      const vvix      = q('$VVIX.X')
+      const skew      = q('$SKEW.X')
       const vixSlope  = calcSlope5d(vixC)
       const vixPctile = calcPercentile(vixC, vixLevel)
-      const vvix      = q('$VVIX.X')
+      // Term structure: VIX / VIX3M
+      // < 1 = contango (calm), > 1 = backwardation (fear spike)
+      const termRatio = vixLevel && vix3m && vix3m > 0 ? vixLevel / vix3m : null
+      const termLabel = termRatio == null ? null
+        : termRatio < 0.88 ? { text: 'Steep Contango', color: '#00d084' }
+        : termRatio < 0.95 ? { text: 'Contango',       color: '#00d084' }
+        : termRatio < 1.00 ? { text: 'Flat',           color: '#ffa502' }
+        : termRatio < 1.05 ? { text: 'Backwardation',  color: '#ffa502' }
+        :                    { text: 'Steep Backwdn.',  color: '#ff4757' }
 
-      // ── 5. Macro ────────────────────────────────────────────────────────────
+      // ── 5. Macro ─────────────────────────────────────────────────────────────
       const tnxLevel  = q('$TNX.X')
       const tnxChange = chg('$TNX.X')
       const dxyPrice  = q('$DXY')
@@ -337,55 +447,49 @@ export function useMarketQualityData() {
       const fedStance = deriveFedStance(tnxLevel)
       const fomcDays  = nearestFomcDays()
 
-      // ── 6. Breadth ──────────────────────────────────────────────────────────
-      const spxa50r  = q('$SPXA50R')
-      const spxa200r = q('$SPXA200R')
-      const spxa20r  = q('$SPXA20R')
-      const advn     = q('$ADVN')
-      const decn     = q('$DECN')
-      const nahi     = q('$NAHI1D')
-      const nalo     = q('$NALO1D')
-      const adRatio  = advn != null && decn != null && advn + decn > 0 ? advn / (advn + decn) : null
-      const hlRatio  = nahi != null && nalo != null && nahi + nalo > 0 ? nahi / (nahi + nalo) : null
+      // ── 6. Factor Regime computation ─────────────────────────────────────────
+      const factorResults = {
+        MTUM: mtumR.status === 'fulfilled' ? computeOneFactorRegime(mtumR.value, spyBars) : null,
+        IWF:  iwfR.status  === 'fulfilled' ? computeOneFactorRegime(iwfR.value,  spyBars) : null,
+        QUAL: qualR.status === 'fulfilled' ? computeOneFactorRegime(qualR.value, spyBars) : null,
+        SIZE: sizeR.status === 'fulfilled' ? computeOneFactorRegime(sizeR.value, spyBars) : null,
+        VLUE: vlueR.status === 'fulfilled' ? computeOneFactorRegime(vlueR.value, spyBars) : null,
+      }
+      const bullCount = ['MTUM', 'IWF', 'SIZE'].filter(id => factorResults[id]?.regime === 'BULL').length
 
-      // ── 7. Sectors ──────────────────────────────────────────────────────────
+      // ── 7. Sectors ────────────────────────────────────────────────────────────
       const sectorData = SECTORS.map(s => ({
-        ...s,
-        price:     q(s.id),
-        change:    chg(s.id),
-        changePct: pct(s.id),
+        ...s, price: q(s.id), change: chg(s.id), changePct: pct(s.id),
       }))
-      const sectorRanked   = [...sectorData].sort((a, b) => (b.changePct ?? -999) - (a.changePct ?? -999))
-      const sectorChanges  = sectorData.map(s => s.changePct).filter(x => x != null)
-      const positiveSectors = sectorData.filter(s => (s.changePct ?? 0) > 0).length
+      const sectorRanked  = [...sectorData].sort((a, b) => (b.changePct ?? -999) - (a.changePct ?? -999))
+      const sectorChanges = sectorData.map(s => s.changePct).filter(x => x != null)
 
-      // ── 8. Scores ───────────────────────────────────────────────────────────
-      const volS    = scoreVolatility(vixLevel, vixSlope, vixPctile)
+      // ── 8. Scores ─────────────────────────────────────────────────────────────
+      const volS    = scoreVolatility(vixLevel, vixSlope, vixPctile, termRatio, vvix, skew)
       const trendS  = scoreTrend(vs20d, vs50d, vs200d, rsi14)
-      const breadS  = scoreBreadth(spxa50r, spxa200r, spxa20r, adRatio, hlRatio)
+      const factorS = scoreFactorRegime(factorResults, mode)
       const momS    = scoreMomentum(sectorChanges)
       const macroS  = scoreMacro(tnxLevel, tnxChange, dxyChange, fomcDays)
 
-      const scoreMap  = { volatility: volS, trend: trendS, breadth: breadS, momentum: momS, macro: macroS }
+      const scoreMap  = { volatility: volS, trend: trendS, factorRegime: factorS, momentum: momS, macro: macroS }
       const composite = computeComposite(scoreMap, mode)
       const decision  = getDecision(composite, mode)
 
-      const rawData = {
-        vix:      { level: vixLevel, slope: vixSlope, percentile: vixPctile, vvix },
-        spy:      { price: spyPrice, change: chg('SPY'), changePct: pct('SPY'), vs20d, vs50d, vs200d, rsi14, regime, ma20, ma50, ma200 },
-        qqq:      { price: qqqPrice, change: chg('QQQ'), changePct: pct('QQQ'), vs50d: qqqVs50d, ma50: q50 },
-        tnx:      { level: tnxLevel, change: tnxChange, changePct: pct('$TNX.X'), fedStance },
-        dxy:      { price: dxyPrice, change: dxyChange, changePct: pct('$DXY') },
-        breadth:  { spxa50r, spxa200r, spxa20r, advn, decn, adRatio, nahi, nalo, hlRatio },
-        sectors:  sectorData,
+      setRaw({
+        vix:     { level: vixLevel, vix3m, vvix, skew, slope: vixSlope, percentile: vixPctile, termRatio, termLabel },
+        spy:     { price: spyPrice, change: chg('SPY'), changePct: pct('SPY'), vs20d, vs50d, vs200d, rsi14, regime, ma20, ma50, ma200 },
+        qqq:     { price: qqqPrice, change: chg('QQQ'), changePct: pct('QQQ'), vs50d: qqqVs50d, ma50: q50 },
+        tnx:     { level: tnxLevel, change: tnxChange, changePct: pct('$TNX.X'), fedStance },
+        dxy:     { price: dxyPrice, change: dxyChange, changePct: pct('$DXY') },
+        factors: factorResults,
+        bullCount,
+        sectors: sectorData,
         sectorRanked,
-        positiveSectors,
+        positiveSectors: sectorData.filter(s => (s.changePct ?? 0) > 0).length,
         totalSectors: SECTORS.length,
-        events:   getUpcomingEvents(),
+        events:  getUpcomingEvents(),
         fomcDays,
-      }
-
-      setRaw(rawData)
+      })
       setScores({ ...scoreMap, composite, decision, weights: WEIGHTS[mode] ?? WEIGHTS.swing })
       setLastUpdated(new Date())
     } catch (e) {

@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, Brain, Loader, AlertTriangle, Calendar, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { RefreshCw, Brain, Loader, AlertTriangle, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { callMarketQualityAI } from '../../utils/ai.js'
 import {
   useMarketQualityData,
   WEIGHTS,
+  FACTORS,
   classifyRegime,
 } from './useMarketQualityData.js'
 
@@ -116,11 +117,18 @@ function VolatilityPanel({ vix, score }) {
   const slopeCol  = vix.slope > 0.3 ? '#ff4757' : vix.slope < -0.3 ? '#00d084' : '#94a3b8'
   const levelTag  = vix.level == null ? null : vix.level < 16 ? 'Low' : vix.level < 22 ? 'Moderate' : vix.level < 30 ? 'High' : 'Extreme'
   const levelCol  = vix.level < 16 ? '#00d084' : vix.level < 22 ? '#ffa502' : '#ff4757'
+  const termCol   = vix.termLabel?.color ?? '#94a3b8'
 
   return (
     <div className="card-sm h-full">
       <PanelHdr label="Volatility" score={score} />
       <MetricRow label="VIX Level"    value={fmt(vix.level)} tag={levelTag} tagColor={levelCol} />
+      <MetricRow label="VIX3M"        value={fmt(vix.vix3m)}
+        tag={vix.vix3m != null ? (vix.vix3m < 18 ? 'Low' : vix.vix3m < 24 ? 'Mod' : 'High') : null}
+        tagColor={vix.vix3m < 18 ? '#00d084' : vix.vix3m < 24 ? '#ffa502' : '#ff4757'} />
+      <MetricRow label="Term Struct"
+        value={vix.termRatio != null ? fmt(vix.termRatio) : null}
+        tag={vix.termLabel?.text ?? null} tagColor={termCol} />
       <MetricRow label="VIX 5d Slope" value={vix.slope != null ? fmt(vix.slope, 2) : null} tag={slopeTag} tagColor={slopeCol} dir={vix.slope} />
       <MetricRow label="VIX 1Y %ile"  value={vix.percentile != null ? `${vix.percentile}th` : null}
         tag={vix.percentile != null ? (vix.percentile < 40 ? 'Normal' : vix.percentile < 70 ? 'Elevated' : 'High') : null}
@@ -128,6 +136,9 @@ function VolatilityPanel({ vix, score }) {
       <MetricRow label="VVIX"         value={fmt(vix.vvix)}
         tag={vix.vvix != null ? (vix.vvix < 90 ? 'Calm' : vix.vvix < 110 ? 'Elevated' : 'Extreme') : null}
         tagColor={vix.vvix < 90 ? '#00d084' : vix.vvix < 110 ? '#ffa502' : '#ff4757'} />
+      <MetricRow label="SKEW"         value={vix.skew != null ? fmt(vix.skew, 0) : null}
+        tag={vix.skew != null ? (vix.skew < 125 ? 'Normal' : vix.skew < 140 ? 'Elevated' : 'High Tail') : null}
+        tagColor={vix.skew < 125 ? '#00d084' : vix.skew < 140 ? '#ffa502' : '#ff4757'} />
     </div>
   )
 }
@@ -159,31 +170,68 @@ function TrendPanel({ spy, qqq, score }) {
   )
 }
 
-function BreadthPanel({ breadth, score }) {
-  if (!breadth) return <div className="card-sm h-full"><PanelHdr label="Breadth" score={score} /><p className="text-gray-600 text-xs">No data</p></div>
-  const { spxa50r, spxa200r, spxa20r, adRatio, nahi, nalo, hlRatio, advn, decn } = breadth
+function FactorRegimePanel({ factors, bullCount, score }) {
+  const hasAny = factors && Object.values(factors).some(f => f != null)
+  if (!hasAny) return (
+    <div className="card-sm h-full">
+      <PanelHdr label="Factor Regime" score={score} />
+      <p className="text-gray-600 text-xs">Loading factor data…</p>
+    </div>
+  )
 
-  const pctTag = v => {
-    if (v == null) return { label: null, color: '#64748b' }
-    if (v > 65) return { label: 'Strong', color: '#00d084' }
-    if (v > 45) return { label: 'Moderate', color: '#ffa502' }
-    return { label: 'Weak', color: '#ff4757' }
-  }
+  const bullTotal = ['MTUM', 'IWF', 'SIZE'].filter(id => factors?.[id] != null).length
+  const breadthLabel = bullTotal === 0 ? 'No Data'
+    : bullCount >= bullTotal ? 'Full Bull' : bullCount >= 2 ? 'Moderate' : bullCount >= 1 ? 'Mixed' : 'Bear'
+  const breadthCol   = bullCount >= bullTotal ? '#00d084' : bullCount >= 2 ? '#ffa502' : bullCount >= 1 ? '#ffa502' : '#ff4757'
 
   return (
     <div className="card-sm h-full">
-      <PanelHdr label="Breadth" score={score} />
-      <MetricRow label="% > 50d MA"  value={spxa50r  != null ? `${fmt(spxa50r,  0)}%` : null} tag={pctTag(spxa50r).label}  tagColor={pctTag(spxa50r).color} />
-      <MetricRow label="% > 200d MA" value={spxa200r != null ? `${fmt(spxa200r, 0)}%` : null} tag={pctTag(spxa200r).label} tagColor={pctTag(spxa200r).color} />
-      <MetricRow label="% > 20d MA"  value={spxa20r  != null ? `${fmt(spxa20r,  0)}%` : null} tag={pctTag(spxa20r).label}  tagColor={pctTag(spxa20r).color} />
-      <MetricRow label="NYSE A/D"
-        value={advn != null && decn != null ? `${Math.round(advn)}↑ / ${Math.round(decn)}↓` : null}
-        tag={adRatio != null ? (adRatio > 0.55 ? 'Advancing' : adRatio > 0.45 ? 'Neutral' : 'Declining') : null}
-        tagColor={adRatio > 0.55 ? '#00d084' : adRatio > 0.45 ? '#ffa502' : '#ff4757'} />
-      <MetricRow label="NAS H/L (1d)"
-        value={nahi != null && nalo != null ? `${Math.round(nahi)}H / ${Math.round(nalo)}L` : null}
-        tag={hlRatio != null ? (hlRatio > 0.55 ? 'Highs Lead' : hlRatio > 0.4 ? 'Balanced' : 'Lows Lead') : null}
-        tagColor={hlRatio > 0.55 ? '#00d084' : hlRatio > 0.4 ? '#ffa502' : '#ff4757'} />
+      <PanelHdr label="Factor Regime" score={score} />
+
+      {/* Breadth summary */}
+      <div className="flex items-center justify-between py-0.5 mb-1.5 pb-1.5 border-b border-white/5">
+        <span className="text-gray-500 text-[11px]">Factor Breadth</span>
+        <div className="flex items-center gap-1.5">
+          <span className="mono text-xs" style={{ color: breadthCol }}>{bullCount}/{bullTotal} BULL</span>
+          <span className="text-[10px] font-medium px-1 py-px rounded" style={{ color: breadthCol, background: `${breadthCol}20` }}>{breadthLabel}</span>
+        </div>
+      </div>
+
+      {/* Each factor row */}
+      {FACTORS.map(({ id, label, desc, invert }) => {
+        const f = factors?.[id]
+        if (!f) return (
+          <div key={id} className="flex items-center justify-between py-0.5">
+            <span className="text-gray-600 text-[11px]">{label}</span>
+            <span className="text-gray-700 text-[10px]">N/A</span>
+          </div>
+        )
+        // For inverted factors, BULL = defensive = caution (orange/red), BEAR = risk-on (green)
+        const isBull     = f.regime === 'BULL'
+        const isPositive = invert ? !isBull : isBull
+        const regimeCol  = isPositive ? '#00d084' : '#ff4757'
+        const zFmt       = f.zScore != null ? `${f.zScore > 0 ? '+' : ''}${f.zScore.toFixed(1)}σ` : '—'
+        const interp     = invert
+          ? (isBull ? 'Defensive rotation' : 'Risk appetite ✓')
+          : (isBull ? 'Leading' : 'Lagging')
+
+        return (
+          <div key={id} className="flex items-center justify-between py-0.5 gap-1">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: regimeCol }} />
+              <span className="text-gray-400 text-[11px] shrink-0 w-8">{label}</span>
+              <span className="text-gray-600 text-[10px] truncate hidden lg:block">{interp}</span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="mono text-[10px] text-gray-500">{zFmt}</span>
+              <span className="text-[10px] font-semibold px-1 py-px rounded"
+                style={{ color: regimeCol, background: `${regimeCol}20` }}>
+                {f.regime}
+              </span>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -285,11 +333,11 @@ function ScoringBreakdown({ scores, mode }) {
   if (!scores) return null
   const w = WEIGHTS[mode] ?? WEIGHTS.swing
   const items = [
-    { key: 'volatility', label: 'Volatility' },
-    { key: 'trend',      label: 'Trend'      },
-    { key: 'breadth',    label: 'Breadth'    },
-    { key: 'momentum',   label: 'Momentum'   },
-    { key: 'macro',      label: 'Macro'      },
+    { key: 'volatility',   label: 'Volatility'     },
+    { key: 'trend',        label: 'Trend'           },
+    { key: 'factorRegime', label: 'Factor Regime'   },
+    { key: 'momentum',     label: 'Momentum'        },
+    { key: 'macro',        label: 'Macro'           },
   ]
   return (
     <div className="card-sm">
@@ -315,7 +363,7 @@ function ScoringBreakdown({ scores, mode }) {
           <span><span className="text-yellow-400">●</span> 60–79: CAUTION — half size</span>
           <span><span className="text-red-400">●</span> &lt;60: NO — preserve capital</span>
         </div>
-        {mode === 'position' && <p className="text-gray-700 mt-1">Position mode: thresholds 75/55. Trend + breadth weighted higher.</p>}
+        {mode === 'position' && <p className="text-gray-700 mt-1">Position mode: thresholds 75/55. Trend + factor regime weighted higher.</p>}
       </div>
     </div>
   )
@@ -469,11 +517,11 @@ export default function MarketQuality() {
                 <div className="text-[10px] font-semibold tracking-widest uppercase text-gray-500 mb-3">Component Scores</div>
                 <div className="grid grid-cols-5 gap-3">
                   {[
-                    { key: 'volatility', label: 'VOL'      },
-                    { key: 'trend',      label: 'TREND'    },
-                    { key: 'breadth',    label: 'BREADTH'  },
-                    { key: 'momentum',   label: 'MOM'      },
-                    { key: 'macro',      label: 'MACRO'    },
+                    { key: 'volatility',    label: 'VOL'    },
+                    { key: 'trend',         label: 'TREND'  },
+                    { key: 'factorRegime',  label: 'REGIME' },
+                    { key: 'momentum',      label: 'MOM'    },
+                    { key: 'macro',         label: 'MACRO'  },
                   ].map(({ key, label }) => {
                     const s = scores[key]
                     const c = scoreColor(s)
@@ -501,7 +549,7 @@ export default function MarketQuality() {
               <TrendPanel spy={raw.spy} qqq={raw.qqq} score={scores.trend} />
             </div>
             <div className="col-span-12 md:col-span-4 lg:col-span-2half">
-              <BreadthPanel breadth={raw.breadth} score={scores.breadth} />
+              <FactorRegimePanel factors={raw.factors} bullCount={raw.bullCount} score={scores.factorRegime} />
             </div>
             <div className="col-span-12 md:col-span-6 lg:col-span-2half">
               <MomentumPanel sectors={raw.sectors} positiveSectors={raw.positiveSectors} totalSectors={raw.totalSectors} score={scores.momentum} />
