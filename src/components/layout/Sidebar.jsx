@@ -1,4 +1,4 @@
-import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, TrendingUp, Sparkles, ScanLine, Sun, GitCompare, FlaskConical, Layers, Activity } from 'lucide-react'
+import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, TrendingUp, Sparkles, ScanLine, Sun, GitCompare, FlaskConical, Layers, Activity, Gauge } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 
 const NAV = [
@@ -13,8 +13,9 @@ const NAV = [
   { id: 'ai',          label: 'AI Analysis',    icon: Sparkles },
   { id: 'edgelab',     label: 'Edge Lab',       icon: FlaskConical },
   { id: 'regime',      label: 'Factor Regime',  icon: Layers },
-  { id: 'volatility',  label: 'Vol Dashboard',  icon: Activity },
-  { id: 'settings',    label: 'Settings',       icon: Settings },
+  { id: 'volatility',  label: 'Vol Dashboard',    icon: Activity },
+  { id: 'marketquality', label: 'Market Dashboard', icon: Gauge    },
+  { id: 'settings',    label: 'Settings',         icon: Settings },
 ]
 
 const ACCOUNT_COLORS = [

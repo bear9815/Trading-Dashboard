@@ -1002,6 +1002,31 @@ export async function classifySymbolTheme(symbol, apiKey) {
 
 
 /**
+ * Generate an AI terminal analysis for the Market Quality Dashboard.
+ */
+export async function callMarketQualityAI(raw, scores, mode, apiKey) {
+  if (!apiKey) throw new Error('No API key configured')
+
+  const modeLabel = mode === 'position' ? 'position trading (2–8 week holds)' : 'swing trading (1–10 day holds)'
+  const fmt = (v, d = 2) => v != null ? v.toFixed(d) : 'N/A'
+
+  const prompt =
+    `You are a professional market analyst providing a real-time assessment for a trader focused on ${modeLabel}.\n\n` +
+    `MARKET QUALITY SCORE: ${scores.composite ?? 'N/A'}/100 — Decision: ${scores.decision ?? 'N/A'}\n\n` +
+    `COMPONENT SCORES:\n` +
+    `- Volatility: ${scores.volatility ?? 'N/A'}/100 | VIX ${fmt(raw.vix?.level)} (${raw.vix?.percentile != null ? raw.vix.percentile + 'th %ile' : 'N/A'}), slope ${fmt(raw.vix?.slope, 2)}\n` +
+    `- Trend: ${scores.trend ?? 'N/A'}/100 | SPY vs 20/50/200d: ${fmt(raw.spy?.vs20d, 1)}%/${fmt(raw.spy?.vs50d, 1)}%/${fmt(raw.spy?.vs200d, 1)}%, RSI-14 ${raw.spy?.rsi14 ?? 'N/A'}, Regime: ${raw.spy?.regime?.label ?? 'N/A'}\n` +
+    `- Breadth: ${scores.breadth ?? 'N/A'}/100 | %>${raw.breadth?.spxa50r != null ? raw.breadth.spxa50r.toFixed(0) + '% above 50d' : 'N/A'}, A/D ratio ${raw.breadth?.adRatio != null ? (raw.breadth.adRatio * 100).toFixed(0) + '%' : 'N/A'}, NAS H/L ${raw.breadth?.nahi ?? 'N/A'}/${raw.breadth?.nalo ?? 'N/A'}\n` +
+    `- Momentum: ${scores.momentum ?? 'N/A'}/100 | ${raw.positiveSectors ?? 'N/A'}/${raw.totalSectors} sectors positive | Leader: ${raw.sectorRanked?.[0]?.label ?? 'N/A'} (${fmt(raw.sectorRanked?.[0]?.changePct, 2)}%), Laggard: ${raw.sectorRanked?.[raw.sectorRanked.length-1]?.label ?? 'N/A'} (${fmt(raw.sectorRanked?.[raw.sectorRanked?.length-1]?.changePct, 2)}%)\n` +
+    `- Macro: ${scores.macro ?? 'N/A'}/100 | 10Y yield ${fmt(raw.tnx?.level)}% (${raw.tnx?.change != null ? (raw.tnx.change > 0 ? '+' : '') + raw.tnx.change.toFixed(3) : 'N/A'}), DXY ${fmt(raw.dxy?.price)}, Fed: ${raw.tnx?.fedStance?.label ?? 'N/A'}, FOMC in ${raw.fomcDays === 999 ? 'N/A' : raw.fomcDays + 'd'}\n\n` +
+    (raw.events?.length ? `UPCOMING EVENTS: ${raw.events.map(e => `${e.label} (${e.daysAway === 0 ? 'today' : 'in ' + e.daysAway + 'd'})`).join(', ')}\n\n` : '') +
+    `Provide a 3-4 sentence terminal-style assessment. Cover: (1) overall environment quality for ${modeLabel}, (2) the 1-2 most important risk factors right now, (3) specific actionable guidance — what to do, what to avoid. ` +
+    `Be direct, use numbers, and write as a professional would to a trader. No markdown, no headers. Plain flowing prose.`
+
+  return callAI(apiKey, prompt)
+}
+
+/**
  * Generate a short AI market read for the VIX Volatility Dashboard.
  */
 export async function callVolatilityAI(metrics, apiKey) {
