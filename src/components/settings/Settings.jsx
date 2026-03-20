@@ -565,14 +565,35 @@ export default function Settings() {
               </div>
             ) : (
               <>
-                <p className="text-xs text-gray-400">
-                  Connect your Schwab account for live quotes and real-time price data across all dashboard tools.
-                </p>
                 {schwabError && (
-                  <p className="text-xs text-accent-red flex items-center gap-1.5">
-                    <AlertCircle size={11} /> {schwabError}
-                  </p>
+                  <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-xs space-y-1">
+                    <p className="text-accent-red font-medium flex items-center gap-1.5">
+                      <AlertCircle size={12} /> Connection Error
+                    </p>
+                    <p className="text-red-300/80">{schwabError}</p>
+                  </div>
                 )}
+
+                <div className="rounded-lg bg-surface-200 border border-white/5 p-3 text-xs space-y-2 text-gray-400">
+                  <p className="font-medium text-gray-300">Required setup</p>
+                  <p>1. <a href="https://developer.schwab.com" target="_blank" rel="noopener noreferrer" className="text-accent-blue underline">developer.schwab.com</a> → your app → Callback URL must be exactly:</p>
+                  <p className="mono text-gray-300 bg-black/30 px-2 py-1 rounded">https://your-app.vercel.app/api/schwab/callback</p>
+                  <p>2. Vercel environment variables:</p>
+                  <div className="space-y-0.5 pl-2">
+                    {['SCHWAB_APP_KEY', 'SCHWAB_APP_SECRET', 'SCHWAB_REDIRECT_URI', 'APP_URL', 'SUPABASE_SERVICE_ROLE_KEY'].map(v => (
+                      <p key={v} className="mono text-gray-300">{v}</p>
+                    ))}
+                  </div>
+                  <p>3. Supabase SQL Editor — run once to create the token table:</p>
+                  <pre className="bg-black/40 rounded p-2 text-[10px] text-gray-300 overflow-x-auto whitespace-pre">{`create table if not exists schwab_tokens (
+  user_id       uuid primary key references auth.users,
+  access_token  text not null,
+  refresh_token text,
+  expires_at    timestamptz,
+  updated_at    timestamptz default now()
+);`}</pre>
+                </div>
+
                 <button
                   onClick={startOAuth}
                   disabled={schwabLoading}

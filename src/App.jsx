@@ -53,8 +53,24 @@ export default function App() {
       window.history.replaceState({}, '', window.location.pathname)
       loadSchwabTokens()
       setPage('settings')
-    } else if (schwabStatus === 'denied' || schwabStatus === 'error') {
+    } else if (schwabStatus === 'denied') {
       window.history.replaceState({}, '', window.location.pathname)
+      useSchwabStore.setState({ error: 'Schwab authorization was denied.' })
+      setPage('settings')
+    } else if (schwabStatus === 'error') {
+      const reason = params.get('reason') || 'unknown'
+      const messages = {
+        config:         'Missing Vercel env vars (SCHWAB_APP_KEY / SCHWAB_APP_SECRET / etc.)',
+        token_exchange: 'Token exchange failed — check that SCHWAB_REDIRECT_URI matches exactly in both Vercel and the Schwab Developer Portal.',
+        missing_params: 'OAuth callback missing code or state parameter.',
+        bad_state:      'Could not decode state — try connecting again.',
+        db_write:       'Supabase write failed — the schwab_tokens table may not exist. See Settings for setup instructions.',
+        db_error:       'Supabase connection error — check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
+        fetch_failed:   'Network error contacting Schwab token endpoint.',
+      }
+      window.history.replaceState({}, '', window.location.pathname)
+      useSchwabStore.setState({ error: messages[reason] || `OAuth error: ${reason}` })
+      setPage('settings')
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
