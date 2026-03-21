@@ -286,7 +286,7 @@ export default function TradeChart({ trade }) {
           markers.push({
             time:     entrySnap,
             position: isShort ? 'aboveBar' : 'belowBar',
-            color:    isShort ? '#ff4757'  : '#00d084',
+            color:    '#39ff14',   // lime green
             shape:    isShort ? 'arrowDown' : 'arrowUp',
             size:     0.75,
             text:     '',
@@ -299,7 +299,7 @@ export default function TradeChart({ trade }) {
             markers.push({
               time:     d,
               position: isShort ? 'belowBar' : 'aboveBar',
-              color:    isShort ? '#00d084'  : '#ff4757',
+              color:    '#ff69b4',  // hot pink
               shape:    isShort ? 'arrowUp'  : 'arrowDown',
               size:     0.75,
               text:     '',
