@@ -4,6 +4,7 @@ import {
   ColorType,
   CrosshairMode,
   LineStyle,
+  createSeriesMarkers,
   CandlestickSeries,
   LineSeries,
   HistogramSeries,
@@ -260,11 +261,7 @@ export default function TradeChart({ trade }) {
           })))
         }
 
-        // ── Entry / exit price notes ───────────────────────────────────────────
-        // Simulates TradingView "price note" style:
-        // A short 2-candle horizontal tick drawn at the EXACT entry/exit price,
-        // with a labelled badge on the right price scale.
-        // No floating arrows — the tick is anchored to the real price level.
+        // ── Entry / exit markers ───────────────────────────────────────────────
         const candleDates = new Set(candles.map(c => c.time))
         const snap = (iso) => {
           if (!iso) return null
@@ -279,44 +276,37 @@ export default function TradeChart({ trade }) {
           return null
         }
 
-        // Draw a short horizontal tick at a specific date + price with a right-axis label
-        function addPriceNote(snappedDate, price, color, label) {
-          if (!snappedDate || price == null) return
-          const idx = candles.findIndex(c => c.time === snappedDate)
-          if (idx < 0) return
-          // Span the tick over 2 candles: the note candle + next (or prev if at end)
-          const t1 = snappedDate
-          const t2 = idx < candles.length - 1 ? candles[idx + 1].time : candles[Math.max(0, idx - 1)].time
-          const [tA, tB] = t1 <= t2 ? [t1, t2] : [t2, t1]
-          const s = chart.addSeries(LineSeries, {
-            color,
-            lineWidth:              2,
-            priceLineVisible:       false,
-            lastValueVisible:       true,   // shows the labelled badge on right scale
-            crosshairMarkerVisible: false,
-            title:                  label,
+        const exits     = (trade.exits || []).filter(e => e.date)
+        const markers   = []
+        const entrySnap = snap(trade.entryDate)
+
+        if (entrySnap) {
+          markers.push({
+            time:     entrySnap,
+            position: isShort ? 'aboveBar' : 'belowBar',
+            color:    isShort ? '#ff4757'  : '#00d084',
+            shape:    isShort ? 'arrowDown' : 'arrowUp',
+            size:     0.75,
+            text:     '',
           })
-          s.setData([
-            { time: tA, value: price },
-            { time: tB, value: price },
-          ])
         }
 
-        const exits     = (trade.exits || []).filter(e => e.date)
-        const entrySnap = snap(trade.entryDate)
-        const entryColor = isShort ? '#ff4757' : '#00d084'
-        const exitColor  = isShort ? '#00d084' : '#ff4757'
-
-        addPriceNote(entrySnap, trade.entryPrice, entryColor, isShort ? 'S' : 'E')
-
-        exits.forEach((ex, i) => {
-          addPriceNote(
-            snap(ex.date),
-            ex.price,
-            exitColor,
-            exits.length > 1 ? `X${i + 1}` : 'X',
-          )
+        exits.forEach(ex => {
+          const d = snap(ex.date)
+          if (d) {
+            markers.push({
+              time:     d,
+              position: isShort ? 'belowBar' : 'aboveBar',
+              color:    isShort ? '#00d084'  : '#ff4757',
+              shape:    isShort ? 'arrowUp'  : 'arrowDown',
+              size:     0.75,
+              text:     '',
+            })
+          }
         })
+
+        markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
+        createSeriesMarkers(candleSeries, markers)
 
         // ── Stop-loss + Take-profit lines (entry → last exit only) ───────────
         // Lines are scoped to the trade window — they start at entry and end
