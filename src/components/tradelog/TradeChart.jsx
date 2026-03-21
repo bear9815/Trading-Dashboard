@@ -309,30 +309,45 @@ export default function TradeChart({ trade }) {
         // v5: createSeriesMarkers replaces series.setMarkers()
         createSeriesMarkers(candleSeries, markers)
 
-        // ── Stop-loss line ───────────────────────────────────────────────────
-        if (trade.stopLoss) {
-          const s = chart.addSeries(LineSeries, {
-            color: '#ff4757', lineWidth: 1, lineStyle: LineStyle.Dashed,
-            lastValueVisible: true, priceLineVisible: false,
-            title: `Stop $${trade.stopLoss}`, crosshairMarkerVisible: false,
-          })
-          s.setData([
-            { time: candles[0].time,                  value: trade.stopLoss },
-            { time: candles[candles.length - 1].time, value: trade.stopLoss },
-          ])
-        }
+        // ── Stop-loss + Take-profit lines (entry → last exit only) ───────────
+        // Lines are scoped to the trade window — they start at entry and end
+        // at the last exit date (or at today's candle if the trade is still open).
+        // This avoids cluttering the full chart with horizontal lines.
+        {
+          const tradeStart = entrySnap || candles[0].time
 
-        // ── Take-profit line ─────────────────────────────────────────────────
-        if (trade.takeProfit) {
-          const s = chart.addSeries(LineSeries, {
-            color: '#00d084', lineWidth: 1, lineStyle: LineStyle.Dashed,
-            lastValueVisible: true, priceLineVisible: false,
-            title: `TP $${trade.takeProfit}`, crosshairMarkerVisible: false,
-          })
-          s.setData([
-            { time: candles[0].time,                  value: trade.takeProfit },
-            { time: candles[candles.length - 1].time, value: trade.takeProfit },
-          ])
+          // Last exit date snapped to nearest candle, fallback to last candle
+          const exitSnaps = exits.map(e => snap(e.date)).filter(Boolean)
+          const tradeEnd  = exitSnaps.length > 0
+            ? exitSnaps.reduce((latest, d) => (d > latest ? d : latest), exitSnaps[0])
+            : candles[candles.length - 1].time
+
+          // Ensure start < end (edge case: same-day entry+exit, nudge end forward)
+          const lineEnd = tradeEnd > tradeStart ? tradeEnd : candles[candles.length - 1].time
+
+          if (trade.stopLoss && tradeStart) {
+            const s = chart.addSeries(LineSeries, {
+              color: 'rgba(255,71,87,0.7)', lineWidth: 1, lineStyle: LineStyle.Dashed,
+              lastValueVisible: false, priceLineVisible: false,
+              crosshairMarkerVisible: false,
+            })
+            s.setData([
+              { time: tradeStart, value: trade.stopLoss },
+              { time: lineEnd,    value: trade.stopLoss },
+            ])
+          }
+
+          if (trade.takeProfit && tradeStart) {
+            const s = chart.addSeries(LineSeries, {
+              color: 'rgba(0,208,132,0.7)', lineWidth: 1, lineStyle: LineStyle.Dashed,
+              lastValueVisible: false, priceLineVisible: false,
+              crosshairMarkerVisible: false,
+            })
+            s.setData([
+              { time: tradeStart, value: trade.takeProfit },
+              { time: lineEnd,    value: trade.takeProfit },
+            ])
+          }
         }
 
         chart.timeScale().fitContent()
