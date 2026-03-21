@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, Brain, Loader, AlertTriangle, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { RefreshCw, Brain, Loader, AlertTriangle, TrendingUp, TrendingDown, Minus, Info } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { callMarketQualityAI } from '../../utils/ai.js'
 import {
@@ -33,6 +33,201 @@ function DirIcon({ val, size = 12 }) {
   if (val > 0)     return <TrendingUp   size={size} className="text-green-400 inline" />
   if (val < 0)     return <TrendingDown size={size} className="text-red-400   inline" />
   return <Minus size={size} className="text-gray-500 inline" />
+}
+
+// ── Info popover ──────────────────────────────────────────────────────────────
+
+function InfoPopover({ content, alignRight = true }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative inline-flex items-center" style={{ zIndex: 10 }}>
+      <button
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onClick={() => setOpen(v => !v)}
+        className="ml-1 p-0.5 rounded text-gray-600 hover:text-accent-blue transition-colors"
+        style={{ lineHeight: 0 }}
+        aria-label="More info"
+      >
+        <Info size={11} />
+      </button>
+      {open && (
+        <div
+          className="absolute bottom-full mb-2 bg-[#111827] border border-white/15 rounded-xl shadow-2xl text-xs leading-relaxed"
+          style={{
+            [alignRight ? 'right' : 'left']: 0,
+            width: 288,
+            zIndex: 9999,
+            pointerEvents: 'none',
+          }}
+        >
+          {content}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Inline label with optional hover tooltip for individual metric rows */
+function MetricTip({ label, tip }) {
+  const [show, setShow] = useState(false)
+  return (
+    <span
+      className="relative text-gray-500 text-[11px] cursor-default select-none"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      {label}
+      {tip && (
+        <>
+          <span className="ml-0.5 text-gray-700">·</span>
+          {show && (
+            <span
+              className="absolute left-0 bottom-full mb-1.5 bg-[#111827] border border-white/15 rounded-lg px-2.5 py-2 shadow-xl leading-relaxed"
+              style={{ width: 220, zIndex: 9999, display: 'block', pointerEvents: 'none' }}
+            >
+              {tip}
+            </span>
+          )}
+        </>
+      )}
+    </span>
+  )
+}
+
+// ── Panel info content ─────────────────────────────────────────────────────────
+
+function VolInfo() {
+  return (
+    <div className="p-3.5 space-y-2.5">
+      <div>
+        <p className="text-white font-semibold mb-1 text-[11px] tracking-wide uppercase">Volatility Panel</p>
+        <p className="text-gray-400">Market fear & uncertainty. Composite of VIX level, trend, term structure, VVIX, and SKEW.</p>
+      </div>
+      <div className="space-y-1">
+        <p className="text-gray-500 text-[10px] uppercase tracking-wider font-semibold">Swing Signal Guide</p>
+        <div className="space-y-0.5 text-gray-400">
+          <p><span className="text-green-400 font-mono">VIX 16–22</span> — Sweet spot. Real moves, manageable risk.</p>
+          <p><span className="text-yellow-400 font-mono">&lt;16</span> — Too calm. Breakouts lack follow-through.</p>
+          <p><span className="text-yellow-400 font-mono">22–30</span> — Cut size 50%. Tighten stops.</p>
+          <p><span className="text-red-400 font-mono">&gt;30</span> — Danger zone. Most setups fail. Cash is a position.</p>
+        </div>
+      </div>
+      <div className="space-y-0.5 text-gray-400 border-t border-white/5 pt-2">
+        <p><span className="text-green-400 font-mono">Term &lt;1.0</span> — Contango. Calm institutional positioning. ✓</p>
+        <p><span className="text-red-400 font-mono">Term &gt;1.0</span> — Backwardation. Fear spike. Wait for it to resolve before adding longs.</p>
+        <p className="text-gray-500 mt-1"><span className="text-yellow-400 font-mono">SKEW &gt;140</span> — Smart money buying crash protection. Hidden fear even when VIX looks calm.</p>
+      </div>
+    </div>
+  )
+}
+
+function TrendInfo() {
+  return (
+    <div className="p-3.5 space-y-2.5">
+      <div>
+        <p className="text-white font-semibold mb-1 text-[11px] tracking-wide uppercase">Trend Panel</p>
+        <p className="text-gray-400">SPY's position relative to key MAs — the primary macro trend filter for swing entries.</p>
+      </div>
+      <div className="space-y-1">
+        <p className="text-gray-500 text-[10px] uppercase tracking-wider font-semibold">Swing Signal Guide</p>
+        <div className="space-y-0.5 text-gray-400">
+          <p><span className="text-green-400">Above all 3 MAs</span> — Full bull stack. Buy pullbacks. Highest win rate environment.</p>
+          <p><span className="text-yellow-400">Below 50d, above 200d</span> — Correcting. Wait for 50d reclaim or A+ setups only.</p>
+          <p><span className="text-red-400">Below 200d MA</span> — Bear market. Reduce swing activity dramatically. Short bias only.</p>
+        </div>
+      </div>
+      <div className="space-y-0.5 text-gray-400 border-t border-white/5 pt-2">
+        <p className="text-gray-500 text-[10px] uppercase tracking-wider font-semibold mb-1">RSI-14</p>
+        <p><span className="text-green-400 font-mono">50–65</span> — Healthy trend with room to run. Best entry zone.</p>
+        <p><span className="text-yellow-400 font-mono">&gt;70</span> — Overbought. Avoid new longs, trail existing stops.</p>
+        <p><span className="text-yellow-400 font-mono">&lt;40</span> — Oversold. Watch for bounce setups, not new longs yet.</p>
+      </div>
+    </div>
+  )
+}
+
+function FactorInfo() {
+  return (
+    <div className="p-3.5 space-y-2.5">
+      <div>
+        <p className="text-white font-semibold mb-1 text-[11px] tracking-wide uppercase">Factor Regime Panel</p>
+        <p className="text-gray-400">Are the right market styles leading? Computed as EWMA Z-scores of factor returns vs SPY. Tells you what the market is rewarding right now.</p>
+      </div>
+      <div className="space-y-1">
+        <p className="text-gray-500 text-[10px] uppercase tracking-wider font-semibold">Per-Factor Signals</p>
+        <div className="space-y-0.5 text-gray-400">
+          <p><span className="text-green-400">MTUM BULL</span> — Momentum strategies rewarded → breakouts follow through. Most important signal.</p>
+          <p><span className="text-green-400">Growth BULL</span> — Tech/growth leading → risk-on, ideal for swing.</p>
+          <p><span className="text-green-400">Quality BEAR</span> — Risk appetite up. Money leaving defensives. (inverted scoring)</p>
+          <p><span className="text-green-400">Size BULL</span> — Small caps participating → broad market health.</p>
+        </div>
+      </div>
+      <div className="space-y-0.5 text-gray-400 border-t border-white/5 pt-2">
+        <p><span className="text-red-400">MTUM BEAR</span> — Momentum not working → avoid breakout chasing entirely.</p>
+        <p><span className="text-yellow-400">Quality BULL</span> — Defensive rotation. Institutional caution. Reduce aggression.</p>
+        <p className="text-gray-500 mt-1">Z-score magnitude matters: ±2σ = strong regime. ±0.5σ = transitioning.</p>
+      </div>
+    </div>
+  )
+}
+
+function MomInfo() {
+  return (
+    <div className="p-3.5 space-y-2.5">
+      <div>
+        <p className="text-white font-semibold mb-1 text-[11px] tracking-wide uppercase">Momentum Panel</p>
+        <p className="text-gray-400">How many of 11 S&P sectors are advancing today — a breadth check for rally quality.</p>
+      </div>
+      <div className="space-y-1">
+        <p className="text-gray-500 text-[10px] uppercase tracking-wider font-semibold">Swing Signal Guide</p>
+        <div className="space-y-0.5 text-gray-400">
+          <p><span className="text-green-400 font-mono">8–11 positive</span> — Broad rally. High-conviction longs. Add size to winners.</p>
+          <p><span className="text-yellow-400 font-mono">5–7 positive</span> — Mixed. Stick to leading sectors only.</p>
+          <p><span className="text-red-400 font-mono">&lt;4 positive</span> — Narrow breadth. Only the dominant sector worth trading. High failure rate for breakouts.</p>
+        </div>
+      </div>
+      <div className="space-y-0.5 text-gray-400 border-t border-white/5 pt-2">
+        <p className="text-gray-500 text-[10px] font-semibold">Top/Bot Spread:</p>
+        <p><span className="text-green-400">&gt;3%</span> — Strong rotation. Trade the leader.</p>
+        <p><span className="text-gray-400">&lt;1%</span> — Indecisive. No clear leadership. Wait.</p>
+      </div>
+    </div>
+  )
+}
+
+function MacroInfo() {
+  return (
+    <div className="p-3.5 space-y-2.5">
+      <div>
+        <p className="text-white font-semibold mb-1 text-[11px] tracking-wide uppercase">Macro Panel</p>
+        <p className="text-gray-400">Interest rate and dollar backdrop — the macro tide that lifts or sinks risk assets.</p>
+      </div>
+      <div className="space-y-1">
+        <p className="text-gray-500 text-[10px] uppercase tracking-wider font-semibold">10Y Yield Signals</p>
+        <div className="space-y-0.5 text-gray-400">
+          <p><span className="text-red-400">Rising fast (+0.10/wk)</span> — Headwind for growth/tech. Reduce momentum exposure.</p>
+          <p><span className="text-green-400">Falling + below 3.5%</span> — Tailwind for growth. Lean into momentum setups.</p>
+          <p><span className="text-yellow-400">Yield &gt;4.5%</span> — Elevated. Growth stocks face a premium headwind.</p>
+        </div>
+      </div>
+      <div className="space-y-0.5 text-gray-400 border-t border-white/5 pt-2">
+        <p><span className="text-yellow-400">DXY strengthening</span> — Headwind for commodities and EM. Mixed for domestic tech.</p>
+        <p className="mt-1"><span className="text-red-400">FOMC ≤2 days</span> — Cut all new entries. Vol spikes unpredictably.</p>
+        <p><span className="text-red-400">FOMC day</span> — Hold existing. Add nothing. Expect a whipsaw move.</p>
+        <p><span className="text-yellow-400">FOMC ≤7 days</span> — Reduce size. Markets front-run expected outcomes.</p>
+      </div>
+    </div>
+  )
 }
 
 const DECISION_CFG = {
@@ -97,11 +292,14 @@ function MetricRow({ label, value, tag, tagColor, dir }) {
   )
 }
 
-function PanelHdr({ label, score }) {
+function PanelHdr({ label, score, info }) {
   const col = scoreColor(score)
   return (
     <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-white/5">
-      <span className="text-[10px] font-semibold tracking-widest uppercase text-gray-400">{label}</span>
+      <div className="flex items-center">
+        <span className="text-[10px] font-semibold tracking-widest uppercase text-gray-400">{label}</span>
+        {info && <InfoPopover content={info} />}
+      </div>
       {score != null && (
         <span className="mono font-bold text-sm" style={{ color: col }}>{score}</span>
       )}
@@ -121,22 +319,28 @@ function VolatilityPanel({ vix, score }) {
 
   return (
     <div className="card-sm h-full">
-      <PanelHdr label="Volatility" score={score} />
-      <MetricRow label="VIX Level"    value={fmt(vix.level)} tag={levelTag} tagColor={levelCol} />
-      <MetricRow label="VIX3M"        value={fmt(vix.vix3m)}
+      <PanelHdr label="Volatility" score={score} info={<VolInfo />} />
+      <MetricRow label={<MetricTip label="VIX Level" tip="S&P 500 30-day implied vol. Sweet spot 16–22 for swing. Below 16 = complacency. Above 30 = avoid new longs." />}
+        value={fmt(vix.level)} tag={levelTag} tagColor={levelCol} />
+      <MetricRow label={<MetricTip label="VIX3M" tip="3-month implied vol. Compares longer-term fear to near-term VIX." />}
+        value={fmt(vix.vix3m)}
         tag={vix.vix3m != null ? (vix.vix3m < 18 ? 'Low' : vix.vix3m < 24 ? 'Mod' : 'High') : null}
         tagColor={vix.vix3m < 18 ? '#00d084' : vix.vix3m < 24 ? '#ffa502' : '#ff4757'} />
-      <MetricRow label="Term Struct"
+      <MetricRow label={<MetricTip label="Term Struct" tip="VIX ÷ VIX3M ratio. Below 1.0 = contango (calm, favorable). Above 1.0 = backwardation (fear spike — wait before adding longs)." />}
         value={vix.termRatio != null ? fmt(vix.termRatio) : null}
         tag={vix.termLabel?.text ?? null} tagColor={termCol} />
-      <MetricRow label="VIX 5d Slope" value={vix.slope != null ? fmt(vix.slope, 2) : null} tag={slopeTag} tagColor={slopeCol} dir={vix.slope} />
-      <MetricRow label="VIX 1Y %ile"  value={vix.percentile != null ? `${vix.percentile}th` : null}
+      <MetricRow label={<MetricTip label="VIX 5d Slope" tip="Rate of VIX change over last 5 sessions. Rising = deteriorating conditions. Falling = stabilizing — often a re-entry signal." />}
+        value={vix.slope != null ? fmt(vix.slope, 2) : null} tag={slopeTag} tagColor={slopeCol} dir={vix.slope} />
+      <MetricRow label={<MetricTip label="VIX 1Y %ile" tip="Where current VIX sits in its 1-year range. Below 40th = historically calm. Above 70th = historically elevated." />}
+        value={vix.percentile != null ? `${vix.percentile}th` : null}
         tag={vix.percentile != null ? (vix.percentile < 40 ? 'Normal' : vix.percentile < 70 ? 'Elevated' : 'High') : null}
         tagColor={vix.percentile < 40 ? '#00d084' : vix.percentile < 70 ? '#ffa502' : '#ff4757'} />
-      <MetricRow label="VVIX"         value={fmt(vix.vvix)}
+      <MetricRow label={<MetricTip label="VVIX" tip="Volatility of VIX itself. Above 110 = VIX is unstable — gaps and reversals become unpredictable. Reduce overnight exposure." />}
+        value={fmt(vix.vvix)}
         tag={vix.vvix != null ? (vix.vvix < 90 ? 'Calm' : vix.vvix < 110 ? 'Elevated' : 'Extreme') : null}
         tagColor={vix.vvix < 90 ? '#00d084' : vix.vvix < 110 ? '#ffa502' : '#ff4757'} />
-      <MetricRow label="SKEW"         value={vix.skew != null ? fmt(vix.skew, 0) : null}
+      <MetricRow label={<MetricTip label="SKEW" tip="Demand for crash protection (puts). Above 140 = smart money hedging tail risk despite a normal-looking VIX — hidden fear." />}
+        value={vix.skew != null ? fmt(vix.skew, 0) : null}
         tag={vix.skew != null ? (vix.skew < 125 ? 'Normal' : vix.skew < 140 ? 'Elevated' : 'High Tail') : null}
         tagColor={vix.skew < 125 ? '#00d084' : vix.skew < 140 ? '#ffa502' : '#ff4757'} />
     </div>
@@ -157,12 +361,17 @@ function TrendPanel({ spy, qqq, score }) {
 
   return (
     <div className="card-sm h-full">
-      <PanelHdr label="Trend" score={score} />
-      <MetricRow label="SPY vs 20d MA"  value={spy.vs20d  != null ? `${fmtPct(spy.vs20d)}`  : null} tag={maTag(spy.vs20d).label}  tagColor={maTag(spy.vs20d).color} />
-      <MetricRow label="SPY vs 50d MA"  value={spy.vs50d  != null ? `${fmtPct(spy.vs50d)}`  : null} tag={maTag(spy.vs50d).label}  tagColor={maTag(spy.vs50d).color} />
-      <MetricRow label="SPY vs 200d MA" value={spy.vs200d != null ? `${fmtPct(spy.vs200d)}` : null} tag={maTag(spy.vs200d).label} tagColor={maTag(spy.vs200d).color} />
-      <MetricRow label="QQQ vs 50d MA"  value={qqq?.vs50d != null ? `${fmtPct(qqq.vs50d)}`  : null} tag={maTag(qqq?.vs50d).label} tagColor={maTag(qqq?.vs50d).color} />
-      <MetricRow label="SPY RSI-14"     value={spy.rsi14} tag={rsiTag} tagColor={rsiCol} />
+      <PanelHdr label="Trend" score={score} info={<TrendInfo />} />
+      <MetricRow label={<MetricTip label="SPY vs 20d MA" tip="Short-term trend health. Above 0% = price above 20-day MA. Key for swing entry timing." />}
+        value={spy.vs20d  != null ? `${fmtPct(spy.vs20d)}`  : null} tag={maTag(spy.vs20d).label}  tagColor={maTag(spy.vs20d).color} />
+      <MetricRow label={<MetricTip label="SPY vs 50d MA" tip="Intermediate trend. Above = uptrend confirmed. Below = wait for reclaim before adding new longs." />}
+        value={spy.vs50d  != null ? `${fmtPct(spy.vs50d)}`  : null} tag={maTag(spy.vs50d).label}  tagColor={maTag(spy.vs50d).color} />
+      <MetricRow label={<MetricTip label="SPY vs 200d MA" tip="Long-term bull/bear dividing line. Above = bull market. Below = bear market. Position sizing guide." />}
+        value={spy.vs200d != null ? `${fmtPct(spy.vs200d)}` : null} tag={maTag(spy.vs200d).label} tagColor={maTag(spy.vs200d).color} />
+      <MetricRow label={<MetricTip label="QQQ vs 50d MA" tip="Tech/growth leadership check. QQQ leading SPY above 50d = risk-on growth environment." />}
+        value={qqq?.vs50d != null ? `${fmtPct(qqq.vs50d)}`  : null} tag={maTag(qqq?.vs50d).label} tagColor={maTag(qqq?.vs50d).color} />
+      <MetricRow label={<MetricTip label="SPY RSI-14" tip="Momentum oscillator. 50–65 = healthy trend. >70 = overbought, trail stops. <40 = oversold watch zone." />}
+        value={spy.rsi14} tag={rsiTag} tagColor={rsiCol} />
       <MetricRow label="Regime"
         value={<span style={{ color: spy.regime?.color }}>{spy.regime?.label ?? '—'}</span>}
         tag={spy.regime?.detail} tagColor={spy.regime?.color} />
@@ -186,7 +395,7 @@ function FactorRegimePanel({ factors, bullCount, score }) {
 
   return (
     <div className="card-sm h-full">
-      <PanelHdr label="Factor Regime" score={score} />
+      <PanelHdr label="Factor Regime" score={score} info={<FactorInfo />} />
 
       {/* Breadth summary */}
       <div className="flex items-center justify-between py-0.5 mb-1.5 pb-1.5 border-b border-white/5">
@@ -245,10 +454,10 @@ function MomentumPanel({ sectors, positiveSectors, totalSectors, score }) {
 
   return (
     <div className="card-sm h-full">
-      <PanelHdr label="Momentum" score={score} />
-      <MetricRow label="Sectors +" value={
-        <span style={{ color: posCol }}>{positiveSectors ?? '—'}/{totalSectors}</span>
-      } tag={positiveSectors >= 7 ? 'Broad' : positiveSectors >= 4 ? 'Mixed' : 'Narrow'} tagColor={posCol} />
+      <PanelHdr label="Momentum" score={score} info={<MomInfo />} />
+      <MetricRow label={<MetricTip label="Sectors +" tip="Breadth check: how many of 11 S&P sectors are up today. 8+ = broad rally. Under 4 = narrow, high-risk." />}
+        value={<span style={{ color: posCol }}>{positiveSectors ?? '—'}/{totalSectors}</span>}
+        tag={positiveSectors >= 7 ? 'Broad' : positiveSectors >= 4 ? 'Mixed' : 'Narrow'} tagColor={posCol} />
       <MetricRow label="Leader"
         value={leader?.label ?? '—'}
         tag={leader?.changePct != null ? fmtPct(leader.changePct) : null}
@@ -279,16 +488,16 @@ function MacroPanel({ tnx, dxy, score, fomcDays }) {
 
   return (
     <div className="card-sm h-full">
-      <PanelHdr label="Macro" score={score} />
-      <MetricRow label="10Y Yield"
+      <PanelHdr label="Macro" score={score} info={<MacroInfo />} />
+      <MetricRow label={<MetricTip label="10Y Yield" tip="US Treasury 10-year yield. Rising fast = headwind for growth stocks. Above 4.5% = valuation pressure on high-multiple names." />}
         value={tnx.level != null ? `${fmt(tnx.level)}%` : null}
         tag={tnxTag} tagColor={tnxCol} dir={tnx.change} />
-      <MetricRow label="DXY"
+      <MetricRow label={<MetricTip label="DXY" tip="US Dollar strength index. Strengthening = headwind for commodities and EM. Weakening = tailwind for risk assets." />}
         value={fmt(dxy?.price)}
         tag={dxyTag} tagColor={dxyCol} dir={dxy?.change} />
-      <MetricRow label="Fed Stance"
+      <MetricRow label={<MetricTip label="Fed Stance" tip="Implied Fed posture based on 10Y yield level. Hawkish = rate pressure on equities. Dovish = supportive." />}
         value={<span style={{ color: tnx.fedStance?.color }}>{tnx.fedStance?.label ?? '—'}</span>} />
-      <MetricRow label="Next FOMC"
+      <MetricRow label={<MetricTip label="Next FOMC" tip="Days until the next Fed rate decision. Within 2 days = cut new entries, vol spikes unpredictably. Day of = hold existing, add nothing." />}
         value={fomcDays === 999 ? 'Scheduled' : fomcDays === 0 ? 'TODAY' : `${fomcDays}d away`}
         tag={fomcDays <= 0 ? 'Event Risk!' : fomcDays <= 3 ? 'Imminent' : fomcDays <= 7 ? 'This Week' : null}
         tagColor={fomcDays <= 0 ? '#ff4757' : fomcDays <= 3 ? '#ffa502' : '#ffa502'} />
