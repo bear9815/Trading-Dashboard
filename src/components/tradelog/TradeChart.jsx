@@ -5,6 +5,9 @@ import {
   CrosshairMode,
   LineStyle,
   createSeriesMarkers,
+  CandlestickSeries,
+  LineSeries,
+  HistogramSeries,
 } from 'lightweight-charts'
 import { ExternalLink, RefreshCw, AlertCircle } from 'lucide-react'
 import { fetchHistory } from '../../utils/marketData.js'
@@ -193,7 +196,7 @@ export default function TradeChart({ trade }) {
         chartRef.current = chart
 
         // ── Candlestick series ───────────────────────────────────────────────
-        const candleSeries = chart.addCandlestickSeries({
+        const candleSeries = chart.addSeries(CandlestickSeries, {
           upColor:         '#00d084',
           downColor:       '#ff4757',
           borderUpColor:   '#00d084',
@@ -209,7 +212,7 @@ export default function TradeChart({ trade }) {
         // ── Volume histogram ─────────────────────────────────────────────────
         const hasVolume = candles.some(c => (c.volume ?? 0) > 0)
         if (showVolume && hasVolume) {
-          const volSeries = chart.addHistogramSeries({
+          const volSeries = chart.addSeries(HistogramSeries, {
             priceFormat:  { type: 'volume' },
             priceScaleId: 'vol',
           })
@@ -227,7 +230,7 @@ export default function TradeChart({ trade }) {
 
           // Middle line (EMA 34) — always gold
           if (kc.middle.length > 0 && showEMA34) {
-            const mid = chart.addLineSeries({
+            const mid = chart.addSeries(LineSeries, {
               color: '#ffa502', lineWidth: 1.5,
               priceLineVisible: false, lastValueVisible: false,
               crosshairMarkerVisible: false, title: 'EMA 34',
@@ -237,14 +240,14 @@ export default function TradeChart({ trade }) {
 
           // Upper + Lower bands
           if (showKeltner && kc.upper.length > 0) {
-            const upSeries = chart.addLineSeries({
+            const upSeries = chart.addSeries(LineSeries, {
               color: '#3d84ff', lineWidth: 1, lineStyle: LineStyle.Dashed,
               priceLineVisible: false, lastValueVisible: false,
               crosshairMarkerVisible: false, title: `KC+${kMult}`,
             })
             upSeries.setData(kc.upper)
 
-            const loSeries = chart.addLineSeries({
+            const loSeries = chart.addSeries(LineSeries, {
               color: '#3d84ff', lineWidth: 1, lineStyle: LineStyle.Dashed,
               priceLineVisible: false, lastValueVisible: false,
               crosshairMarkerVisible: false, title: `KC-${kMult}`,
@@ -303,7 +306,7 @@ export default function TradeChart({ trade }) {
 
         // ── Stop-loss line ───────────────────────────────────────────────────
         if (trade.stopLoss) {
-          const s = chart.addLineSeries({
+          const s = chart.addSeries(LineSeries, {
             color: '#ff4757', lineWidth: 1, lineStyle: LineStyle.Dashed,
             lastValueVisible: true, priceLineVisible: false,
             title: `Stop $${trade.stopLoss}`, crosshairMarkerVisible: false,
@@ -316,7 +319,7 @@ export default function TradeChart({ trade }) {
 
         // ── Take-profit line ─────────────────────────────────────────────────
         if (trade.takeProfit) {
-          const s = chart.addLineSeries({
+          const s = chart.addSeries(LineSeries, {
             color: '#00d084', lineWidth: 1, lineStyle: LineStyle.Dashed,
             lastValueVisible: true, priceLineVisible: false,
             title: `TP $${trade.takeProfit}`, crosshairMarkerVisible: false,
