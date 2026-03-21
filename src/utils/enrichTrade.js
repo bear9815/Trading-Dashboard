@@ -24,6 +24,13 @@ export function enrichTrade(trade) {
   const pl    = result.pl
   const isShort = (result.position || 'Long').toLowerCase().includes('short')
 
+  // ── 0. Snapshot original stop loss (frozen on first entry, never overwritten) ─
+  // Mirrors _originalPositionSize — lets us always compute R vs the true initial
+  // risk even after the user trails the stop or partially closes the position.
+  if (result._originalStopLoss == null && stop != null) {
+    result._originalStopLoss = stop
+  }
+
   // ── 1. 2R auto-target ────────────────────────────────────────────────────
   if (result.takeProfit == null && entry != null && stop != null) {
     const riskPerShare = isShort ? stop - entry : entry - stop
@@ -36,9 +43,14 @@ export function enrichTrade(trade) {
   }
 
   // ── 2. R-multiple from actual P&L ────────────────────────────────────────
+  // Always use the ORIGINAL stop loss and ORIGINAL position size so that:
+  //  • Trailing the stop never inflates R (denominator stays fixed)
+  //  • Multiple/partial exits sum their P&L against the full original risk
   if (result.rMultiple == null && entry != null && stop != null && pl != null && size > 0) {
-    const riskPerShare = Math.abs(entry - stop)
-    const oneR = riskPerShare * size
+    const origStop = result._originalStopLoss ?? stop
+    const origSize = result._originalPositionSize ?? size
+    const riskPerShare = Math.abs(entry - origStop)
+    const oneR = riskPerShare * origSize
     if (oneR > 0) {
       result.rMultiple = Math.round((pl / oneR) * 1000) / 1000
     }

@@ -316,9 +316,14 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
       const ba           = ep && exitedShares > 0 ? ep * exitedShares : null
       if (ba > 0) {
         pl = gross - ba - comm
-        // R vs original position risk (how much of total 1R did you capture)
-        if (ep && sl && ps) {
-          const totalRisk = Math.abs(ep - sl) * ps
+        // R = total P&L ÷ ORIGINAL risk dollar amount.
+        // Use _originalStopLoss (not the current/trailed stop) and
+        // _originalPositionSize (not remaining shares after partial exits)
+        // so that trailing stops and scale-outs don't inflate R.
+        const origSL = trade._originalStopLoss ?? sl
+        const origPS = trade._originalPositionSize ?? ps
+        if (ep && origSL && origPS) {
+          const totalRisk = Math.abs(ep - origSL) * origPS
           if (totalRisk > 0) rMultiple = parseFloat((pl / totalRisk).toFixed(3))
         }
       }
@@ -347,6 +352,9 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
       exitNotes:    draft.exitNotes ?? trade.exitNotes ?? '',
       tags:         draft.tags ?? trade.tags ?? [],
       processGrade: draft.processGrade !== undefined ? draft.processGrade : (trade.processGrade ?? null),
+      // Preserve original stop once set — never overwrite with a trailed stop.
+      // This is the denominator for all R calculations on this trade forever.
+      _originalStopLoss: trade._originalStopLoss ?? num(draft.stopLoss),
     }
 
     if (rMultiple != null) updates.rMultiple = rMultiple
@@ -702,19 +710,26 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
             />
           </div>
 
-          {/* Preview R */}
+          {/* Preview R — always computed against ORIGINAL stop/size, not current edited values */}
           {(() => {
-            const e = parseFloat(draft.entryPrice)
-            const s = parseFloat(draft.stopLoss)
-            const sz = parseFloat(draft.positionSize)
+            const e      = parseFloat(draft.entryPrice) || trade.entryPrice
+            // Use the frozen original stop for the denominator, falling back to
+            // whatever is currently in the stop field only if this is a brand-new trade.
+            const origSL = trade._originalStopLoss ?? parseFloat(draft.stopLoss)
+            const origSz = trade._originalPositionSize ?? (parseFloat(draft.positionSize) || trade.positionSize)
             const pl = trade.pl
-            if (e > 0 && s > 0 && sz > 0 && pl != null) {
-              const oneR = Math.abs(e - s) * sz
+            if (e > 0 && origSL > 0 && origSz > 0 && pl != null) {
+              const oneR = Math.abs(e - origSL) * origSz
               const newR = oneR > 0 ? (pl / oneR).toFixed(2) : null
+              const staleSL = trade._originalStopLoss != null &&
+                parseFloat(draft.stopLoss) !== trade._originalStopLoss
               return newR ? (
                 <p className="text-xs mb-3 text-accent-blue/80">
                   Preview R-multiple: <span className="font-semibold mono">{newR}R</span>
                   <span className="text-gray-500 ml-2">(1R = {formatCurrency(oneR)})</span>
+                  {staleSL && (
+                    <span className="text-gray-600 ml-2">· using original SL ${trade._originalStopLoss.toFixed(2)}</span>
+                  )}
                 </p>
               ) : null
             }
