@@ -154,11 +154,13 @@ export default function TradeChart({ trade }) {
           const exits      = (trade.exits || []).filter(e => e.date)
           const lastExitMs = exits.length > 0
             ? Math.max(...exits.map(e => new Date(e.date).getTime()))
-            : Date.now()
-          const endMs      = Math.max(lastExitMs, Date.now())
+            : null
+          // Closed trades: end chart ~5 days after last exit (no future candles)
+          // Open trades: extend to today so the current price is visible
+          const endMs     = lastExitMs != null ? lastExitMs + 5 * 86_400_000 : Date.now() + 2 * 86_400_000
           // Extra lookback so EMA/ATR have enough bars to warm up (34 × 2 + buffer)
-          const startDate  = new Date(entryMs - 120 * 86_400_000)
-          const endDate    = new Date(endMs   + 30 * 86_400_000)
+          const startDate = new Date(entryMs - 120 * 86_400_000)
+          const endDate   = new Date(endMs)
 
           const daily = await fetchHistory(trade.symbol, startDate, endDate)
           if (cancelRef.current) return
