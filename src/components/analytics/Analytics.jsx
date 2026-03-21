@@ -14,7 +14,7 @@ import { buildEquityCurve } from '../../utils/equityCurve.js'
 import {
   calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor,
   calcRMultipleDistribution, groupByField, calcAvgWinLoss, calcTotalR,
-  calcSharpe, calcSortino, calcSQN, calcCalmar
+  calcSharpe, calcSortino, calcSQN, calcCalmar, calcAvgStopEfficiency
 } from '../../utils/metrics.js'
 import { formatCurrency, formatR, formatDate } from '../../utils/formatters.js'
 import { computeTradeMAEMFE, fetchHistory, fetchATR14 } from '../../utils/marketData.js'
@@ -183,6 +183,10 @@ export default function Analytics({ selectedAccount }) {
 
   const timeframe    = analyticsTimeframe ?? 'All'
   const setTimeframe = setAnalyticsTimeframe
+
+  // R-basis toggle: 'stop' = stop-based R (default), 'atr' = ATR-budget R
+  const [rBasis, setRBasis] = useState('stop')
+  const rField = rBasis === 'atr' ? 'rMultipleATR' : 'rMultiple'
 
   // MAE/MFE state
   const [maemfeData, setMaemfeData] = useState([])
@@ -474,14 +478,14 @@ export default function Analytics({ selectedAccount }) {
         label: (() => { const d = new Date(month + '-02'); return d.toLocaleString('default', { month: 'short', year: '2-digit' }) })(),
         trades:       ts.length,
         winRate:      calcWinRate(ts),
-        avgR:         calcAvgR(ts),
+        avgR:         calcAvgR(ts, rField),
         expectancy:   calcExpectancy(ts),
         profitFactor: isFinite(pf) ? pf : 999,
-        totalR:       calcTotalR(ts),
+        totalR:       calcTotalR(ts, rField),
         totalPL:      ts.reduce((s, t) => s + (t.pl || 0), 0),
       }
     })
-  }, [closedSorted])
+  }, [closedSorted, rField])
 
   const sortedMonthly = useMemo(() => {
     return [...monthlyStats].sort((a, b) => {
@@ -495,12 +499,12 @@ export default function Analytics({ selectedAccount }) {
   const cumRData = useMemo(() => {
     let cumR = 0
     return closedSorted.map((t, i) => {
-      cumR += t.rMultiple || 0
+      cumR += t[rField] || 0
       return { trade: i + 1, cumR: Math.round(cumR * 100) / 100 }
     })
-  }, [closedSorted])
+  }, [closedSorted, rField])
 
-  const totalR = calcTotalR(closedSorted)
+  const totalR = calcTotalR(closedSorted, rField)
 
   // ── Time of Day Analysis ───────────────────────────────────────────────────
   // All times in CST (Central): market open = 8:30, close = 3:00.
@@ -629,7 +633,7 @@ export default function Analytics({ selectedAccount }) {
     { name: 'Loss', value: losses },
   ]
 
-  const rDist = calcRMultipleDistribution(tfFiltered)
+  const rDist = calcRMultipleDistribution(tfFiltered, rField)
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const byDow = Object.fromEntries(dayNames.map(d => [d, { total: 0, count: 0 }]))
@@ -724,12 +728,14 @@ export default function Analytics({ selectedAccount }) {
 
   const { avgWin, avgLoss } = calcAvgWinLoss(tfFiltered)
   const payoffRatio = Math.abs(avgLoss) > 0 ? avgWin / Math.abs(avgLoss) : null
-  const avgWinR  = useMemo(() => { const w = closed.filter(t => t.status === 'Win'  && t.rMultiple != null); return w.length ? w.reduce((s, t) => s + t.rMultiple, 0) / w.length : null }, [closed])
-  const avgLossR = useMemo(() => { const l = closed.filter(t => t.status === 'Loss' && t.rMultiple != null); return l.length ? l.reduce((s, t) => s + t.rMultiple, 0) / l.length : null }, [closed])
+  const avgWinR  = useMemo(() => { const w = closed.filter(t => t.status === 'Win'  && t[rField] != null); return w.length ? w.reduce((s, t) => s + t[rField], 0) / w.length : null }, [closed, rField])
+  const avgLossR = useMemo(() => { const l = closed.filter(t => t.status === 'Loss' && t[rField] != null); return l.length ? l.reduce((s, t) => s + t[rField], 0) / l.length : null }, [closed, rField])
   const profitFactor = calcProfitFactor(tfFiltered)
   const expectancy = calcExpectancy(tfFiltered)
-  const avgR = calcAvgR(tfFiltered)
+  const avgR = calcAvgR(tfFiltered, rField)
   const winRate = calcWinRate(tfFiltered)
+  const avgStopEff = useMemo(() => calcAvgStopEfficiency(tfFiltered), [tfFiltered])
+  const hasATRData = useMemo(() => tfFiltered.some(t => t.atrValue != null), [tfFiltered])
 
   // ── Streaks ──────────────────────────────────────────────────────────────
   const streaks = useMemo(() => {
@@ -867,7 +873,7 @@ export default function Analytics({ selectedAccount }) {
     return { sharpe: calcSharpe(curve), sortino: calcSortino(curve), calmar: calcCalmar(curve) }
   }, [trades, accountActivities])
 
-  const sqn = useMemo(() => calcSQN(tfFiltered), [tfFiltered])
+  const sqn = useMemo(() => calcSQN(tfFiltered, rField), [tfFiltered, rField])
 
   // ── Drawdown Simulator ────────────────────────────────────────────────────
   const drawdownSim = useMemo(() => {
@@ -907,6 +913,28 @@ export default function Analytics({ selectedAccount }) {
         ))}
       </div>
 
+      {/* R-basis toggle — only visible when trades have ATR data */}
+      {hasATRData && (
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-gray-500 font-medium">R Basis:</span>
+          <div className="flex items-center bg-surface-100 border border-white/10 rounded-lg p-0.5">
+            {[['stop', 'Stop Loss'], ['atr', 'ATR Budget']].map(([val, label]) => (
+              <button key={val} onClick={() => setRBasis(val)}
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                  rBasis === val ? 'bg-accent-blue/20 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+                }`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10px] text-gray-600">
+            {rBasis === 'atr'
+              ? 'R calculated vs ATR × position size — your true system risk budget'
+              : 'R calculated vs actual stop distance × position size'}
+          </span>
+        </div>
+      )}
+
       {/* Summary stats */}
       <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
 
@@ -926,17 +954,21 @@ export default function Analytics({ selectedAccount }) {
         />
 
         <StatCardWithTooltip
-          label="Avg R-Multiple" value={formatR(avgR)}
+          label={rBasis === 'atr' ? 'Avg R (ATR)' : 'Avg R-Multiple'} value={formatR(avgR)}
           valueClass={avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Average R-Multiple</p>
-            <p className="text-gray-400 leading-relaxed mb-3">The average profit or loss per closed trade, expressed as a multiple of your initial risk (1R = the $ amount you risked on entry). Positive avg R means your edge is real.</p>
+            <p className="text-gray-400 leading-relaxed mb-3">
+              {rBasis === 'atr'
+                ? 'P&L ÷ (ATR × position size). Your true system expectancy — accounts for tight stops vs ATR sizing. A stopped-out trade with a tight stop costs less than -1R here.'
+                : 'The average profit or loss per closed trade expressed as a multiple of your actual stop risk (1R = stop distance × shares).'}
+            </p>
             <div className="space-y-1 mb-3">
               {[['> 1.0R','text-accent-green','Excellent'],['0.5–1.0R','text-accent-green','Healthy edge'],['0–0.5R','text-accent-yellow','Marginal — watch costs'],['< 0R','text-accent-red','No edge present']].map(([r,c,d])=>(
                 <div key={r} className="flex gap-2"><span className={`font-semibold w-20 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>
               ))}
             </div>
-            <p className="text-gray-600">Even a small positive avg R compounds significantly over many trades. Improving from 0.3R to 0.6R doubles long-term account growth.</p>
+            <p className="text-gray-600">Even a small positive avg R compounds significantly over many trades.</p>
           </>}
         />
 
@@ -1084,6 +1116,33 @@ export default function Analytics({ selectedAccount }) {
             },
           ]}
         />
+
+        {hasATRData && avgStopEff != null && (
+          <StatCardWithTooltip
+            label="Avg Stop Efficiency"
+            value={`${(avgStopEff * 100).toFixed(0)}%`}
+            valueClass={avgStopEff <= 0.6 ? 'text-accent-blue' : avgStopEff <= 1.0 ? 'text-accent-green' : 'text-accent-yellow'}
+            tooltipContent={<>
+              <p className="font-bold text-white text-sm mb-2">Average Stop Efficiency</p>
+              <p className="text-gray-400 leading-relaxed mb-3">
+                Stop distance ÷ ATR at entry. Shows how much of your ATR risk budget you actually expose per trade. 100% = stop placed exactly 1 ATR away. 50% = tight stop at half an ATR.
+              </p>
+              <div className="space-y-1 mb-3">
+                {[
+                  ['> 90%', 'text-accent-green', 'Full ATR used as stop'],
+                  ['60–90%', 'text-accent-yellow', 'Moderate tightening'],
+                  ['< 60%', 'text-accent-blue', 'Tight stops — rMultipleATR >> rMultiple'],
+                ].map(([r, c, d]) => (
+                  <div key={r} className="flex gap-2">
+                    <span className={`font-semibold w-20 shrink-0 ${c}`}>{r}</span>
+                    <span className="text-gray-600">{d}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-gray-600">Low stop efficiency means your stop-based R overstates your true risk budget losses. Use ATR R for system expectancy; stop R for execution quality.</p>
+            </>}
+          />
+        )}
 
       </div>
 

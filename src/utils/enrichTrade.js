@@ -56,6 +56,28 @@ export function enrichTrade(trade) {
     }
   }
 
+  // ── 2b. ATR-based R (rMultipleATR), ATR risk budget, and stop efficiency ──
+  // atrValue is the ATR at entry — the basis used to SIZE the position.
+  // This gives a second R view where 1R = ATR × originalSize (the full risk
+  // budget). When stop is tighter than ATR, rMultipleATR < rMultiple, which
+  // correctly shows a smaller hit to the overall system budget.
+  if (result.atrValue != null && result.atrValue > 0) {
+    const origSize2 = result._originalPositionSize ?? size
+    if (origSize2 > 0) {
+      result.atrRisk = Math.round(result.atrValue * origSize2 * 100) / 100
+      if (pl != null && result.atrRisk > 0) {
+        result.rMultipleATR = Math.round((pl / result.atrRisk) * 1000) / 1000
+      }
+    }
+    // Stop efficiency: what fraction of 1 ATR is this stop?
+    // 1.0 = stop exactly at ATR, 0.5 = stop is half an ATR away, etc.
+    if (entry != null && stop != null) {
+      const origStop2 = result._originalStopLoss ?? stop
+      const stopDist  = Math.abs(entry - origStop2)
+      result.stopEfficiency = Math.round((stopDist / result.atrValue) * 1000) / 1000
+    }
+  }
+
   // ── 3. Planned Risk:Reward ────────────────────────────────────────────────
   if (result.riskReward == null && entry != null && stop != null && result.takeProfit != null) {
     const risk   = Math.abs(entry - stop)
@@ -138,8 +160,9 @@ export function enrichTrade(trade) {
         }
 
         // R and P&L% are only meaningful on a fully closed trade
-        result.rMultiple = null
-        result.plPct     = null
+        result.rMultiple    = null
+        result.rMultipleATR = null
+        result.plPct        = null
       }
     }
   }

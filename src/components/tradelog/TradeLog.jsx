@@ -29,11 +29,19 @@ const PLAYBOOK_TAGS = [
   'With Trend', 'Counter Trend', 'Earnings Play', 'News Catalyst', 'Pre-Market',
 ]
 
-function RBadge({ r }) {
-  if (r == null) return <span className="badge-open text-xs">—</span>
-  if (r >= 1) return <span className="badge-win">{formatR(r)}</span>
-  if (r >= 0) return <span className="badge-scratch">{formatR(r)}</span>
-  return <span className="badge-loss">{formatR(r)}</span>
+function RBadge({ r, atrR }) {
+  if (r == null && atrR == null) return <span className="badge-open text-xs">—</span>
+  const badge = r == null ? null : r >= 1 ? 'badge-win' : r >= 0 ? 'badge-scratch' : 'badge-loss'
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      {badge && <span className={badge}>{formatR(r)}</span>}
+      {atrR != null && (
+        <span className="text-[9px] mono text-gray-500" title="R vs ATR sizing budget">
+          ATR: {formatR(atrR)}
+        </span>
+      )}
+    </div>
+  )
 }
 
 function StatusBadge({ status }) {
@@ -260,6 +268,7 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
       stopLoss:     trade.stopLoss     ?? '',
       takeProfit:   trade.takeProfit   ?? '',
       positionSize: (trade._originalPositionSize ?? trade.positionSize) ?? '',
+      atrValue:     trade.atrValue     ?? '',
       status:       trade.status       ?? 'Open',
       exits: (trade.exits || [])
         .filter(e => e.price || e.amount)
@@ -343,6 +352,7 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
       stopLoss:     num(draft.stopLoss),
       takeProfit:   num(draft.takeProfit) ?? undefined,
       positionSize: num(draft.positionSize),
+      atrValue:     num(draft.atrValue) ?? trade.atrValue ?? null,
       status:       newStatus,
       exits:        draft.exits != null ? editedExits : trade.exits,
       pl,
@@ -398,6 +408,18 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
                   )}
                 </span>
               ],
+              ...(trade.atrValue != null ? [
+                ['ATR at Entry',   `$${trade.atrValue.toFixed(2)}`],
+                ['ATR Risk (1R)',  trade.atrRisk != null ? `$${trade.atrRisk.toFixed(2)}` : '—'],
+                ['R (ATR basis)',  trade.rMultipleATR != null
+                  ? <span className={trade.rMultipleATR >= 0 ? 'text-accent-green mono font-medium' : 'text-accent-red mono font-medium'}>{formatR(trade.rMultipleATR)}</span>
+                  : '—'],
+                ['Stop Efficiency', trade.stopEfficiency != null
+                  ? <span className={trade.stopEfficiency <= 0.5 ? 'text-accent-green mono' : trade.stopEfficiency <= 0.9 ? 'text-accent-yellow mono' : 'text-gray-300 mono'}>
+                      {(trade.stopEfficiency * 100).toFixed(0)}% of ATR
+                    </span>
+                  : '—'],
+              ] : []),
               ['Buy Amount',   formatCurrency(trade.buyAmount)],
               ['Sell Amount',  formatCurrency(trade.sellAmount)],
               ['P&L %',        trade.plPct != null ? `${trade.plPct.toFixed(2)}%` : '—'],
@@ -567,11 +589,12 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
           </div>
 
           {/* Status + entry fields */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 mb-3 text-xs">
             <EditableSelect label="Status" field="status" draft={draft} setDraft={setDraft}
               options={['Open', 'Win', 'Loss', 'Scratch']} />
             <EditableNum label="Entry Price"   field="entryPrice"   value={trade.entryPrice}   draft={draft} setDraft={setDraft} />
             <EditableNum label="Stop Loss"     field="stopLoss"     value={trade.stopLoss}     draft={draft} setDraft={setDraft} placeholder="required for R" />
+            <EditableNum label="ATR"           field="atrValue"     value={trade.atrValue}     draft={draft} setDraft={setDraft} placeholder="optional" />
             <EditableNum label="Take Profit"   field="takeProfit"   value={trade.takeProfit}   draft={draft} setDraft={setDraft} placeholder="auto 2R if blank" />
             <EditableNum label="Position Size" field="positionSize" value={trade._originalPositionSize ?? trade.positionSize} draft={draft} setDraft={setDraft} />
           </div>
@@ -1020,7 +1043,7 @@ export default function TradeLog({ selectedAccount }) {
                       <td className={`px-3 py-3 text-right mono font-medium ${signClass(trade.pl)}`}>
                         {trade.pl != null ? (trade.pl >= 0 ? '+' : '') + formatCurrency(trade.pl) : '—'}
                       </td>
-                      <td className="px-4 py-3 text-right"><RBadge r={trade.rMultiple} /></td>
+                      <td className="px-4 py-3 text-right"><RBadge r={trade.rMultiple} atrR={trade.rMultipleATR} /></td>
                     </tr>
                     {expanded === trade.id && (
                       <tr>

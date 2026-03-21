@@ -11,6 +11,7 @@ const BLANK = {
   entryDate:    new Date().toISOString().slice(0, 16),
   entryPrice:   '',
   stopLoss:     '',
+  atrValue:     '',
   positionSize: '',
 }
 
@@ -31,8 +32,12 @@ export default function QuickAddTrade() {
   const ep  = parseFloat(form.entryPrice)
   const sl  = parseFloat(form.stopLoss)
   const ps  = parseFloat(form.positionSize)
-  const riskDollar = (!isNaN(ep) && !isNaN(sl) && !isNaN(ps)) ? Math.abs(ep - sl) * ps : null
-  const riskPct    = (riskDollar != null && accountBalance > 0) ? (riskDollar / accountBalance * 100) : null
+  const atr = parseFloat(form.atrValue)
+  const riskDollar   = (!isNaN(ep) && !isNaN(sl) && !isNaN(ps)) ? Math.abs(ep - sl) * ps : null
+  const riskPct      = (riskDollar != null && accountBalance > 0) ? (riskDollar / accountBalance * 100) : null
+  const atrRiskDollar = (!isNaN(atr) && !isNaN(ps) && atr > 0) ? atr * ps : null
+  const stopEffPct    = (!isNaN(ep) && !isNaN(sl) && !isNaN(atr) && atr > 0)
+    ? (Math.abs(ep - sl) / atr) * 100 : null
 
   function set(key, val) {
     setForm(f => ({ ...f, [key]: val }))
@@ -48,6 +53,7 @@ export default function QuickAddTrade() {
       entryDate:    form.entryDate ? new Date(form.entryDate).toISOString() : new Date().toISOString(),
       entryPrice:   parseFloat(form.entryPrice),
       stopLoss:     parseFloat(form.stopLoss) || null,
+      atrValue:     parseFloat(form.atrValue)  || null,
       positionSize: parseFloat(form.positionSize) || null,
       status:       'Open',
       market:       'Stock',
@@ -175,7 +181,7 @@ export default function QuickAddTrade() {
                 </div>
 
                 {/* Price fields */}
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="label mb-1">Entry Price</label>
                     <input
@@ -200,6 +206,17 @@ export default function QuickAddTrade() {
                     />
                   </div>
                   <div>
+                    <label className="label mb-1">ATR <span className="text-gray-600 font-normal">(optional)</span></label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={form.atrValue}
+                      onChange={e => set('atrValue', e.target.value)}
+                      placeholder="e.g. 1.85"
+                      className="input w-full"
+                    />
+                  </div>
+                  <div>
                     <label className="label mb-1">Shares</label>
                     <input
                       type="number"
@@ -214,14 +231,29 @@ export default function QuickAddTrade() {
                 </div>
 
                 {/* Live risk preview */}
-                {riskDollar != null && (
-                  <div className="flex items-center gap-3 bg-surface-200 rounded-md px-3 py-2 text-xs">
-                    <span className="text-gray-500">Risk:</span>
-                    <span className="text-accent-red font-semibold">${riskDollar.toFixed(2)}</span>
-                    {riskPct != null && (
-                      <span className={`font-medium ${riskPct > 2 ? 'text-accent-red' : riskPct > 1 ? 'text-accent-yellow' : 'text-accent-green'}`}>
-                        {riskPct.toFixed(2)}% of account
-                      </span>
+                {(riskDollar != null || atrRiskDollar != null) && (
+                  <div className="bg-surface-200 rounded-md px-3 py-2 text-xs space-y-1">
+                    {riskDollar != null && (
+                      <div className="flex items-center gap-3">
+                        <span className="text-gray-500 w-24 shrink-0">Stop risk:</span>
+                        <span className="text-accent-red font-semibold">${riskDollar.toFixed(2)}</span>
+                        {riskPct != null && (
+                          <span className={`font-medium ${riskPct > 2 ? 'text-accent-red' : riskPct > 1 ? 'text-accent-yellow' : 'text-accent-green'}`}>
+                            {riskPct.toFixed(2)}% of account
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {atrRiskDollar != null && (
+                      <div className="flex items-center gap-3">
+                        <span className="text-gray-500 w-24 shrink-0">ATR budget:</span>
+                        <span className="text-accent-yellow font-semibold">${atrRiskDollar.toFixed(2)}</span>
+                        {stopEffPct != null && (
+                          <span className={`font-medium ${stopEffPct > 90 ? 'text-gray-400' : stopEffPct > 50 ? 'text-accent-yellow' : 'text-accent-green'}`}>
+                            {stopEffPct.toFixed(0)}% of ATR used
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

@@ -9,16 +9,16 @@ export function calcWinRate(trades) {
   return (wins / closed.length) * 100
 }
 
-export function calcAvgR(trades) {
-  const closed = trades.filter(t => t.rMultiple != null && (t.status === 'Win' || t.status === 'Loss'))
+export function calcAvgR(trades, rField = 'rMultiple') {
+  const closed = trades.filter(t => t[rField] != null && (t.status === 'Win' || t.status === 'Loss'))
   if (!closed.length) return 0
-  return closed.reduce((s, t) => s + t.rMultiple, 0) / closed.length
+  return closed.reduce((s, t) => s + t[rField], 0) / closed.length
 }
 
-export function calcTotalR(trades) {
+export function calcTotalR(trades, rField = 'rMultiple') {
   return trades
-    .filter(t => t.rMultiple != null)
-    .reduce((s, t) => s + t.rMultiple, 0)
+    .filter(t => t[rField] != null)
+    .reduce((s, t) => s + t[rField], 0)
 }
 
 export function calcExpectancy(trades) {
@@ -156,10 +156,10 @@ export function calcCalmar(equityCurve) {
  * SQN = (mean(R) / stdev(R)) × sqrt(n)
  * Ratings: <1.6 poor | 1.6-1.9 below avg | 2.0-2.4 avg | 2.5-2.9 good | 3.0-5.0 excellent | 5.0+ holy grail
  */
-export function calcSQN(trades) {
+export function calcSQN(trades, rField = 'rMultiple') {
   const rs = trades
-    .filter(t => (t.status === 'Win' || t.status === 'Loss') && t.rMultiple != null)
-    .map(t => t.rMultiple)
+    .filter(t => (t.status === 'Win' || t.status === 'Loss') && t[rField] != null)
+    .map(t => t[rField])
   const n = rs.length
   if (n < 5) return null
   const mean = rs.reduce((s, r) => s + r, 0) / n
@@ -169,16 +169,27 @@ export function calcSQN(trades) {
   return (mean / std) * Math.sqrt(n)
 }
 
-export function calcRMultipleDistribution(trades) {
+export function calcRMultipleDistribution(trades, rField = 'rMultiple') {
   const buckets = {}
   trades
-    .filter(t => t.rMultiple != null && (t.status === 'Win' || t.status === 'Loss'))
+    .filter(t => t[rField] != null && (t.status === 'Win' || t.status === 'Loss'))
     .forEach(t => {
-      const bucket = Math.floor(t.rMultiple)
+      const bucket = Math.floor(t[rField])
       const key = `${bucket}R`
       buckets[key] = (buckets[key] || 0) + 1
     })
   return Object.entries(buckets)
     .map(([r, count]) => ({ r, rNum: parseInt(r), count }))
     .sort((a, b) => a.rNum - b.rNum)
+}
+
+/**
+ * Average stop efficiency across trades that have atrValue set.
+ * stopEfficiency = actual stop distance / ATR (1.0 = full ATR used as stop)
+ * Returns null if no trades have ATR data.
+ */
+export function calcAvgStopEfficiency(trades) {
+  const ts = trades.filter(t => t.stopEfficiency != null && (t.status === 'Win' || t.status === 'Loss'))
+  if (!ts.length) return null
+  return ts.reduce((s, t) => s + t.stopEfficiency, 0) / ts.length
 }
