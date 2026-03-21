@@ -8,6 +8,7 @@ import {
   CandlestickSeries,
   LineSeries,
   HistogramSeries,
+  AreaSeries,
 } from 'lightweight-charts'
 import { ExternalLink, RefreshCw, AlertCircle } from 'lucide-react'
 import { fetchHistory } from '../../utils/marketData.js'
@@ -95,7 +96,10 @@ function aggregateWeekly(candles) {
 }
 
 // ── Keltner multiplier options ─────────────────────────────────────────────────
-const MULT_OPTIONS = [1.5, 2.0, 2.5, 3.0]
+const MULT_OPTIONS = [0.5, 1.0, 1.5, 2.0]
+
+// Chart background — used by the lower KC AreaSeries to mask fill below lower band
+const CHART_BG = '#0a0d14'
 
 // ── Chart component ───────────────────────────────────────────────────────────
 
@@ -123,9 +127,8 @@ export default function TradeChart({ trade }) {
   const [loading,      setLoading]      = useState(true)
   const [error,        setError]        = useState(null)
   const [timeframe,    setTimeframe]    = useState('D')
-  const [showEMA34,    setShowEMA34]    = useState(true)
   const [showKeltner,  setShowKeltner]  = useState(true)
-  const [kMult,        setKMult]        = useState(2.0)
+  const [kMult,        setKMult]        = useState(0.5)
   const [showVolume,   setShowVolume]   = useState(true)
 
   const isShort = trade?.position === 'Short'
@@ -195,7 +198,41 @@ export default function TradeChart({ trade }) {
         })
         chartRef.current = chart
 
-        // ── Candlestick series ───────────────────────────────────────────────
+        // ── Keltner Channel bands (added FIRST so candles render on top) ─────
+        // Two AreaSeries trick: upper fills down with tinted blue; lower fills
+        // down with background color to "erase" the blue below the lower band.
+        // Candles added after render on top of both fills.
+        if (showKeltner && candles.length >= 34) {
+          const kc = calcKeltner(candles, 34, kMult)
+
+          if (kc.upper.length > 0) {
+            // Upper band — fills downward with blue tint
+            const kcUp = chart.addSeries(AreaSeries, {
+              lineColor:   'rgba(61,132,255,0.55)',
+              lineWidth:   1,
+              topColor:    'rgba(61,132,255,0.18)',
+              bottomColor: 'rgba(61,132,255,0.06)',
+              priceLineVisible:      false,
+              lastValueVisible:      false,
+              crosshairMarkerVisible: false,
+            })
+            kcUp.setData(kc.upper)
+
+            // Lower band — fills downward with background color to mask the blue fill
+            const kcLo = chart.addSeries(AreaSeries, {
+              lineColor:   'rgba(61,132,255,0.55)',
+              lineWidth:   1,
+              topColor:    CHART_BG,
+              bottomColor: CHART_BG,
+              priceLineVisible:      false,
+              lastValueVisible:      false,
+              crosshairMarkerVisible: false,
+            })
+            kcLo.setData(kc.lower)
+          }
+        }
+
+        // ── Candlestick series (on top of KC bands) ──────────────────────────
         const candleSeries = chart.addSeries(CandlestickSeries, {
           upColor:         '#00d084',
           downColor:       '#ff4757',
@@ -222,38 +259,6 @@ export default function TradeChart({ trade }) {
             value: c.volume ?? 0,
             color: (c.close ?? 0) >= (c.open ?? 0) ? '#00d08435' : '#ff475735',
           })))
-        }
-
-        // ── Keltner Channel + EMA 34 ─────────────────────────────────────────
-        if ((showEMA34 || showKeltner) && candles.length >= 34) {
-          const kc = calcKeltner(candles, 34, kMult)
-
-          // Middle line (EMA 34) — always gold
-          if (kc.middle.length > 0 && showEMA34) {
-            const mid = chart.addSeries(LineSeries, {
-              color: '#ffa502', lineWidth: 1.5,
-              priceLineVisible: false, lastValueVisible: false,
-              crosshairMarkerVisible: false, title: 'EMA 34',
-            })
-            mid.setData(kc.middle)
-          }
-
-          // Upper + Lower bands
-          if (showKeltner && kc.upper.length > 0) {
-            const upSeries = chart.addSeries(LineSeries, {
-              color: '#3d84ff', lineWidth: 1, lineStyle: LineStyle.Dashed,
-              priceLineVisible: false, lastValueVisible: false,
-              crosshairMarkerVisible: false, title: `KC+${kMult}`,
-            })
-            upSeries.setData(kc.upper)
-
-            const loSeries = chart.addSeries(LineSeries, {
-              color: '#3d84ff', lineWidth: 1, lineStyle: LineStyle.Dashed,
-              priceLineVisible: false, lastValueVisible: false,
-              crosshairMarkerVisible: false, title: `KC-${kMult}`,
-            })
-            loSeries.setData(kc.lower)
-          }
         }
 
         // ── Entry / exit markers (v5 API: createSeriesMarkers) ───────────────
@@ -350,7 +355,7 @@ export default function TradeChart({ trade }) {
       cancelRef.current = true
       if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
     }
-  }, [trade?.id, trade?.symbol, timeframe, showEMA34, showKeltner, kMult, showVolume]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [trade?.id, trade?.symbol, timeframe, showKeltner, kMult, showVolume]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const plColor = (trade?.pl ?? 0) >= 0 ? 'text-accent-green' : 'text-accent-red'
   const rColor  = (trade?.rMultiple ?? 0) >= 0 ? 'text-accent-green' : 'text-accent-red'
@@ -400,17 +405,6 @@ export default function TradeChart({ trade }) {
           ))}
 
           <span className="w-px h-3 bg-white/10 mx-0.5" />
-
-          {/* EMA 34 toggle */}
-          <button
-            onClick={() => setShowEMA34(v => !v)}
-            title="Toggle EMA 34"
-            className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
-              showEMA34 ? 'text-accent-yellow bg-accent-yellow/15' : 'text-gray-600 hover:text-gray-400'
-            }`}
-          >
-            EMA34
-          </button>
 
           {/* Keltner toggle */}
           <button
@@ -565,17 +559,10 @@ export default function TradeChart({ trade }) {
             </span>
           )}
 
-          {showEMA34 && (
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-4 border-t" style={{ borderColor: '#ffa502' }} />
-              EMA 34
-            </span>
-          )}
-
           {showKeltner && (
             <span className="flex items-center gap-1">
-              <span className="inline-block w-4 border-t border-dashed" style={{ borderColor: '#3d84ff' }} />
-              KC ({kMult}×ATR)
+              <span className="inline-block w-4 h-2 rounded-sm" style={{ background: 'rgba(61,132,255,0.25)', border: '1px solid rgba(61,132,255,0.55)' }} />
+              KC ({kMult}×ATR34)
             </span>
           )}
 
