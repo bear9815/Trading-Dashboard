@@ -259,7 +259,7 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
       entryPrice:   trade.entryPrice   ?? '',
       stopLoss:     trade.stopLoss     ?? '',
       takeProfit:   trade.takeProfit   ?? '',
-      positionSize: trade.positionSize ?? '',
+      positionSize: (trade._originalPositionSize ?? trade.positionSize) ?? '',
       status:       trade.status       ?? 'Open',
       exits: (trade.exits || [])
         .filter(e => e.price || e.amount)
@@ -388,9 +388,16 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
               ['Entry Price',  trade.entryPrice   != null ? `$${trade.entryPrice.toFixed(2)}`  : '—'],
               ['Stop Loss',    trade.stopLoss      != null ? `$${trade.stopLoss.toFixed(2)}`    : <span className="text-accent-yellow">not set</span>],
               ['Take Profit',  trade.takeProfit    != null ? `$${trade.takeProfit.toFixed(2)}`  : '—'],
-              [trade.status === 'Open' && trade.exits?.some(e => e.price || e.amount)
-                ? 'Shares Remaining' : 'Position Size',
-                trade.positionSize?.toLocaleString() ?? '—'],
+              ['Position Size',
+                <span className="flex items-center gap-1.5">
+                  <span>{(trade._originalPositionSize ?? trade.positionSize)?.toLocaleString() ?? '—'}</span>
+                  {trade.remainingShares != null && trade.remainingShares < (trade._originalPositionSize ?? trade.positionSize) && (
+                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-accent-yellow/10 text-accent-yellow border border-accent-yellow/20">
+                      {trade.remainingShares} rem
+                    </span>
+                  )}
+                </span>
+              ],
               ['Buy Amount',   formatCurrency(trade.buyAmount)],
               ['Sell Amount',  formatCurrency(trade.sellAmount)],
               ['P&L %',        trade.plPct != null ? `${trade.plPct.toFixed(2)}%` : '—'],
@@ -566,7 +573,7 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
             <EditableNum label="Entry Price"   field="entryPrice"   value={trade.entryPrice}   draft={draft} setDraft={setDraft} />
             <EditableNum label="Stop Loss"     field="stopLoss"     value={trade.stopLoss}     draft={draft} setDraft={setDraft} placeholder="required for R" />
             <EditableNum label="Take Profit"   field="takeProfit"   value={trade.takeProfit}   draft={draft} setDraft={setDraft} placeholder="auto 2R if blank" />
-            <EditableNum label="Position Size" field="positionSize" value={trade.positionSize} draft={draft} setDraft={setDraft} />
+            <EditableNum label="Position Size" field="positionSize" value={trade._originalPositionSize ?? trade.positionSize} draft={draft} setDraft={setDraft} />
           </div>
 
           {/* Editable exit fills */}

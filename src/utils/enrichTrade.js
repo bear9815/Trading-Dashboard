@@ -104,10 +104,16 @@ export function enrichTrade(trade) {
         return sum + sh
       }, 0)
 
+      // Always expose remainingShares as a display field (0 = fully closed).
+      // We NEVER mutate positionSize — it stays as the original full entry size
+      // so that R calculations, buy-amount display, and position records are correct.
+      const remaining = Math.max(0, Math.round(origSize - exitedShares))
+      result.remainingShares = remaining
+
       // 0.5-share tolerance absorbs floating-point rounding from amount ÷ price
       if (exitedShares > 0 && exitedShares < origSize - 0.5) {
-        result.status      = 'Open'
-        result.positionSize = Math.round(origSize - exitedShares)  // remaining shares
+        result.status = 'Open'
+        // positionSize intentionally NOT mutated — see note above
 
         // Recalculate P&L on the exited shares only
         const entry = result.entryPrice
@@ -131,7 +137,7 @@ export function enrichTrade(trade) {
           result.pl = null
         }
 
-        // R-multiple and P&L% only make sense for a fully closed trade
+        // R and P&L% are only meaningful on a fully closed trade
         result.rMultiple = null
         result.plPct     = null
       }
