@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { createChart, ColorType, CrosshairMode, LineStyle } from 'lightweight-charts'
+import {
+  createChart,
+  ColorType,
+  CrosshairMode,
+  LineStyle,
+  createSeriesMarkers,
+} from 'lightweight-charts'
 import { ExternalLink, RefreshCw, AlertCircle } from 'lucide-react'
 import { fetchHistory } from '../../utils/marketData.js'
 
@@ -17,21 +23,58 @@ function calcEMA(candles, period) {
   return result
 }
 
-function calcSMA(candles, period) {
+/**
+ * Wilder's Smoothed ATR series aligned to candle times.
+ * Returns array of { time, atr }.
+ */
+function calcATRSeries(candles, period) {
+  if (candles.length < period + 1) return []
+  const trs = []
+  for (let i = 1; i < candles.length; i++) {
+    const { high, low } = candles[i]
+    const prev = candles[i - 1].close
+    trs.push(Math.max(high - low, Math.abs(high - prev), Math.abs(low - prev)))
+  }
+  if (trs.length < period) return []
+
+  // Seed with simple average, then Wilder smooth
+  let atr = trs.slice(0, period).reduce((s, v) => s + v, 0) / period
   const result = []
-  for (let i = period - 1; i < candles.length; i++) {
-    const sum = candles.slice(i - period + 1, i + 1).reduce((s, c) => s + c.close, 0)
-    result.push({ time: candles[i].time, value: parseFloat((sum / period).toFixed(4)) })
+  for (let i = period - 1; i < trs.length; i++) {
+    if (i > period - 1) atr = (atr * (period - 1) + trs[i]) / period
+    // candles[i+1] because trs[i] corresponds to candle i+1
+    result.push({ time: candles[i + 1].time, atr })
   }
   return result
+}
+
+/**
+ * Keltner Channel bands.
+ * Middle = EMA(period), Upper = Middle + mult×ATR, Lower = Middle - mult×ATR
+ * Returns { upper, middle, lower } each as { time, value }[] arrays.
+ */
+function calcKeltner(candles, period = 34, mult = 2.0) {
+  const emaData = calcEMA(candles, period)
+  const atrData = calcATRSeries(candles, period)
+  const atrMap  = new Map(atrData.map(d => [d.time, d.atr]))
+
+  const upper = [], middle = [], lower = []
+  for (const e of emaData) {
+    const atr = atrMap.get(e.time)
+    if (atr == null) continue
+    middle.push({ time: e.time, value: parseFloat(e.value.toFixed(4)) })
+    upper.push({ time: e.time, value: parseFloat((e.value + mult * atr).toFixed(4)) })
+    lower.push({ time: e.time, value: parseFloat((e.value - mult * atr).toFixed(4)) })
+  }
+  return { upper, middle, lower }
 }
 
 function aggregateWeekly(candles) {
   const map = new Map()
   for (const c of candles) {
     const d   = new Date(c.time + 'T00:00:00Z')
-    const dow = d.getUTCDay()                                // 0=Sun
-    const diff = dow === 0 ? -6 : 1 - dow                   // shift to Monday
+    const dow = d.getUTCDay()
+    const diff = dow === 0 ? -6 : 1 - dow
     const mon  = new Date(d)
     mon.setUTCDate(d.getUTCDate() + diff)
     const key = mon.toISOString().slice(0, 10)
@@ -48,6 +91,9 @@ function aggregateWeekly(candles) {
   return [...map.values()].sort((a, b) => (a.time < b.time ? -1 : 1))
 }
 
+// ── Keltner multiplier options ─────────────────────────────────────────────────
+const MULT_OPTIONS = [1.5, 2.0, 2.5, 3.0]
+
 // ── Chart component ───────────────────────────────────────────────────────────
 
 /**
@@ -56,7 +102,9 @@ function aggregateWeekly(candles) {
  * Features:
  *  - Daily / Weekly timeframe toggle (cached — no refetch on switch)
  *  - Volume histogram (bottom 20% of chart area)
- *  - EMA 20 (orange) + SMA 50 (blue) overlays, individually toggleable
+ *  - EMA 34 (gold) — middle line of Keltner Channel
+ *  - Keltner Channel bands (blue dashed) — EMA34 ± mult × ATR34
+ *  - Multiplier toggle: 1.5× / 2.0× / 2.5× / 3.0×
  *  - Entry / exit markers (handles both Long and Short positions)
  *  - Stop-loss + take-profit dashed lines
  *  - P&L and R-multiple shown in header
@@ -65,20 +113,20 @@ function aggregateWeekly(candles) {
 export default function TradeChart({ trade }) {
   const containerRef  = useRef(null)
   const chartRef      = useRef(null)
-  const rawRef        = useRef(null)   // cached daily candles (keyed to trade.id)
+  const rawRef        = useRef(null)
   const prevIdRef     = useRef(null)
   const cancelRef     = useRef(false)
 
-  const [loading,     setLoading]     = useState(true)
-  const [error,       setError]       = useState(null)
-  const [timeframe,   setTimeframe]   = useState('D')   // 'D' | 'W'
-  const [showEMA20,   setShowEMA20]   = useState(true)
-  const [showSMA50,   setShowSMA50]   = useState(true)
-  const [showVolume,  setShowVolume]  = useState(true)
+  const [loading,      setLoading]      = useState(true)
+  const [error,        setError]        = useState(null)
+  const [timeframe,    setTimeframe]    = useState('D')
+  const [showEMA34,    setShowEMA34]    = useState(true)
+  const [showKeltner,  setShowKeltner]  = useState(true)
+  const [kMult,        setKMult]        = useState(2.0)
+  const [showVolume,   setShowVolume]   = useState(true)
 
   const isShort = trade?.position === 'Short'
 
-  // Format P&L for header display
   const formatPL = (v) => v == null ? null
     : (v >= 0 ? '+' : '') + v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 
@@ -102,7 +150,8 @@ export default function TradeChart({ trade }) {
             ? Math.max(...exits.map(e => new Date(e.date).getTime()))
             : Date.now()
           const endMs      = Math.max(lastExitMs, Date.now())
-          const startDate  = new Date(entryMs - 60 * 86_400_000)
+          // Extra lookback so EMA/ATR have enough bars to warm up (34 × 2 + buffer)
+          const startDate  = new Date(entryMs - 120 * 86_400_000)
           const endDate    = new Date(endMs   + 30 * 86_400_000)
 
           const daily = await fetchHistory(trade.symbol, startDate, endDate)
@@ -117,155 +166,178 @@ export default function TradeChart({ trade }) {
 
       if (cancelRef.current || !containerRef.current) return
 
-      // ── Destroy previous chart instance ────────────────────────────────────
+      // ── Destroy previous chart instance ──────────────────────────────────
       if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
 
       const daily   = rawRef.current
       const candles = timeframe === 'W' ? aggregateWeekly(daily) : daily
       if (!candles.length) { setError('No candles after aggregation.'); setLoading(false); return }
 
-      // ── Create chart ───────────────────────────────────────────────────────
-      const chart = createChart(containerRef.current, {
-        autoSize: true,
-        layout: {
-          background: { type: ColorType.Solid, color: '#0a0d14' },
-          textColor: '#9ca3af',
-          fontSize: 11,
-        },
-        grid: {
-          vertLines: { color: '#1a2035' },
-          horzLines: { color: '#1a2035' },
-        },
-        crosshair: { mode: CrosshairMode.Normal },
-        rightPriceScale: { borderColor: '#1a2035' },
-        timeScale: { borderColor: '#1a2035', timeVisible: false },
-      })
-      chartRef.current = chart
-
-      // ── Candlestick series ─────────────────────────────────────────────────
-      const candleSeries = chart.addCandlestickSeries({
-        upColor:         '#00d084',
-        downColor:       '#ff4757',
-        borderUpColor:   '#00d084',
-        borderDownColor: '#ff4757',
-        wickUpColor:     '#00d084',
-        wickDownColor:   '#ff4757',
-      })
-      // Reserve bottom 22% for volume panel
-      if (showVolume) {
-        candleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.04, bottom: 0.22 } })
-      }
-      candleSeries.setData(candles)
-
-      // ── Volume histogram ───────────────────────────────────────────────────
-      const hasVolume = candles.some(c => (c.volume ?? 0) > 0)
-      if (showVolume && hasVolume) {
-        const volSeries = chart.addHistogramSeries({
-          priceFormat:  { type: 'volume' },
-          priceScaleId: 'vol',
+      // ── Wrap all chart creation in try/catch so errors don't freeze loading ─
+      try {
+        const chart = createChart(containerRef.current, {
+          autoSize: true,
+          layout: {
+            background: { type: ColorType.Solid, color: '#0a0d14' },
+            textColor: '#9ca3af',
+            fontSize: 11,
+          },
+          grid: {
+            vertLines: { color: '#1a2035' },
+            horzLines: { color: '#1a2035' },
+          },
+          crosshair: { mode: CrosshairMode.Normal },
+          rightPriceScale: { borderColor: '#1a2035' },
+          timeScale: { borderColor: '#1a2035', timeVisible: false },
         })
-        volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } })
-        volSeries.setData(candles.map(c => ({
-          time:  c.time,
-          value: c.volume ?? 0,
-          color: (c.close ?? 0) >= (c.open ?? 0) ? '#00d08435' : '#ff475735',
-        })))
-      }
+        chartRef.current = chart
 
-      // ── EMA 20 ─────────────────────────────────────────────────────────────
-      if (showEMA20 && candles.length >= 20) {
-        const s = chart.addLineSeries({
-          color: '#ffa502', lineWidth: 1,
-          priceLineVisible: false, lastValueVisible: false,
-          crosshairMarkerVisible: false, title: 'EMA 20',
+        // ── Candlestick series ───────────────────────────────────────────────
+        const candleSeries = chart.addCandlestickSeries({
+          upColor:         '#00d084',
+          downColor:       '#ff4757',
+          borderUpColor:   '#00d084',
+          borderDownColor: '#ff4757',
+          wickUpColor:     '#00d084',
+          wickDownColor:   '#ff4757',
         })
-        s.setData(calcEMA(candles, 20))
-      }
-
-      // ── SMA 50 ─────────────────────────────────────────────────────────────
-      if (showSMA50 && candles.length >= 50) {
-        const s = chart.addLineSeries({
-          color: '#3d84ff', lineWidth: 1,
-          priceLineVisible: false, lastValueVisible: false,
-          crosshairMarkerVisible: false, title: 'SMA 50',
-        })
-        s.setData(calcSMA(candles, 50))
-      }
-
-      // ── Entry / exit markers ───────────────────────────────────────────────
-      const candleDates = new Set(candles.map(c => c.time))
-      const snap = (iso) => {
-        if (!iso) return null
-        const t = iso.slice(0, 10)
-        if (candleDates.has(t)) return t
-        for (let d = 1; d <= 7; d++) {
-          const fwd = new Date(new Date(t).getTime() + d * 86_400_000).toISOString().slice(0, 10)
-          const bck = new Date(new Date(t).getTime() - d * 86_400_000).toISOString().slice(0, 10)
-          if (candleDates.has(fwd)) return fwd
-          if (candleDates.has(bck)) return bck
+        if (showVolume) {
+          candleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.04, bottom: 0.22 } })
         }
-        return null
-      }
+        candleSeries.setData(candles)
 
-      const exits   = (trade.exits || []).filter(e => e.date)
-      const markers = []
+        // ── Volume histogram ─────────────────────────────────────────────────
+        const hasVolume = candles.some(c => (c.volume ?? 0) > 0)
+        if (showVolume && hasVolume) {
+          const volSeries = chart.addHistogramSeries({
+            priceFormat:  { type: 'volume' },
+            priceScaleId: 'vol',
+          })
+          volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } })
+          volSeries.setData(candles.map(c => ({
+            time:  c.time,
+            value: c.volume ?? 0,
+            color: (c.close ?? 0) >= (c.open ?? 0) ? '#00d08435' : '#ff475735',
+          })))
+        }
 
-      const entrySnap = snap(trade.entryDate)
-      if (entrySnap) {
-        markers.push({
-          time:     entrySnap,
-          position: isShort ? 'aboveBar' : 'belowBar',
-          color:    isShort ? '#ff4757'  : '#00d084',
-          shape:    isShort ? 'arrowDown' : 'arrowUp',
-          size:     1.5,
-          text:     `${isShort ? 'Short' : 'Buy'}  $${trade.entryPrice?.toFixed(2) ?? ''}`,
-        })
-      }
+        // ── Keltner Channel + EMA 34 ─────────────────────────────────────────
+        if ((showEMA34 || showKeltner) && candles.length >= 34) {
+          const kc = calcKeltner(candles, 34, kMult)
 
-      exits.forEach(ex => {
-        const d = snap(ex.date)
-        if (d) {
+          // Middle line (EMA 34) — always gold
+          if (kc.middle.length > 0 && showEMA34) {
+            const mid = chart.addLineSeries({
+              color: '#ffa502', lineWidth: 1.5,
+              priceLineVisible: false, lastValueVisible: false,
+              crosshairMarkerVisible: false, title: 'EMA 34',
+            })
+            mid.setData(kc.middle)
+          }
+
+          // Upper + Lower bands
+          if (showKeltner && kc.upper.length > 0) {
+            const upSeries = chart.addLineSeries({
+              color: '#3d84ff', lineWidth: 1, lineStyle: LineStyle.Dashed,
+              priceLineVisible: false, lastValueVisible: false,
+              crosshairMarkerVisible: false, title: `KC+${kMult}`,
+            })
+            upSeries.setData(kc.upper)
+
+            const loSeries = chart.addLineSeries({
+              color: '#3d84ff', lineWidth: 1, lineStyle: LineStyle.Dashed,
+              priceLineVisible: false, lastValueVisible: false,
+              crosshairMarkerVisible: false, title: `KC-${kMult}`,
+            })
+            loSeries.setData(kc.lower)
+          }
+        }
+
+        // ── Entry / exit markers (v5 API: createSeriesMarkers) ───────────────
+        const candleDates = new Set(candles.map(c => c.time))
+        const snap = (iso) => {
+          if (!iso) return null
+          const t = iso.slice(0, 10)
+          if (candleDates.has(t)) return t
+          for (let d = 1; d <= 7; d++) {
+            const fwd = new Date(new Date(t).getTime() + d * 86_400_000).toISOString().slice(0, 10)
+            const bck = new Date(new Date(t).getTime() - d * 86_400_000).toISOString().slice(0, 10)
+            if (candleDates.has(fwd)) return fwd
+            if (candleDates.has(bck)) return bck
+          }
+          return null
+        }
+
+        const exits   = (trade.exits || []).filter(e => e.date)
+        const markers = []
+
+        const entrySnap = snap(trade.entryDate)
+        if (entrySnap) {
           markers.push({
-            time:     d,
-            position: isShort ? 'belowBar' : 'aboveBar',
-            color:    isShort ? '#00d084'  : '#ff4757',
-            shape:    isShort ? 'arrowUp'  : 'arrowDown',
+            time:     entrySnap,
+            position: isShort ? 'aboveBar' : 'belowBar',
+            color:    isShort ? '#ff4757'  : '#00d084',
+            shape:    isShort ? 'arrowDown' : 'arrowUp',
             size:     1.5,
-            text:     `${isShort ? 'Cover' : 'Sell'}  $${ex.price?.toFixed(2) ?? ''}`,
+            text:     `${isShort ? 'Short' : 'Buy'}  $${trade.entryPrice?.toFixed(2) ?? ''}`,
           })
         }
-      })
 
-      markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
-      candleSeries.setMarkers(markers)
-
-      // ── Stop-loss line ─────────────────────────────────────────────────────
-      if (trade.stopLoss) {
-        const s = chart.addLineSeries({
-          color: '#ff4757', lineWidth: 1, lineStyle: LineStyle.Dashed,
-          lastValueVisible: true, priceLineVisible: false,
-          title: `Stop $${trade.stopLoss}`, crosshairMarkerVisible: false,
+        exits.forEach(ex => {
+          const d = snap(ex.date)
+          if (d) {
+            markers.push({
+              time:     d,
+              position: isShort ? 'belowBar' : 'aboveBar',
+              color:    isShort ? '#00d084'  : '#ff4757',
+              shape:    isShort ? 'arrowUp'  : 'arrowDown',
+              size:     1.5,
+              text:     `${isShort ? 'Cover' : 'Sell'}  $${ex.price?.toFixed(2) ?? ''}`,
+            })
+          }
         })
-        s.setData([
-          { time: candles[0].time,                  value: trade.stopLoss },
-          { time: candles[candles.length - 1].time, value: trade.stopLoss },
-        ])
+
+        markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
+        // v5: createSeriesMarkers replaces series.setMarkers()
+        createSeriesMarkers(candleSeries, markers)
+
+        // ── Stop-loss line ───────────────────────────────────────────────────
+        if (trade.stopLoss) {
+          const s = chart.addLineSeries({
+            color: '#ff4757', lineWidth: 1, lineStyle: LineStyle.Dashed,
+            lastValueVisible: true, priceLineVisible: false,
+            title: `Stop $${trade.stopLoss}`, crosshairMarkerVisible: false,
+          })
+          s.setData([
+            { time: candles[0].time,                  value: trade.stopLoss },
+            { time: candles[candles.length - 1].time, value: trade.stopLoss },
+          ])
+        }
+
+        // ── Take-profit line ─────────────────────────────────────────────────
+        if (trade.takeProfit) {
+          const s = chart.addLineSeries({
+            color: '#00d084', lineWidth: 1, lineStyle: LineStyle.Dashed,
+            lastValueVisible: true, priceLineVisible: false,
+            title: `TP $${trade.takeProfit}`, crosshairMarkerVisible: false,
+          })
+          s.setData([
+            { time: candles[0].time,                  value: trade.takeProfit },
+            { time: candles[candles.length - 1].time, value: trade.takeProfit },
+          ])
+        }
+
+        chart.timeScale().fitContent()
+      } catch (chartErr) {
+        // Chart creation errors should show the error state, not infinite loading
+        if (!cancelRef.current) {
+          console.error('TradeChart build error:', chartErr)
+          setError(chartErr.message ?? 'Chart failed to render')
+          setLoading(false)
+          return
+        }
       }
 
-      // ── Take-profit line ───────────────────────────────────────────────────
-      if (trade.takeProfit) {
-        const s = chart.addLineSeries({
-          color: '#00d084', lineWidth: 1, lineStyle: LineStyle.Dashed,
-          lastValueVisible: true, priceLineVisible: false,
-          title: `TP $${trade.takeProfit}`, crosshairMarkerVisible: false,
-        })
-        s.setData([
-          { time: candles[0].time,                  value: trade.takeProfit },
-          { time: candles[candles.length - 1].time, value: trade.takeProfit },
-        ])
-      }
-
-      chart.timeScale().fitContent()
       setLoading(false)
     }
 
@@ -275,18 +347,7 @@ export default function TradeChart({ trade }) {
       cancelRef.current = true
       if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
     }
-  }, [trade?.id, trade?.symbol, timeframe, showEMA20, showSMA50, showVolume]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  function reload() {
-    rawRef.current   = null
-    prevIdRef.current = null
-    setError(null)
-    setLoading(true)
-    // Trigger effect by bumping a key — handled by the parent re-render
-    // Instead: directly manipulate the ref and force re-run via state
-    setLoading(l => !l)   // toggle to trigger effect re-run
-    setTimeout(() => setLoading(true), 0)
-  }
+  }, [trade?.id, trade?.symbol, timeframe, showEMA34, showKeltner, kMult, showVolume]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const plColor = (trade?.pl ?? 0) >= 0 ? 'text-accent-green' : 'text-accent-red'
   const rColor  = (trade?.rMultiple ?? 0) >= 0 ? 'text-accent-green' : 'text-accent-red'
@@ -337,25 +398,46 @@ export default function TradeChart({ trade }) {
 
           <span className="w-px h-3 bg-white/10 mx-0.5" />
 
-          {/* Indicator toggles */}
+          {/* EMA 34 toggle */}
           <button
-            onClick={() => setShowEMA20(v => !v)}
-            title="Toggle EMA 20"
+            onClick={() => setShowEMA34(v => !v)}
+            title="Toggle EMA 34"
             className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
-              showEMA20 ? 'text-accent-yellow bg-accent-yellow/15' : 'text-gray-600 hover:text-gray-400'
+              showEMA34 ? 'text-accent-yellow bg-accent-yellow/15' : 'text-gray-600 hover:text-gray-400'
             }`}
           >
-            EMA20
+            EMA34
           </button>
+
+          {/* Keltner toggle */}
           <button
-            onClick={() => setShowSMA50(v => !v)}
-            title="Toggle SMA 50"
+            onClick={() => setShowKeltner(v => !v)}
+            title="Toggle Keltner Channels"
             className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
-              showSMA50 ? 'text-accent-blue bg-accent-blue/15' : 'text-gray-600 hover:text-gray-400'
+              showKeltner ? 'text-accent-blue bg-accent-blue/15' : 'text-gray-600 hover:text-gray-400'
             }`}
           >
-            SMA50
+            KC
           </button>
+
+          {/* Keltner multiplier */}
+          {showKeltner && (
+            <div className="flex rounded overflow-hidden border border-white/10">
+              {MULT_OPTIONS.map(m => (
+                <button
+                  key={m}
+                  onClick={() => setKMult(m)}
+                  className={`text-[10px] px-1.5 py-0.5 transition-colors ${
+                    kMult === m ? 'bg-accent-blue/20 text-accent-blue' : 'text-gray-600 hover:text-gray-400'
+                  }`}
+                >
+                  {m}×
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Volume toggle */}
           <button
             onClick={() => setShowVolume(v => !v)}
             title="Toggle volume"
@@ -370,7 +452,7 @@ export default function TradeChart({ trade }) {
 
           {/* Reload */}
           <button
-            onClick={() => { rawRef.current = null; prevIdRef.current = null; setError(null); setLoading(v => !v) }}
+            onClick={() => { rawRef.current = null; prevIdRef.current = null; setError(null); setLoading(true) }}
             className="p-0.5 text-gray-600 hover:text-gray-300 transition-colors"
             title="Reload chart"
           >
@@ -414,15 +496,13 @@ export default function TradeChart({ trade }) {
                 e.target.nextSibling.style.display = 'flex'
               }}
             />
-            {/* Text fallback */}
             <div className="absolute inset-0 flex-col items-center justify-center gap-2" style={{ display: 'none' }}>
               <AlertCircle size={20} className="text-gray-600" />
               <p className="text-xs text-gray-500 text-center px-4">{error}</p>
             </div>
-            {/* Action buttons */}
             <div className="absolute bottom-3 flex gap-2">
               <button
-                onClick={() => { rawRef.current = null; prevIdRef.current = null; setError(null); setLoading(v => !v) }}
+                onClick={() => { rawRef.current = null; prevIdRef.current = null; setError(null); setLoading(true) }}
                 className="btn-ghost text-xs"
               >
                 Retry
@@ -447,7 +527,6 @@ export default function TradeChart({ trade }) {
           </div>
         )}
 
-        {/* Always rendered so ref is available */}
         <div
           ref={containerRef}
           style={{ width: '100%', height: '100%', opacity: loading || error ? 0 : 1 }}
@@ -483,17 +562,17 @@ export default function TradeChart({ trade }) {
             </span>
           )}
 
-          {showEMA20 && (
+          {showEMA34 && (
             <span className="flex items-center gap-1">
               <span className="inline-block w-4 border-t" style={{ borderColor: '#ffa502' }} />
-              EMA 20
+              EMA 34
             </span>
           )}
 
-          {showSMA50 && (
+          {showKeltner && (
             <span className="flex items-center gap-1">
-              <span className="inline-block w-4 border-t" style={{ borderColor: '#3d84ff' }} />
-              SMA 50
+              <span className="inline-block w-4 border-t border-dashed" style={{ borderColor: '#3d84ff' }} />
+              KC ({kMult}×ATR)
             </span>
           )}
 
