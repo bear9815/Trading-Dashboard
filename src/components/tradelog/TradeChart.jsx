@@ -285,22 +285,22 @@ export default function TradeChart({ trade }) {
             time:     entrySnap,
             position: isShort ? 'aboveBar' : 'belowBar',
             color:    isShort ? '#ff4757'  : '#00d084',
-            shape:    isShort ? 'arrowDown' : 'arrowUp',
-            size:     1.5,
-            text:     `${isShort ? 'Short' : 'Buy'}  $${trade.entryPrice?.toFixed(2) ?? ''}`,
+            shape:    'square',
+            size:     2,
+            text:     `${isShort ? 'S' : 'E'}  $${trade.entryPrice?.toFixed(2) ?? ''}`,
           })
         }
 
-        exits.forEach(ex => {
+        exits.forEach((ex, i) => {
           const d = snap(ex.date)
           if (d) {
             markers.push({
               time:     d,
               position: isShort ? 'belowBar' : 'aboveBar',
               color:    isShort ? '#00d084'  : '#ff4757',
-              shape:    isShort ? 'arrowUp'  : 'arrowDown',
-              size:     1.5,
-              text:     `${isShort ? 'Cover' : 'Sell'}  $${ex.price?.toFixed(2) ?? ''}`,
+              shape:    'square',
+              size:     2,
+              text:     `X${exits.length > 1 ? i + 1 : ''}  $${ex.price?.toFixed(2) ?? ''}`,
             })
           }
         })
