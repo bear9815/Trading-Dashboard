@@ -7,9 +7,12 @@
  */
 
 export function calcRiskPerTrade(trade) {
-  if (!trade.stopLoss || !trade.entryPrice || !trade.positionSize) return 0
+  // Use remainingShares when available — positionSize is frozen at original entry
+  // size and should never be used for current-risk calculations on partial exits.
+  const effectiveSize = trade.remainingShares ?? trade.positionSize
+  if (!trade.stopLoss || !trade.entryPrice || !effectiveSize) return 0
   const riskPerShare = Math.abs(trade.entryPrice - trade.stopLoss)
-  return riskPerShare * trade.positionSize
+  return riskPerShare * effectiveSize
 }
 
 export function calcNEP(openTrades) {
@@ -46,7 +49,7 @@ export function getHeatLabel(pct) {
 export function calcCashDeployed(openTrades, accountBalance) {
   if (!accountBalance) return 0
   const total = openTrades.reduce(
-    (s, t) => s + Math.abs((t.positionSize || 0) * (t.entryPrice || 0)),
+    (s, t) => s + Math.abs(((t.remainingShares ?? t.positionSize) || 0) * (t.entryPrice || 0)),
     0
   )
   return accountBalance > 0 ? (total / accountBalance) * 100 : 0
@@ -76,7 +79,8 @@ export function calcEffectiveExposure(openTrades, atrMap, benchmarkAtrPct, accou
   let totalNotional  = 0
 
   const positions = openTrades.map(t => {
-    const notional  = Math.abs((t.positionSize || 0) * (t.entryPrice || 0))
+    const sz        = t.remainingShares ?? t.positionSize
+    const notional  = Math.abs((sz || 0) * (t.entryPrice || 0))
     const atrPct    = atrMap?.get(t.symbol)?.atrPct || 0
     const effective = atrPct > 0 ? notional * (atrPct / benchmarkAtrPct) : 0
     totalEffective += effective
@@ -94,11 +98,14 @@ export function calcEffectiveExposure(openTrades, atrMap, benchmarkAtrPct, accou
 
 export function buildOpenPositionRisk(openTrades, accountBalance) {
   return openTrades.map(t => {
-    const riskDollar = calcRiskPerTrade(t)
-    const riskPct = accountBalance ? (riskDollar / accountBalance) * 100 : 0
-    const rPerShare = t.stopLoss && t.entryPrice ? Math.abs(t.entryPrice - t.stopLoss) : 0
+    // effectiveSize = shares still held; positionSize is frozen at original entry
+    const effectiveSize = t.remainingShares ?? t.positionSize
+    const riskDollar    = calcRiskPerTrade(t)
+    const riskPct       = accountBalance ? (riskDollar / accountBalance) * 100 : 0
+    const rPerShare     = t.stopLoss && t.entryPrice ? Math.abs(t.entryPrice - t.stopLoss) : 0
     return {
       ...t,
+      positionSize: effectiveSize,   // override for display + grouping math
       riskDollar,
       riskPct,
       rPerShare,

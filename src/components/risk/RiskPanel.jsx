@@ -871,12 +871,12 @@ export default function RiskPanel({ selectedAccount }) {
     setSectorsError(null)
     try {
       const sectorMap = await fetchSectors(symbols)
-      const totalValue = openTrades.reduce((s, t) => s + ((t.positionSize || 1) * (t.entryPrice || 0)), 0)
+      const totalValue = openTrades.reduce((s, t) => s + (((t.remainingShares ?? t.positionSize) || 1) * (t.entryPrice || 0)), 0)
 
       const bySector = {}
       for (const t of openTrades) {
         const sect = sectorMap.get(t.symbol)?.sector || 'Unknown'
-        const val  = (t.positionSize || 1) * (t.entryPrice || 0)
+        const val  = ((t.remainingShares ?? t.positionSize) || 1) * (t.entryPrice || 0)
         bySector[sect] = (bySector[sect] || 0) + val
       }
 
@@ -912,7 +912,7 @@ export default function RiskPanel({ selectedAccount }) {
       let atrEffective = 0
       if (atrData.size > 0 && benchmarkAtrPct > 0) {
         for (const t of (sec.sectorTrades || [])) {
-          const notional = Math.abs((t.positionSize || 0) * (t.entryPrice || 0))
+          const notional = Math.abs(((t.remainingShares ?? t.positionSize) || 0) * (t.entryPrice || 0))
           const posAtr   = atrData.get(t.symbol)?.atrPct || 0
           if (posAtr > 0) atrEffective += notional * (posAtr / benchmarkAtrPct)
         }
@@ -933,8 +933,9 @@ export default function RiskPanel({ selectedAccount }) {
     if (atrData.size === 0) return 0
     return openTrades.reduce((sum, t) => {
       const atrPct = atrData.get(t.symbol)?.atrPct
-      if (!atrPct || !t.positionSize || !t.entryPrice) return sum
-      return sum + Math.abs(t.positionSize * t.entryPrice) * (atrPct / 100)
+      const sz = t.remainingShares ?? t.positionSize
+      if (!atrPct || !sz || !t.entryPrice) return sum
+      return sum + Math.abs(sz * t.entryPrice) * (atrPct / 100)
     }, 0)
   }, [openTrades, atrData])
 
@@ -945,8 +946,9 @@ export default function RiskPanel({ selectedAccount }) {
     const benchAtr    = benchmarkAtrPct / 100
     const rows = openTrades.map(t => {
       const posAtrPct = atrData.get(t.symbol)?.atrPct
-      if (!posAtrPct || !t.positionSize || !t.entryPrice) return null
-      const notional = Math.abs(t.positionSize * t.entryPrice)
+      const sz2 = t.remainingShares ?? t.positionSize
+      if (!posAtrPct || !sz2 || !t.entryPrice) return null
+      const notional = Math.abs(sz2 * t.entryPrice)
       const isLong   = (t.position ?? 'Long').toLowerCase() !== 'short'
       const impact   = (scenarioPct / benchAtr) * (posAtrPct / 100) * notional
       return { symbol: t.symbol, impact: isLong ? -impact : impact }
@@ -1069,9 +1071,10 @@ export default function RiskPanel({ selectedAccount }) {
                     // Sum unrealized P&L across all lots (accurate even with different entry prices)
                     const unrealizedPL = currentPrice != null
                       ? group.lots.reduce((s, l) => {
-                          if (!l.entryPrice || !l.positionSize) return s
+                          const lSz = l.remainingShares ?? l.positionSize
+                          if (!l.entryPrice || !lSz) return s
                           const lng = (l.position ?? 'Long').toLowerCase() !== 'short'
-                          return s + (lng ? currentPrice - l.entryPrice : l.entryPrice - currentPrice) * l.positionSize
+                          return s + (lng ? currentPrice - l.entryPrice : l.entryPrice - currentPrice) * lSz
                         }, 0)
                       : null
                     const plColor = unrealizedPL == null ? '' : unrealizedPL >= 0 ? 'text-accent-green' : 'text-accent-red'
@@ -1242,15 +1245,16 @@ export default function RiskPanel({ selectedAccount }) {
                           const lotEffTP  = lot.takeProfit ?? lotDefTP
                           const lotCurR   = currentPrice != null && lot.entryPrice && lotRPS && lotRPS > 0
                             ? (lotIsLong ? currentPrice - lot.entryPrice : lot.entryPrice - currentPrice) / lotRPS : null
-                          const lotUPL    = currentPrice != null && lot.entryPrice && lot.positionSize
-                            ? (lotIsLong ? currentPrice - lot.entryPrice : lot.entryPrice - currentPrice) * lot.positionSize : null
+                          const lotSz     = lot.remainingShares ?? lot.positionSize
+                          const lotUPL    = currentPrice != null && lot.entryPrice && lotSz
+                            ? (lotIsLong ? currentPrice - lot.entryPrice : lot.entryPrice - currentPrice) * lotSz : null
                           const lotPlClr  = lotUPL == null ? '' : lotUPL >= 0 ? 'text-accent-green' : 'text-accent-red'
                           return (
                             <tr key={lot.id} className="bg-white/[0.02] text-xs border-l-2 border-accent-blue/20">
                               <td className="py-1.5 pl-7 mono text-gray-400">
                                 <span className="text-gray-700 mr-1.5">└</span>
                                 Lot {lotIdx + 1}
-                                <span className="ml-1.5 text-gray-600">{lot.positionSize?.toLocaleString()} sh</span>
+                                <span className="ml-1.5 text-gray-600">{lotSz?.toLocaleString()} sh</span>
                               </td>
                               <td className="py-1.5 text-right mono text-gray-500">
                                 {currentPrice != null ? `$${currentPrice.toFixed(2)}` : '—'}
