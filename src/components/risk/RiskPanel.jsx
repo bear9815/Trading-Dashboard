@@ -131,8 +131,22 @@ function ClosePositionModal({ position, onClose, onConfirm }) {
   const now = new Date()
   const _pad = n => String(n).padStart(2, '0')
   const localNow = `${now.getFullYear()}-${_pad(now.getMonth()+1)}-${_pad(now.getDate())}T${_pad(now.getHours())}:${_pad(now.getMinutes())}`
+
+  // Compute true remaining shares: original size minus whatever has already been exited.
+  // positionSize may have been mutated to the remaining count by older code, so we
+  // always derive this from _originalPositionSize + existing exits when possible.
+  const alreadyExited = (position.exits || []).reduce((sum, ex) => {
+    const sh = ex.shares != null ? Math.abs(ex.shares)
+             : (ex.amount != null && ex.price ? Math.round(Math.abs(ex.amount) / Math.abs(ex.price)) : 0)
+    return sum + sh
+  }, 0)
+  const origSize = position._originalPositionSize ?? position.positionSize ?? 0
+  const defaultShares = origSize > 0
+    ? Math.max(0, Math.round(origSize - alreadyExited))
+    : (position.remainingShares ?? position.positionSize ?? 0)
+
   const [exitPrice, setExitPrice]   = useState('')
-  const [shares, setShares]         = useState(String(position.positionSize || ''))
+  const [shares, setShares]         = useState(String(defaultShares || ''))
   const [exitDate, setExitDate]     = useState(localNow)
   const [commission, setCommission] = useState('0')
   const [status, setStatus]         = useState('Win')
@@ -200,7 +214,7 @@ function ClosePositionModal({ position, onClose, onConfirm }) {
           <div>
             <h3 className="font-semibold text-white text-sm">Close {position.symbol}</h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              Entry ${ep0.toFixed(2)} · {position.positionSize} shares
+              Entry ${ep0.toFixed(2)} · {defaultShares} shares remaining
             </p>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors p-1">

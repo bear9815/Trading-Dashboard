@@ -75,7 +75,7 @@ export const useTradeStore = create((set, get) => ({
       supabase.from('import_batches').select('data').eq('user_id', userId),
     ])
 
-    const trades            = (tRes.data || []).map(r => r.data)
+    const trades            = (tRes.data || []).map(r => enrichTrade(r.data))
     const accountActivities = (aRes.data || []).map(r => r.data)
     const importBatches     = (bRes.data || []).map(r => r.data)
 
