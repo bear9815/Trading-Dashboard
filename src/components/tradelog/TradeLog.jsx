@@ -314,23 +314,28 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
 
     const newStatus = draft.status ?? trade.status
 
-    // Recompute P&L only for closed trades — buy cost uses shares-exited, not full position size
+    // Recompute P&L whenever exits exist.
+    // For partial closes (exitedShares < origSize) enrichTrade will recalculate.
+    // For a full close where the user forgot to change the status dropdown,
+    // we still calculate here so enrichTrade's auto-close logic has the right
+    // pl/sellAmount to work with.
     let pl = trade.pl, sellAmount = trade.sellAmount, rMultiple
 
-    if (editedExits.length > 0 && newStatus !== 'Open') {
-      const gross        = editedExits.reduce((s, e) => s + e.amount, 0)
-      const comm         = editedExits.reduce((s, e) => s + e.commission, 0)
-      const exitedShares = editedExits.reduce((s, e) => s + e.shares, 0)
-      sellAmount         = gross - comm
-      const ba           = ep && exitedShares > 0 ? ep * exitedShares : null
+    const origPS = trade._originalPositionSize ?? ps
+    const exitedShares = editedExits.reduce((s, e) => s + e.shares, 0)
+    const isFullClose  = origPS > 0 && exitedShares >= origPS - 0.5
+
+    if (editedExits.length > 0 && (newStatus !== 'Open' || isFullClose)) {
+      const gross = editedExits.reduce((s, e) => s + e.amount, 0)
+      const comm  = editedExits.reduce((s, e) => s + e.commission, 0)
+      sellAmount  = gross - comm
+      const ba    = ep && exitedShares > 0 ? ep * exitedShares : null
       if (ba > 0) {
         pl = gross - ba - comm
         // R = total P&L ÷ ORIGINAL risk dollar amount.
         // Use _originalStopLoss (not the current/trailed stop) and
-        // _originalPositionSize (not remaining shares after partial exits)
-        // so that trailing stops and scale-outs don't inflate R.
+        // _originalPositionSize (not remaining shares after partial exits).
         const origSL = trade._originalStopLoss ?? sl
-        const origPS = trade._originalPositionSize ?? ps
         if (ep && origSL && origPS) {
           const totalRisk = Math.abs(ep - origSL) * origPS
           if (totalRisk > 0) rMultiple = parseFloat((pl / totalRisk).toFixed(3))
@@ -338,8 +343,9 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
       }
     }
 
-    // Open trades: clear any stale P&L / R so they don't show misleading numbers
-    if (newStatus === 'Open') {
+    // For genuinely open partial positions, clear stale P&L so enrichTrade
+    // recalculates it fresh from the exits array.
+    if (newStatus === 'Open' && !isFullClose) {
       pl         = null
       sellAmount = null
       rMultiple  = null

@@ -132,37 +132,70 @@ export function enrichTrade(trade) {
       const remaining = Math.max(0, Math.round(origSize - exitedShares))
       result.remainingShares = remaining
 
+      // Helper: sum gross proceeds from exits array
+      const calcGross = (exits) => exits.reduce((sum, ex) => {
+        if (ex.amount != null) return sum + Math.abs(ex.amount)
+        const sh = ex.shares != null ? Math.abs(ex.shares) : 0
+        return sum + (ex.price != null ? Math.abs(ex.price) * sh : 0)
+      }, 0)
+      const calcComm  = (exits) => exits.reduce((sum, ex) => sum + (ex.commission ?? 0), 0)
+
       // 0.5-share tolerance absorbs floating-point rounding from amount ÷ price
       if (exitedShares > 0 && exitedShares < origSize - 0.5) {
+        // ── PARTIAL EXIT: keep Open, recalculate partial P&L ──────────────────
         result.status = 'Open'
-        // positionSize intentionally NOT mutated — see note above
 
-        // Recalculate P&L on the exited shares only
         const entry = result.entryPrice
         if (entry != null) {
-          const grossProceeds = result.exits.reduce((sum, ex) => {
-            if (ex.amount != null) return sum + Math.abs(ex.amount)
-            const sh = ex.shares != null ? Math.abs(ex.shares)
-              : (ex.price != null && Math.abs(ex.price) > 0
-                  ? Math.round(Math.abs(ex.amount ?? 0) / Math.abs(ex.price)) : 0)
-            return sum + Math.abs(ex.price ?? 0) * sh
-          }, 0)
-          const totalComm = result.exits.reduce((sum, ex) => sum + (ex.commission ?? 0), 0)
-          const isShort   = (result.position || 'Long').toLowerCase().includes('short')
+          const gross     = calcGross(result.exits)
+          const totalComm = calcComm(result.exits)
           result.pl = Math.round(
             ((isShort
-              ? entry * exitedShares - grossProceeds
-              : grossProceeds - entry * exitedShares
+              ? entry * exitedShares - gross
+              : gross - entry * exitedShares
             ) - totalComm) * 100
           ) / 100
         } else {
           result.pl = null
         }
 
-        // R and P&L% are only meaningful on a fully closed trade
+        // R and P&L% only meaningful for a fully closed trade
         result.rMultiple    = null
         result.rMultipleATR = null
         result.plPct        = null
+
+      } else if (exitedShares >= origSize - 0.5 && exitedShares > 0 && result.status === 'Open') {
+        // ── FULL EXIT still marked Open: auto-close ───────────────────────────
+        // Happens when the user logs the final partial close but forgets to
+        // change the status dropdown, or when enrichTrade is called on a trade
+        // that was partially closed in a previous session.
+        const entry = result.entryPrice
+        if (entry != null) {
+          const gross     = calcGross(result.exits)
+          const totalComm = calcComm(result.exits)
+          const plCalc    = Math.round(
+            ((isShort
+              ? entry * exitedShares - gross
+              : gross - entry * exitedShares
+            ) - totalComm) * 100
+          ) / 100
+          result.pl         = plCalc
+          result.sellAmount = Math.round((gross - totalComm) * 100) / 100
+          result.status     = plCalc > 0 ? 'Win' : plCalc < 0 ? 'Loss' : 'Scratch'
+
+          // Compute R now that we have a final P&L
+          const origStop2 = result._originalStopLoss ?? stop
+          if (origStop2 != null && origSize > 0) {
+            const oneR = Math.abs(entry - origStop2) * origSize
+            if (oneR > 0) result.rMultiple = Math.round((plCalc / oneR) * 1000) / 1000
+          }
+          if (result.atrRisk > 0) {
+            result.rMultipleATR = Math.round((plCalc / result.atrRisk) * 1000) / 1000
+          }
+          if (result.buyAmount > 0) {
+            result.plPct = Math.round((plCalc / Math.abs(result.buyAmount)) * 10000) / 100
+          }
+        }
       }
     }
   }
