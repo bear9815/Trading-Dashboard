@@ -940,17 +940,22 @@ Rules:
  */
 export async function analyzeStockBrief(ticker, apiKey) {
   if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
-  const sym = ticker.trim().toUpperCase()
+  const input = ticker.trim()
+  // Could be a ticker ("RKLB") or a company name ("Rocket Lab") — let the AI resolve it
+  const sym = input.toUpperCase()
 
   const prompt = `You are a professional equity analyst writing a high-quality company brief for long-term investors.
 
-Analyze ${sym} using the 7-point framework below.
+The user has entered: "${input}"
+This may be a stock ticker symbol OR a company name. Identify the correct publicly traded company and use its official ticker symbol in your response.
+
+Analyze that company using the 7-point framework below.
 
 Use only verifiable, factual information (annual reports, investor presentations, filings, earnings transcripts, and reputable financial sources). Be concise, analytical, and concrete — no filler or marketing language.
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
-  "ticker": "${sym}",
+  "ticker": "The correct exchange ticker symbol (e.g. RKLB)",
   "companyName": "Full legal company name",
   "oneLiner": "One sentence describing this business to an investor",
   "executiveSummary": "150–200 word summary of how the company makes money, its economic quality, and where its edge and risks lie",
@@ -970,7 +975,7 @@ Rules:
 - Each bullet must be a concrete, specific insight or data point — no generic statements
 - Include actual numbers (margins, growth rates, market share) wherever available
 - Tone: analytical, neutral, precise
-- If the ticker is unknown or not a real company, return { "error": "Unknown ticker: ${sym}" }`
+- If the input cannot be matched to any real publicly traded company, return { "error": "Could not identify a publicly traded company for: ${input}" }`
 
   const text = await callAI(apiKey, prompt)
   const jsonMatch = text.match(/\{[\s\S]*\}/)

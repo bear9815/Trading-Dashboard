@@ -694,12 +694,11 @@ export default function AIFeedback({ selectedAccount }) {
             </p>
             <div className="flex gap-2">
               <input
-                className="input flex-1 text-sm font-mono uppercase"
-                placeholder="e.g. NVDA, STX, MSFT"
+                className="input flex-1 text-sm"
+                placeholder="Ticker (NVDA) or company name (Rocket Lab)"
                 value={briefTicker}
-                onChange={e => setBriefTicker(e.target.value.toUpperCase())}
+                onChange={e => setBriefTicker(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') runStockBrief() }}
-                maxLength={10}
               />
               <button
                 onClick={runStockBrief}
