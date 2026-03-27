@@ -126,7 +126,7 @@ async function processWithGemini(file, apiKey) {
             { text: buildPrompt() },
           ],
         }],
-        generationConfig: { maxOutputTokens: 8192, temperature: 0.2 },
+        generationConfig: { maxOutputTokens: 65536, temperature: 0.2 },
       }),
     }
   )
@@ -138,7 +138,16 @@ async function processWithGemini(file, apiKey) {
   let raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
   if (raw.startsWith('```')) raw = raw.split('\n').slice(1).join('\n')
   if (raw.endsWith('```')) raw = raw.slice(0, raw.lastIndexOf('```'))
-  return JSON.parse(raw.trim())
+  raw = raw.trim()
+  try {
+    return JSON.parse(raw)
+  } catch (e) {
+    const finishReason = data.candidates?.[0]?.finishReason
+    if (finishReason === 'MAX_TOKENS') {
+      throw new Error('Gemini response was truncated — PDF may be too large. Try a shorter report.')
+    }
+    throw new Error(`Failed to parse Gemini response as JSON: ${e.message}`)
+  }
 }
 
 // ── Chat context builder ──────────────────────────────────────────────────────
