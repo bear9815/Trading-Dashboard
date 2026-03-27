@@ -101,6 +101,9 @@ For supply_chain_nodes: identify 5-8 critical nodes in the supply chain, assessi
 ${SCHEMA}`
 }
 
+// Safely coerce a potentially non-string API field to string
+const toStr = v => (typeof v === 'string' ? v : '')
+
 // ── PDF helpers ───────────────────────────────────────────────────────────────
 function readFileAsBase64(file) {
   return new Promise((resolve, reject) => {
@@ -191,8 +194,9 @@ function parseCatalystDate(line) {
 
 // ── Sub-components: existing data renderers ───────────────────────────────────
 function ValueChain({ text }) {
-  if (!text) return <p className="text-gray-500 text-sm">No data available.</p>
-  const lines = text.split('\n'); const layers = []; let cur = null
+  const safe = toStr(text)
+  if (!safe) return <p className="text-gray-500 text-sm">No data available.</p>
+  const lines = safe.split('\n'); const layers = []; let cur = null
   for (const ln of lines) {
     const s = ln.trim()
     if (!s) { if (cur?.items.length) { layers.push(cur); cur = null } continue }
@@ -221,8 +225,9 @@ function ValueChain({ text }) {
 }
 
 function CompetitiveLandscape({ text }) {
-  if (!text) return <p className="text-gray-500 text-sm">No data available.</p>
-  const lines = text.split('\n').filter(l => l.trim()); const entries = []; let cur = null
+  const safe = toStr(text)
+  if (!safe) return <p className="text-gray-500 text-sm">No data available.</p>
+  const lines = safe.split('\n').filter(l => l.trim()); const entries = []; let cur = null
   for (const ln of lines) {
     const s = ln.trim(), isE = /^#{1,3}\s*\d+\)/.test(s) || /^\d+[.)]\s/.test(s.replace(/\*\*/g,''))
     if (isE && s.length > 8) { if (cur) entries.push(cur); cur = { h: s.replace(/^#{1,3}\s*/,'').replace(/\*\*/g,''), d: [] } }
@@ -244,10 +249,11 @@ function CompetitiveLandscape({ text }) {
 }
 
 function TAMAnalysis({ text }) {
-  if (!text) return <p className="text-gray-500 text-sm">No data available.</p>
-  const m26 = text.match(/(?:2025|2026)[^$]{0,40}(\$[\d.,]+\s*(?:billion|trillion|B|T|M))/i) || text.match(/(\$[\d.,]+\s*(?:billion|trillion|B|T|M))[^\n]{0,30}(?:2025|2026)/i)
-  const m30 = text.match(/(?:2030|2031|2029)[^$]{0,40}(\$[\d.,]+\s*(?:billion|trillion|B|T|M))/i) || text.match(/(\$[\d.,]+\s*(?:billion|trillion|B|T|M))[^\n]{0,30}(?:2030|2031)/i)
-  const mc  = text.match(/([\d.]+)%\s*CAGR/i) || text.match(/CAGR[^\d]{0,15}([\d.]+)%/i)
+  const safe = toStr(text)
+  if (!safe) return <p className="text-gray-500 text-sm">No data available.</p>
+  const m26 = safe.match(/(?:2025|2026)[^$]{0,40}(\$[\d.,]+\s*(?:billion|trillion|B|T|M))/i) || safe.match(/(\$[\d.,]+\s*(?:billion|trillion|B|T|M))[^\n]{0,30}(?:2025|2026)/i)
+  const m30 = safe.match(/(?:2030|2031|2029)[^$]{0,40}(\$[\d.,]+\s*(?:billion|trillion|B|T|M))/i) || safe.match(/(\$[\d.,]+\s*(?:billion|trillion|B|T|M))[^\n]{0,30}(?:2030|2031)/i)
+  const mc  = safe.match(/([\d.]+)%\s*CAGR/i) || safe.match(/CAGR[^\d]{0,15}([\d.]+)%/i)
   return (
     <div>
       {(m26||m30||mc) && (
@@ -260,25 +266,26 @@ function TAMAnalysis({ text }) {
           ) : null)}
         </div>
       )}
-      <p className="text-sm text-gray-400 whitespace-pre-wrap leading-relaxed">{text}</p>
+      <p className="text-sm text-gray-400 whitespace-pre-wrap leading-relaxed">{safe}</p>
     </div>
   )
 }
 
 function Signals({ rev, cat }) {
-  if (!rev && !cat) return <p className="text-gray-500 text-sm">No signal data available.</p>
+  const revS = toStr(rev), catS = toStr(cat)
+  if (!revS && !catS) return <p className="text-gray-500 text-sm">No signal data available.</p>
   return (
     <div className="space-y-5">
-      {rev && <div>
+      {revS && <div>
         <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Revenue Acceleration Signals</div>
         <ul className="space-y-1.5">
-          {rev.split('\n').filter(l=>l.trim()).map((l,i) => { const c = l.replace(/^[-•*\d.]+\s*/,''); return c.length > 3 ? <li key={i} className="flex items-start gap-2 text-sm text-gray-400"><span className="w-1.5 h-1.5 rounded-full bg-accent-green mt-1.5 shrink-0"/>{c}</li> : null })}
+          {revS.split('\n').filter(l=>l.trim()).map((l,i) => { const c = l.replace(/^[-•*\d.]+\s*/,''); return c.length > 3 ? <li key={i} className="flex items-start gap-2 text-sm text-gray-400"><span className="w-1.5 h-1.5 rounded-full bg-accent-green mt-1.5 shrink-0"/>{c}</li> : null })}
         </ul>
       </div>}
-      {cat && <div>
+      {catS && <div>
         <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Forward Catalyst Calendar</div>
         <div className="space-y-1.5">
-          {cat.split('\n').filter(l=>l.trim()).map((evt,i) => {
+          {catS.split('\n').filter(l=>l.trim()).map((evt,i) => {
             const el = evt.toLowerCase()
             let b = 'border-gray-700'
             if (el.includes('earn')||el.includes('report')||el.includes('quarter')) b = 'border-accent-blue'
@@ -295,13 +302,14 @@ function Signals({ rev, cat }) {
 }
 
 function AlphaEdge({ text }) {
-  if (!text) return <p className="text-gray-500 text-sm">No data available.</p>
-  let blocks = text.split(/\n(?=\d+[.)]\s)/).filter(b=>b.trim())
-  if (blocks.length <= 1) blocks = text.split('\n\n').filter(b=>b.trim())
+  const safe = toStr(text)
+  if (!safe) return <p className="text-gray-500 text-sm">No data available.</p>
+  let blocks = safe.split(/\n(?=\d+[.)]\s)/).filter(b=>b.trim())
+  if (blocks.length <= 1) blocks = safe.split('\n\n').filter(b=>b.trim())
   if (blocks.length <= 1) return (
     <div className="bg-accent-yellow/8 border border-accent-yellow/20 rounded-lg p-4">
       <div className="flex items-center gap-2 text-accent-yellow font-semibold text-sm mb-2"><Zap size={14}/>Unpriced Tailwinds</div>
-      <p className="text-sm text-gray-400 leading-relaxed">{text}</p>
+      <p className="text-sm text-gray-400 leading-relaxed">{safe}</p>
     </div>
   )
   return <div className="space-y-3">{blocks.map((b,i) => {
@@ -483,7 +491,7 @@ function CatalystTimeline({ themes }) {
   const { grouped, total } = useMemo(() => {
     const all = []
     for (const [name, data] of Object.entries(themes)) {
-      const cal = data.deep?.['Forward Catalyst Calendar'] || ''
+      const cal = toStr(data.deep?.['Forward Catalyst Calendar'])
       for (const line of cal.split('\n').filter(l=>l.trim())) {
         const parsed = parseCatalystDate(line)
         if (!parsed) continue
