@@ -31,6 +31,7 @@ const EdgeLab            = lazy(() => import('./components/edgelab/EdgeLab.jsx')
 const FactorRegime       = lazy(() => import('./components/regime/FactorRegime.jsx'))
 const VolatilityDashboard = lazy(() => import('./components/volatility/VolatilityDashboard.jsx'))
 const MarketQuality       = lazy(() => import('./components/marketquality/MarketQuality.jsx'))
+const ThematicResearch    = lazy(() => import('./components/thematic/ThematicResearch.jsx'))
 
 // ── Page-transition loading fallback ─────────────────────────────────────────
 function PageLoader() {
@@ -192,6 +193,7 @@ export default function App() {
             {page === 'marketquality' && <MarketQuality />}
             {page === 'settings'      && <Settings />}
             {page === 'rrg'         && <div className="h-full"><RRGPage /></div>}
+            {page === 'thematic'    && <ThematicResearch />}
           </Suspense>
         </main>
       </div>

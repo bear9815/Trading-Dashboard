@@ -1,4 +1,4 @@
-import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, TrendingUp, Sparkles, ScanLine, Sun, GitCompare, FlaskConical, Layers, Activity, Gauge } from 'lucide-react'
+import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, TrendingUp, Sparkles, ScanLine, Sun, GitCompare, FlaskConical, Layers, Activity, Gauge, Globe } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 
 const NAV = [
@@ -15,6 +15,7 @@ const NAV = [
   { id: 'regime',      label: 'Factor Regime',  icon: Layers },
   { id: 'volatility',  label: 'Vol Dashboard',    icon: Activity },
   { id: 'marketquality', label: 'Market Dashboard', icon: Gauge    },
+  { id: 'thematic',    label: 'Thematic Research', icon: Globe    },
   { id: 'settings',    label: 'Settings',         icon: Settings },
 ]
 
