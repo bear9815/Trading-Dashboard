@@ -678,6 +678,62 @@ function ProgressiveSizer({ accountBalance, trades, openPositions, quotes }) {
   )
 }
 
+// ── Lot Picker Modal ──────────────────────────────────────────────────────────
+// For multi-lot positions: let the user choose which specific lot to close before
+// opening the regular ClosePositionModal.
+function LotPickerModal({ group, onClose, onPickLot }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-surface-50 border border-white/10 rounded-xl p-5 w-full max-w-sm shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-semibold text-white text-sm">Close — {group.symbol}</h3>
+            <p className="text-xs text-gray-500 mt-0.5">Which lot are you reducing?</p>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors p-1">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="space-y-2">
+          {group.lots.map((lot, i) => {
+            const alreadyExited = (lot.exits || []).reduce((s, ex) => {
+              const sh = ex.shares != null ? Math.abs(ex.shares)
+                       : (ex.amount && ex.price ? Math.round(Math.abs(ex.amount) / Math.abs(ex.price)) : 0)
+              return s + sh
+            }, 0)
+            const origSz = lot._originalPositionSize ?? lot.positionSize ?? 0
+            const remaining = origSz > 0 ? Math.max(0, Math.round(origSz - alreadyExited)) : origSz
+            return (
+              <button
+                key={lot.id}
+                onClick={() => onPickLot(lot)}
+                className="w-full text-left p-3 rounded-lg bg-surface-100 hover:bg-surface-200 border border-white/5 hover:border-accent-blue/30 transition-colors"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-white">Lot {i + 1}</span>
+                  <span className="text-xs text-gray-400 mono">{remaining.toLocaleString()} sh remaining</span>
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  Entry ${lot.entryPrice?.toFixed(2) ?? '—'}
+                  {lot.stopLoss ? ` · Stop $${lot.stopLoss.toFixed(2)}` : ''}
+                  {lot.entryDate ? ` · ${new Date(lot.entryDate).toLocaleDateString()}` : ''}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+        <button onClick={onClose} className="btn-ghost w-full mt-3 text-sm">Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function RiskPanel({ selectedAccount }) {
@@ -688,8 +744,8 @@ export default function RiskPanel({ selectedAccount }) {
   const [quotes, setQuotes]           = useState(new Map())
   const [fetching, setFetching]       = useState(false)
   const [lastRefresh, setLastRefresh] = useState(null)
-  const [closeTarget, setCloseTarget]         = useState(null) // single position to close
-  const [closeAllTarget, setCloseAllTarget]   = useState(null) // multi-lot group to close
+  const [closeTarget, setCloseTarget]   = useState(null) // lot to partially/fully close
+  const [lotPickTarget, setLotPickTarget] = useState(null) // multi-lot group awaiting lot selection
   const [expandedSymbols, setExpandedSymbols] = useState(new Set())
   const [ladderSymbols,   setLadderSymbols]   = useState(new Set())
 
@@ -1201,10 +1257,10 @@ export default function RiskPanel({ selectedAccount }) {
                                 </button>
                               )}
                               <button
-                                onClick={() => isMulti ? setCloseAllTarget(group) : setCloseTarget(group.lots[0])}
+                                onClick={() => isMulti ? setLotPickTarget(group) : setCloseTarget(group.lots[0])}
                                 className="text-[11px] px-2 py-1 rounded border border-accent-red/30 text-accent-red hover:bg-accent-red/10 transition-all whitespace-nowrap"
                               >
-                                {isMulti ? 'Close All' : 'Close'}
+                                Close
                               </button>
                             </div>
                           </td>
@@ -1771,47 +1827,17 @@ export default function RiskPanel({ selectedAccount }) {
         />
       )}
 
-      {/* ── Close All Lots Modal (multi-lot group) ─────────────────────────── */}
-      {closeAllTarget && (() => {
-        const syntheticPosition = {
-          ...closeAllTarget.lots[0],
-          positionSize: closeAllTarget.positionSize,
-          entryPrice:   closeAllTarget.entryPrice,
-          stopLoss:     closeAllTarget.stopLoss,
-          exits:        [],
-        }
-        return (
-          <ClosePositionModal
-            position={syntheticPosition}
-            onClose={() => setCloseAllTarget(null)}
-            onConfirm={(updates) => {
-              const lastExit   = updates.exits?.[updates.exits.length - 1] ?? {}
-              const ep         = lastExit.price ?? 0
-              const exitDate   = lastExit.date
-              const totalComm  = lastExit.commission ?? 0
-              const totalShares = closeAllTarget.positionSize || 1
-              closeAllTarget.lots.forEach(lot => {
-                const lotShares = lot.positionSize || 0
-                if (!ep || lotShares <= 0) return
-                const lotPct    = lotShares / totalShares
-                const lotComm   = Math.round(totalComm * lotPct * 100) / 100
-                const lotAmount = ep * lotShares
-                const lotBa     = (lot.entryPrice || 0) * lotShares
-                const isShort   = (lot.position || 'Long').toLowerCase().includes('short')
-                const lotPl     = Math.round(((isShort ? lotBa - lotAmount : lotAmount - lotBa) - lotComm) * 100) / 100
-                const exitRecord = { price: ep, amount: lotAmount, shares: lotShares, date: exitDate, commission: lotComm }
-                updateTrade(lot.id, {
-                  status:     lotPl > 0 ? 'Win' : lotPl < 0 ? 'Loss' : 'Scratch',
-                  pl:         lotPl,
-                  sellAmount: lotAmount - lotComm,
-                  exits:      [...(lot.exits || []), exitRecord],
-                })
-              })
-              setCloseAllTarget(null)
-            }}
-          />
-        )
-      })()}
+      {/* ── Lot Picker Modal (multi-lot group → pick which lot to close) ─── */}
+      {lotPickTarget && (
+        <LotPickerModal
+          group={lotPickTarget}
+          onClose={() => setLotPickTarget(null)}
+          onPickLot={(lot) => {
+            setLotPickTarget(null)
+            setCloseTarget(lot)
+          }}
+        />
+      )}
 
       {/* ── Risk Guidelines ──────────────────────────────────────────────── */}
       <div className="card">

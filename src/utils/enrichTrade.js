@@ -106,7 +106,10 @@ export function enrichTrade(trade) {
   // Uses _originalPositionSize (set once and never changed) so that repeated
   // enrichTrade calls (e.g. recalcAll, updateTrade) are idempotent and don't
   // progressively shrink positionSize on every pass.
-  if (result.exits?.length > 0) {
+  if (!result.exits?.length) {
+    // No exits — clear any stale remainingShares so risk panel shows full size
+    result.remainingShares = null
+  } else if (result.exits?.length > 0) {
     // Snapshot the original full position size on the very first call.
     // After this it's frozen — partial-close mutations to positionSize won't
     // corrupt the reference on subsequent calls.
