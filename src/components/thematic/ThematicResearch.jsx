@@ -1,6 +1,9 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
-import { useSettingsStore } from '../../store/useSettingsStore.js'
-import { useThematicStore } from '../../store/useThematicStore.js'
+import { useSettingsStore }        from '../../store/useSettingsStore.js'
+import { useThematicStore }        from '../../store/useThematicStore.js'
+import { useAuthStore }            from '../../store/useAuthStore.js'
+import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
+import ResearchLibrary             from './ResearchLibrary.jsx'
 import {
   ChevronDown, AlertTriangle, Gem, Zap, Upload, FileText,
   Trash2, RefreshCw, X, Loader, Send, Bot, TrendingUp,
@@ -172,6 +175,24 @@ Bear Case: ${bears || 'n/a'}
 TAM: ${(dp['TAM / SAM / SOM'] || '').substring(0, 300)}
 Catalysts: ${(dp['Forward Catalyst Calendar'] || '').substring(0, 350)}`
   }).join('\n\n---\n\n')
+}
+
+// ── Library context builder ───────────────────────────────────────────────────
+function buildLibraryContext(sources) {
+  if (!sources || sources.length === 0) return ''
+  return sources.map(s => {
+    const tickers   = (s.tickers || []).join(', ')
+    const catalysts = (s.catalyst_signals || []).map(c => `${c.catalyst} (${c.status})`).join('; ')
+    const metrics   = (s.key_metrics || []).map(m => `${m.label}: ${m.value}`).join(', ')
+    const typeLabel = s.source_type === 'deep_dive' ? 'DEEP DIVE' : s.source_type === 'earnings_call' ? 'EARNINGS CALL' : 'SOURCE'
+    return `[${typeLabel}] ${s.title}
+Tickers: ${tickers || 'n/a'} | Sentiment: ${s.sentiment || 'n/a'}
+Summary: ${s.summary || ''}
+Key Points: ${(s.key_points || []).slice(0, 5).join('; ')}
+Catalysts: ${catalysts || 'n/a'}
+Metrics: ${metrics || 'n/a'}
+${s.raw_text ? s.raw_text.substring(0, 2000) : ''}`
+  }).join('\n\n===\n\n')
 }
 
 // ── Catalyst date parser ──────────────────────────────────────────────────────
@@ -710,7 +731,7 @@ function ThemeMap({ themes }) {
 }
 
 // ── AI Research Chat ──────────────────────────────────────────────────────────
-function ThematicChat({ themes, apiKey }) {
+function ThematicChat({ themes, apiKey, librarySources = [] }) {
   const themeNames = Object.keys(themes)
   const [messages, setMessages] = useState([{
     role: 'assistant',
@@ -722,7 +743,8 @@ function ThematicChat({ themes, apiKey }) {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
 
-  const context = useMemo(() => buildChatContext(themes), [themes])
+  const context    = useMemo(() => buildChatContext(themes),          [themes])
+  const libraryCtx = useMemo(() => buildLibraryContext(librarySources), [librarySources])
 
   async function send(text) {
     const msg = (text ?? input).trim()
@@ -741,7 +763,7 @@ function ThematicChat({ themes, apiKey }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            system_instruction: { parts: [{ text: `You are an expert investment research analyst with access to live web search AND the following thematic investment research dossiers:\n\n${context}\n\nFor questions about current prices, recent news, earnings, or market conditions — use web search to get live data. For questions about thesis, catalysts, or comparisons across themes — draw from the research. Always be analytical, specific, and concise. Cite sources when you use web data.` }] },
+            system_instruction: { parts: [{ text: `You are an expert investment research analyst with access to live web search, thematic dossiers, and a research library of uploaded documents.\n\nTHEMATIC DOSSIERS:\n${context}${libraryCtx ? `\n\n---\nRESEARCH LIBRARY (deep dives & earnings calls):\n\n${libraryCtx}` : ''}\n\nFor current prices, news, or market conditions — use web search. For thesis, catalysts, cross-referencing what companies are saying against the investment thesis, or spotting catalysts in motion — draw from the dossiers and library. Be analytical, specific, and cite sources.` }] },
             contents: [...history, { role: 'user', parts: [{ text: msg }] }],
             tools: [{ googleSearch: {} }],
           }),
@@ -987,6 +1009,12 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
 export default function ThematicResearch() {
   const { apiKey } = useSettingsStore()
   const { themes, addTheme, removeTheme, convictions, setConviction } = useThematicStore()
+  const { user }   = useAuthStore()
+  const { sources: librarySources, loadSources } = useResearchLibraryStore()
+
+  useEffect(() => {
+    if (user?.id) loadSources()
+  }, [user?.id])
 
   const [processing,     setProcessing]     = useState(false)
   const [processingFile, setProcessingFile] = useState('')
@@ -1093,7 +1121,7 @@ export default function ThematicResearch() {
             </button>
             {showChat && (
               <div className="border-t border-white/10">
-                <ThematicChat themes={themes} apiKey={apiKey} />
+                <ThematicChat themes={themes} apiKey={apiKey} librarySources={librarySources} />
               </div>
             )}
           </div>
@@ -1123,6 +1151,9 @@ export default function ThematicResearch() {
           </div>
         </>
       )}
+
+      {/* Research Library */}
+      <ResearchLibrary />
 
       {themeCount === 0 && (
         <div className="bg-surface-50 border border-white/10 border-dashed rounded-xl p-10 text-center">
