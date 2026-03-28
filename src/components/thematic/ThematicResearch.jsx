@@ -3,7 +3,7 @@ import { useSettingsStore }        from '../../store/useSettingsStore.js'
 import { useThematicStore }        from '../../store/useThematicStore.js'
 import { useAuthStore }            from '../../store/useAuthStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
-import ResearchLibrary             from './ResearchLibrary.jsx'
+import ResearchLibrary, { ActiveSignals } from './ResearchLibrary.jsx'
 import {
   ChevronDown, AlertTriangle, Gem, Zap, Upload, FileText,
   Trash2, RefreshCw, X, Loader, Send, Bot, TrendingUp,
@@ -1151,6 +1151,9 @@ export default function ThematicResearch() {
           </div>
         </>
       )}
+
+      {/* Active Signals */}
+      <ActiveSignals />
 
       {/* Research Library */}
       <ResearchLibrary />

@@ -51,6 +51,25 @@ export const useResearchLibraryStore = create((set, get) => ({
     return data
   },
 
+  updateSource: async (id, updates) => {
+    if (!supabase) return
+    const uid = await getUid()
+    if (!uid) return
+    const { data, error } = await supabase
+      .from('research_sources')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', uid)
+      .select()
+      .single()
+    if (error) {
+      console.error('[ResearchLibrary] updateSource:', error.message)
+      throw error
+    }
+    set(state => ({ sources: state.sources.map(s => s.id === id ? data : s) }))
+    return data
+  },
+
   removeSource: async (id) => {
     if (!supabase) return
     const uid = await getUid()

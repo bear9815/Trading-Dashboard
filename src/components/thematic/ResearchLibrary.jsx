@@ -1,8 +1,8 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import {
   Upload, FileText, Trash2, ChevronDown, ChevronUp, Loader,
   AlertTriangle, X, BookOpen, TrendingUp, TrendingDown,
-  Minus, Zap, BarChart2,
+  Minus, Zap, BarChart2, RefreshCw,
 } from 'lucide-react'
 import { useSettingsStore }        from '../../store/useSettingsStore.js'
 import { useAuthStore }            from '../../store/useAuthStore.js'
@@ -315,12 +315,150 @@ function SourceCard({ source, onRemove }) {
   )
 }
 
+// ── Active Signals panel ──────────────────────────────────────────────────────
+function SignalSection({ label, items, dot, border, bg }) {
+  return (
+    <div className={`${bg} border ${border} rounded-lg p-3`}>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">{label}</div>
+      <div className="space-y-2.5">
+        {items.map((item, i) => (
+          <div key={i} className="flex items-start gap-2">
+            <span className={`w-1.5 h-1.5 rounded-full ${dot} mt-1 shrink-0`}/>
+            <div className="min-w-0">
+              <p className="text-xs text-gray-300 leading-snug">{item.text}</p>
+              <p className="text-[10px] text-gray-600 mt-0.5">
+                {item.type === 'deep_dive' ? 'Deep Dive' : item.type === 'earnings_call' ? 'Earnings Call' : 'Source'}
+                {' · '}{item.source.length > 55 ? item.source.substring(0, 55) + '…' : item.source}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function ActiveSignals() {
+  const { sources, updateSource }  = useResearchLibraryStore()
+  const { themes }                 = useThematicStore()
+  const { apiKey }                 = useSettingsStore()
+  const [reanalyzing, setReanalyzing] = useState(false)
+  const [currentId,   setCurrentId]   = useState(null)
+  const [show,        setShow]        = useState(true)
+
+  const allSignals = useMemo(() => {
+    const catalysts = [], confirmations = [], contradictions = [], newInfo = []
+    for (const s of sources) {
+      const ins = s.insights || {}
+      ;(ins.catalysts_in_motion || []).forEach(text => catalysts.push({ text, source: s.title, type: s.source_type }))
+      ;(ins.confirmations       || []).forEach(text => confirmations.push({ text, source: s.title, type: s.source_type }))
+      ;(ins.contradictions      || []).forEach(text => contradictions.push({ text, source: s.title, type: s.source_type }))
+      ;(ins.new_information     || []).forEach(text => newInfo.push({ text, source: s.title, type: s.source_type }))
+    }
+    return { catalysts, confirmations, contradictions, newInfo }
+  }, [sources])
+
+  const totalSignals   = allSignals.catalysts.length + allSignals.confirmations.length + allSignals.contradictions.length + allSignals.newInfo.length
+  const unanalyzed     = sources.filter(s => !s.insights || Object.keys(s.insights).length === 0).length
+  const hasDossiers    = Object.keys(themes).length > 0
+
+  async function reanalyzeAll() {
+    if (!apiKey || reanalyzing || !hasDossiers) return
+    setReanalyzing(true)
+    for (const source of sources) {
+      setCurrentId(source.id)
+      try {
+        const result = await autoAnalyzeWithGemini(source, themes, apiKey)
+        if (result) await updateSource(source.id, { insights: result })
+      } catch (e) {
+        console.warn(`[ActiveSignals] re-analysis failed for "${source.title}":`, e.message)
+      }
+    }
+    setReanalyzing(false)
+    setCurrentId(null)
+  }
+
+  if (sources.length === 0) return null
+
+  return (
+    <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden">
+      <button onClick={() => setShow(p => !p)}
+        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors">
+        <Zap size={14} className="text-accent-yellow"/>
+        <span className="text-sm font-semibold text-white flex-1 text-left">Active Signals</span>
+        {allSignals.contradictions.length > 0 && (
+          <span className="text-[10px] font-semibold bg-red-500/15 text-red-400 border border-red-500/30 rounded-full px-2 py-0.5 mr-1">
+            {allSignals.contradictions.length} conflict{allSignals.contradictions.length !== 1 ? 's' : ''}
+          </span>
+        )}
+        {allSignals.catalysts.length > 0 && (
+          <span className="text-[10px] font-semibold bg-accent-blue/15 text-accent-blue border border-accent-blue/30 rounded-full px-2 py-0.5 mr-1">
+            {allSignals.catalysts.length} in motion
+          </span>
+        )}
+        <ChevronDown size={16} className={`text-gray-500 transition-transform ${show ? 'rotate-180' : ''}`}/>
+      </button>
+
+      {show && (
+        <div className="border-t border-white/10 p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-600">
+              {reanalyzing && currentId
+                ? `Analyzing ${sources.find(s => s.id === currentId)?.title?.substring(0, 40) || '…'}…`
+                : unanalyzed > 0
+                ? `${unanalyzed} source${unanalyzed !== 1 ? 's' : ''} not yet analyzed`
+                : `${sources.length} source${sources.length !== 1 ? 's' : ''} · ${totalSignals} signal${totalSignals !== 1 ? 's' : ''}`}
+            </p>
+            <button onClick={reanalyzeAll}
+              disabled={reanalyzing || !apiKey || !hasDossiers}
+              title={!hasDossiers ? 'Add thematic dossiers first' : ''}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-accent-blue border border-white/10 hover:border-accent-blue/30 rounded-lg px-2.5 py-1.5 transition-all disabled:opacity-40">
+              <RefreshCw size={11} className={reanalyzing ? 'animate-spin' : ''}/>
+              {reanalyzing ? 'Analyzing…' : 'Re-analyze all'}
+            </button>
+          </div>
+
+          {totalSignals === 0 ? (
+            <div className="text-center py-6 text-gray-600">
+              <Zap size={18} className="mx-auto mb-2 opacity-40"/>
+              <p className="text-xs">
+                {!hasDossiers
+                  ? 'Add thematic dossiers first — signals cross-reference your library against your themes'
+                  : 'No signals yet — click Re-analyze all to cross-reference your library'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {allSignals.catalysts.length > 0 && (
+                <SignalSection label="Catalysts In Motion" items={allSignals.catalysts}
+                  dot="bg-accent-blue" border="border-accent-blue/20" bg="bg-accent-blue/5"/>
+              )}
+              {allSignals.contradictions.length > 0 && (
+                <SignalSection label="Conflicts With Thesis" items={allSignals.contradictions}
+                  dot="bg-red-400" border="border-red-500/20" bg="bg-red-500/5"/>
+              )}
+              {allSignals.confirmations.length > 0 && (
+                <SignalSection label="Thesis Confirmations" items={allSignals.confirmations}
+                  dot="bg-accent-green" border="border-accent-green/20" bg="bg-accent-green/5"/>
+              )}
+              {allSignals.newInfo.length > 0 && (
+                <SignalSection label="New Information" items={allSignals.newInfo}
+                  dot="bg-accent-yellow" border="border-accent-yellow/20" bg="bg-accent-yellow/5"/>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ResearchLibrary() {
   const { apiKey }  = useSettingsStore()
   const { user }    = useAuthStore()
   const { themes }  = useThematicStore()
-  const { sources, loading: storeLoading, loadSources, addSource, removeSource } = useResearchLibraryStore()
+  const { sources, loading: storeLoading, loadSources, addSource, removeSource, updateSource } = useResearchLibraryStore()
 
   const [sourceType,   setSourceType]   = useState('deep_dive')
   const [tickerInput,  setTickerInput]  = useState('')
@@ -373,7 +511,10 @@ export default function ResearchLibrary() {
       if (saved && Object.keys(themes).length > 0) {
         try {
           const result = await autoAnalyzeWithGemini(saved, themes, apiKey)
-          if (result) setAnalysis(result)
+          if (result) {
+            setAnalysis(result)
+            await updateSource(saved.id, { insights: result })
+          }
         } catch (ae) {
           console.warn('[ResearchLibrary] auto-analysis failed:', ae.message)
         }
