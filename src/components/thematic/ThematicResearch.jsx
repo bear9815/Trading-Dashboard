@@ -1,40 +1,15 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 import { useSettingsStore }        from '../../store/useSettingsStore.js'
 import { useThematicStore }        from '../../store/useThematicStore.js'
 import { useAuthStore }            from '../../store/useAuthStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import ResearchLibrary, { ActiveSignals } from './ResearchLibrary.jsx'
 import {
-  ChevronDown, AlertTriangle, Gem, Zap, Upload, FileText,
-  Trash2, RefreshCw, X, Loader, Send, Bot, TrendingUp,
-  TrendingDown, Calendar, Network, Star, Shield, BarChart,
+  ChevronDown, AlertTriangle, Gem, Zap, FileText,
+  Trash2, Send, Bot, TrendingUp,
+  TrendingDown, Calendar, Star, Shield,
   Search, ExternalLink,
 } from 'lucide-react'
-
-// ── Theme Interconnection Map data ───────────────────────────────────────────
-const THEME_LINKS = [
-  { a: 'AI Infrastructure & Semiconductors', b: 'Nuclear Energy & Power Demand',       type: 'feeds',     label: 'Data center power demand' },
-  { a: 'AI Infrastructure & Semiconductors', b: 'Robotics & Automation',                type: 'feeds',     label: 'AI model deployment' },
-  { a: 'AI Infrastructure & Semiconductors', b: 'Quantum Computing',                    type: 'converges', label: 'Next-gen compute evolution' },
-  { a: 'AI Infrastructure & Semiconductors', b: 'Cybersecurity',                        type: 'feeds',     label: 'Expanded attack surface' },
-  { a: 'AI Infrastructure & Semiconductors', b: 'GLP-1 / Obesity Pharma',               type: 'feeds',     label: 'AI-driven drug discovery' },
-  { a: 'Nuclear Energy & Power Demand',       b: 'U.S. Infrastructure & Grid Buildout', type: 'feeds',     label: 'Grid modernization need' },
-  { a: 'Robotics & Automation',               b: 'Reshoring & U.S. Industrials',        type: 'enables',   label: 'Factory automation' },
-  { a: 'Digital Assets & Tokenization',       b: 'Cybersecurity',                       type: 'feeds',     label: 'Crypto security demand' },
-  { a: 'Digital Assets & Tokenization',       b: 'Gold & Precious Metals',              type: 'competes',  label: 'Store of value' },
-  { a: 'Space Economy',                       b: 'Aerospace & Defense',                 type: 'overlaps',  label: 'Dual-use technology' },
-  { a: 'Reshoring & U.S. Industrials',        b: 'U.S. Infrastructure & Grid Buildout', type: 'feeds',     label: 'Manufacturing capacity build' },
-  { a: 'Quantum Computing',                   b: 'Cybersecurity',                       type: 'disrupts',  label: 'Post-quantum crypto threat' },
-]
-
-const LINK_COLORS = {
-  feeds:     '#4db8ff',
-  enables:   '#00e5a0',
-  competes:  '#ff4d6d',
-  converges: '#ffaa00',
-  overlaps:  '#a78bfa',
-  disrupts:  '#f97316',
-}
 
 // ── Macro variables ───────────────────────────────────────────────────────────
 const MACRO_VARS = [
@@ -46,116 +21,8 @@ const MACRO_VARS = [
   { key: 'risk_appetite',label: 'Risk-On' },
 ]
 
-// ── Updated schema prompt ─────────────────────────────────────────────────────
-const SCHEMA = `Return ONLY valid JSON (no markdown, no explanation) with this exact structure:
-
-{
-  "<AUTO-DETECTED THEME NAME>": {
-    "dossier": {
-      "The Catalyst": "<2-3 sentence core investment thesis>",
-      "Pure Play #1 Ticker": "<ticker>", "Pure Play #1 Name": "<name>", "Pure Play #1 Market Cap": "<Large/Mid/Small Cap>", "Pure Play #1 Tailwind Exposure": "<1 sentence>", "Pure Play #1 Thesis": "<1-2 sentences>",
-      "Pure Play #2 Ticker": "<ticker>", "Pure Play #2 Name": "<name>", "Pure Play #2 Market Cap": "<cap>", "Pure Play #2 Tailwind Exposure": "<1 sentence>", "Pure Play #2 Thesis": "<1-2 sentences>",
-      "Pure Play #3 Ticker": "<ticker>", "Pure Play #3 Name": "<name>", "Pure Play #3 Market Cap": "<cap>", "Pure Play #3 Tailwind Exposure": "<1 sentence>", "Pure Play #3 Thesis": "<1-2 sentences>",
-      "Pure Play #4 Ticker": "<ticker>", "Pure Play #4 Name": "<name>", "Pure Play #4 Market Cap": "<cap>", "Pure Play #4 Tailwind Exposure": "<1 sentence>", "Pure Play #4 Thesis": "<1-2 sentences>",
-      "Pure Play #5 Ticker": "<ticker>", "Pure Play #5 Name": "<name>", "Pure Play #5 Market Cap": "<cap>", "Pure Play #5 Tailwind Exposure": "<1 sentence>", "Pure Play #5 Thesis": "<1-2 sentences>",
-      "Hidden Gem Ticker": "<smaller overlooked company ticker>", "Hidden Gem Name": "<name>", "Hidden Gem Market Cap": "<cap>", "Hidden Gem Thesis": "<2-3 sentences on why overlooked but well-positioned>",
-      "Institutional / Dark Pool Signal": "<1-2 sentences on smart money or institutional positioning>",
-      "Key Risk Factor": "<single biggest thesis invalidation risk>",
-      "bulls": ["<bull argument 1>", "<bull argument 2>", "<bull argument 3>", "<bull argument 4>", "<bull argument 5>"],
-      "bears": ["<bear argument 1>", "<bear argument 2>", "<bear argument 3>", "<bear argument 4>", "<bear argument 5>"],
-      "macro_sensitivity": {
-        "rates":         { "direction": "tailwind|headwind|neutral", "reason": "<max 15 words>" },
-        "usd":           { "direction": "tailwind|headwind|neutral", "reason": "<max 15 words>" },
-        "growth":        { "direction": "tailwind|headwind|neutral", "reason": "<max 15 words>" },
-        "energy":        { "direction": "tailwind|headwind|neutral", "reason": "<max 15 words>" },
-        "inflation":     { "direction": "tailwind|headwind|neutral", "reason": "<max 15 words>" },
-        "risk_appetite": { "direction": "tailwind|headwind|neutral", "reason": "<max 15 words>" }
-      },
-      "supply_chain_nodes": [
-        { "name": "<node name>", "role": "<what this node does in 5-8 words>", "risk_level": "low|medium|high", "bottleneck": "<key constraint or vulnerability in 1 sentence>" }
-      ]
-    },
-    "deep": {
-      "Industry Value Chain Map": "<Format: **Layer Name**\\n- bullet\\n- bullet\\n\\n**Next Layer**\\n- bullet (4-6 layers minimum, blank line between each)>",
-      "Competitive Landscape": "<Format: 1. Company (TICKER) — Position\\n- detail\\n\\n2. Company (TICKER) — Position\\n- detail (rank 5-8 companies)>",
-      "TAM / SAM / SOM": "<MUST include dollar figures like '$X billion' near years '2026' and '2030', and 'X% CAGR'. Then full narrative 3-4 paragraphs.>",
-      "Revenue Acceleration Signals": "<Bulleted list, each starting with '- '. 5-8 signals on demand, pricing, contracts, adoption.>",
-      "Forward Catalyst Calendar": "<Each on its own line. Format: '- Q2 2026: Event description'. 6-10 upcoming catalysts.>",
-      "Unpriced Tailwinds": "<Format: 1. Title — Explanation of what market is missing.\\n\\n2. Title — Explanation. (4-6 tailwinds)>"
-    }
-  }
-}`
-
-function buildPrompt() {
-  return `You are a senior investment analyst distilling a research report into structured investment intelligence.
-
-AUTO-DETECT the investment theme from this PDF. Choose a precise name like "AI Infrastructure & Semiconductors", "Robotics & Automation", "Nuclear Energy & Power Demand", etc.
-
-Extract ALL relevant information from the report — companies, market data, TAM figures, competitive dynamics, catalysts.
-
-For Pure Plays: the 5 best-positioned, most investable companies. Prefer companies with explicit tickers.
-For Hidden Gem: a smaller, less-covered name with asymmetric upside.
-For TAM: extract all dollar figures and growth rates — the display parser needs '$X billion' near years and 'X% CAGR' explicitly in the text.
-For Value Chain: map the full supply chain from raw inputs to end customers, minimum 4 layers.
-For Unpriced Tailwinds: what is the market not pricing in yet?
-For bulls/bears: the 5 strongest arguments FOR and AGAINST investing in this theme.
-For macro_sensitivity: assess each macro factor's effect on this theme (tailwind = benefits, headwind = hurts, neutral).
-For supply_chain_nodes: identify 5-8 critical nodes in the supply chain, assessing risk level for each.
-
-${SCHEMA}`
-}
-
 // Safely coerce a potentially non-string API field to string
 const toStr = v => (typeof v === 'string' ? v : '')
-
-// ── PDF helpers ───────────────────────────────────────────────────────────────
-function readFileAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = e => resolve(e.target.result.split(',')[1])
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
-
-async function processWithGemini(file, apiKey) {
-  const base64 = await readFileAsBase64(file)
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          role: 'user',
-          parts: [
-            { inlineData: { mimeType: 'application/pdf', data: base64 } },
-            { text: buildPrompt() },
-          ],
-        }],
-        generationConfig: { maxOutputTokens: 65536, temperature: 0.2 },
-      }),
-    }
-  )
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err?.error?.message || `Gemini API error ${res.status}`)
-  }
-  const data = await res.json()
-  let raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
-  if (raw.startsWith('```')) raw = raw.split('\n').slice(1).join('\n')
-  if (raw.endsWith('```')) raw = raw.slice(0, raw.lastIndexOf('```'))
-  raw = raw.trim()
-  try {
-    return JSON.parse(raw)
-  } catch (e) {
-    const finishReason = data.candidates?.[0]?.finishReason
-    if (finishReason === 'MAX_TOKENS') {
-      throw new Error('Gemini response was truncated — PDF may be too large. Try a shorter report.')
-    }
-    throw new Error(`Failed to parse Gemini response as JSON: ${e.message}`)
-  }
-}
 
 // ── Chat context builder ──────────────────────────────────────────────────────
 function buildChatContext(themes) {
@@ -644,92 +511,6 @@ function MacroMatrix({ themes }) {
   )
 }
 
-// ── Theme Interconnection Map ─────────────────────────────────────────────────
-function ThemeMap({ themes }) {
-  const [hovered, setHovered] = useState(null)
-  const themeNames = Object.keys(themes)
-  const N = themeNames.length
-
-  if (N < 2) return (
-    <p className="text-center py-8 text-gray-600 text-sm">Add at least 2 themes to visualize connections.</p>
-  )
-
-  const W = 620, H = 320, cx = W / 2, cy = H / 2, R = Math.min(cx, cy) * 0.72
-  const nodes = themeNames.map((name, i) => {
-    const angle = (2 * Math.PI * i / N) - Math.PI / 2
-    return { name, x: cx + R * Math.cos(angle), y: cy + R * Math.sin(angle) }
-  })
-  const getNode = name => nodes.find(n => n.name === name)
-  const activeLinks = THEME_LINKS.filter(l => themeNames.includes(l.a) && themeNames.includes(l.b))
-  const usedTypes   = [...new Set(activeLinks.map(l => l.type))]
-
-  return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 300 }}>
-        {activeLinks.map((link, i) => {
-          const from = getNode(link.a), to = getNode(link.b)
-          if (!from || !to) return null
-          const color  = LINK_COLORS[link.type] || '#64748b'
-          const isHov  = hovered === link.a || hovered === link.b
-          return (
-            <line key={i}
-              x1={from.x} y1={from.y} x2={to.x} y2={to.y}
-              stroke={color} strokeWidth={isHov ? 2 : 1}
-              strokeOpacity={isHov ? 0.75 : 0.2}
-              strokeDasharray={link.type === 'competes' ? '5 4' : link.type === 'disrupts' ? '2 3' : undefined}
-            />
-          )
-        })}
-        {nodes.map((node, i) => {
-          const isHov  = hovered === node.name
-          const isLeft = node.x < cx - 15, isRight = node.x > cx + 15
-          const anchor = isLeft ? 'end' : isRight ? 'start' : 'middle'
-          const tx = isLeft ? node.x - 11 : isRight ? node.x + 11 : node.x
-          const ty = node.y < cy - 10 ? node.y - 13 : node.y > cy + 10 ? node.y + 18 : node.y - 13
-          const shortName = node.name.split(' ').slice(0,2).join(' ')
-          const hovLinks  = activeLinks.filter(l => l.a === node.name || l.b === node.name)
-          return (
-            <g key={i}
-              onMouseEnter={() => setHovered(node.name)}
-              onMouseLeave={() => setHovered(null)}
-              style={{ cursor: 'default' }}>
-              <circle cx={node.x} cy={node.y} r={isHov ? 7 : 5}
-                fill={isHov ? '#4db8ff' : '#334155'}
-                stroke={isHov ? '#4db8ff' : '#475569'}
-                strokeWidth={1.5}/>
-              <text x={tx} y={ty} textAnchor={anchor}
-                fill={isHov ? '#e2e8f0' : '#64748b'}
-                fontSize={9} fontFamily="Inter,sans-serif" fontWeight={isHov ? '600' : '400'}>
-                {shortName}
-              </text>
-              {isHov && hovLinks.map((l, li) => {
-                const other = l.a === node.name ? l.b : l.a
-                const oShort = other.split(' ').slice(0,2).join(' ')
-                return (
-                  <text key={li} x={cx} y={H - 14 - li * 13} textAnchor="middle"
-                    fill={LINK_COLORS[l.type]} fontSize={9} fontFamily="Inter,sans-serif">
-                    {l.type} → {oShort}: {l.label}
-                  </text>
-                )
-              })}
-            </g>
-          )
-        })}
-      </svg>
-      {usedTypes.length > 0 && (
-        <div className="flex flex-wrap gap-4 mt-1 justify-center">
-          {usedTypes.map(type => (
-            <div key={type} className="flex items-center gap-1.5 text-[10px] text-gray-500">
-              <div className="w-5 h-px" style={{ background: LINK_COLORS[type] }}/>
-              {type}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── AI Research Chat ──────────────────────────────────────────────────────────
 function ThematicChat({ themes, apiKey, librarySources = [] }) {
   const themeNames = Object.keys(themes)
@@ -876,64 +657,6 @@ function ThematicChat({ themes, apiKey, librarySources = [] }) {
   )
 }
 
-// ── Processing overlay ────────────────────────────────────────────────────────
-function ProcessingOverlay({ fileName }) {
-  const steps = ['Reading PDF…','Sending to Gemini…','Extracting thesis…','Mapping value chain…','Identifying pure plays…','Structuring dossier…']
-  const [step, setStep] = useState(0)
-  useEffect(() => {
-    const t = setInterval(() => setStep(s => (s + 1) % steps.length), 2200)
-    return () => clearInterval(t)
-  }, [])
-  return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="bg-surface-50 border border-white/15 rounded-2xl p-8 max-w-sm w-full mx-4 text-center shadow-2xl">
-        <div className="w-14 h-14 rounded-full bg-accent-blue/15 border border-accent-blue/30 flex items-center justify-center mx-auto mb-5">
-          <Loader size={24} className="text-accent-blue animate-spin"/>
-        </div>
-        <h3 className="text-white font-semibold text-base mb-1">Distilling Research</h3>
-        <p className="text-gray-500 text-xs mb-5 truncate px-2">{fileName}</p>
-        <div className="h-0.5 bg-white/5 rounded-full mb-4 overflow-hidden">
-          <div className="h-full bg-accent-blue rounded-full animate-pulse" style={{ width: '60%' }}/>
-        </div>
-        <p className="text-accent-blue text-xs font-medium animate-pulse">{steps[step]}</p>
-      </div>
-    </div>
-  )
-}
-
-// ── Drop Zone ─────────────────────────────────────────────────────────────────
-function DropZone({ onFiles }) {
-  const [dragging, setDragging] = useState(false)
-  const inputRef = useRef()
-  const handleDrop = useCallback(e => {
-    e.preventDefault(); setDragging(false)
-    const files = [...e.dataTransfer.files].filter(f => f.type === 'application/pdf')
-    if (files.length) onFiles(files)
-  }, [onFiles])
-  return (
-    <div
-      onDragOver={e => { e.preventDefault(); setDragging(true) }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={handleDrop}
-      onClick={() => inputRef.current?.click()}
-      className={`relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200 select-none
-        ${dragging ? 'border-accent-blue bg-accent-blue/8 scale-[1.01]' : 'border-white/15 bg-white/[0.02] hover:border-white/30 hover:bg-white/[0.04]'}`}
-    >
-      <input ref={inputRef} type="file" accept="application/pdf" multiple className="hidden"
-        onChange={e => { const f=[...e.target.files].filter(f=>f.type==='application/pdf'); if(f.length) onFiles(f); e.target.value='' }}/>
-      <div className={`w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-3 transition-colors ${dragging?'bg-accent-blue/20':'bg-white/5'}`}>
-        <Upload size={20} className={dragging?'text-accent-blue':'text-gray-500'}/>
-      </div>
-      <p className={`font-semibold text-sm mb-1 transition-colors ${dragging?'text-accent-blue':'text-gray-300'}`}>
-        {dragging ? 'Drop to analyze' : 'Drop a research PDF here'}
-      </p>
-      <p className="text-xs text-gray-600">
-        or <span className="text-gray-400 underline underline-offset-2">click to browse</span> · Gemini reads and structures everything automatically
-      </p>
-    </div>
-  )
-}
-
 // ── Dossier Card ──────────────────────────────────────────────────────────────
 const CARD_TABS = [
   ['overview',  'Overview'],
@@ -946,7 +669,7 @@ const CARD_TABS = [
   ['alpha',     'Alpha Edge'],
 ]
 
-function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, conviction, onConvictionChange, onRemove, onRefresh }) {
+function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, conviction, onConvictionChange, onRemove }) {
   const d  = data.dossier || {}
   const dp = data.deep    || {}
   const lastUpdated = data.lastUpdated ? new Date(data.lastUpdated).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : ''
@@ -970,9 +693,6 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
               {[1,2,3,4,5].map(n => <Star key={n} size={10} className={n<=conviction?'text-accent-yellow fill-accent-yellow':'text-gray-700'}/>)}
             </div>
           )}
-          <button onClick={onRefresh} className="p-1.5 rounded-lg text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors" title="Replace with new PDF">
-            <RefreshCw size={13}/>
-          </button>
           <button onClick={onRemove} className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-400/10 transition-colors" title="Remove theme">
             <Trash2 size={13}/>
           </button>
@@ -1008,7 +728,7 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function ThematicResearch() {
   const { apiKey } = useSettingsStore()
-  const { themes, addTheme, removeTheme, convictions, setConviction } = useThematicStore()
+  const { themes, removeTheme, convictions, setConviction } = useThematicStore()
   const { user }   = useAuthStore()
   const { sources: librarySources, loadSources } = useResearchLibraryStore()
 
@@ -1016,39 +736,14 @@ export default function ThematicResearch() {
     if (user?.id) loadSources()
   }, [user?.id])
 
-  const [processing,     setProcessing]     = useState(false)
-  const [processingFile, setProcessingFile] = useState('')
-  const [error,          setError]          = useState(null)
-  const [expanded,       setExpanded]       = useState(null)
-  const [tabs,           setTabs]           = useState({})
-  const [showMap,        setShowMap]        = useState(true)
-  const [showChat,       setShowChat]       = useState(false)
+  const [expanded, setExpanded] = useState(null)
+  const [tabs,     setTabs]     = useState({})
+  const [showChat, setShowChat] = useState(false)
 
   const themeCount = Object.keys(themes).length
 
-  const handleFiles = useCallback(async (files) => {
-    if (!apiKey) { setError('No Gemini API key found. Add it in Settings → API Keys.'); return }
-    setError(null)
-    for (const file of files) {
-      setProcessing(true); setProcessingFile(file.name)
-      try {
-        const result = await processWithGemini(file, apiKey)
-        for (const [name, data] of Object.entries(result)) {
-          addTheme(name, data, file.name)
-          setExpanded(name)
-          setTabs(p => ({ ...p, [name]: 'overview' }))
-        }
-      } catch (err) {
-        console.error(err)
-        setError(`Failed to process "${file.name}": ${err.message || 'Unknown error'}`)
-      }
-      setProcessing(false); setProcessingFile('')
-    }
-  }, [apiKey, addTheme])
-
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {processing && <ProcessingOverlay fileName={processingFile} />}
 
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -1056,8 +751,8 @@ export default function ThematicResearch() {
           <h1 className="text-xl font-bold text-white">Thematic Research Center</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {themeCount > 0
-              ? `${themeCount} theme${themeCount!==1?'s':''} distilled · Drop a PDF to add more`
-              : 'Your thematic investment brain — drop a research PDF to get started'}
+              ? `${themeCount} theme${themeCount!==1?'s':''} distilled · Upload PDFs to the library to add more`
+              : 'Your thematic investment brain — upload research PDFs to the library below to get started'}
           </p>
         </div>
         {themeCount > 0 && (
@@ -1069,13 +764,6 @@ export default function ThematicResearch() {
       </div>
 
       {/* Banners */}
-      {error && (
-        <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/25 rounded-xl px-4 py-3">
-          <AlertTriangle size={16} className="text-red-400 mt-0.5 shrink-0"/>
-          <p className="text-sm text-red-300 flex-1">{error}</p>
-          <button onClick={() => setError(null)}><X size={14} className="text-red-400 hover:text-red-200"/></button>
-        </div>
-      )}
       {!apiKey && (
         <div className="flex items-start gap-3 bg-accent-yellow/8 border border-accent-yellow/25 rounded-xl px-4 py-3">
           <AlertTriangle size={16} className="text-accent-yellow mt-0.5 shrink-0"/>
@@ -1083,8 +771,11 @@ export default function ThematicResearch() {
         </div>
       )}
 
-      {/* Drop Zone */}
-      <DropZone onFiles={handleFiles} />
+      {/* Research Library — primary upload point */}
+      <ResearchLibrary />
+
+      {/* Active Signals */}
+      <ActiveSignals />
 
       {themeCount > 0 && (
         <>
@@ -1092,22 +783,6 @@ export default function ThematicResearch() {
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <CatalystTimeline themes={themes} />
             <MacroMatrix themes={themes} />
-          </div>
-
-          {/* Theme Interconnection Map */}
-          <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden">
-            <button onClick={() => setShowMap(p => !p)}
-              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors">
-              <Network size={14} className="text-accent-blue"/>
-              <span className="text-sm font-semibold text-white flex-1 text-left">Theme Interconnection Map</span>
-              <span className="text-xs text-gray-600 mr-2">How your themes relate to each other</span>
-              <ChevronDown size={16} className={`text-gray-500 transition-transform ${showMap?'rotate-180':''}`}/>
-            </button>
-            {showMap && (
-              <div className="px-4 pb-4 border-t border-white/10 pt-4">
-                <ThemeMap themes={themes} />
-              </div>
-            )}
           </div>
 
           {/* AI Research Assistant */}
@@ -1144,30 +819,12 @@ export default function ThematicResearch() {
                   conviction={convictions?.[name] || 0}
                   onConvictionChange={val => setConviction(name, val)}
                   onRemove={() => { removeTheme(name); if (expanded===name) setExpanded(null) }}
-                  onRefresh={() => document.getElementById('thematic-file-input')?.click()}
                 />
               ))}
             </div>
           </div>
         </>
       )}
-
-      {/* Active Signals */}
-      <ActiveSignals />
-
-      {/* Research Library */}
-      <ResearchLibrary />
-
-      {themeCount === 0 && (
-        <div className="bg-surface-50 border border-white/10 border-dashed rounded-xl p-10 text-center">
-          <FileText size={28} className="text-gray-700 mx-auto mb-3"/>
-          <p className="text-gray-500 text-sm mb-1">No dossiers yet</p>
-          <p className="text-gray-600 text-xs">Drop your first research PDF above and Gemini will distill it into a full investment dossier</p>
-        </div>
-      )}
-
-      <input id="thematic-file-input" type="file" accept="application/pdf" multiple className="hidden"
-        onChange={e => { const f=[...e.target.files].filter(f=>f.type==='application/pdf'); if(f.length) handleFiles(f); e.target.value='' }}/>
     </div>
   )
 }

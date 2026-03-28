@@ -8,16 +8,7 @@ import { useSettingsStore }        from '../../store/useSettingsStore.js'
 import { useAuthStore }            from '../../store/useAuthStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { useThematicStore }        from '../../store/useThematicStore.js'
-
-// ── File helper ───────────────────────────────────────────────────────────────
-function readFileAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload  = e => resolve(e.target.result.split(',')[1])
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
+import { processWithGemini, readFileAsBase64 } from '../../utils/thematicGemini.js'
 
 // ── Gemini: extraction ────────────────────────────────────────────────────────
 function buildExtractionPrompt(sourceType, tickerHint, themeHint) {
@@ -507,6 +498,17 @@ export default function ResearchLibrary() {
       }
 
       const saved = await addSource(payload)
+
+      // Also create/update thematic dossier from the same PDF
+      try {
+        const dossierResult = await processWithGemini(file, apiKey)
+        const { addTheme } = useThematicStore.getState()
+        for (const [name, data] of Object.entries(dossierResult)) {
+          addTheme(name, data, file.name)
+        }
+      } catch (de) {
+        console.warn('[ResearchLibrary] dossier creation failed:', de.message)
+      }
 
       if (saved && Object.keys(themes).length > 0) {
         try {
