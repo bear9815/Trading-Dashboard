@@ -7,7 +7,7 @@ import ResearchLibrary, { ActiveSignals } from './ResearchLibrary.jsx'
 import {
   ChevronDown, AlertTriangle, Gem, Zap, FileText,
   Trash2, Send, Bot, TrendingUp,
-  TrendingDown, Calendar, Star, Shield,
+  TrendingDown, Calendar, Star, Shield, BarChart,
   Search, ExternalLink,
 } from 'lucide-react'
 
