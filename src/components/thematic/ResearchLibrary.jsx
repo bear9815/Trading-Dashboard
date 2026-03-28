@@ -457,6 +457,8 @@ export default function ResearchLibrary() {
   const [dragging,     setDragging]     = useState(false)
   const [uploading,    setUploading]    = useState(false)
   const [uploadFile,   setUploadFile]   = useState('')
+  const [uploadIndex,  setUploadIndex]  = useState(0)
+  const [uploadTotal,  setUploadTotal]  = useState(0)
   const [error,        setError]        = useState(null)
   const [analysis,     setAnalysis]     = useState(null)
   const [showLibrary,  setShowLibrary]  = useState(true)
@@ -467,69 +469,76 @@ export default function ResearchLibrary() {
   }, [user?.id])
 
   const handleFiles = useCallback(async (files) => {
-    const file = files[0]
-    if (!file) return
+    if (!files.length) return
     if (!apiKey) { setError('No Gemini API key. Add it in Settings → API Keys.'); return }
     if (!user?.id) { setError('You must be signed in to save to the research library.'); return }
     setError(null)
     setAnalysis(null)
     setUploading(true)
-    setUploadFile(file.name)
-    try {
-      const extracted = await extractWithGemini(file, apiKey, sourceType, tickerInput.trim(), themeInput.trim())
+    setUploadTotal(files.length)
 
-      const hintTickers = tickerInput.split(',').map(t => t.trim().toUpperCase()).filter(Boolean)
-      const docTickers  = (extracted.tickers_mentioned || []).map(t => t.toUpperCase())
-      const tickers     = [...new Set([...hintTickers, ...docTickers])]
-
-      const payload = {
-        title:            extracted.title    || file.name.replace(/\.pdf$/i, ''),
-        source_type:      sourceType,
-        tickers,
-        theme:            themeInput.trim()  || (extracted.themes_mentioned || [])[0] || '',
-        raw_text:         (typeof extracted.raw_text === 'string' ? extracted.raw_text : '').substring(0, 8000),
-        summary:          typeof extracted.summary === 'string' ? extracted.summary : '',
-        key_points:       Array.isArray(extracted.key_points)       ? extracted.key_points       : [],
-        catalyst_signals: Array.isArray(extracted.catalyst_signals) ? extracted.catalyst_signals : [],
-        key_metrics:      Array.isArray(extracted.key_metrics)      ? extracted.key_metrics      : [],
-        themes_mentioned: Array.isArray(extracted.themes_mentioned) ? extracted.themes_mentioned : [],
-        sentiment:        typeof extracted.sentiment === 'string'   ? extracted.sentiment        : 'neutral',
-        file_name:        file.name,
-      }
-
-      const saved = await addSource(payload)
-
-      // Also create/update thematic dossier from the same PDF
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      setUploadIndex(i + 1)
+      setUploadFile(file.name)
       try {
-        const dossierResult = await processWithGemini(file, apiKey)
-        const { addTheme } = useThematicStore.getState()
-        for (const [name, data] of Object.entries(dossierResult)) {
-          addTheme(name, data, file.name)
-        }
-      } catch (de) {
-        console.warn('[ResearchLibrary] dossier creation failed:', de.message)
-      }
+        const extracted = await extractWithGemini(file, apiKey, sourceType, tickerInput.trim(), themeInput.trim())
 
-      if (saved && Object.keys(themes).length > 0) {
+        const hintTickers = tickerInput.split(',').map(t => t.trim().toUpperCase()).filter(Boolean)
+        const docTickers  = (extracted.tickers_mentioned || []).map(t => t.toUpperCase())
+        const tickers     = [...new Set([...hintTickers, ...docTickers])]
+
+        const payload = {
+          title:            extracted.title    || file.name.replace(/\.pdf$/i, ''),
+          source_type:      sourceType,
+          tickers,
+          theme:            themeInput.trim()  || (extracted.themes_mentioned || [])[0] || '',
+          raw_text:         (typeof extracted.raw_text === 'string' ? extracted.raw_text : '').substring(0, 8000),
+          summary:          typeof extracted.summary === 'string' ? extracted.summary : '',
+          key_points:       Array.isArray(extracted.key_points)       ? extracted.key_points       : [],
+          catalyst_signals: Array.isArray(extracted.catalyst_signals) ? extracted.catalyst_signals : [],
+          key_metrics:      Array.isArray(extracted.key_metrics)      ? extracted.key_metrics      : [],
+          themes_mentioned: Array.isArray(extracted.themes_mentioned) ? extracted.themes_mentioned : [],
+          sentiment:        typeof extracted.sentiment === 'string'   ? extracted.sentiment        : 'neutral',
+          file_name:        file.name,
+        }
+
+        const saved = await addSource(payload)
+
+        // Also create/update thematic dossier from the same PDF
         try {
-          const result = await autoAnalyzeWithGemini(saved, themes, apiKey)
-          if (result) {
-            setAnalysis(result)
-            await updateSource(saved.id, { insights: result })
+          const dossierResult = await processWithGemini(file, apiKey)
+          const { addTheme } = useThematicStore.getState()
+          for (const [name, data] of Object.entries(dossierResult)) {
+            addTheme(name, data, file.name)
           }
-        } catch (ae) {
-          console.warn('[ResearchLibrary] auto-analysis failed:', ae.message)
+        } catch (de) {
+          console.warn('[ResearchLibrary] dossier creation failed:', de.message)
         }
-      }
 
-      setTickerInput('')
-      setThemeInput('')
-    } catch (err) {
-      console.error(err)
-      setError(`Failed to process "${file.name}": ${err.message}`)
+        if (saved && Object.keys(themes).length > 0) {
+          try {
+            const result = await autoAnalyzeWithGemini(saved, themes, apiKey)
+            if (result) {
+              setAnalysis(result)
+              await updateSource(saved.id, { insights: result })
+            }
+          } catch (ae) {
+            console.warn('[ResearchLibrary] auto-analysis failed:', ae.message)
+          }
+        }
+      } catch (err) {
+        console.error(err)
+        setError(`Failed to process "${file.name}": ${err.message}`)
+      }
     }
+
+    setTickerInput('')
+    setThemeInput('')
     setUploading(false)
     setUploadFile('')
+    setUploadIndex(0)
+    setUploadTotal(0)
   }, [apiKey, user?.id, sourceType, tickerInput, themeInput, themes, addSource])
 
   const handleDrop = useCallback(e => {
@@ -589,28 +598,49 @@ export default function ResearchLibrary() {
             {uploading ? (
               <div className="border border-white/10 rounded-xl p-5 text-center bg-white/[0.02]">
                 <Loader size={18} className="text-accent-blue animate-spin mx-auto mb-2"/>
-                <p className="text-xs text-accent-blue font-medium animate-pulse">{uploadFile}</p>
+                {uploadTotal > 1 && (
+                  <p className="text-[10px] text-gray-500 mb-1">File {uploadIndex} of {uploadTotal}</p>
+                )}
+                <p className="text-xs text-accent-blue font-medium animate-pulse truncate px-4">{uploadFile}</p>
                 <p className="text-[10px] text-gray-600 mt-1">Extracting intelligence with Gemini…</p>
               </div>
             ) : (
-              <div
-                onDragOver={e => { e.preventDefault(); setDragging(true) }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={handleDrop}
-                onClick={() => inputRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all select-none ${
-                  dragging
-                    ? 'border-accent-blue bg-accent-blue/8 scale-[1.01]'
-                    : 'border-white/10 bg-white/[0.01] hover:border-white/25 hover:bg-white/[0.03]'
-                }`}
-              >
-                <input ref={inputRef} type="file" accept="application/pdf" className="hidden"
-                  onChange={e => { const f=[...e.target.files].filter(f=>f.type==='application/pdf'); if(f.length) handleFiles(f); e.target.value='' }}/>
-                <Upload size={16} className={`mx-auto mb-1.5 ${dragging ? 'text-accent-blue' : 'text-gray-600'}`}/>
-                <p className={`text-xs font-medium ${dragging ? 'text-accent-blue' : 'text-gray-400'}`}>
-                  {dragging ? 'Drop to analyze' : 'Drop a PDF to add to your library'}
-                </p>
-                <p className="text-[10px] text-gray-600 mt-0.5">click to browse · one file at a time</p>
+              <div className="space-y-2">
+                <div
+                  onDragOver={e => { e.preventDefault(); setDragging(true) }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={handleDrop}
+                  onClick={() => inputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all select-none ${
+                    dragging
+                      ? 'border-accent-blue bg-accent-blue/8 scale-[1.01]'
+                      : 'border-white/10 bg-white/[0.01] hover:border-white/25 hover:bg-white/[0.03]'
+                  }`}
+                >
+                  <input ref={inputRef} type="file" accept="application/pdf" multiple className="hidden"
+                    onChange={e => { const f=[...e.target.files].filter(f=>f.type==='application/pdf'); if(f.length) handleFiles(f); e.target.value='' }}/>
+                  <Upload size={16} className={`mx-auto mb-1.5 ${dragging ? 'text-accent-blue' : 'text-gray-600'}`}/>
+                  <p className={`text-xs font-medium ${dragging ? 'text-accent-blue' : 'text-gray-400'}`}>
+                    {dragging ? 'Drop to analyze' : 'Drop PDFs here or click to browse'}
+                  </p>
+                  <p className="text-[10px] text-gray-600 mt-0.5">multiple files supported</p>
+                </div>
+                <a
+                  href="https://drive.google.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full border border-white/10 rounded-xl py-2.5 text-xs text-gray-500 hover:text-gray-300 hover:border-white/20 hover:bg-white/[0.02] transition-all"
+                >
+                  <svg width="13" height="13" viewBox="0 0 87.3 78" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066DA"/>
+                    <path d="M43.65 25L29.9 1.2C28.55 2 27.4 3.1 26.6 4.5L1.2 48.4c-.8 1.4-1.2 2.95-1.2 4.5h27.5l16.15-27.9z" fill="#00AC47"/>
+                    <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.8l5.65 9.6 8.1 14.2z" fill="#EA4335"/>
+                    <path d="M43.65 25L57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2L43.65 25z" fill="#00832D"/>
+                    <path d="M59.8 53H27.5L13.75 76.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2L59.8 53z" fill="#2684FC"/>
+                    <path d="M73.4 26.5l-12.8-22.2c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25 59.8 53h27.45c0-1.55-.4-3.1-1.2-4.5l-12.65-22z" fill="#FFBA00"/>
+                  </svg>
+                  Open Google Drive
+                </a>
               </div>
             )}
           </div>
