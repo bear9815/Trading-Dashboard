@@ -5,6 +5,7 @@ import {
   ChevronDown, AlertTriangle, Gem, Zap, Upload, FileText,
   Trash2, RefreshCw, X, Loader, Send, Bot, TrendingUp,
   TrendingDown, Calendar, Network, Star, Shield, BarChart,
+  Search, ExternalLink,
 } from 'lucide-react'
 
 // ── Theme Interconnection Map data ───────────────────────────────────────────
@@ -740,14 +741,23 @@ function ThematicChat({ themes, apiKey }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            system_instruction: { parts: [{ text: `You are an expert investment research analyst. You have access to the following thematic investment research:\n\n${context}\n\nAnswer questions by referencing specific data from the research. Be analytical, specific, and concise. Use bullet points when comparing themes.` }] },
+            system_instruction: { parts: [{ text: `You are an expert investment research analyst with access to live web search AND the following thematic investment research dossiers:\n\n${context}\n\nFor questions about current prices, recent news, earnings, or market conditions — use web search to get live data. For questions about thesis, catalysts, or comparisons across themes — draw from the research. Always be analytical, specific, and concise. Cite sources when you use web data.` }] },
             contents: [...history, { role: 'user', parts: [{ text: msg }] }],
+            tools: [{ googleSearch: {} }],
           }),
         }
       )
-      const data  = await res.json()
-      const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Unable to generate a response.'
-      setMessages(prev => [...prev, { role: 'assistant', text: reply }])
+      const data      = await res.json()
+      const candidate = data.candidates?.[0]
+      const reply     = candidate?.content?.parts?.[0]?.text || 'Unable to generate a response.'
+      const grounding = candidate?.groundingMetadata
+      const sources   = grounding?.groundingChunks
+        ?.map(c => c.web)
+        .filter(Boolean)
+        .filter((s, i, arr) => arr.findIndex(x => x.uri === s.uri) === i)
+        .slice(0, 5) || []
+      const queries   = grounding?.webSearchQueries || []
+      setMessages(prev => [...prev, { role: 'assistant', text: reply, sources, queries }])
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', text: `Error: ${err.message}` }])
     }
@@ -755,9 +765,9 @@ function ThematicChat({ themes, apiKey }) {
   }
 
   const SUGGESTIONS = [
-    'Compare pure plays across all my themes',
+    'What\'s happening with my themes in the market this week?',
     'Which theme has the best risk/reward right now?',
-    'What macro environment favors my themes most?',
+    'Any recent news on my pure play tickers?',
     'Where do I have accidental concentration?',
   ]
 
@@ -771,12 +781,33 @@ function ThematicChat({ themes, apiKey }) {
                 <Bot size={12} className="text-accent-blue"/>
               </div>
             )}
-            <div className={`max-w-[88%] rounded-xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
-              m.role==='user'
-                ? 'bg-accent-blue/15 text-gray-200 rounded-tr-sm'
-                : 'bg-white/[0.05] text-gray-300 rounded-tl-sm'
-            }`}>
-              {m.text}
+            <div className="max-w-[88%] flex flex-col gap-1.5">
+              <div className={`rounded-xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
+                m.role==='user'
+                  ? 'bg-accent-blue/15 text-gray-200 rounded-tr-sm'
+                  : 'bg-white/[0.05] text-gray-300 rounded-tl-sm'
+              }`}>
+                {m.text}
+              </div>
+              {m.queries?.length > 0 && (
+                <div className="flex items-center gap-1.5 px-1">
+                  <Search size={10} className="text-accent-blue shrink-0"/>
+                  <span className="text-[10px] text-gray-600 italic truncate">
+                    Searched: {m.queries.join(' · ')}
+                  </span>
+                </div>
+              )}
+              {m.sources?.length > 0 && (
+                <div className="flex flex-col gap-1 px-1">
+                  {m.sources.map((s, si) => (
+                    <a key={si} href={s.uri} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-[11px] text-accent-blue/70 hover:text-accent-blue truncate transition-colors">
+                      <ExternalLink size={9} className="shrink-0"/>
+                      <span className="truncate">{s.title || s.uri}</span>
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         ))}
