@@ -708,6 +708,41 @@ function LifecycleTab({ d }) {
         </div>
       </div>
 
+      {/* Weinstein Stage Analysis */}
+      {d.weinstein_stage?.current_stage && (() => {
+        const ws = d.weinstein_stage
+        const stageCfg = {
+          'Stage 1: Basing':    { color: 'text-gray-400',        bg: 'bg-white/5',          border: 'border-white/10' },
+          'Stage 2: Advancing': { color: 'text-accent-green',   bg: 'bg-accent-green/8',   border: 'border-accent-green/25' },
+          'Stage 3: Topping':   { color: 'text-accent-yellow',  bg: 'bg-accent-yellow/8',  border: 'border-accent-yellow/25' },
+          'Stage 4: Declining': { color: 'text-red-400',        bg: 'bg-red-500/8',        border: 'border-red-500/25' },
+        }
+        const sc = stageCfg[ws.current_stage] || stageCfg['Stage 1: Basing']
+        const windowCfg = { ideal: 'text-accent-green bg-accent-green/15 border-accent-green/30', acceptable: 'text-accent-yellow bg-accent-yellow/15 border-accent-yellow/30', avoid: 'text-red-400 bg-red-500/15 border-red-500/30' }
+        return (
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Weinstein Stage Analysis</div>
+            <div className={`${sc.bg} border ${sc.border} rounded-xl p-4 space-y-3`}>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <span className={`text-sm font-bold ${sc.color}`}>{ws.current_stage}</span>
+                {ws.entry_window && (
+                  <span className={`text-[10px] font-bold uppercase tracking-wider border rounded-full px-2 py-0.5 ${windowCfg[ws.entry_window] || windowCfg.avoid}`}>
+                    {ws.entry_window === 'ideal' ? '✓ Ideal Entry' : ws.entry_window === 'acceptable' ? '~ Acceptable' : '✗ Avoid'}
+                  </span>
+                )}
+              </div>
+              {ws.stage_rationale && <p className="text-xs text-gray-400 leading-relaxed">{ws.stage_rationale}</p>}
+              {ws.breakout_trigger && (
+                <div className="bg-black/20 rounded-lg px-3 py-2">
+                  <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Breakout Trigger: </span>
+                  <span className="text-xs text-gray-300">{ws.breakout_trigger}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* N Factors preview */}
       {(d.n_factors || []).length > 0 && (
         <div>
@@ -788,16 +823,24 @@ const ACCEL_CFG = {
   decelerating: { color: 'text-red-400',       dot: 'bg-red-400',       label: 'Decelerating' },
 }
 
+const RYAN_GRADE_CFG = {
+  A: { bg: 'bg-accent-green/15', border: 'border-accent-green/40', text: 'text-accent-green' },
+  B: { bg: 'bg-accent-blue/15',  border: 'border-accent-blue/40',  text: 'text-accent-blue'  },
+  C: { bg: 'bg-accent-yellow/15',border: 'border-accent-yellow/40',text: 'text-accent-yellow' },
+  D: { bg: 'bg-red-500/15',      border: 'border-red-500/40',      text: 'text-red-400'      },
+}
+
 function LeadershipRankingTab({ leaders = [] }) {
   if (!leaders.length) return (
     <p className="text-gray-500 text-sm text-center py-8">Re-upload this PDF to extract leadership rankings.</p>
   )
   return (
     <div className="space-y-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Industry Leadership — O'Neil Ranked</div>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Industry Leadership — O'Neil / David Ryan Ranked</div>
       {leaders.map((leader, i) => {
-        const rs   = RANK_STYLE[i] || RANK_STYLE[2]
+        const rs    = RANK_STYLE[i] || RANK_STYLE[2]
         const accel = ACCEL_CFG[leader.earnings_acceleration] || ACCEL_CFG.stable
+        const gc    = RYAN_GRADE_CFG[leader.ryan_grade]
         return (
           <div key={i} className={`border rounded-xl p-4 ${rs.card}`}>
             <div className="flex items-start gap-3">
@@ -811,8 +854,33 @@ function LeadershipRankingTab({ leaders = [] }) {
                   <span className={`flex items-center gap-1 text-[10px] font-semibold ${accel.color}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${accel.dot}`}/>{accel.label}
                   </span>
+                  {gc && (
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${gc.bg} ${gc.border} ${gc.text}`}>
+                      Ryan {leader.ryan_grade}
+                    </span>
+                  )}
                 </div>
                 {leader.moat && <p className="text-xs text-gray-400 mb-1.5"><span className="text-gray-300 font-medium">Moat: </span>{leader.moat}</p>}
+                {/* Ryan framework details */}
+                {(leader.ryan_ipo_era || leader.ryan_insider_ownership || leader.ryan_first_advance) && (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5 mb-1.5">
+                    {leader.ryan_ipo_era && (
+                      <span className="text-[9px] font-medium bg-white/5 border border-white/10 text-gray-400 rounded px-1.5 py-0.5">
+                        {leader.ryan_ipo_era}
+                      </span>
+                    )}
+                    {leader.ryan_insider_ownership && (
+                      <span className="text-[9px] font-medium bg-white/5 border border-white/10 text-gray-400 rounded px-1.5 py-0.5">
+                        Insider: {leader.ryan_insider_ownership}
+                      </span>
+                    )}
+                    {leader.ryan_first_advance === 'yes' && (
+                      <span className="text-[9px] font-semibold bg-accent-green/10 border border-accent-green/30 text-accent-green rounded px-1.5 py-0.5">
+                        First Advance
+                      </span>
+                    )}
+                  </div>
+                )}
                 {leader['3yr_scenario'] && <p className="text-xs text-gray-500 italic">{leader['3yr_scenario']}</p>}
               </div>
             </div>
@@ -852,15 +920,85 @@ function NFactorTab({ nFactors = [] }) {
   )
 }
 
-function StressTestTab({ test }) {
-  if (!test) return (
+const ROPPEL_WORTHY_CFG = {
+  yes:         { bg: 'bg-accent-green/15', border: 'border-accent-green/40', text: 'text-accent-green', label: 'Concentration Worthy' },
+  conditional: { bg: 'bg-accent-yellow/15',border: 'border-accent-yellow/40',text: 'text-accent-yellow',label: 'Conditional'           },
+  no:          { bg: 'bg-red-500/15',      border: 'border-red-500/40',      text: 'text-red-400',      label: 'Not Worthy'            },
+}
+const ROPPEL_TEN_X_CFG = {
+  yes:      { text: 'text-accent-green', label: '10x Potential: Yes'      },
+  possible: { text: 'text-accent-yellow',label: '10x Potential: Possible' },
+  unlikely: { text: 'text-red-400',      label: '10x Potential: Unlikely' },
+}
+
+function StressTestTab({ test, roppel }) {
+  if (!test && !roppel) return (
     <p className="text-gray-500 text-sm text-center py-8">Re-upload this PDF to generate the long-duration stress test.</p>
   )
-  const score = parseInt(test.fisher_score) || 0
+  const score = parseInt(test?.fisher_score) || 0
   const scoreColor = score >= 8 ? 'text-accent-green' : score >= 6 ? 'text-accent-blue' : score >= 4 ? 'text-accent-yellow' : 'text-red-400'
 
   return (
     <div className="space-y-5">
+
+      {/* Roppel Assessment */}
+      {roppel && (
+        <div className="bg-white/[0.03] border border-white/10 rounded-xl p-4 space-y-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Jim Roppel — Concentration Framework</div>
+          <div className="flex flex-wrap gap-2">
+            {roppel.concentration_worthy && ROPPEL_WORTHY_CFG[roppel.concentration_worthy] && (() => {
+              const wc = ROPPEL_WORTHY_CFG[roppel.concentration_worthy]
+              return (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${wc.bg} ${wc.border} ${wc.text}`}>
+                  {wc.label}
+                </span>
+              )
+            })()}
+            {roppel.secular_or_cyclical && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-gray-300 capitalize">
+                {roppel.secular_or_cyclical}
+              </span>
+            )}
+            {roppel.hold_horizon && (
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-accent-blue/10 border border-accent-blue/25 text-accent-blue">
+                Hold: {roppel.hold_horizon}
+              </span>
+            )}
+            {roppel.ten_x_potential && ROPPEL_TEN_X_CFG[roppel.ten_x_potential] && (
+              <span className={`text-[10px] font-semibold ${ROPPEL_TEN_X_CFG[roppel.ten_x_potential].text}`}>
+                {ROPPEL_TEN_X_CFG[roppel.ten_x_potential].label}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {roppel.management_quality && (
+              <div>
+                <div className="text-[10px] font-semibold text-gray-500 mb-0.5">Management Quality</div>
+                <div className="text-xs text-gray-300 capitalize font-medium">{roppel.management_quality}</div>
+                {roppel.management_evidence && <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">{roppel.management_evidence}</p>}
+              </div>
+            )}
+            {roppel.ten_x_rationale && (
+              <div>
+                <div className="text-[10px] font-semibold text-gray-500 mb-0.5">10x Rationale</div>
+                <p className="text-[11px] text-gray-400 leading-relaxed">{roppel.ten_x_rationale}</p>
+              </div>
+            )}
+          </div>
+          {roppel.market_recognition_catalyst && (
+            <div className="bg-black/20 rounded-lg px-3 py-2">
+              <span className="text-[10px] font-semibold text-gray-500">Recognition Catalyst: </span>
+              <span className="text-xs text-gray-300">{roppel.market_recognition_catalyst}</span>
+            </div>
+          )}
+          {roppel.patience_insight && (
+            <div className="bg-accent-blue/5 border border-accent-blue/20 rounded-lg px-3 py-2">
+              <span className="text-[10px] font-semibold text-accent-blue">Patient Investor Edge: </span>
+              <span className="text-xs text-gray-400 italic">{roppel.patience_insight}</span>
+            </div>
+          )}
+        </div>
+      )}
       {/* Fisher Score */}
       {score > 0 && (
         <div className="flex items-start gap-4 bg-white/[0.03] border border-white/10 rounded-xl p-4">
@@ -1085,7 +1223,7 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
             {activeTab==='earnings'   && <EarningsPowerTab earningsPower={d.earnings_power} />}
             {activeTab==='leadership' && <LeadershipRankingTab leaders={d.leadership_ranking} />}
             {activeTab==='nfactors'   && <NFactorTab nFactors={d.n_factors} />}
-            {activeTab==='stress'     && <StressTestTab test={d.long_duration_test} />}
+            {activeTab==='stress'     && <StressTestTab test={d.long_duration_test} roppel={d.roppel_assessment} />}
           </div>
         </div>
       )}
