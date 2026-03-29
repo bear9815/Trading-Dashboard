@@ -4,12 +4,13 @@ import { useThematicStore }        from '../../store/useThematicStore.js'
 import { useAuthStore }            from '../../store/useAuthStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import ResearchLibrary, { ActiveSignals } from './ResearchLibrary.jsx'
+import { refreshNewFields } from '../../utils/thematicGemini.js'
 import {
   ChevronDown, AlertTriangle, Gem, Zap, FileText,
   Trash2, Send, Bot, TrendingUp,
   TrendingDown, Calendar, Star, Shield, BarChart,
   Search, ExternalLink, Activity, Trophy, Award,
-  CheckSquare, XCircle, Target, Layers,
+  CheckSquare, XCircle, Target, Layers, RefreshCw,
 } from 'lucide-react'
 
 // ── Macro variables ───────────────────────────────────────────────────────────
@@ -1160,7 +1161,7 @@ const CARD_TABS = [
   ['comp',        'Competitive'],
 ]
 
-function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, conviction, onConvictionChange, onRemove }) {
+function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, conviction, onConvictionChange, onRemove, onRefresh, refreshing }) {
   const d  = data.dossier || {}
   const dp = data.deep    || {}
   const lastUpdated = data.lastUpdated ? new Date(data.lastUpdated).toLocaleDateString('en-US',{month:'short',day:'numeric'}) : ''
@@ -1193,6 +1194,16 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
             <div className="hidden sm:flex gap-0.5">
               {[1,2,3,4,5].map(n => <Star key={n} size={10} className={n<=conviction?'text-accent-yellow fill-accent-yellow':'text-gray-700'}/>)}
             </div>
+          )}
+          {!d.lifecycle_stage && (
+            <button
+              onClick={onRefresh}
+              disabled={refreshing}
+              className="p-1.5 rounded-lg text-gray-600 hover:text-accent-blue hover:bg-accent-blue/10 transition-colors disabled:opacity-40"
+              title="Upgrade analysis (no PDF needed)"
+            >
+              <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''}/>
+            </button>
           )}
           <button onClick={onRemove} className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-400/10 transition-colors" title="Remove theme">
             <Trash2 size={13}/>
@@ -1234,7 +1245,7 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function ThematicResearch() {
   const { apiKey } = useSettingsStore()
-  const { themes, removeTheme, convictions, setConviction } = useThematicStore()
+  const { themes, removeTheme, convictions, setConviction, patchThemeDossier } = useThematicStore()
   const { user }   = useAuthStore()
   const { sources: librarySources, loadSources } = useResearchLibraryStore()
 
@@ -1242,9 +1253,24 @@ export default function ThematicResearch() {
     if (user?.id) loadSources()
   }, [user?.id])
 
-  const [expanded, setExpanded] = useState(null)
-  const [tabs,     setTabs]     = useState({})
-  const [showChat, setShowChat] = useState(false)
+  const [expanded,   setExpanded]   = useState(null)
+  const [tabs,       setTabs]       = useState({})
+  const [showChat,   setShowChat]   = useState(false)
+  const [refreshing, setRefreshing] = useState({}) // { [themeName]: true }
+
+  const handleRefresh = async (name) => {
+    if (!apiKey) return alert('Add your Gemini API key in Settings first.')
+    setRefreshing(p => ({ ...p, [name]: true }))
+    try {
+      const data = themes[name]
+      const fields = await refreshNewFields(name, data.dossier || {}, data.deep || {}, apiKey)
+      patchThemeDossier(name, fields)
+    } catch (e) {
+      alert(`Refresh failed: ${e.message}`)
+    } finally {
+      setRefreshing(p => ({ ...p, [name]: false }))
+    }
+  }
 
   const themeCount = Object.keys(themes).length
 
@@ -1328,6 +1354,8 @@ export default function ThematicResearch() {
                   conviction={convictions?.[name] || 0}
                   onConvictionChange={val => setConviction(name, val)}
                   onRemove={() => { removeTheme(name); if (expanded===name) setExpanded(null) }}
+                  onRefresh={() => handleRefresh(name)}
+                  refreshing={!!refreshing[name]}
                 />
               ))}
             </div>

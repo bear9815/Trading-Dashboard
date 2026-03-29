@@ -37,6 +37,18 @@ export const useThematicStore = create(
           convictions: { ...state.convictions, [name]: value },
         })),
 
+      patchThemeDossier: (name, fields) =>
+        set(state => ({
+          themes: {
+            ...state.themes,
+            [name]: {
+              ...state.themes[name],
+              dossier: { ...state.themes[name]?.dossier, ...fields },
+              lastUpdated: new Date().toISOString(),
+            },
+          },
+        })),
+
       clearAll: () => set({ themes: {}, convictions: {} }),
     }),
     { name: 'thematic-research-v1' }

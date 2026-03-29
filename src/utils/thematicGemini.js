@@ -33,7 +33,7 @@ export const SCHEMA = `Return ONLY valid JSON (no markdown, no explanation) with
         { "ticker": "<TICKER>", "current_eps": "<TTM EPS e.g. $2.40, or 'pre-profit'>", "3yr_bull": "<bull case EPS or revenue in 3 years>", "5yr_bull": "<bull case EPS or revenue in 5 years>", "revenue_cagr": "<% CAGR>", "margin_driver": "<1 sentence on what expands margins>", "key_assumption": "<single most critical assumption for the bull case>" }
       ],
       "leadership_ranking": [
-        { "rank": "<1|2|3>", "ticker": "<TICKER>", "name": "<company name>", "moat": "<1 sentence durable competitive advantage>", "earnings_acceleration": "accelerating|stable|decelerating", "3yr_scenario": "<1-2 sentence bull scenario 3 years out>" }
+        { "rank": "<1|2|3>", "ticker": "<TICKER>", "name": "<company name>", "moat": "<1 sentence durable competitive advantage>", "earnings_acceleration": "accelerating|stable|decelerating", "3yr_scenario": "<1-2 sentence bull scenario 3 years out>", "ryan_ipo_era": "emerging (<5yr public)|growth (5-10yr)|established (10yr+)", "ryan_first_advance": "yes|no|likely", "ryan_insider_ownership": "high|moderate|low|unknown", "ryan_grade": "A|B|C|D" }
       ],
       "n_factors": [
         { "factor": "<short title e.g. 'New Product Cycle'>", "description": "<1-2 sentences on what it is>", "why_unpriced": "<1 sentence why market hasn't fully valued this yet>" }
@@ -45,6 +45,25 @@ export const SCHEMA = `Return ONLY valid JSON (no markdown, no explanation) with
         "years_to_peak_earnings": "<integer>",
         "fisher_score": "<integer 1-10>",
         "fisher_rationale": "<2-3 sentences on score — cite management quality, reinvestment, moat durability>"
+      },
+      "weinstein_stage": {
+        "current_stage": "Stage 1: Basing|Stage 2: Advancing|Stage 3: Topping|Stage 4: Declining",
+        "stage_rationale": "<2-3 sentences explaining price/volume/institutional action that defines the current stage>",
+        "entry_window": "ideal|acceptable|avoid",
+        "breakout_trigger": "<specific event or condition that would confirm Stage 2 advance — be concrete>",
+        "risk_of_stage_change": "low|medium|high",
+        "risk_rationale": "<1 sentence on what could push it to the next stage>"
+      },
+      "roppel_assessment": {
+        "secular_or_cyclical": "secular|cyclical|hybrid",
+        "management_quality": "exceptional|strong|average|weak",
+        "management_evidence": "<1-2 sentences citing specific evidence of management quality from the report>",
+        "ten_x_potential": "yes|possible|unlikely",
+        "ten_x_rationale": "<1-2 sentences on path to 10x from current valuation>",
+        "hold_horizon": "1yr|2-3yr|3-5yr|5yr+",
+        "concentration_worthy": "yes|conditional|no",
+        "market_recognition_catalyst": "<the specific event or data point that will force the market to reprice this story>",
+        "patience_insight": "<what the patient investor sees today that the impatient investor misses>"
       }
     },
     "deep": {
@@ -78,6 +97,9 @@ For earnings_power: model 3 and 5-year bull case EPS (or revenue if pre-profit) 
 For leadership_ranking: apply O'Neil criteria — rank top 3 companies by earnings acceleration potential, market share trajectory, and new product/service advantage. Set earnings_acceleration to 'accelerating' only if EPS growth rate is increasing, 'decelerating' if slowing, 'stable' otherwise.
 For n_factors: identify 3-6 O'Neil N factors (New product, New service, New management, New industry conditions) — focus on what is genuinely unpriced or underappreciated by consensus. Be specific.
 For long_duration_test: apply Phil Fisher's framework. must_be_true should be 3-5 structural conditions the entire thesis depends on. thesis_killers should be specific events that would force thesis abandonment. fisher_score (1-10) rewards: large real TAM, durable moat, management that reinvests intelligently, low threat of commoditization, pricing power. 10 = NVDA-level multi-decade compounder potential.
+For leadership_ranking ryan fields: apply David Ryan's criteria. ryan_ipo_era reflects how recently the company went public. ryan_first_advance = 'yes' only if the stock appears to be in its FIRST major price advance (not a second or third leg). ryan_insider_ownership = 'high' if >10% insider-owned. ryan_grade: A = all criteria met (emerging company, first advance, accelerating earnings, high insider ownership), B = most criteria met, C = some, D = established company past prime move.
+For weinstein_stage: apply Stan Weinstein's four-stage cycle to the THEME's leading stocks collectively. Stage 1 = extended basing/accumulation (flat price, declining volume). Stage 2 = advancing (above 30wk MA, volume expansion on up weeks). Stage 3 = topping/distribution (extended from base, churning volume, leadership diverging). Stage 4 = declining (below 30wk MA, institutional selling). entry_window = 'ideal' only for early Stage 2, 'acceptable' for confirmed Stage 2, 'avoid' for Stage 1/3/4.
+For roppel_assessment: apply Jim Roppel's concentration framework. secular = theme driven by irreversible structural change lasting 10+ years. cyclical = tied to economic cycles. concentration_worthy = 'yes' only if secular + exceptional management + 10x potential + early stage. market_recognition_catalyst must be a SPECIFIC trigger (earnings report, product launch, regulatory approval, etc.) not a vague concept.
 
 ${SCHEMA}`
 }
@@ -145,7 +167,7 @@ export function buildCombinedPrompt(sourceType, tickerHint, themeHint) {
           { "ticker": "<TICKER>", "current_eps": "<TTM EPS or 'pre-profit'>", "3yr_bull": "<bull EPS or revenue 3yr>", "5yr_bull": "<bull EPS or revenue 5yr>", "revenue_cagr": "<% CAGR>", "margin_driver": "<1 sentence>", "key_assumption": "<single critical assumption>" }
         ],
         "leadership_ranking": [
-          { "rank": "<1|2|3>", "ticker": "<TICKER>", "name": "<name>", "moat": "<1 sentence>", "earnings_acceleration": "accelerating|stable|decelerating", "3yr_scenario": "<1-2 sentence bull scenario>" }
+          { "rank": "<1|2|3>", "ticker": "<TICKER>", "name": "<name>", "moat": "<1 sentence>", "earnings_acceleration": "accelerating|stable|decelerating", "3yr_scenario": "<1-2 sentence bull scenario>", "ryan_ipo_era": "emerging (<5yr public)|growth (5-10yr)|established (10yr+)", "ryan_first_advance": "yes|no|likely", "ryan_insider_ownership": "high|moderate|low|unknown", "ryan_grade": "A|B|C|D" }
         ],
         "n_factors": [
           { "factor": "<short title>", "description": "<1-2 sentences>", "why_unpriced": "<1 sentence>" }
@@ -157,6 +179,25 @@ export function buildCombinedPrompt(sourceType, tickerHint, themeHint) {
           "years_to_peak_earnings": "<integer>",
           "fisher_score": "<integer 1-10>",
           "fisher_rationale": "<2-3 sentences>"
+        },
+        "weinstein_stage": {
+          "current_stage": "Stage 1: Basing|Stage 2: Advancing|Stage 3: Topping|Stage 4: Declining",
+          "stage_rationale": "<2-3 sentences>",
+          "entry_window": "ideal|acceptable|avoid",
+          "breakout_trigger": "<specific concrete trigger>",
+          "risk_of_stage_change": "low|medium|high",
+          "risk_rationale": "<1 sentence>"
+        },
+        "roppel_assessment": {
+          "secular_or_cyclical": "secular|cyclical|hybrid",
+          "management_quality": "exceptional|strong|average|weak",
+          "management_evidence": "<1-2 sentences>",
+          "ten_x_potential": "yes|possible|unlikely",
+          "ten_x_rationale": "<1-2 sentences>",
+          "hold_horizon": "1yr|2-3yr|3-5yr|5yr+",
+          "concentration_worthy": "yes|conditional|no",
+          "market_recognition_catalyst": "<specific trigger>",
+          "patience_insight": "<what the patient investor sees>"
         }
       },
       "deep": {
@@ -174,9 +215,11 @@ ${tickerHint ? `\nKnown ticker(s): ${tickerHint}` : ''}${themeHint ? `\nKnown th
 
 For lifecycle_stage: Early Innings (pre-mass adoption), Growth Phase (institutional adoption, >20% CAGR), Maturing (decelerating), Late Cycle (commoditizing). Set runway_years as integer.
 For earnings_power: 3 and 5-year bull case EPS for top 3 plays using TAM capture and margin expansion from the document.
-For leadership_ranking: rank top 3 by O'Neil criteria — earnings acceleration, market share, new product advantage.
+For leadership_ranking: rank top 3 by O'Neil criteria. Ryan fields — ryan_grade A = emerging company + first advance + accelerating earnings + high insider ownership. B = most criteria met. ryan_first_advance = 'yes' only if this appears to be the stock's FIRST major price advance.
 For n_factors: 3-6 specific unpriced catalysts (new product/service/market/management/regulation).
-For long_duration_test: Phil Fisher framework. fisher_score 1-10 (10 = multi-decade compounder). must_be_true = structural dependencies. thesis_killers = specific invalidation events.`
+For long_duration_test: Phil Fisher framework. fisher_score 1-10. must_be_true = structural dependencies. thesis_killers = specific invalidation events.
+For weinstein_stage: Stan Weinstein four-stage cycle applied to theme's leading stocks. Stage 2 = only buyable stage. entry_window = 'ideal' for early Stage 2 only. breakout_trigger must be a specific concrete event.
+For roppel_assessment: Jim Roppel concentration framework. concentration_worthy = 'yes' only if secular + exceptional management + 10x potential + early stage. market_recognition_catalyst must be a specific trigger, not vague. patience_insight = the insight that separates a 3-5 year holder from a trader.`
 }
 
 export async function processWithGeminiCombined(file, apiKey, sourceType, tickerHint, themeHint) {
@@ -216,6 +259,102 @@ export async function processWithGeminiCombined(file, apiKey, sourceType, ticker
     }
     throw new Error(`Failed to parse Gemini response as JSON: ${e.message}`)
   }
+}
+
+// ── Upgrade old dossiers (text-only, no PDF re-upload) ────────────────────────
+// Takes existing dossier + deep text, infers missing growth-research fields.
+// Uses gemini-2.0-flash (cheaper) with a tight output budget (~4k tokens).
+export async function refreshNewFields(themeName, dossier, deep, apiKey) {
+  const context = `THEME: ${themeName}
+
+EXISTING RESEARCH SUMMARY:
+Catalyst: ${dossier['The Catalyst'] || ''}
+Pure Plays: ${[1,2,3,4,5].map(n => `${dossier[`Pure Play #${n} Ticker`] || ''} - ${dossier[`Pure Play #${n} Name`] || ''}: ${dossier[`Pure Play #${n} Thesis`] || ''}`).filter(s => s.trim() !== ' - :').join(' | ')}
+Hidden Gem: ${dossier['Hidden Gem Ticker']} - ${dossier['Hidden Gem Thesis'] || ''}
+Bull arguments: ${(dossier.bulls || []).join('; ')}
+Bear arguments: ${(dossier.bears || []).join('; ')}
+TAM/Market Size: ${(deep?.['TAM / SAM / SOM'] || '').slice(0, 800)}
+Competitive Landscape: ${(deep?.['Competitive Landscape'] || '').slice(0, 600)}
+Revenue Signals: ${(deep?.['Revenue Acceleration Signals'] || '').slice(0, 500)}
+Forward Catalysts: ${(deep?.['Forward Catalyst Calendar'] || '').slice(0, 500)}
+Unpriced Tailwinds: ${(deep?.['Unpriced Tailwinds'] || '').slice(0, 500)}
+Key Risk: ${dossier['Key Risk Factor'] || ''}`
+
+  const prompt = `You are a senior growth investment analyst. Based on the research summary below, generate ONLY valid JSON (no markdown, no explanation) with the following fields:
+
+{
+  "lifecycle_stage": "Early Innings|Growth Phase|Maturing|Late Cycle",
+  "runway_years": <integer>,
+  "earnings_power": [
+    { "ticker": "<TICKER>", "current_eps": "<TTM EPS or 'pre-profit'>", "3yr_bull": "<3yr bull EPS or revenue>", "5yr_bull": "<5yr bull>", "revenue_cagr": "<%>", "margin_driver": "<1 sentence>", "key_assumption": "<key assumption>" }
+  ],
+  "leadership_ranking": [
+    { "rank": "1", "ticker": "<TICKER>", "name": "<name>", "moat": "<1 sentence>", "earnings_acceleration": "accelerating|stable|decelerating", "3yr_scenario": "<1-2 sentences>", "ryan_ipo_era": "emerging (<5yr public)|growth (5-10yr)|established (10yr+)", "ryan_first_advance": "yes|no|likely", "ryan_insider_ownership": "high|moderate|low|unknown", "ryan_grade": "A|B|C|D" },
+    { "rank": "2", "ticker": "<TICKER>", "name": "<name>", "moat": "<1 sentence>", "earnings_acceleration": "accelerating|stable|decelerating", "3yr_scenario": "<1-2 sentences>", "ryan_ipo_era": "emerging (<5yr public)|growth (5-10yr)|established (10yr+)", "ryan_first_advance": "yes|no|likely", "ryan_insider_ownership": "high|moderate|low|unknown", "ryan_grade": "A|B|C|D" },
+    { "rank": "3", "ticker": "<TICKER>", "name": "<name>", "moat": "<1 sentence>", "earnings_acceleration": "accelerating|stable|decelerating", "3yr_scenario": "<1-2 sentences>", "ryan_ipo_era": "emerging (<5yr public)|growth (5-10yr)|established (10yr+)", "ryan_first_advance": "yes|no|likely", "ryan_insider_ownership": "high|moderate|low|unknown", "ryan_grade": "A|B|C|D" }
+  ],
+  "n_factors": [
+    { "factor": "<title>", "description": "<1-2 sentences>", "why_unpriced": "<1 sentence>" }
+  ],
+  "long_duration_test": {
+    "must_be_true": ["<structural assumption 1>", "<assumption 2>", "<assumption 3>"],
+    "thesis_killers": ["<invalidation event 1>", "<killer 2>", "<killer 3>"],
+    "tam_reality_check": "<2-3 sentences>",
+    "years_to_peak_earnings": <integer>,
+    "fisher_score": <integer 1-10>,
+    "fisher_rationale": "<2-3 sentences>"
+  },
+  "weinstein_stage": {
+    "current_stage": "Stage 1: Basing|Stage 2: Advancing|Stage 3: Topping|Stage 4: Declining",
+    "stage_rationale": "<2-3 sentences>",
+    "entry_window": "ideal|acceptable|avoid",
+    "breakout_trigger": "<specific concrete event or condition>",
+    "risk_of_stage_change": "low|medium|high",
+    "risk_rationale": "<1 sentence>"
+  },
+  "roppel_assessment": {
+    "secular_or_cyclical": "secular|cyclical|hybrid",
+    "management_quality": "exceptional|strong|average|weak",
+    "management_evidence": "<1-2 sentences>",
+    "ten_x_potential": "yes|possible|unlikely",
+    "ten_x_rationale": "<1-2 sentences>",
+    "hold_horizon": "1yr|2-3yr|3-5yr|5yr+",
+    "concentration_worthy": "yes|conditional|no",
+    "market_recognition_catalyst": "<specific event or data point>",
+    "patience_insight": "<what patient investor sees today>"
+  }
+}
+
+Guidelines:
+- earnings_power: use the top 3 pure plays from the research. If pre-profit, use revenue.
+- leadership_ranking: use the top 3 pure plays, ranked by O'Neil criteria.
+- ryan_grade A = emerging company + likely first advance + accelerating earnings + high insider ownership. B = most criteria, C = some, D = established past prime.
+- weinstein_stage: infer from the growth stage and momentum signals in the research — if early-stage with accelerating fundamentals, lean Stage 2.
+- fisher_score 1-10: rewards large real TAM, durable moat, management quality, pricing power. 10 = multi-decade compounder potential.
+- concentration_worthy: only 'yes' if secular + exceptional management + 10x potential + early stage.
+
+${context}`
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 4096, temperature: 0.2 },
+      }),
+    }
+  )
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.error?.message || `Gemini API error ${res.status}`)
+  }
+  const data = await res.json()
+  let raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
+  if (raw.startsWith('```')) raw = raw.split('\n').slice(1).join('\n')
+  if (raw.endsWith('```')) raw = raw.slice(0, raw.lastIndexOf('```'))
+  return JSON.parse(raw.trim())
 }
 
 export async function processWithGemini(file, apiKey) {
