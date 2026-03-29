@@ -8,7 +8,7 @@ import { useSettingsStore }        from '../../store/useSettingsStore.js'
 import { useAuthStore }            from '../../store/useAuthStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { useThematicStore }        from '../../store/useThematicStore.js'
-import { processWithGemini, readFileAsBase64 } from '../../utils/thematicGemini.js'
+import { processWithGeminiCombined, readFileAsBase64 } from '../../utils/thematicGemini.js'
 
 // ── Gemini: extraction ────────────────────────────────────────────────────────
 function buildExtractionPrompt(sourceType, tickerHint, themeHint) {
@@ -52,7 +52,7 @@ async function extractWithGemini(file, apiKey, sourceType, tickerHint, themeHint
             { text: buildExtractionPrompt(sourceType, tickerHint, themeHint) },
           ],
         }],
-        generationConfig: { maxOutputTokens: 65536, temperature: 0.1 },
+        generationConfig: { maxOutputTokens: 8192, temperature: 0.1 },
       }),
     }
   )
@@ -451,7 +451,8 @@ export default function ResearchLibrary() {
   const { themes }  = useThematicStore()
   const { sources, loading: storeLoading, loadSources, addSource, removeSource, updateSource } = useResearchLibraryStore()
 
-  const [sourceType,   setSourceType]   = useState('deep_dive')
+  const [sourceType,    setSourceType]    = useState('deep_dive')
+  const [createDossier, setCreateDossier] = useState(true)
   const [tickerInput,  setTickerInput]  = useState('')
   const [themeInput,   setThemeInput]   = useState('')
   const [dragging,     setDragging]     = useState(false)
@@ -468,6 +469,11 @@ export default function ResearchLibrary() {
     if (user?.id) loadSources()
   }, [user?.id])
 
+  // Default dossier toggle based on source type
+  useEffect(() => {
+    setCreateDossier(sourceType === 'deep_dive')
+  }, [sourceType])
+
   const handleFiles = useCallback(async (files) => {
     if (!files.length) return
     if (!apiKey) { setError('No Gemini API key. Add it in Settings → API Keys.'); return }
@@ -482,7 +488,17 @@ export default function ResearchLibrary() {
       setUploadIndex(i + 1)
       setUploadFile(file.name)
       try {
-        const extracted = await extractWithGemini(file, apiKey, sourceType, tickerInput.trim(), themeInput.trim())
+        let extracted, dossierThemes = null
+
+        if (createDossier) {
+          // Single call: returns both library metadata and thematic dossier
+          const combined = await processWithGeminiCombined(file, apiKey, sourceType, tickerInput.trim(), themeInput.trim())
+          extracted     = combined.library || {}
+          dossierThemes = combined.themes  || null
+        } else {
+          // Extract-only: cheaper, no dossier
+          extracted = await extractWithGemini(file, apiKey, sourceType, tickerInput.trim(), themeInput.trim())
+        }
 
         const hintTickers = tickerInput.split(',').map(t => t.trim().toUpperCase()).filter(Boolean)
         const docTickers  = (extracted.tickers_mentioned || []).map(t => t.toUpperCase())
@@ -505,15 +521,12 @@ export default function ResearchLibrary() {
 
         const saved = await addSource(payload)
 
-        // Also create/update thematic dossier from the same PDF
-        try {
-          const dossierResult = await processWithGemini(file, apiKey)
+        // Add thematic dossier if the combined call produced one
+        if (dossierThemes) {
           const { addTheme } = useThematicStore.getState()
-          for (const [name, data] of Object.entries(dossierResult)) {
+          for (const [name, data] of Object.entries(dossierThemes)) {
             addTheme(name, data, file.name)
           }
-        } catch (de) {
-          console.warn('[ResearchLibrary] dossier creation failed:', de.message)
         }
 
         if (saved && Object.keys(themes).length > 0) {
@@ -595,6 +608,20 @@ export default function ResearchLibrary() {
               />
             </div>
 
+            {/* Dossier toggle */}
+            <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
+              <div
+                onClick={() => setCreateDossier(p => !p)}
+                className={`relative w-8 h-4 rounded-full transition-colors ${createDossier ? 'bg-accent-blue' : 'bg-white/15'}`}
+              >
+                <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${createDossier ? 'translate-x-4' : 'translate-x-0.5'}`}/>
+              </div>
+              <span className="text-xs text-gray-500">
+                Build thematic dossier
+                <span className="ml-1 text-gray-600">({createDossier ? '1 API call' : 'extract only — saves quota'})</span>
+              </span>
+            </label>
+
             {uploading ? (
               <div className="border border-white/10 rounded-xl p-5 text-center bg-white/[0.02]">
                 <Loader size={18} className="text-accent-blue animate-spin mx-auto mb-2"/>
@@ -602,7 +629,7 @@ export default function ResearchLibrary() {
                   <p className="text-[10px] text-gray-500 mb-1">File {uploadIndex} of {uploadTotal}</p>
                 )}
                 <p className="text-xs text-accent-blue font-medium animate-pulse truncate px-4">{uploadFile}</p>
-                <p className="text-[10px] text-gray-600 mt-1">Extracting intelligence with Gemini…</p>
+                <p className="text-[10px] text-gray-600 mt-1">{createDossier ? 'Extracting + building dossier…' : 'Extracting intelligence…'}</p>
               </div>
             ) : (
               <div className="space-y-2">
