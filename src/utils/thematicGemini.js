@@ -26,7 +26,26 @@ export const SCHEMA = `Return ONLY valid JSON (no markdown, no explanation) with
       },
       "supply_chain_nodes": [
         { "name": "<node name>", "role": "<what this node does in 5-8 words>", "risk_level": "low|medium|high", "bottleneck": "<key constraint or vulnerability in 1 sentence>" }
-      ]
+      ],
+      "lifecycle_stage": "Early Innings|Growth Phase|Maturing|Late Cycle",
+      "runway_years": "<integer: estimated years of significant growth remaining>",
+      "earnings_power": [
+        { "ticker": "<TICKER>", "current_eps": "<TTM EPS e.g. $2.40, or 'pre-profit'>", "3yr_bull": "<bull case EPS or revenue in 3 years>", "5yr_bull": "<bull case EPS or revenue in 5 years>", "revenue_cagr": "<% CAGR>", "margin_driver": "<1 sentence on what expands margins>", "key_assumption": "<single most critical assumption for the bull case>" }
+      ],
+      "leadership_ranking": [
+        { "rank": "<1|2|3>", "ticker": "<TICKER>", "name": "<company name>", "moat": "<1 sentence durable competitive advantage>", "earnings_acceleration": "accelerating|stable|decelerating", "3yr_scenario": "<1-2 sentence bull scenario 3 years out>" }
+      ],
+      "n_factors": [
+        { "factor": "<short title e.g. 'New Product Cycle'>", "description": "<1-2 sentences on what it is>", "why_unpriced": "<1 sentence why market hasn't fully valued this yet>" }
+      ],
+      "long_duration_test": {
+        "must_be_true": ["<critical structural assumption 1>", "<assumption 2>", "<assumption 3>"],
+        "thesis_killers": ["<event that would break the thesis 1>", "<killer 2>", "<killer 3>"],
+        "tam_reality_check": "<2-3 sentences: is this TAM real and capturable or theoretical?>",
+        "years_to_peak_earnings": "<integer>",
+        "fisher_score": "<integer 1-10>",
+        "fisher_rationale": "<2-3 sentences on score — cite management quality, reinvestment, moat durability>"
+      }
     },
     "deep": {
       "Industry Value Chain Map": "<Format: **Layer Name**\\n- bullet\\n- bullet\\n\\n**Next Layer**\\n- bullet (4-6 layers minimum, blank line between each)>",
@@ -54,6 +73,11 @@ For Unpriced Tailwinds: what is the market not pricing in yet?
 For bulls/bears: the 5 strongest arguments FOR and AGAINST investing in this theme.
 For macro_sensitivity: assess each macro factor's effect on this theme (tailwind = benefits, headwind = hurts, neutral).
 For supply_chain_nodes: identify 5-8 critical nodes in the supply chain, assessing risk level for each.
+For lifecycle_stage: classify where this theme is in its development — Early Innings (pre-mass adoption, most TAM uncaptured), Growth Phase (institutional adoption accelerating, >20% CAGR), Maturing (growth decelerating, consolidation), Late Cycle (commoditizing, margin compression). Set runway_years to estimated years until peak earnings power for the theme.
+For earnings_power: model 3 and 5-year bull case EPS (or revenue if pre-profit) for the top 3 pure plays. Use reported EPS as baseline. Project forward using the TAM capture rate and margin expansion logic in the report. Be explicit about the single key assumption.
+For leadership_ranking: apply O'Neil criteria — rank top 3 companies by earnings acceleration potential, market share trajectory, and new product/service advantage. Set earnings_acceleration to 'accelerating' only if EPS growth rate is increasing, 'decelerating' if slowing, 'stable' otherwise.
+For n_factors: identify 3-6 O'Neil N factors (New product, New service, New management, New industry conditions) — focus on what is genuinely unpriced or underappreciated by consensus. Be specific.
+For long_duration_test: apply Phil Fisher's framework. must_be_true should be 3-5 structural conditions the entire thesis depends on. thesis_killers should be specific events that would force thesis abandonment. fisher_score (1-10) rewards: large real TAM, durable moat, management that reinvests intelligently, low threat of commoditization, pricing power. 10 = NVDA-level multi-decade compounder potential.
 
 ${SCHEMA}`
 }
@@ -114,7 +138,26 @@ export function buildCombinedPrompt(sourceType, tickerHint, themeHint) {
         },
         "supply_chain_nodes": [
           { "name": "<node>", "role": "<5-8 words>", "risk_level": "low|medium|high", "bottleneck": "<1 sentence>" }
-        ]
+        ],
+        "lifecycle_stage": "Early Innings|Growth Phase|Maturing|Late Cycle",
+        "runway_years": "<integer: estimated years of significant growth remaining>",
+        "earnings_power": [
+          { "ticker": "<TICKER>", "current_eps": "<TTM EPS or 'pre-profit'>", "3yr_bull": "<bull EPS or revenue 3yr>", "5yr_bull": "<bull EPS or revenue 5yr>", "revenue_cagr": "<% CAGR>", "margin_driver": "<1 sentence>", "key_assumption": "<single critical assumption>" }
+        ],
+        "leadership_ranking": [
+          { "rank": "<1|2|3>", "ticker": "<TICKER>", "name": "<name>", "moat": "<1 sentence>", "earnings_acceleration": "accelerating|stable|decelerating", "3yr_scenario": "<1-2 sentence bull scenario>" }
+        ],
+        "n_factors": [
+          { "factor": "<short title>", "description": "<1-2 sentences>", "why_unpriced": "<1 sentence>" }
+        ],
+        "long_duration_test": {
+          "must_be_true": ["<assumption 1>", "<assumption 2>", "<assumption 3>"],
+          "thesis_killers": ["<risk 1>", "<risk 2>", "<risk 3>"],
+          "tam_reality_check": "<2-3 sentence honest assessment>",
+          "years_to_peak_earnings": "<integer>",
+          "fisher_score": "<integer 1-10>",
+          "fisher_rationale": "<2-3 sentences>"
+        }
       },
       "deep": {
         "Industry Value Chain Map": "<**Layer**\\n- bullet\\n\\n**Next Layer**\\n- bullet — 4-6 layers>",
@@ -127,7 +170,13 @@ export function buildCombinedPrompt(sourceType, tickerHint, themeHint) {
     }
   }
 }
-${tickerHint ? `\nKnown ticker(s): ${tickerHint}` : ''}${themeHint ? `\nKnown theme: ${themeHint}` : ''}`
+${tickerHint ? `\nKnown ticker(s): ${tickerHint}` : ''}${themeHint ? `\nKnown theme: ${themeHint}` : ''}
+
+For lifecycle_stage: Early Innings (pre-mass adoption), Growth Phase (institutional adoption, >20% CAGR), Maturing (decelerating), Late Cycle (commoditizing). Set runway_years as integer.
+For earnings_power: 3 and 5-year bull case EPS for top 3 plays using TAM capture and margin expansion from the document.
+For leadership_ranking: rank top 3 by O'Neil criteria — earnings acceleration, market share, new product advantage.
+For n_factors: 3-6 specific unpriced catalysts (new product/service/market/management/regulation).
+For long_duration_test: Phil Fisher framework. fisher_score 1-10 (10 = multi-decade compounder). must_be_true = structural dependencies. thesis_killers = specific invalidation events.`
 }
 
 export async function processWithGeminiCombined(file, apiKey, sourceType, tickerHint, themeHint) {

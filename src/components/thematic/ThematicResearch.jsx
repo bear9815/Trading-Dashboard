@@ -8,7 +8,8 @@ import {
   ChevronDown, AlertTriangle, Gem, Zap, FileText,
   Trash2, Send, Bot, TrendingUp,
   TrendingDown, Calendar, Star, Shield, BarChart,
-  Search, ExternalLink,
+  Search, ExternalLink, Activity, Trophy, Award,
+  CheckSquare, XCircle, Target, Layers,
 } from 'lucide-react'
 
 // ── Macro variables ───────────────────────────────────────────────────────────
@@ -657,16 +658,368 @@ function ThematicChat({ themes, apiKey, librarySources = [] }) {
   )
 }
 
+// ── Growth Research Components ────────────────────────────────────────────────
+
+const LIFECYCLE_CFG = {
+  'Early Innings': { color: 'text-accent-green',  bg: 'bg-accent-green/10',  border: 'border-accent-green/30',  bar: 'bg-accent-green',  idx: 0 },
+  'Growth Phase':  { color: 'text-accent-blue',   bg: 'bg-accent-blue/10',   border: 'border-accent-blue/30',   bar: 'bg-accent-blue',   idx: 1 },
+  'Maturing':      { color: 'text-accent-yellow', bg: 'bg-accent-yellow/10', border: 'border-accent-yellow/30', bar: 'bg-accent-yellow', idx: 2 },
+  'Late Cycle':    { color: 'text-red-400',       bg: 'bg-red-500/10',       border: 'border-red-500/30',       bar: 'bg-red-400',       idx: 3 },
+}
+const LIFECYCLE_STAGES = ['Early Innings', 'Growth Phase', 'Maturing', 'Late Cycle']
+const LIFECYCLE_DESC = {
+  'Early Innings': 'Pre-mass adoption — most of the TAM is still uncaptured. Maximum runway, highest growth potential ahead.',
+  'Growth Phase':  'Institutional adoption accelerating — earnings expanding rapidly, sector CAGR above 20%.',
+  'Maturing':      'Theme is widely understood — growth decelerating, consolidation underway. Winners still compound but alpha is harder.',
+  'Late Cycle':    'Commoditizing — margin compression, multiple contraction risk. Be very selective or avoid.',
+}
+
+function LifecycleTab({ d }) {
+  const stage   = d.lifecycle_stage || ''
+  const runway  = parseInt(d.runway_years) || 0
+  const cfg     = LIFECYCLE_CFG[stage] || LIFECYCLE_CFG['Growth Phase']
+
+  if (!stage) return (
+    <p className="text-gray-500 text-sm text-center py-8">Re-upload this PDF to extract lifecycle data with the updated schema.</p>
+  )
+
+  return (
+    <div className="space-y-5">
+      {/* Stage card */}
+      <div className={`${cfg.bg} border ${cfg.border} rounded-xl p-4`}>
+        <div className="flex items-center justify-between mb-1.5">
+          <span className={`text-base font-bold ${cfg.color}`}>{stage}</span>
+          {runway > 0 && <span className="text-xs text-gray-500 flex items-center gap-1"><Activity size={11}/>{runway}+ yr runway</span>}
+        </div>
+        <p className="text-xs text-gray-400 leading-relaxed">{LIFECYCLE_DESC[stage]}</p>
+      </div>
+
+      {/* Progress bar */}
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Theme Maturity</div>
+        <div className="grid grid-cols-4 gap-1 mb-1.5">
+          {LIFECYCLE_STAGES.map((s, i) => (
+            <div key={s} className={`h-1.5 rounded-full ${i <= cfg.idx ? cfg.bar : 'bg-white/10'}`}/>
+          ))}
+        </div>
+        <div className="flex justify-between">
+          <span className="text-[9px] text-gray-600">Early Innings</span>
+          <span className="text-[9px] text-gray-600">Late Cycle</span>
+        </div>
+      </div>
+
+      {/* N Factors preview */}
+      {(d.n_factors || []).length > 0 && (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">N Factors — What's New & Unpriced</div>
+          <div className="space-y-2">
+            {d.n_factors.map((n, i) => (
+              <div key={i} className="bg-accent-yellow/5 border border-accent-yellow/20 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[9px] font-bold uppercase tracking-wider bg-accent-yellow/20 text-accent-yellow rounded px-1.5 py-0.5">N</span>
+                  <span className="text-xs font-semibold text-white">{n.factor}</span>
+                </div>
+                <p className="text-xs text-gray-400 leading-snug">{n.description}</p>
+                {n.why_unpriced && <p className="text-[11px] text-accent-yellow mt-1">↗ {n.why_unpriced}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EarningsPowerTab({ earningsPower = [] }) {
+  if (!earningsPower.length) return (
+    <p className="text-gray-500 text-sm text-center py-8">Re-upload this PDF to extract earnings power projections.</p>
+  )
+  return (
+    <div className="space-y-4">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">3–5 Year Bull Case Earnings Model</div>
+      <div className="space-y-3">
+        {earningsPower.map((item, i) => (
+          <div key={i} className="bg-white/[0.03] border border-white/10 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-sm font-bold text-accent-blue">{item.ticker}</span>
+              {item.revenue_cagr && <span className="text-xs text-gray-500 bg-white/5 rounded px-2 py-0.5">{item.revenue_cagr} CAGR</span>}
+            </div>
+            <div className="grid grid-cols-3 gap-3 mb-3">
+              {item.current_eps && (
+                <div className="text-center bg-white/[0.03] rounded-lg p-2">
+                  <div className="text-[10px] text-gray-600 mb-0.5">Current EPS</div>
+                  <div className="text-sm font-bold text-gray-300">{item.current_eps}</div>
+                </div>
+              )}
+              {item['3yr_bull'] && (
+                <div className="text-center bg-accent-green/5 border border-accent-green/15 rounded-lg p-2">
+                  <div className="text-[10px] text-gray-600 mb-0.5">3yr Bull</div>
+                  <div className="text-sm font-bold text-accent-green">{item['3yr_bull']}</div>
+                </div>
+              )}
+              {item['5yr_bull'] && (
+                <div className="text-center bg-accent-green/5 border border-accent-green/15 rounded-lg p-2">
+                  <div className="text-[10px] text-gray-600 mb-0.5">5yr Bull</div>
+                  <div className="text-sm font-bold text-accent-green">{item['5yr_bull']}</div>
+                </div>
+              )}
+            </div>
+            {item.margin_driver && (
+              <p className="text-xs text-gray-500 mb-1"><span className="text-gray-400 font-medium">Margin driver: </span>{item.margin_driver}</p>
+            )}
+            {item.key_assumption && (
+              <p className="text-xs text-accent-yellow"><span className="text-gray-400 font-medium">Key assumption: </span>{item.key_assumption}</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+const RANK_STYLE = [
+  { num: 'bg-accent-yellow/20 text-accent-yellow border-accent-yellow/40', card: 'border-accent-yellow/30 bg-accent-yellow/5' },
+  { num: 'bg-white/10 text-gray-300 border-white/20',                      card: 'border-white/10 bg-white/[0.02]' },
+  { num: 'bg-amber-700/20 text-amber-500 border-amber-600/30',              card: 'border-white/10 bg-white/[0.02]' },
+]
+const ACCEL_CFG = {
+  accelerating: { color: 'text-accent-green',  dot: 'bg-accent-green',  label: 'Accelerating' },
+  stable:       { color: 'text-accent-yellow', dot: 'bg-accent-yellow', label: 'Stable' },
+  decelerating: { color: 'text-red-400',       dot: 'bg-red-400',       label: 'Decelerating' },
+}
+
+function LeadershipRankingTab({ leaders = [] }) {
+  if (!leaders.length) return (
+    <p className="text-gray-500 text-sm text-center py-8">Re-upload this PDF to extract leadership rankings.</p>
+  )
+  return (
+    <div className="space-y-3">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Industry Leadership — O'Neil Ranked</div>
+      {leaders.map((leader, i) => {
+        const rs   = RANK_STYLE[i] || RANK_STYLE[2]
+        const accel = ACCEL_CFG[leader.earnings_acceleration] || ACCEL_CFG.stable
+        return (
+          <div key={i} className={`border rounded-xl p-4 ${rs.card}`}>
+            <div className="flex items-start gap-3">
+              <div className={`w-7 h-7 rounded-full border flex items-center justify-center text-xs font-bold shrink-0 ${rs.num}`}>
+                {leader.rank || i+1}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <span className="text-sm font-bold text-white">{leader.ticker}</span>
+                  <span className="text-xs text-gray-500">{leader.name}</span>
+                  <span className={`flex items-center gap-1 text-[10px] font-semibold ${accel.color}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${accel.dot}`}/>{accel.label}
+                  </span>
+                </div>
+                {leader.moat && <p className="text-xs text-gray-400 mb-1.5"><span className="text-gray-300 font-medium">Moat: </span>{leader.moat}</p>}
+                {leader['3yr_scenario'] && <p className="text-xs text-gray-500 italic">{leader['3yr_scenario']}</p>}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function NFactorTab({ nFactors = [] }) {
+  if (!nFactors.length) return (
+    <p className="text-gray-500 text-sm text-center py-8">Re-upload this PDF to detect N factors.</p>
+  )
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">N Factors Detected</div>
+        <span className="text-[10px] font-bold bg-accent-yellow/20 text-accent-yellow rounded-full px-2 py-0.5">{nFactors.length}</span>
+      </div>
+      {nFactors.map((n, i) => (
+        <div key={i} className="bg-accent-yellow/5 border border-accent-yellow/20 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-[9px] font-bold uppercase tracking-wider bg-accent-yellow/20 text-accent-yellow border border-accent-yellow/30 rounded px-1.5 py-0.5">N</span>
+            <span className="text-sm font-semibold text-white">{n.factor}</span>
+          </div>
+          <p className="text-xs text-gray-400 leading-relaxed mb-2">{n.description}</p>
+          {n.why_unpriced && (
+            <div className="bg-accent-yellow/8 border border-accent-yellow/20 rounded-lg px-3 py-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-accent-yellow">Why Unpriced: </span>
+              <span className="text-xs text-gray-400">{n.why_unpriced}</span>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function StressTestTab({ test }) {
+  if (!test) return (
+    <p className="text-gray-500 text-sm text-center py-8">Re-upload this PDF to generate the long-duration stress test.</p>
+  )
+  const score = parseInt(test.fisher_score) || 0
+  const scoreColor = score >= 8 ? 'text-accent-green' : score >= 6 ? 'text-accent-blue' : score >= 4 ? 'text-accent-yellow' : 'text-red-400'
+
+  return (
+    <div className="space-y-5">
+      {/* Fisher Score */}
+      {score > 0 && (
+        <div className="flex items-start gap-4 bg-white/[0.03] border border-white/10 rounded-xl p-4">
+          <div className="text-center shrink-0">
+            <div className={`text-3xl font-bold ${scoreColor}`}>{score}</div>
+            <div className="text-[10px] text-gray-600">/10</div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-semibold text-white mb-1">Long-Duration Score (Phil Fisher)</div>
+            <div className="flex gap-0.5 mb-2">
+              {Array.from({length:10}).map((_,i) => (
+                <div key={i} className={`flex-1 h-1.5 rounded-full ${i < score ? (i >= 7 ? 'bg-accent-green' : i >= 5 ? 'bg-accent-blue' : 'bg-accent-yellow') : 'bg-white/10'}`}/>
+              ))}
+            </div>
+            {test.fisher_rationale && <p className="text-xs text-gray-400 leading-relaxed">{test.fisher_rationale}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Years to peak + TAM check */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {test.years_to_peak_earnings && (
+          <div className="bg-white/[0.03] border border-white/10 rounded-xl p-3 text-center">
+            <div className="text-2xl font-bold text-accent-blue">{test.years_to_peak_earnings}</div>
+            <div className="text-[10px] text-gray-500 mt-0.5">Years to Peak Earnings</div>
+          </div>
+        )}
+        {test.tam_reality_check && (
+          <div className="bg-white/[0.03] border border-white/10 rounded-xl p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1.5">TAM Reality Check</div>
+            <p className="text-xs text-gray-400 leading-relaxed">{test.tam_reality_check}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Must be true / Thesis killers */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {(test.must_be_true || []).length > 0 && (
+          <div className="bg-accent-green/5 border border-accent-green/20 rounded-xl p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-accent-green mb-2">Must Be True</div>
+            <ul className="space-y-1.5">
+              {test.must_be_true.map((item, i) => (
+                <li key={i} className="flex items-start gap-2 text-xs text-gray-400">
+                  <CheckSquare size={12} className="text-accent-green shrink-0 mt-0.5"/>
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {(test.thesis_killers || []).length > 0 && (
+          <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-red-400 mb-2">Thesis Killers</div>
+            <ul className="space-y-1.5">
+              {test.thesis_killers.map((item, i) => (
+                <li key={i} className="flex items-start gap-2 text-xs text-gray-400">
+                  <XCircle size={12} className="text-red-400 shrink-0 mt-0.5"/>
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function FundamentalMomentumBoard({ themes, convictions, librarySources }) {
+  const [show, setShow] = useState(true)
+
+  const ranked = useMemo(() => {
+    return Object.entries(themes).map(([name, data]) => {
+      const d = data.dossier || {}
+      const lifecyclePoints = { 'Early Innings': 4, 'Growth Phase': 3, 'Maturing': 2, 'Late Cycle': 1 }[d.lifecycle_stage] ?? 0
+      const fisherScore     = parseInt(d.long_duration_test?.fisher_score) || 0
+      const nCount          = (d.n_factors || []).length
+      const libBonus        = Math.min(3, (librarySources || []).filter(s =>
+        (s.themes_mentioned || []).some(t => t.toLowerCase().includes(name.toLowerCase().split(' ')[0]))
+      ).length)
+      const convBonus       = (convictions?.[name] || 0) * 0.5
+      const composite       = lifecyclePoints + fisherScore + (nCount * 1.5) + libBonus + convBonus
+      return {
+        name, composite, lifecyclePoints, fisherScore, nCount, libBonus,
+        lifecycle_stage: d.lifecycle_stage,
+        runway_years: parseInt(d.runway_years) || 0,
+      }
+    }).sort((a, b) => b.composite - a.composite)
+  }, [themes, convictions, librarySources])
+
+  const maxScore   = 4 + 10 + (6 * 1.5) + 3 + 2.5
+  const hasData    = ranked.some(r => r.lifecyclePoints > 0 || r.fisherScore > 0)
+  const lcColors   = { 'Early Innings': 'text-accent-green', 'Growth Phase': 'text-accent-blue', 'Maturing': 'text-accent-yellow', 'Late Cycle': 'text-red-400' }
+
+  if (Object.keys(themes).length === 0) return null
+
+  return (
+    <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden">
+      <button onClick={() => setShow(p => !p)}
+        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors">
+        <Trophy size={14} className="text-accent-yellow"/>
+        <span className="text-sm font-semibold text-white flex-1 text-left">Fundamental Momentum Board</span>
+        <span className="text-xs text-gray-600 mr-2">O'Neil / Fisher composite ranking</span>
+        <ChevronDown size={16} className={`text-gray-500 transition-transform ${show ? 'rotate-180' : ''}`}/>
+      </button>
+
+      {show && (
+        <div className="border-t border-white/10 p-4">
+          {!hasData ? (
+            <div className="text-center py-6 text-gray-600">
+              <Layers size={20} className="mx-auto mb-2 opacity-40"/>
+              <p className="text-xs">Re-upload PDFs with the updated schema to populate growth rankings.</p>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+              {ranked.map((row, i) => (
+                <div key={row.name} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 ${i === 0 ? 'bg-accent-green/5 border border-accent-green/15' : 'bg-white/[0.02] border border-white/5'}`}>
+                  <span className={`text-xs font-bold w-4 shrink-0 ${i === 0 ? 'text-accent-green' : 'text-gray-600'}`}>#{i+1}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-gray-300 truncate">{row.name}</p>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      {row.lifecycle_stage && <span className={`text-[10px] font-semibold ${lcColors[row.lifecycle_stage] || 'text-gray-500'}`}>{row.lifecycle_stage}</span>}
+                      {row.fisherScore > 0 && <span className="text-[10px] text-gray-600"><Award size={9} className="inline mr-0.5"/>{row.fisherScore}/10</span>}
+                      {row.nCount > 0 && <span className="text-[10px] text-gray-600">{row.nCount} N factor{row.nCount !== 1 ? 's' : ''}</span>}
+                      {row.runway_years > 0 && <span className="text-[10px] text-gray-600">{row.runway_years}yr runway</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${i === 0 ? 'bg-accent-green' : 'bg-accent-blue'}`}
+                        style={{ width: `${Math.min(100, (row.composite / maxScore) * 100)}%` }}/>
+                    </div>
+                    <span className="text-xs font-bold text-gray-500 w-6 text-right">{Math.round(row.composite)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Dossier Card ──────────────────────────────────────────────────────────────
 const CARD_TABS = [
-  ['overview',  'Overview'],
-  ['bull_bear', 'Bull / Bear'],
-  ['supply',    'Supply Chain'],
-  ['vc',        'Value Chain'],
-  ['comp',      'Competitive'],
-  ['tam',       'TAM & Sizing'],
-  ['sig',       'Signals'],
-  ['alpha',     'Alpha Edge'],
+  ['overview',    'Overview'],
+  ['lifecycle',   'Lifecycle'],
+  ['earnings',    'Earnings Power'],
+  ['leadership',  'Leadership'],
+  ['nfactors',    'N Factors'],
+  ['stress',      'Stress Test'],
+  ['bull_bear',   'Bull / Bear'],
+  ['tam',         'TAM & Sizing'],
+  ['sig',         'Signals'],
+  ['alpha',       'Alpha Edge'],
+  ['supply',      'Supply Chain'],
+  ['vc',          'Value Chain'],
+  ['comp',        'Competitive'],
 ]
 
 function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, conviction, onConvictionChange, onRemove }) {
@@ -688,6 +1041,16 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
           {lastUpdated && <span className="hidden lg:block text-[10px] text-gray-600">{lastUpdated}</span>}
           {tamStr && <span className="hidden lg:block text-xs text-gray-500">{tamStr}</span>}
           {gemTicker && <span className="hidden md:flex items-center gap-1 text-xs text-purple-400"><Gem size={12}/>{gemTicker}</span>}
+          {d.lifecycle_stage && (
+            <span className={`hidden lg:flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${LIFECYCLE_CFG[d.lifecycle_stage]?.color || 'text-gray-400'} ${LIFECYCLE_CFG[d.lifecycle_stage]?.border || 'border-white/20'} ${LIFECYCLE_CFG[d.lifecycle_stage]?.bg || ''}`}>
+              <Activity size={9}/>{d.lifecycle_stage}
+            </span>
+          )}
+          {d.long_duration_test?.fisher_score && (
+            <span className="hidden xl:flex items-center gap-1 text-[10px] text-gray-500">
+              <Award size={9}/>{d.long_duration_test.fisher_score}/10
+            </span>
+          )}
           {conviction > 0 && (
             <div className="hidden sm:flex gap-0.5">
               {[1,2,3,4,5].map(n => <Star key={n} size={10} className={n<=conviction?'text-accent-yellow fill-accent-yellow':'text-gray-700'}/>)}
@@ -717,7 +1080,12 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
             {activeTab==='comp'      && <div><div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-3">Competitive Landscape</div><CompetitiveLandscape text={dp['Competitive Landscape']}/></div>}
             {activeTab==='tam'       && <div><div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-3">TAM / SAM / SOM Analysis</div><TAMAnalysis text={dp['TAM / SAM / SOM']}/></div>}
             {activeTab==='sig'       && <Signals rev={dp['Revenue Acceleration Signals']} cat={dp['Forward Catalyst Calendar']}/>}
-            {activeTab==='alpha'     && <div><div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-3">Unpriced Tailwinds — Alpha Edge</div><AlphaEdge text={dp['Unpriced Tailwinds']}/></div>}
+            {activeTab==='alpha'      && <div><div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-3">Unpriced Tailwinds — Alpha Edge</div><AlphaEdge text={dp['Unpriced Tailwinds']}/></div>}
+            {activeTab==='lifecycle'  && <LifecycleTab d={d} />}
+            {activeTab==='earnings'   && <EarningsPowerTab earningsPower={d.earnings_power} />}
+            {activeTab==='leadership' && <LeadershipRankingTab leaders={d.leadership_ranking} />}
+            {activeTab==='nfactors'   && <NFactorTab nFactors={d.n_factors} />}
+            {activeTab==='stress'     && <StressTestTab test={d.long_duration_test} />}
           </div>
         </div>
       )}
@@ -748,11 +1116,11 @@ export default function ThematicResearch() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-white">Thematic Research Center</h1>
+          <h1 className="text-xl font-bold text-white">Growth Research Center</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {themeCount > 0
               ? `${themeCount} theme${themeCount!==1?'s':''} distilled · Upload PDFs to the library to add more`
-              : 'Your thematic investment brain — upload research PDFs to the library below to get started'}
+              : 'Secular compounder research — upload deep dive PDFs to build your growth thesis database'}
           </p>
         </div>
         {themeCount > 0 && (
@@ -784,6 +1152,9 @@ export default function ThematicResearch() {
             <CatalystTimeline themes={themes} />
             <MacroMatrix themes={themes} />
           </div>
+
+          {/* Fundamental Momentum Board */}
+          <FundamentalMomentumBoard themes={themes} convictions={convictions} librarySources={librarySources} />
 
           {/* AI Research Assistant */}
           <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden">

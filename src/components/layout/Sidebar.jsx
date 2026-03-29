@@ -13,7 +13,7 @@ const NAV = [
   { id: 'ai',          label: 'AI Analysis',    icon: Sparkles },
   { id: 'edgelab',     label: 'Edge Lab',       icon: FlaskConical },
   { id: 'regime',      label: 'Factor Regime',  icon: Layers },
-  { id: 'thematic',    label: 'Thematic Research', icon: Globe    },
+  { id: 'thematic',    label: 'Growth Research',   icon: Globe    },
   { id: 'settings',    label: 'Settings',         icon: Settings },
 ]
 
