@@ -1,5 +1,6 @@
-import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, TrendingUp, Sparkles, ScanLine, Sun, GitCompare, FlaskConical, Layers, Globe } from 'lucide-react'
+import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, Sparkles, ScanLine, Sun, GitCompare, FlaskConical, Layers, Globe } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
+import AppLogo from './AppLogo.jsx'
 
 const NAV = [
   { id: 'dashboard',   label: 'Dashboard',     icon: LayoutDashboard },
@@ -39,11 +40,8 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
     <aside className="w-16 md:w-56 bg-surface-50 border-r border-white/10 flex flex-col shrink-0 h-screen sticky top-0">
 
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-4 py-5 border-b border-white/10">
-        <div className="w-8 h-8 rounded-lg bg-accent-blue flex items-center justify-center shrink-0">
-          <TrendingUp size={16} className="text-white" />
-        </div>
-        <span className="hidden md:block font-semibold text-white text-sm tracking-wide">Trading Dashboard</span>
+      <div className="px-4 py-4 border-b border-white/10">
+        <AppLogo size="md" showWordmark />
       </div>
 
       {/* ── Account Selector — desktop ── */}

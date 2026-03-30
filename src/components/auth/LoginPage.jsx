@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuthStore } from '../../store/useAuthStore.js'
-import { TrendingUp, Loader } from 'lucide-react'
+import { Loader } from 'lucide-react'
+import AppLogo from '../layout/AppLogo.jsx'
 
 export default function LoginPage() {
   const { signIn, signUp, resetPassword } = useAuthStore()
@@ -40,11 +41,14 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
 
         {/* Logo */}
-        <div className="flex items-center justify-center gap-2.5 mb-8">
-          <div className="w-9 h-9 rounded-lg bg-accent-blue/20 border border-accent-blue/30 flex items-center justify-center">
-            <TrendingUp size={18} className="text-accent-blue" />
+        <div className="flex justify-center mb-8">
+          <div className="flex items-center gap-3">
+            <AppLogo size="md" showWordmark={false} />
+            <div className="flex flex-col leading-none">
+              <span className="text-xl font-bold text-white tracking-tight">Trading</span>
+              <span className="text-sm font-medium text-blue-400 tracking-widest uppercase">Dashboard</span>
+            </div>
           </div>
-          <span className="text-xl font-bold text-white tracking-tight">Trading Dashboard</span>
         </div>
 
         {/* Card */}
