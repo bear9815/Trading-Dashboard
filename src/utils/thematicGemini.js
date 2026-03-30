@@ -263,7 +263,7 @@ export async function processWithGeminiCombined(file, apiKey, sourceType, ticker
 
 // ── Upgrade old dossiers (text-only, no PDF re-upload) ────────────────────────
 // Takes existing dossier + deep text, infers missing growth-research fields.
-// Uses gemini-2.0-flash (cheaper) with a tight output budget (~4k tokens).
+// Uses gemini-1.5-flash-8b (most free-tier quota) with a tight output budget (~4k tokens).
 export async function refreshNewFields(themeName, dossier, deep, apiKey) {
   const context = `THEME: ${themeName}
 
@@ -336,7 +336,7 @@ Guidelines:
 ${context}`
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
