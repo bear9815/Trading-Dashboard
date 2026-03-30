@@ -104,7 +104,7 @@ function ValueChain({ text }) {
           {i > 0 && <div className="flex items-center px-1 text-gray-600 text-base shrink-0">→</div>}
           <div className="min-w-[140px] max-w-[160px] bg-white/[0.03] border border-white/10 rounded-lg p-3">
             <div className="text-xs font-bold uppercase tracking-wider text-accent-blue mb-2">{l.t}</div>
-            <div className="text-sm text-gray-400 leading-relaxed space-y-0.5">
+            <div className="text-base text-gray-400 leading-relaxed space-y-0.5">
               {l.items.slice(0,3).map((item,j) => { const m = item.match(/^-\s*\*\*([^*]+)\*\*/); return <div key={j}>{m ? <span className="font-semibold text-gray-300">{m[1]}</span> : item.replace(/^[-•*]\s*/,'').replace(/\*\*/g,'').substring(0,90)}</div> })}
             </div>
           </div>
@@ -200,7 +200,7 @@ function AlphaEdge({ text }) {
   if (blocks.length <= 1) return (
     <div className="bg-accent-yellow/8 border border-accent-yellow/20 rounded-lg p-4">
       <div className="flex items-center gap-2 text-accent-yellow font-semibold text-sm mb-2"><Zap size={14}/>Unpriced Tailwinds</div>
-      <p className="text-sm text-gray-400 leading-relaxed">{safe}</p>
+      <p className="text-base text-gray-400 leading-relaxed">{safe}</p>
     </div>
   )
   return <div className="space-y-3">{blocks.map((b,i) => {
@@ -212,7 +212,7 @@ function AlphaEdge({ text }) {
     return (
       <div key={i} className="bg-accent-yellow/8 border border-accent-yellow/20 rounded-lg p-4">
         <div className="flex items-center gap-2 text-accent-yellow font-semibold text-sm mb-2"><Zap size={14}/>{title.length>80?title.substring(0,60)+'…':title}</div>
-        <p className="text-sm text-gray-400 leading-relaxed">{body.trim()}</p>
+        <p className="text-base text-gray-400 leading-relaxed">{body.trim()}</p>
       </div>
     )
   })}</div>
@@ -252,8 +252,8 @@ function OverviewTab({ d }) {
           <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Hidden Gem</div>
           <div className="bg-purple-500/8 border border-purple-500/20 rounded-lg p-3.5">
             <div className="flex items-center gap-2 font-bold text-purple-400 text-sm mb-1"><Gem size={13}/>{d['Hidden Gem Ticker']} — {d['Hidden Gem Name']}</div>
-            {d['Hidden Gem Market Cap'] && <div className="text-xs text-gray-500 mb-1.5">{d['Hidden Gem Market Cap']}</div>}
-            <p className="text-sm text-gray-400 leading-relaxed">{d['Hidden Gem Thesis']?.replace(/\*\*/g,'')}</p>
+            {d['Hidden Gem Market Cap'] && <div className="text-sm text-gray-500 mb-1.5">{d['Hidden Gem Market Cap']}</div>}
+            <p className="text-base text-gray-400 leading-relaxed">{d['Hidden Gem Thesis']?.replace(/\*\*/g,'')}</p>
           </div>
         </div>
       )}
@@ -358,8 +358,8 @@ function SupplyChainStress({ nodes }) {
               </div>
               <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: cfg.dot }}>{cfg.label} Risk</span>
             </div>
-            {node.role       && <p className="text-xs text-gray-500 mb-1">{node.role}</p>}
-            {node.bottleneck && <p className="text-sm text-gray-400 leading-relaxed">{node.bottleneck}</p>}
+            {node.role       && <p className="text-sm text-gray-500 mb-1">{node.role}</p>}
+            {node.bottleneck && <p className="text-base text-gray-400 leading-relaxed">{node.bottleneck}</p>}
           </div>
         )
       })}
@@ -421,7 +421,7 @@ function CatalystTimeline({ themes }) {
                   <div key={i} className={`flex items-start gap-2 ${ev.past ? 'opacity-40' : ''}`}>
                     <span className="w-1.5 h-1.5 rounded-full shrink-0 mt-1.5" style={{ background: themeColor[ev.theme] }}/>
                     <div className="min-w-0">
-                      <p className="text-xs text-gray-400 leading-snug">{ev.text}</p>
+                      <p className="text-sm text-gray-400 leading-snug">{ev.text}</p>
                       <p className="text-xs text-gray-600 truncate">{ev.theme.split(' ').slice(0,3).join(' ')}</p>
                     </div>
                   </div>
@@ -692,7 +692,7 @@ function LifecycleTab({ d }) {
           <span className={`text-base font-bold ${cfg.color}`}>{stage}</span>
           {runway > 0 && <span className="text-xs text-gray-500 flex items-center gap-1"><Activity size={11}/>{runway}+ yr runway</span>}
         </div>
-        <p className="text-sm text-gray-400 leading-relaxed">{LIFECYCLE_DESC[stage]}</p>
+        <p className="text-base text-gray-400 leading-relaxed">{LIFECYCLE_DESC[stage]}</p>
       </div>
 
       {/* Progress bar */}
@@ -732,11 +732,11 @@ function LifecycleTab({ d }) {
                   </span>
                 )}
               </div>
-              {ws.stage_rationale && <p className="text-sm text-gray-400 leading-relaxed">{ws.stage_rationale}</p>}
+              {ws.stage_rationale && <p className="text-base text-gray-400 leading-relaxed">{ws.stage_rationale}</p>}
               {ws.breakout_trigger && (
                 <div className="bg-black/20 rounded-lg px-3 py-2">
                   <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Breakout Trigger: </span>
-                  <span className="text-xs text-gray-300">{ws.breakout_trigger}</span>
+                  <span className="text-sm text-gray-300">{ws.breakout_trigger}</span>
                 </div>
               )}
             </div>
@@ -755,7 +755,7 @@ function LifecycleTab({ d }) {
                   <span className="text-[9px] font-bold uppercase tracking-wider bg-accent-yellow/20 text-accent-yellow rounded px-1.5 py-0.5">N</span>
                   <span className="text-xs font-semibold text-white">{n.factor}</span>
                 </div>
-                <p className="text-xs text-gray-400 leading-snug">{n.description}</p>
+                <p className="text-sm text-gray-400 leading-snug">{n.description}</p>
                 {n.why_unpriced && <p className="text-xs text-accent-yellow mt-1">↗ {n.why_unpriced}</p>}
               </div>
             ))}
@@ -778,7 +778,7 @@ function EarningsPowerTab({ earningsPower = [] }) {
           <div key={i} className="bg-white/[0.03] border border-white/10 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
               <span className="text-sm font-bold text-accent-blue">{item.ticker}</span>
-              {item.revenue_cagr && <span className="text-xs text-gray-500 bg-white/5 rounded px-2 py-0.5">{item.revenue_cagr} CAGR</span>}
+              {item.revenue_cagr && <span className="text-sm text-gray-500 bg-white/5 rounded px-2 py-0.5">{item.revenue_cagr} CAGR</span>}
             </div>
             <div className="grid grid-cols-3 gap-3 mb-3">
               {item.current_eps && (
@@ -801,7 +801,7 @@ function EarningsPowerTab({ earningsPower = [] }) {
               )}
             </div>
             {item.margin_driver && (
-              <p className="text-xs text-gray-500 mb-1"><span className="text-gray-400 font-medium">Margin driver: </span>{item.margin_driver}</p>
+              <p className="text-sm text-gray-500 mb-1"><span className="text-gray-400 font-medium">Margin driver: </span>{item.margin_driver}</p>
             )}
             {item.key_assumption && (
               <p className="text-xs text-accent-yellow"><span className="text-gray-400 font-medium">Key assumption: </span>{item.key_assumption}</p>
@@ -861,7 +861,7 @@ function LeadershipRankingTab({ leaders = [] }) {
                     </span>
                   )}
                 </div>
-                {leader.moat && <p className="text-xs text-gray-400 mb-1.5"><span className="text-gray-300 font-medium">Moat: </span>{leader.moat}</p>}
+                {leader.moat && <p className="text-sm text-gray-400 mb-1.5"><span className="text-gray-300 font-medium">Moat: </span>{leader.moat}</p>}
                 {/* Ryan framework details */}
                 {(leader.ryan_ipo_era || leader.ryan_insider_ownership || leader.ryan_first_advance) && (
                   <div className="flex flex-wrap gap-1.5 mt-1.5 mb-1.5">
@@ -882,7 +882,7 @@ function LeadershipRankingTab({ leaders = [] }) {
                     )}
                   </div>
                 )}
-                {leader['3yr_scenario'] && <p className="text-sm text-gray-500 italic">{leader['3yr_scenario']}</p>}
+                {leader['3yr_scenario'] && <p className="text-base text-gray-500 italic">{leader['3yr_scenario']}</p>}
               </div>
             </div>
           </div>
@@ -908,11 +908,11 @@ function NFactorTab({ nFactors = [] }) {
             <span className="text-[9px] font-bold uppercase tracking-wider bg-accent-yellow/20 text-accent-yellow border border-accent-yellow/30 rounded px-1.5 py-0.5">N</span>
             <span className="text-sm font-semibold text-white">{n.factor}</span>
           </div>
-          <p className="text-sm text-gray-400 leading-relaxed mb-2">{n.description}</p>
+          <p className="text-base text-gray-400 leading-relaxed mb-2">{n.description}</p>
           {n.why_unpriced && (
             <div className="bg-accent-yellow/8 border border-accent-yellow/20 rounded-lg px-3 py-2">
               <span className="text-xs font-semibold uppercase tracking-wider text-accent-yellow">Why Unpriced: </span>
-              <span className="text-xs text-gray-400">{n.why_unpriced}</span>
+              <span className="text-sm text-gray-400">{n.why_unpriced}</span>
             </div>
           )}
         </div>
@@ -975,27 +975,27 @@ function StressTestTab({ test, roppel }) {
             {roppel.management_quality && (
               <div>
                 <div className="text-xs font-semibold text-gray-500 mb-0.5">Management Quality</div>
-                <div className="text-xs text-gray-300 capitalize font-medium">{roppel.management_quality}</div>
+                <div className="text-sm text-gray-300 capitalize font-medium">{roppel.management_quality}</div>
                 {roppel.management_evidence && <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{roppel.management_evidence}</p>}
               </div>
             )}
             {roppel.ten_x_rationale && (
               <div>
                 <div className="text-xs font-semibold text-gray-500 mb-0.5">10x Rationale</div>
-                <p className="text-sm text-gray-400 leading-relaxed">{roppel.ten_x_rationale}</p>
+                <p className="text-base text-gray-400 leading-relaxed">{roppel.ten_x_rationale}</p>
               </div>
             )}
           </div>
           {roppel.market_recognition_catalyst && (
             <div className="bg-black/20 rounded-lg px-3 py-2">
               <span className="text-xs font-semibold text-gray-500">Recognition Catalyst: </span>
-              <span className="text-xs text-gray-300">{roppel.market_recognition_catalyst}</span>
+              <span className="text-sm text-gray-300">{roppel.market_recognition_catalyst}</span>
             </div>
           )}
           {roppel.patience_insight && (
             <div className="bg-accent-blue/5 border border-accent-blue/20 rounded-lg px-3 py-2">
               <span className="text-xs font-semibold text-accent-blue">Patient Investor Edge: </span>
-              <span className="text-xs text-gray-400 italic">{roppel.patience_insight}</span>
+              <span className="text-sm text-gray-400 italic">{roppel.patience_insight}</span>
             </div>
           )}
         </div>
@@ -1008,13 +1008,13 @@ function StressTestTab({ test, roppel }) {
             <div className="text-xs text-gray-600">/10</div>
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-xs font-semibold text-white mb-1">Long-Duration Score (Phil Fisher)</div>
+            <div className="text-sm font-semibold text-white mb-1">Long-Duration Score (Phil Fisher)</div>
             <div className="flex gap-0.5 mb-2">
               {Array.from({length:10}).map((_,i) => (
                 <div key={i} className={`flex-1 h-1.5 rounded-full ${i < score ? (i >= 7 ? 'bg-accent-green' : i >= 5 ? 'bg-accent-blue' : 'bg-accent-yellow') : 'bg-white/10'}`}/>
               ))}
             </div>
-            {test.fisher_rationale && <p className="text-sm text-gray-400 leading-relaxed">{test.fisher_rationale}</p>}
+            {test.fisher_rationale && <p className="text-base text-gray-400 leading-relaxed">{test.fisher_rationale}</p>}
           </div>
         </div>
       )}
@@ -1024,13 +1024,13 @@ function StressTestTab({ test, roppel }) {
         {test.years_to_peak_earnings && (
           <div className="bg-white/[0.03] border border-white/10 rounded-xl p-3 text-center">
             <div className="text-2xl font-bold text-accent-blue">{test.years_to_peak_earnings}</div>
-            <div className="text-xs text-gray-500 mt-0.5">Years to Peak Earnings</div>
+            <div className="text-sm text-gray-500 mt-0.5">Years to Peak Earnings</div>
           </div>
         )}
         {test.tam_reality_check && (
           <div className="bg-white/[0.03] border border-white/10 rounded-xl p-3">
             <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">TAM Reality Check</div>
-            <p className="text-sm text-gray-400 leading-relaxed">{test.tam_reality_check}</p>
+            <p className="text-base text-gray-400 leading-relaxed">{test.tam_reality_check}</p>
           </div>
         )}
       </div>

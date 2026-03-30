@@ -220,44 +220,44 @@ function SourceCard({ source, onRemove }) {
 
   return (
     <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-colors">
-      <div className="flex items-start gap-3 px-4 py-3">
-        <FileText size={14} className="text-gray-600 mt-0.5 shrink-0"/>
+      <div className="flex items-start gap-3 px-4 py-4">
+        <FileText size={16} className="text-gray-500 mt-0.5 shrink-0"/>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap mb-1">
+          <div className="flex items-center gap-2 flex-wrap mb-1.5">
             <TypeBadge type={source.source_type}/>
             <SentimentBadge sentiment={source.sentiment}/>
           </div>
-          <p className="text-sm font-medium text-gray-200 leading-snug">{source.title}</p>
+          <p className="text-base font-medium text-gray-200 leading-snug">{source.title}</p>
           {(source.tickers || []).length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1">
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
               {source.tickers.map(t => (
-                <span key={t} className="text-[10px] font-bold text-accent-blue bg-accent-blue/10 border border-accent-blue/20 rounded px-1.5 py-0.5">{t}</span>
+                <span key={t} className="text-xs font-bold text-accent-blue bg-accent-blue/10 border border-accent-blue/20 rounded px-2 py-0.5">{t}</span>
               ))}
             </div>
           )}
-          <p className="text-xs text-gray-500 mt-1.5 leading-relaxed line-clamp-2">{source.summary}</p>
+          <p className="text-sm text-gray-500 mt-1.5 leading-relaxed line-clamp-2">{source.summary}</p>
         </div>
         <div className="flex items-center gap-1 shrink-0 mt-0.5">
           <button onClick={() => setExpanded(p => !p)}
             className="p-1.5 rounded-lg text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
-            {expanded ? <ChevronUp size={13}/> : <ChevronDown size={13}/>}
+            {expanded ? <ChevronUp size={15}/> : <ChevronDown size={15}/>}
           </button>
           <button onClick={handleRemove} disabled={removing}
             className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-400/10 transition-colors disabled:opacity-40">
-            <Trash2 size={13}/>
+            <Trash2 size={15}/>
           </button>
         </div>
       </div>
 
       {expanded && (
-        <div className="border-t border-white/10 px-4 py-3 space-y-3">
+        <div className="border-t border-white/10 px-4 py-4 space-y-4">
           {(source.key_points || []).length > 0 && (
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Key Points</div>
-              <ul className="space-y-1">
+              <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Key Points</div>
+              <ul className="space-y-1.5">
                 {source.key_points.map((pt, i) => (
-                  <li key={i} className="flex items-start gap-2 text-xs text-gray-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-accent-blue mt-1 shrink-0"/>
+                  <li key={i} className="flex items-start gap-2 text-sm text-gray-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-accent-blue mt-1.5 shrink-0"/>
                     {pt}
                   </li>
                 ))}
@@ -267,15 +267,15 @@ function SourceCard({ source, onRemove }) {
 
           {(source.catalyst_signals || []).length > 0 && (
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Catalyst Signals</div>
-              <div className="space-y-1.5">
+              <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Catalyst Signals</div>
+              <div className="space-y-2">
                 {source.catalyst_signals.map((cs, i) => (
-                  <div key={i} className={`border-l-2 pl-2.5 py-0.5 ${catalystCls(cs.status)}`}>
+                  <div key={i} className={`border-l-2 pl-3 py-0.5 ${catalystCls(cs.status)}`}>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-medium">{cs.catalyst}</span>
-                      <span className={`text-[10px] font-bold uppercase border rounded-full px-1.5 py-0.5 ${catalystCls(cs.status)}`}>{cs.status}</span>
+                      <span className="text-sm font-medium">{cs.catalyst}</span>
+                      <span className={`text-xs font-bold uppercase border rounded-full px-2 py-0.5 ${catalystCls(cs.status)}`}>{cs.status}</span>
                     </div>
-                    {cs.evidence && <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">{cs.evidence}</p>}
+                    {cs.evidence && <p className="text-xs text-gray-500 mt-0.5 leading-snug">{cs.evidence}</p>}
                   </div>
                 ))}
               </div>
@@ -284,20 +284,20 @@ function SourceCard({ source, onRemove }) {
 
           {(source.key_metrics || []).length > 0 && (
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Key Metrics</div>
+              <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Key Metrics</div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {source.key_metrics.map((m, i) => (
-                  <div key={i} className="bg-white/[0.03] border border-white/10 rounded-lg p-2">
-                    <div className="text-xs font-bold text-accent-blue">{m.value}</div>
-                    <div className="text-[10px] text-gray-500">{m.label}</div>
-                    {m.context && <div className="text-[10px] text-gray-600 mt-0.5 leading-tight">{m.context}</div>}
+                  <div key={i} className="bg-white/[0.03] border border-white/10 rounded-lg p-2.5">
+                    <div className="text-sm font-bold text-accent-blue">{m.value}</div>
+                    <div className="text-xs text-gray-500">{m.label}</div>
+                    {m.context && <div className="text-xs text-gray-600 mt-0.5 leading-tight">{m.context}</div>}
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          <div className="text-[10px] text-gray-600">
+          <div className="text-xs text-gray-600">
             {source.file_name} · {new Date(source.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
           </div>
         </div>
@@ -689,13 +689,15 @@ export default function ResearchLibrary() {
           )}
 
           {!storeLoading && sources.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-[10px] font-semibold uppercase tracking-widest text-gray-600">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-3">
                 {sources.length} source{sources.length !== 1 ? 's' : ''} in library
               </div>
-              {sources.map(source => (
-                <SourceCard key={source.id} source={source} onRemove={removeSource}/>
-              ))}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {sources.map(source => (
+                  <SourceCard key={source.id} source={source} onRemove={removeSource}/>
+                ))}
+              </div>
             </div>
           )}
 
