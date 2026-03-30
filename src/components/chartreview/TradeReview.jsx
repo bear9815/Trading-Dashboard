@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { formatCurrency } from '../../utils/formatters.js'
-import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus } from 'lucide-react'
+import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List } from 'lucide-react'
 
 // ── Duration helper ───────────────────────────────────────────────────────────
 function tradeDuration(trade) {
@@ -82,11 +82,12 @@ function Lightbox({ shots, index, onClose, onPrev, onNext }) {
         </button>
       )}
 
-      {/* Image */}
+      {/* Image — fill as much screen as possible */}
       <img
         src={shot?.src}
         alt={shot?.label || 'Screenshot'}
-        className="max-w-[88vw] max-h-[88vh] object-contain rounded-xl shadow-2xl"
+        className="object-contain rounded-lg shadow-2xl"
+        style={{ maxWidth: 'calc(100vw - 80px)', maxHeight: 'calc(100vh - 80px)', width: 'auto', height: 'auto' }}
         onClick={e => e.stopPropagation()}
       />
     </div>
@@ -287,15 +288,17 @@ function ReviewTagsSection({ trade, onUpdate }) {
 
 // ── Review Notes section ──────────────────────────────────────────────────────
 function ReviewNotesSection({ trade, onUpdate }) {
-  const [draft,   setDraft]   = useState(trade.reviewNotes || '')
-  const [saved,   setSaved]   = useState(false)
-  const savedTimer            = useRef(null)
+  const [draft,    setDraft]    = useState(trade.reviewNotes || '')
+  const [saved,    setSaved]    = useState(false)
+  const [editMode, setEditMode] = useState(false)
+  const savedTimer              = useRef(null)
+  const taRef                   = useRef(null)
 
-  // Sync when trade changes (navigating between trades)
   useEffect(() => {
     setDraft(trade.reviewNotes || '')
     setSaved(false)
-  }, [trade.id])  // eslint-disable-line
+    setEditMode(false)
+  }, [trade.id]) // eslint-disable-line
 
   function save() {
     onUpdate({ reviewNotes: draft })
@@ -304,7 +307,62 @@ function ReviewNotesSection({ trade, onUpdate }) {
     savedTimer.current = setTimeout(() => setSaved(false), 2000)
   }
 
+  // Continue bullet on Enter; Backspace on empty bullet line removes it
+  function handleKeyDown(e) {
+    if (e.key === 'Enter') {
+      const ta   = taRef.current
+      const pos  = ta.selectionStart
+      const text = draft
+      const lineStart = text.lastIndexOf('\n', pos - 1) + 1
+      const line = text.slice(lineStart, pos)
+      const bulletMatch = line.match(/^(\s*[•\-]\s)/)
+      if (bulletMatch) {
+        e.preventDefault()
+        const prefix = bulletMatch[1]
+        // If line is only the bullet prefix, remove it instead
+        if (line.trim() === bulletMatch[0].trim()) {
+          const newText = text.slice(0, lineStart) + '\n' + text.slice(pos)
+          setDraft(newText)
+          setTimeout(() => { ta.selectionStart = ta.selectionEnd = lineStart + 1 }, 0)
+        } else {
+          const newText = text.slice(0, pos) + '\n' + prefix + text.slice(pos)
+          setDraft(newText)
+          setTimeout(() => { ta.selectionStart = ta.selectionEnd = pos + 1 + prefix.length }, 0)
+        }
+      }
+    }
+  }
+
+  function insertBullet() {
+    const ta  = taRef.current
+    if (!ta) return
+    const pos  = ta.selectionStart
+    const text = draft
+    // If at start of line or empty, just prepend bullet; otherwise newline + bullet
+    const atLineStart = pos === 0 || text[pos - 1] === '\n'
+    const insert = atLineStart ? '• ' : '\n• '
+    const newText = text.slice(0, pos) + insert + text.slice(pos)
+    setDraft(newText)
+    setTimeout(() => { ta.selectionStart = ta.selectionEnd = pos + insert.length; ta.focus() }, 0)
+  }
+
   const dirty = draft !== (trade.reviewNotes || '')
+
+  // Render saved notes with bullet styling
+  function renderNotes(text) {
+    if (!text?.trim()) return null
+    return text.split('\n').map((line, i) => {
+      const isBullet = /^\s*[•\-]\s/.test(line)
+      const content  = isBullet ? line.replace(/^\s*[•\-]\s/, '') : line
+      if (!line.trim()) return <div key={i} className="h-2" />
+      return isBullet
+        ? <div key={i} className="flex items-start gap-2 text-sm text-gray-300 leading-relaxed">
+            <span className="text-accent-blue mt-1 shrink-0">•</span>
+            <span>{content}</span>
+          </div>
+        : <p key={i} className="text-sm text-gray-300 leading-relaxed">{line}</p>
+    })
+  }
 
   return (
     <div>
@@ -313,27 +371,60 @@ function ReviewNotesSection({ trade, onUpdate }) {
           <MessageSquare size={13} className="text-gray-500" />
           <p className="label">Review Notes</p>
         </div>
-        {(dirty || saved) && (
+        <div className="flex items-center gap-2">
+          {editMode && (
+            <button
+              onClick={insertBullet}
+              title="Insert bullet point"
+              className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-all"
+            >
+              <List size={11} /> Bullet
+            </button>
+          )}
+          {editMode && (dirty || saved) && (
+            <button
+              onClick={save}
+              className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-all ${
+                saved
+                  ? 'bg-accent-green/15 text-accent-green border border-accent-green/25'
+                  : 'bg-accent-blue/15 text-accent-blue border border-accent-blue/25 hover:bg-accent-blue/25'
+              }`}
+            >
+              {saved ? <><Check size={11} /> Saved</> : 'Save'}
+            </button>
+          )}
           <button
-            onClick={save}
-            className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-all ${
-              saved
-                ? 'bg-accent-green/15 text-accent-green border border-accent-green/25'
-                : 'bg-accent-blue/15 text-accent-blue border border-accent-blue/25 hover:bg-accent-blue/25'
-            }`}
+            onClick={() => setEditMode(p => !p)}
+            className="text-xs px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-gray-400 hover:text-white transition-all"
           >
-            {saved ? <><Check size={11} /> Saved</> : 'Save'}
+            {editMode ? 'Done' : 'Edit'}
           </button>
-        )}
+        </div>
       </div>
-      <textarea
-        value={draft}
-        onChange={e => { setDraft(e.target.value); setSaved(false) }}
-        onBlur={() => { if (dirty) save() }}
-        placeholder="What did you do well? What would you do differently? Key takeaways…"
-        className="input text-sm leading-relaxed resize-none w-full"
-        rows={4}
-      />
+
+      {editMode ? (
+        <textarea
+          ref={taRef}
+          value={draft}
+          onChange={e => { setDraft(e.target.value); setSaved(false) }}
+          onBlur={() => { if (dirty) save() }}
+          onKeyDown={handleKeyDown}
+          placeholder="What did you do well? What would you do differently? Key takeaways…&#10;&#10;Tip: Click 'Bullet' or type • then space for a bullet list"
+          className="input text-sm leading-relaxed resize-none w-full font-mono"
+          rows={6}
+          autoFocus
+        />
+      ) : (
+        <div
+          className="min-h-[80px] rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5 cursor-pointer hover:border-white/20 transition-colors space-y-1"
+          onClick={() => setEditMode(true)}
+        >
+          {draft?.trim()
+            ? renderNotes(draft)
+            : <p className="text-sm text-gray-600 italic">Click to add review notes…</p>
+          }
+        </div>
+      )}
     </div>
   )
 }
