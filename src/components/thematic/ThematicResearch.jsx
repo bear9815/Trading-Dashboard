@@ -103,8 +103,8 @@ function ValueChain({ text }) {
         <div key={i} className="flex items-stretch shrink-0">
           {i > 0 && <div className="flex items-center px-1 text-gray-600 text-base shrink-0">→</div>}
           <div className="min-w-[140px] max-w-[160px] bg-white/[0.03] border border-white/10 rounded-lg p-3">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-accent-blue mb-2">{l.t}</div>
-            <div className="text-[11px] text-gray-400 leading-relaxed space-y-0.5">
+            <div className="text-xs font-bold uppercase tracking-wider text-accent-blue mb-2">{l.t}</div>
+            <div className="text-sm text-gray-400 leading-relaxed space-y-0.5">
               {l.items.slice(0,3).map((item,j) => { const m = item.match(/^-\s*\*\*([^*]+)\*\*/); return <div key={j}>{m ? <span className="font-semibold text-gray-300">{m[1]}</span> : item.replace(/^[-•*]\s*/,'').replace(/\*\*/g,'').substring(0,90)}</div> })}
             </div>
           </div>
@@ -152,7 +152,7 @@ function TAMAnalysis({ text }) {
           {[[m26, m26?.[1], 'TAM 2026'],[m30, m30?.[1], 'TAM 2030'],[mc, mc ? mc[1]+'%' : null, 'CAGR']].map(([ex,val,lbl]) => ex ? (
             <div key={lbl} className="bg-accent-blue/8 border border-accent-blue/20 rounded-lg p-3 text-center">
               <div className="text-base font-bold text-accent-blue">{val}</div>
-              <div className="text-[10px] text-gray-500 mt-1 uppercase tracking-wider">{lbl}</div>
+              <div className="text-xs text-gray-500 mt-1 uppercase tracking-wider">{lbl}</div>
             </div>
           ) : null)}
         </div>
@@ -168,13 +168,13 @@ function Signals({ rev, cat }) {
   return (
     <div className="space-y-5">
       {revS && <div>
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Revenue Acceleration Signals</div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Revenue Acceleration Signals</div>
         <ul className="space-y-1.5">
           {revS.split('\n').filter(l=>l.trim()).map((l,i) => { const c = l.replace(/^[-•*\d.]+\s*/,''); return c.length > 3 ? <li key={i} className="flex items-start gap-2 text-sm text-gray-400"><span className="w-1.5 h-1.5 rounded-full bg-accent-green mt-1.5 shrink-0"/>{c}</li> : null })}
         </ul>
       </div>}
       {catS && <div>
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Forward Catalyst Calendar</div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Forward Catalyst Calendar</div>
         <div className="space-y-1.5">
           {catS.split('\n').filter(l=>l.trim()).map((evt,i) => {
             const el = evt.toLowerCase()
@@ -184,7 +184,7 @@ function Signals({ rev, cat }) {
             else if (el.includes('product')||el.includes('launch')||el.includes('release')) b = 'border-accent-green'
             else if (el.includes('conference')||el.includes('summit')||el.includes('expo')) b = 'border-accent-yellow'
             const dm = evt.match(/((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z.]*\s*\d{0,2},?\s*\d{0,4}|Q[1-4]\s*\d{4})/i)
-            return <div key={i} className={`flex gap-3 pl-3 border-l-2 ${b} py-1`}>{dm && <span className="text-[11px] text-gray-500 min-w-[70px] shrink-0">{dm[1]}</span>}<span className="text-sm text-gray-400">{evt.replace(/^[-•*\d.]+\s*/,'')}</span></div>
+            return <div key={i} className={`flex gap-3 pl-3 border-l-2 ${b} py-1`}>{dm && <span className="text-xs text-gray-500 min-w-[70px] shrink-0">{dm[1]}</span>}<span className="text-sm text-gray-400">{evt.replace(/^[-•*\d.]+\s*/,'')}</span></div>
           })}
         </div>
       </div>}
@@ -224,14 +224,14 @@ function OverviewTab({ d }) {
   return (
     <div className="space-y-5">
       <div>
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">The Catalyst</div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">The Catalyst</div>
         <div className="text-sm text-gray-300 bg-accent-blue/5 border-l-2 border-accent-blue px-3 py-2.5 rounded-r-lg leading-relaxed">{d['The Catalyst']||'—'}</div>
       </div>
       <div>
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Ecosystem — Pure Plays</div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Ecosystem — Pure Plays</div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead><tr className="border-b border-white/10">{['#','Ticker','Company','Mkt Cap','Exposure','Thesis'].map(h=><th key={h} className="text-left py-1.5 px-2 text-gray-500 font-medium text-[10px] uppercase tracking-wider">{h}</th>)}</tr></thead>
+            <thead><tr className="border-b border-white/10">{['#','Ticker','Company','Mkt Cap','Exposure','Thesis'].map(h=><th key={h} className="text-left py-1.5 px-2 text-gray-500 font-medium text-xs uppercase tracking-wider">{h}</th>)}</tr></thead>
             <tbody>
               {[1,2,3,4,5].map(i => { const tk=d[`Pure Play #${i} Ticker`]; if(!tk) return null; return (
                 <tr key={i} className="border-b border-white/5 hover:bg-white/[0.03]">
@@ -239,8 +239,8 @@ function OverviewTab({ d }) {
                   <td className="py-1.5 px-2 font-bold text-accent-blue">{tk}</td>
                   <td className="py-1.5 px-2 text-gray-300">{d[`Pure Play #${i} Name`]}</td>
                   <td className="py-1.5 px-2 text-gray-500 whitespace-nowrap">{d[`Pure Play #${i} Market Cap`]}</td>
-                  <td className="py-1.5 px-2 text-gray-400 max-w-[160px] text-[11px]">{d[`Pure Play #${i} Tailwind Exposure`]?.replace(/\*\*/g,'')}</td>
-                  <td className="py-1.5 px-2 text-gray-400 max-w-[200px] text-[11px]">{d[`Pure Play #${i} Thesis`]?.replace(/\*\*/g,'')}</td>
+                  <td className="py-1.5 px-2 text-gray-400 max-w-[160px] text-xs">{d[`Pure Play #${i} Tailwind Exposure`]?.replace(/\*\*/g,'')}</td>
+                  <td className="py-1.5 px-2 text-gray-400 max-w-[200px] text-xs">{d[`Pure Play #${i} Thesis`]?.replace(/\*\*/g,'')}</td>
                 </tr>
               )})}
             </tbody>
@@ -249,7 +249,7 @@ function OverviewTab({ d }) {
       </div>
       {d['Hidden Gem Ticker'] && (
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Hidden Gem</div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Hidden Gem</div>
           <div className="bg-purple-500/8 border border-purple-500/20 rounded-lg p-3.5">
             <div className="flex items-center gap-2 font-bold text-purple-400 text-sm mb-1"><Gem size={13}/>{d['Hidden Gem Ticker']} — {d['Hidden Gem Name']}</div>
             {d['Hidden Gem Market Cap'] && <div className="text-xs text-gray-500 mb-1.5">{d['Hidden Gem Market Cap']}</div>}
@@ -259,7 +259,7 @@ function OverviewTab({ d }) {
       )}
       {d['Institutional / Dark Pool Signal'] && (
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Institutional Signal</div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Institutional Signal</div>
           <p className="text-sm text-gray-400 bg-white/[0.03] border border-white/10 rounded-lg px-3 py-2.5 leading-relaxed">{d['Institutional / Dark Pool Signal']?.replace(/\*\*/g,'')}</p>
         </div>
       )}
@@ -300,7 +300,7 @@ function BullBear({ bulls, bears, conviction, onConvictionChange }) {
         <div>
           <div className="flex items-center gap-1.5 mb-3">
             <TrendingUp size={13} className="text-accent-green"/>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-accent-green">Bull Case</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-accent-green">Bull Case</span>
           </div>
           <ul className="space-y-2.5">
             {(bulls || []).map((pt, i) => (
@@ -314,7 +314,7 @@ function BullBear({ bulls, bears, conviction, onConvictionChange }) {
         <div>
           <div className="flex items-center gap-1.5 mb-3">
             <TrendingDown size={13} className="text-red-400"/>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-red-400">Bear Case</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-red-400">Bear Case</span>
           </div>
           <ul className="space-y-2.5">
             {(bears || []).map((pt, i) => (
@@ -356,10 +356,10 @@ function SupplyChainStress({ nodes }) {
                 <Shield size={12} style={{ color: cfg.dot }}/>
                 <span className="text-sm font-medium text-white">{node.name}</span>
               </div>
-              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: cfg.dot }}>{cfg.label} Risk</span>
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: cfg.dot }}>{cfg.label} Risk</span>
             </div>
             {node.role       && <p className="text-xs text-gray-500 mb-1">{node.role}</p>}
-            {node.bottleneck && <p className="text-xs text-gray-400 leading-relaxed">{node.bottleneck}</p>}
+            {node.bottleneck && <p className="text-sm text-gray-400 leading-relaxed">{node.bottleneck}</p>}
           </div>
         )
       })}
@@ -415,14 +415,14 @@ function CatalystTimeline({ themes }) {
         <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
           {grouped.map(([period, evts]) => (
             <div key={period}>
-              <div className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-1.5 sticky top-0 bg-surface-50 py-0.5">{period}</div>
+              <div className="text-xs font-bold uppercase tracking-widest text-gray-600 mb-1.5 sticky top-0 bg-surface-50 py-0.5">{period}</div>
               <div className="space-y-1.5 pl-3 border-l border-white/10">
                 {evts.map((ev, i) => (
                   <div key={i} className={`flex items-start gap-2 ${ev.past ? 'opacity-40' : ''}`}>
                     <span className="w-1.5 h-1.5 rounded-full shrink-0 mt-1.5" style={{ background: themeColor[ev.theme] }}/>
                     <div className="min-w-0">
                       <p className="text-xs text-gray-400 leading-snug">{ev.text}</p>
-                      <p className="text-[10px] text-gray-600 truncate">{ev.theme.split(' ').slice(0,3).join(' ')}</p>
+                      <p className="text-xs text-gray-600 truncate">{ev.theme.split(' ').slice(0,3).join(' ')}</p>
                     </div>
                   </div>
                 ))}
@@ -464,7 +464,7 @@ function MacroMatrix({ themes }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-white/10">
-                  <th className="text-left py-1.5 px-2 text-gray-600 font-medium text-[10px] w-28">Factor</th>
+                  <th className="text-left py-1.5 px-2 text-gray-600 font-medium text-xs w-28">Factor</th>
                   {themeNames.map(n => (
                     <th key={n} className="px-1 py-1.5 text-center text-[9px] text-gray-500 max-w-[56px]">
                       <span className="block truncate max-w-[56px]">{n.split(/[\s&]/)[0]}</span>
@@ -475,7 +475,7 @@ function MacroMatrix({ themes }) {
               <tbody>
                 {MACRO_VARS.map(mv => (
                   <tr key={mv.key} className="border-b border-white/5">
-                    <td className="py-1.5 px-2 text-[11px] text-gray-400 whitespace-nowrap">{mv.label}</td>
+                    <td className="py-1.5 px-2 text-xs text-gray-400 whitespace-nowrap">{mv.label}</td>
                     {themeNames.map(tName => {
                       const cell = themes[tName]?.dossier?.macro_sensitivity?.[mv.key]
                       const dir = cell?.direction || 'neutral'
@@ -483,7 +483,7 @@ function MacroMatrix({ themes }) {
                       return (
                         <td key={tName} className="px-1 py-1 text-center">
                           <div
-                            className={`inline-flex items-center justify-center w-7 h-6 rounded text-[11px] font-bold cursor-default ${cfg.bg} ${cfg.text}`}
+                            className={`inline-flex items-center justify-center w-7 h-6 rounded text-xs font-bold cursor-default ${cfg.bg} ${cfg.text}`}
                             onMouseEnter={() => setTooltip({ label: mv.label, theme: tName, ...(cell||{}) })}
                             onMouseLeave={() => setTooltip(null)}
                           >
@@ -502,7 +502,7 @@ function MacroMatrix({ themes }) {
               <span className="text-gray-300 font-medium">{tooltip.theme.split(' ').slice(0,3).join(' ')}</span> · {tooltip.label}: {tooltip.reason}
             </div>
           )}
-          <div className="flex gap-4 mt-3 text-[10px]">
+          <div className="flex gap-4 mt-3 text-xs">
             {[['tailwind','#00e5a0','↑ Tailwind'],['neutral','#64748b','— Neutral'],['headwind','#ff4d6d','↓ Headwind']].map(([,c,l]) => (
               <div key={l} className="flex items-center gap-1" style={{ color: c }}>{l}</div>
             ))}
@@ -597,7 +597,7 @@ function ThematicChat({ themes, apiKey, librarySources = [] }) {
               {m.queries?.length > 0 && (
                 <div className="flex items-center gap-1.5 px-1">
                   <Search size={10} className="text-accent-blue shrink-0"/>
-                  <span className="text-[10px] text-gray-600 italic truncate">
+                  <span className="text-xs text-gray-600 italic truncate">
                     Searched: {m.queries.join(' · ')}
                   </span>
                 </div>
@@ -606,7 +606,7 @@ function ThematicChat({ themes, apiKey, librarySources = [] }) {
                 <div className="flex flex-col gap-1 px-1">
                   {m.sources.map((s, si) => (
                     <a key={si} href={s.uri} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 text-[11px] text-accent-blue/70 hover:text-accent-blue truncate transition-colors">
+                      className="flex items-center gap-1.5 text-xs text-accent-blue/70 hover:text-accent-blue truncate transition-colors">
                       <ExternalLink size={9} className="shrink-0"/>
                       <span className="truncate">{s.title || s.uri}</span>
                     </a>
@@ -692,12 +692,12 @@ function LifecycleTab({ d }) {
           <span className={`text-base font-bold ${cfg.color}`}>{stage}</span>
           {runway > 0 && <span className="text-xs text-gray-500 flex items-center gap-1"><Activity size={11}/>{runway}+ yr runway</span>}
         </div>
-        <p className="text-xs text-gray-400 leading-relaxed">{LIFECYCLE_DESC[stage]}</p>
+        <p className="text-sm text-gray-400 leading-relaxed">{LIFECYCLE_DESC[stage]}</p>
       </div>
 
       {/* Progress bar */}
       <div>
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Theme Maturity</div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Theme Maturity</div>
         <div className="grid grid-cols-4 gap-1 mb-1.5">
           {LIFECYCLE_STAGES.map((s, i) => (
             <div key={s} className={`h-1.5 rounded-full ${i <= cfg.idx ? cfg.bar : 'bg-white/10'}`}/>
@@ -722,20 +722,20 @@ function LifecycleTab({ d }) {
         const windowCfg = { ideal: 'text-accent-green bg-accent-green/15 border-accent-green/30', acceptable: 'text-accent-yellow bg-accent-yellow/15 border-accent-yellow/30', avoid: 'text-red-400 bg-red-500/15 border-red-500/30' }
         return (
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Weinstein Stage Analysis</div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Weinstein Stage Analysis</div>
             <div className={`${sc.bg} border ${sc.border} rounded-xl p-4 space-y-3`}>
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <span className={`text-sm font-bold ${sc.color}`}>{ws.current_stage}</span>
                 {ws.entry_window && (
-                  <span className={`text-[10px] font-bold uppercase tracking-wider border rounded-full px-2 py-0.5 ${windowCfg[ws.entry_window] || windowCfg.avoid}`}>
+                  <span className={`text-xs font-bold uppercase tracking-wider border rounded-full px-2 py-0.5 ${windowCfg[ws.entry_window] || windowCfg.avoid}`}>
                     {ws.entry_window === 'ideal' ? '✓ Ideal Entry' : ws.entry_window === 'acceptable' ? '~ Acceptable' : '✗ Avoid'}
                   </span>
                 )}
               </div>
-              {ws.stage_rationale && <p className="text-xs text-gray-400 leading-relaxed">{ws.stage_rationale}</p>}
+              {ws.stage_rationale && <p className="text-sm text-gray-400 leading-relaxed">{ws.stage_rationale}</p>}
               {ws.breakout_trigger && (
                 <div className="bg-black/20 rounded-lg px-3 py-2">
-                  <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Breakout Trigger: </span>
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Breakout Trigger: </span>
                   <span className="text-xs text-gray-300">{ws.breakout_trigger}</span>
                 </div>
               )}
@@ -747,7 +747,7 @@ function LifecycleTab({ d }) {
       {/* N Factors preview */}
       {(d.n_factors || []).length > 0 && (
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">N Factors — What's New & Unpriced</div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">N Factors — What's New & Unpriced</div>
           <div className="space-y-2">
             {d.n_factors.map((n, i) => (
               <div key={i} className="bg-accent-yellow/5 border border-accent-yellow/20 rounded-lg p-3">
@@ -756,7 +756,7 @@ function LifecycleTab({ d }) {
                   <span className="text-xs font-semibold text-white">{n.factor}</span>
                 </div>
                 <p className="text-xs text-gray-400 leading-snug">{n.description}</p>
-                {n.why_unpriced && <p className="text-[11px] text-accent-yellow mt-1">↗ {n.why_unpriced}</p>}
+                {n.why_unpriced && <p className="text-xs text-accent-yellow mt-1">↗ {n.why_unpriced}</p>}
               </div>
             ))}
           </div>
@@ -772,7 +772,7 @@ function EarningsPowerTab({ earningsPower = [] }) {
   )
   return (
     <div className="space-y-4">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">3–5 Year Bull Case Earnings Model</div>
+      <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">3–5 Year Bull Case Earnings Model</div>
       <div className="space-y-3">
         {earningsPower.map((item, i) => (
           <div key={i} className="bg-white/[0.03] border border-white/10 rounded-xl p-4">
@@ -783,19 +783,19 @@ function EarningsPowerTab({ earningsPower = [] }) {
             <div className="grid grid-cols-3 gap-3 mb-3">
               {item.current_eps && (
                 <div className="text-center bg-white/[0.03] rounded-lg p-2">
-                  <div className="text-[10px] text-gray-600 mb-0.5">Current EPS</div>
+                  <div className="text-xs text-gray-600 mb-0.5">Current EPS</div>
                   <div className="text-sm font-bold text-gray-300">{item.current_eps}</div>
                 </div>
               )}
               {item['3yr_bull'] && (
                 <div className="text-center bg-accent-green/5 border border-accent-green/15 rounded-lg p-2">
-                  <div className="text-[10px] text-gray-600 mb-0.5">3yr Bull</div>
+                  <div className="text-xs text-gray-600 mb-0.5">3yr Bull</div>
                   <div className="text-sm font-bold text-accent-green">{item['3yr_bull']}</div>
                 </div>
               )}
               {item['5yr_bull'] && (
                 <div className="text-center bg-accent-green/5 border border-accent-green/15 rounded-lg p-2">
-                  <div className="text-[10px] text-gray-600 mb-0.5">5yr Bull</div>
+                  <div className="text-xs text-gray-600 mb-0.5">5yr Bull</div>
                   <div className="text-sm font-bold text-accent-green">{item['5yr_bull']}</div>
                 </div>
               )}
@@ -837,7 +837,7 @@ function LeadershipRankingTab({ leaders = [] }) {
   )
   return (
     <div className="space-y-3">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Industry Leadership — O'Neil / David Ryan Ranked</div>
+      <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">Industry Leadership — O'Neil / David Ryan Ranked</div>
       {leaders.map((leader, i) => {
         const rs    = RANK_STYLE[i] || RANK_STYLE[2]
         const accel = ACCEL_CFG[leader.earnings_acceleration] || ACCEL_CFG.stable
@@ -852,11 +852,11 @@ function LeadershipRankingTab({ leaders = [] }) {
                 <div className="flex items-center gap-2 flex-wrap mb-1">
                   <span className="text-sm font-bold text-white">{leader.ticker}</span>
                   <span className="text-xs text-gray-500">{leader.name}</span>
-                  <span className={`flex items-center gap-1 text-[10px] font-semibold ${accel.color}`}>
+                  <span className={`flex items-center gap-1 text-xs font-semibold ${accel.color}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${accel.dot}`}/>{accel.label}
                   </span>
                   {gc && (
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${gc.bg} ${gc.border} ${gc.text}`}>
+                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded border ${gc.bg} ${gc.border} ${gc.text}`}>
                       Ryan {leader.ryan_grade}
                     </span>
                   )}
@@ -882,7 +882,7 @@ function LeadershipRankingTab({ leaders = [] }) {
                     )}
                   </div>
                 )}
-                {leader['3yr_scenario'] && <p className="text-xs text-gray-500 italic">{leader['3yr_scenario']}</p>}
+                {leader['3yr_scenario'] && <p className="text-sm text-gray-500 italic">{leader['3yr_scenario']}</p>}
               </div>
             </div>
           </div>
@@ -899,8 +899,8 @@ function NFactorTab({ nFactors = [] }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">N Factors Detected</div>
-        <span className="text-[10px] font-bold bg-accent-yellow/20 text-accent-yellow rounded-full px-2 py-0.5">{nFactors.length}</span>
+        <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">N Factors Detected</div>
+        <span className="text-xs font-bold bg-accent-yellow/20 text-accent-yellow rounded-full px-2 py-0.5">{nFactors.length}</span>
       </div>
       {nFactors.map((n, i) => (
         <div key={i} className="bg-accent-yellow/5 border border-accent-yellow/20 rounded-xl p-4">
@@ -908,10 +908,10 @@ function NFactorTab({ nFactors = [] }) {
             <span className="text-[9px] font-bold uppercase tracking-wider bg-accent-yellow/20 text-accent-yellow border border-accent-yellow/30 rounded px-1.5 py-0.5">N</span>
             <span className="text-sm font-semibold text-white">{n.factor}</span>
           </div>
-          <p className="text-xs text-gray-400 leading-relaxed mb-2">{n.description}</p>
+          <p className="text-sm text-gray-400 leading-relaxed mb-2">{n.description}</p>
           {n.why_unpriced && (
             <div className="bg-accent-yellow/8 border border-accent-yellow/20 rounded-lg px-3 py-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-accent-yellow">Why Unpriced: </span>
+              <span className="text-xs font-semibold uppercase tracking-wider text-accent-yellow">Why Unpriced: </span>
               <span className="text-xs text-gray-400">{n.why_unpriced}</span>
             </div>
           )}
@@ -945,28 +945,28 @@ function StressTestTab({ test, roppel }) {
       {/* Roppel Assessment */}
       {roppel && (
         <div className="bg-white/[0.03] border border-white/10 rounded-xl p-4 space-y-3">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Jim Roppel — Concentration Framework</div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">Jim Roppel — Concentration Framework</div>
           <div className="flex flex-wrap gap-2">
             {roppel.concentration_worthy && ROPPEL_WORTHY_CFG[roppel.concentration_worthy] && (() => {
               const wc = ROPPEL_WORTHY_CFG[roppel.concentration_worthy]
               return (
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${wc.bg} ${wc.border} ${wc.text}`}>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${wc.bg} ${wc.border} ${wc.text}`}>
                   {wc.label}
                 </span>
               )
             })()}
             {roppel.secular_or_cyclical && (
-              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-gray-300 capitalize">
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-gray-300 capitalize">
                 {roppel.secular_or_cyclical}
               </span>
             )}
             {roppel.hold_horizon && (
-              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-accent-blue/10 border border-accent-blue/25 text-accent-blue">
+              <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-accent-blue/10 border border-accent-blue/25 text-accent-blue">
                 Hold: {roppel.hold_horizon}
               </span>
             )}
             {roppel.ten_x_potential && ROPPEL_TEN_X_CFG[roppel.ten_x_potential] && (
-              <span className={`text-[10px] font-semibold ${ROPPEL_TEN_X_CFG[roppel.ten_x_potential].text}`}>
+              <span className={`text-xs font-semibold ${ROPPEL_TEN_X_CFG[roppel.ten_x_potential].text}`}>
                 {ROPPEL_TEN_X_CFG[roppel.ten_x_potential].label}
               </span>
             )}
@@ -974,27 +974,27 @@ function StressTestTab({ test, roppel }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {roppel.management_quality && (
               <div>
-                <div className="text-[10px] font-semibold text-gray-500 mb-0.5">Management Quality</div>
+                <div className="text-xs font-semibold text-gray-500 mb-0.5">Management Quality</div>
                 <div className="text-xs text-gray-300 capitalize font-medium">{roppel.management_quality}</div>
-                {roppel.management_evidence && <p className="text-[11px] text-gray-500 mt-0.5 leading-relaxed">{roppel.management_evidence}</p>}
+                {roppel.management_evidence && <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{roppel.management_evidence}</p>}
               </div>
             )}
             {roppel.ten_x_rationale && (
               <div>
-                <div className="text-[10px] font-semibold text-gray-500 mb-0.5">10x Rationale</div>
-                <p className="text-[11px] text-gray-400 leading-relaxed">{roppel.ten_x_rationale}</p>
+                <div className="text-xs font-semibold text-gray-500 mb-0.5">10x Rationale</div>
+                <p className="text-sm text-gray-400 leading-relaxed">{roppel.ten_x_rationale}</p>
               </div>
             )}
           </div>
           {roppel.market_recognition_catalyst && (
             <div className="bg-black/20 rounded-lg px-3 py-2">
-              <span className="text-[10px] font-semibold text-gray-500">Recognition Catalyst: </span>
+              <span className="text-xs font-semibold text-gray-500">Recognition Catalyst: </span>
               <span className="text-xs text-gray-300">{roppel.market_recognition_catalyst}</span>
             </div>
           )}
           {roppel.patience_insight && (
             <div className="bg-accent-blue/5 border border-accent-blue/20 rounded-lg px-3 py-2">
-              <span className="text-[10px] font-semibold text-accent-blue">Patient Investor Edge: </span>
+              <span className="text-xs font-semibold text-accent-blue">Patient Investor Edge: </span>
               <span className="text-xs text-gray-400 italic">{roppel.patience_insight}</span>
             </div>
           )}
@@ -1005,7 +1005,7 @@ function StressTestTab({ test, roppel }) {
         <div className="flex items-start gap-4 bg-white/[0.03] border border-white/10 rounded-xl p-4">
           <div className="text-center shrink-0">
             <div className={`text-3xl font-bold ${scoreColor}`}>{score}</div>
-            <div className="text-[10px] text-gray-600">/10</div>
+            <div className="text-xs text-gray-600">/10</div>
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-xs font-semibold text-white mb-1">Long-Duration Score (Phil Fisher)</div>
@@ -1014,7 +1014,7 @@ function StressTestTab({ test, roppel }) {
                 <div key={i} className={`flex-1 h-1.5 rounded-full ${i < score ? (i >= 7 ? 'bg-accent-green' : i >= 5 ? 'bg-accent-blue' : 'bg-accent-yellow') : 'bg-white/10'}`}/>
               ))}
             </div>
-            {test.fisher_rationale && <p className="text-xs text-gray-400 leading-relaxed">{test.fisher_rationale}</p>}
+            {test.fisher_rationale && <p className="text-sm text-gray-400 leading-relaxed">{test.fisher_rationale}</p>}
           </div>
         </div>
       )}
@@ -1024,13 +1024,13 @@ function StressTestTab({ test, roppel }) {
         {test.years_to_peak_earnings && (
           <div className="bg-white/[0.03] border border-white/10 rounded-xl p-3 text-center">
             <div className="text-2xl font-bold text-accent-blue">{test.years_to_peak_earnings}</div>
-            <div className="text-[10px] text-gray-500 mt-0.5">Years to Peak Earnings</div>
+            <div className="text-xs text-gray-500 mt-0.5">Years to Peak Earnings</div>
           </div>
         )}
         {test.tam_reality_check && (
           <div className="bg-white/[0.03] border border-white/10 rounded-xl p-3">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1.5">TAM Reality Check</div>
-            <p className="text-xs text-gray-400 leading-relaxed">{test.tam_reality_check}</p>
+            <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">TAM Reality Check</div>
+            <p className="text-sm text-gray-400 leading-relaxed">{test.tam_reality_check}</p>
           </div>
         )}
       </div>
@@ -1039,11 +1039,11 @@ function StressTestTab({ test, roppel }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {(test.must_be_true || []).length > 0 && (
           <div className="bg-accent-green/5 border border-accent-green/20 rounded-xl p-3">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-accent-green mb-2">Must Be True</div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-accent-green mb-2">Must Be True</div>
             <ul className="space-y-1.5">
               {test.must_be_true.map((item, i) => (
-                <li key={i} className="flex items-start gap-2 text-xs text-gray-400">
-                  <CheckSquare size={12} className="text-accent-green shrink-0 mt-0.5"/>
+                <li key={i} className="flex items-start gap-2 text-sm text-gray-400">
+                  <CheckSquare size={14} className="text-accent-green shrink-0 mt-0.5"/>
                   {item}
                 </li>
               ))}
@@ -1052,11 +1052,11 @@ function StressTestTab({ test, roppel }) {
         )}
         {(test.thesis_killers || []).length > 0 && (
           <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-3">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-red-400 mb-2">Thesis Killers</div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-red-400 mb-2">Thesis Killers</div>
             <ul className="space-y-1.5">
               {test.thesis_killers.map((item, i) => (
-                <li key={i} className="flex items-start gap-2 text-xs text-gray-400">
-                  <XCircle size={12} className="text-red-400 shrink-0 mt-0.5"/>
+                <li key={i} className="flex items-start gap-2 text-sm text-gray-400">
+                  <XCircle size={14} className="text-red-400 shrink-0 mt-0.5"/>
                   {item}
                 </li>
               ))}
@@ -1121,10 +1121,10 @@ function FundamentalMomentumBoard({ themes, convictions, librarySources }) {
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-gray-300 truncate">{row.name}</p>
                     <div className="flex items-center gap-3 mt-0.5">
-                      {row.lifecycle_stage && <span className={`text-[10px] font-semibold ${lcColors[row.lifecycle_stage] || 'text-gray-500'}`}>{row.lifecycle_stage}</span>}
-                      {row.fisherScore > 0 && <span className="text-[10px] text-gray-600"><Award size={9} className="inline mr-0.5"/>{row.fisherScore}/10</span>}
-                      {row.nCount > 0 && <span className="text-[10px] text-gray-600">{row.nCount} N factor{row.nCount !== 1 ? 's' : ''}</span>}
-                      {row.runway_years > 0 && <span className="text-[10px] text-gray-600">{row.runway_years}yr runway</span>}
+                      {row.lifecycle_stage && <span className={`text-xs font-semibold ${lcColors[row.lifecycle_stage] || 'text-gray-500'}`}>{row.lifecycle_stage}</span>}
+                      {row.fisherScore > 0 && <span className="text-xs text-gray-600"><Award size={9} className="inline mr-0.5"/>{row.fisherScore}/10</span>}
+                      {row.nCount > 0 && <span className="text-xs text-gray-600">{row.nCount} N factor{row.nCount !== 1 ? 's' : ''}</span>}
+                      {row.runway_years > 0 && <span className="text-xs text-gray-600">{row.runway_years}yr runway</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -1172,27 +1172,27 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
 
   return (
     <div className={`bg-surface-50 border rounded-xl overflow-hidden transition-all ${expanded?'border-accent-blue/40':'border-white/10'}`}>
-      <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex items-center gap-3 px-5 py-4">
         <button onClick={onToggle} className="flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-90 transition-opacity">
-          <span className="font-bold text-white text-sm flex-1 min-w-0 truncate">{name}</span>
+          <span className="font-bold text-white text-base flex-1 min-w-0 truncate">{name}</span>
         </button>
-        <div className="flex items-center gap-2 shrink-0">
-          {lastUpdated && <span className="hidden lg:block text-[10px] text-gray-600">{lastUpdated}</span>}
-          {tamStr && <span className="hidden lg:block text-xs text-gray-500">{tamStr}</span>}
-          {gemTicker && <span className="hidden md:flex items-center gap-1 text-xs text-purple-400"><Gem size={12}/>{gemTicker}</span>}
+        <div className="flex items-center gap-3 shrink-0">
+          {lastUpdated && <span className="hidden lg:block text-xs text-gray-500">{lastUpdated}</span>}
+          {tamStr && <span className="hidden lg:block text-sm text-gray-400">{tamStr}</span>}
+          {gemTicker && <span className="hidden md:flex items-center gap-1 text-sm text-purple-400"><Gem size={13}/>{gemTicker}</span>}
           {d.lifecycle_stage && (
-            <span className={`hidden lg:flex items-center gap-1 text-[10px] font-semibold border rounded-full px-2 py-0.5 ${LIFECYCLE_CFG[d.lifecycle_stage]?.color || 'text-gray-400'} ${LIFECYCLE_CFG[d.lifecycle_stage]?.border || 'border-white/20'} ${LIFECYCLE_CFG[d.lifecycle_stage]?.bg || ''}`}>
-              <Activity size={9}/>{d.lifecycle_stage}
+            <span className={`hidden lg:flex items-center gap-1 text-xs font-semibold border rounded-full px-2.5 py-1 ${LIFECYCLE_CFG[d.lifecycle_stage]?.color || 'text-gray-400'} ${LIFECYCLE_CFG[d.lifecycle_stage]?.border || 'border-white/20'} ${LIFECYCLE_CFG[d.lifecycle_stage]?.bg || ''}`}>
+              <Activity size={10}/>{d.lifecycle_stage}
             </span>
           )}
           {d.long_duration_test?.fisher_score && (
-            <span className="hidden xl:flex items-center gap-1 text-[10px] text-gray-500">
-              <Award size={9}/>{d.long_duration_test.fisher_score}/10
+            <span className="hidden xl:flex items-center gap-1 text-xs text-gray-400">
+              <Award size={11}/>{d.long_duration_test.fisher_score}/10
             </span>
           )}
           {conviction > 0 && (
             <div className="hidden sm:flex gap-0.5">
-              {[1,2,3,4,5].map(n => <Star key={n} size={10} className={n<=conviction?'text-accent-yellow fill-accent-yellow':'text-gray-700'}/>)}
+              {[1,2,3,4,5].map(n => <Star key={n} size={12} className={n<=conviction?'text-accent-yellow fill-accent-yellow':'text-gray-700'}/>)}
             </div>
           )}
           {!d.lifecycle_stage && (
@@ -1216,20 +1216,20 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
           <div className="flex border-b border-white/10 overflow-x-auto">
             {CARD_TABS.map(([id,label]) => (
               <button key={id} onClick={() => onTabChange(id)}
-                className={`px-4 py-2.5 text-xs font-medium whitespace-nowrap border-b-2 transition-all ${activeTab===id?'border-accent-blue text-accent-blue':'border-transparent text-gray-500 hover:text-gray-300'}`}>
+                className={`px-5 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-all ${activeTab===id?'border-accent-blue text-accent-blue':'border-transparent text-gray-500 hover:text-gray-300'}`}>
                 {label}
               </button>
             ))}
           </div>
-          <div className="p-5">
+          <div className="p-6">
             {activeTab==='overview'  && <OverviewTab d={d} />}
             {activeTab==='bull_bear' && <BullBear bulls={d.bulls} bears={d.bears} conviction={conviction} onConvictionChange={onConvictionChange} />}
             {activeTab==='supply'    && <SupplyChainStress nodes={d.supply_chain_nodes} />}
-            {activeTab==='vc'        && <div><div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-3">Industry Value Chain Map</div><ValueChain text={dp['Industry Value Chain Map']}/></div>}
-            {activeTab==='comp'      && <div><div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-3">Competitive Landscape</div><CompetitiveLandscape text={dp['Competitive Landscape']}/></div>}
-            {activeTab==='tam'       && <div><div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-3">TAM / SAM / SOM Analysis</div><TAMAnalysis text={dp['TAM / SAM / SOM']}/></div>}
+            {activeTab==='vc'        && <div><div className="text-sm font-semibold uppercase tracking-wider text-gray-400 mb-3">Industry Value Chain Map</div><ValueChain text={dp['Industry Value Chain Map']}/></div>}
+            {activeTab==='comp'      && <div><div className="text-sm font-semibold uppercase tracking-wider text-gray-400 mb-3">Competitive Landscape</div><CompetitiveLandscape text={dp['Competitive Landscape']}/></div>}
+            {activeTab==='tam'       && <div><div className="text-sm font-semibold uppercase tracking-wider text-gray-400 mb-3">TAM / SAM / SOM Analysis</div><TAMAnalysis text={dp['TAM / SAM / SOM']}/></div>}
             {activeTab==='sig'       && <Signals rev={dp['Revenue Acceleration Signals']} cat={dp['Forward Catalyst Calendar']}/>}
-            {activeTab==='alpha'      && <div><div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-3">Unpriced Tailwinds — Alpha Edge</div><AlphaEdge text={dp['Unpriced Tailwinds']}/></div>}
+            {activeTab==='alpha'      && <div><div className="text-sm font-semibold uppercase tracking-wider text-gray-400 mb-3">Unpriced Tailwinds — Alpha Edge</div><AlphaEdge text={dp['Unpriced Tailwinds']}/></div>}
             {activeTab==='lifecycle'  && <LifecycleTab d={d} />}
             {activeTab==='earnings'   && <EarningsPowerTab earningsPower={d.earnings_power} />}
             {activeTab==='leadership' && <LeadershipRankingTab leaders={d.leadership_ranking} />}
@@ -1275,13 +1275,13 @@ export default function ThematicResearch() {
   const themeCount = Object.keys(themes).length
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-5 space-y-5">
 
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-white">Growth Research Center</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h1 className="text-2xl font-bold text-white">Growth Research Center</h1>
+          <p className="text-sm text-gray-400 mt-1">
             {themeCount > 0
               ? `${themeCount} theme${themeCount!==1?'s':''} distilled · Upload PDFs to the library to add more`
               : 'Secular compounder research — upload deep dive PDFs to build your growth thesis database'}
@@ -1289,8 +1289,8 @@ export default function ThematicResearch() {
         </div>
         {themeCount > 0 && (
           <button onClick={() => { if (confirm('Clear all theme dossiers?')) useThematicStore.getState().clearAll() }}
-            className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-400 transition-colors">
-            <Trash2 size={13}/> Clear all
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-300 transition-colors">
+            <Trash2 size={14}/> Clear all
           </button>
         )}
       </div>
@@ -1312,7 +1312,7 @@ export default function ThematicResearch() {
       {themeCount > 0 && (
         <>
           {/* Intelligence Row: Timeline + Macro Matrix */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
             <CatalystTimeline themes={themes} />
             <MacroMatrix themes={themes} />
           </div>
@@ -1323,11 +1323,11 @@ export default function ThematicResearch() {
           {/* AI Research Assistant */}
           <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden">
             <button onClick={() => setShowChat(p => !p)}
-              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors">
-              <Bot size={14} className="text-accent-blue"/>
-              <span className="text-sm font-semibold text-white flex-1 text-left">AI Research Assistant</span>
-              <span className="text-xs text-gray-600 mr-2">Ask questions across all your research</span>
-              <ChevronDown size={16} className={`text-gray-500 transition-transform ${showChat?'rotate-180':''}`}/>
+              className="w-full flex items-center gap-3 px-5 py-4 hover:bg-white/[0.02] transition-colors">
+              <Bot size={16} className="text-accent-blue"/>
+              <span className="text-base font-semibold text-white flex-1 text-left">AI Research Assistant</span>
+              <span className="text-sm text-gray-500 mr-2">Ask questions across all your research</span>
+              <ChevronDown size={18} className={`text-gray-500 transition-transform ${showChat?'rotate-180':''}`}/>
             </button>
             {showChat && (
               <div className="border-t border-white/10">
@@ -1338,7 +1338,7 @@ export default function ThematicResearch() {
 
           {/* Dossier Cards */}
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-widest text-gray-600 mb-3">
+            <div className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-3">
               Thematic Dossiers — {themeCount} theme{themeCount!==1?'s':''} distilled
             </div>
             <div className="space-y-2">
