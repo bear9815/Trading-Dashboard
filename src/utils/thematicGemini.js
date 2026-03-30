@@ -342,7 +342,7 @@ ${context}`
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 4096, temperature: 0.2 },
+        generationConfig: { maxOutputTokens: 16384, temperature: 0.2 },
       }),
     }
   )
@@ -351,10 +351,18 @@ ${context}`
     throw new Error(err?.error?.message || `Gemini API error ${res.status}`)
   }
   const data = await res.json()
+  const finishReason = data.candidates?.[0]?.finishReason
+  if (finishReason === 'MAX_TOKENS') {
+    throw new Error('Response was cut off — try again, the model will usually complete it on retry.')
+  }
   let raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
   if (raw.startsWith('```')) raw = raw.split('\n').slice(1).join('\n')
   if (raw.endsWith('```')) raw = raw.slice(0, raw.lastIndexOf('```'))
-  return JSON.parse(raw.trim())
+  try {
+    return JSON.parse(raw.trim())
+  } catch (e) {
+    throw new Error('Failed to parse response — please try the refresh again.')
+  }
 }
 
 export async function processWithGemini(file, apiKey) {
