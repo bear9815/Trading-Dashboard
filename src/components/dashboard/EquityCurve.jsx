@@ -16,7 +16,7 @@ const CustomTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null
   const d = payload[0].payload
   return (
-    <div className="card-sm text-xs space-y-1 shadow-xl">
+    <div className="card-sm text-sm space-y-1 shadow-xl">
       <p className="text-gray-400">{d.label || formatDate(d.date)}</p>
       <p className={`font-semibold mono ${payload[0].value >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
         {formatCurrency(payload[0].value)}
@@ -82,12 +82,12 @@ export default function EquityCurve({ data, startBalance }) {
     <div className="card flex-1 flex flex-col" style={{ minHeight: 220 }}>
       <div className="flex items-start justify-between mb-4 shrink-0 flex-wrap gap-2">
         <div>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Equity Curve</p>
+          <p className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-1">Equity Curve</p>
           {lastBalance != null && (
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-white mono">{formatCurrency(lastBalance)}</span>
+            <div className="flex items-baseline gap-3">
+              <span className="text-4xl font-bold text-white mono">{formatCurrency(lastBalance)}</span>
               {change != null && (
-                <span className={`text-sm font-semibold mono ${isPositive ? 'text-accent-green' : 'text-accent-red'}`}>
+                <span className={`text-xl font-semibold mono ${isPositive ? 'text-accent-green' : 'text-accent-red'}`}>
                   {change >= 0 ? '+' : ''}{formatCurrency(change, true)}
                   {changePct != null && ` (${changePct >= 0 ? '+' : ''}${changePct.toFixed(1)}%)`}
                 </span>
@@ -100,7 +100,7 @@ export default function EquityCurve({ data, startBalance }) {
             <button
               key={r.label}
               onClick={() => selectRange(r.label)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 range === r.label
                   ? 'bg-accent-blue/20 text-accent-blue border border-accent-blue/30'
                   : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
@@ -122,8 +122,8 @@ export default function EquityCurve({ data, startBalance }) {
               <stop offset="95%" stopColor={isPositive ? '#00d084' : '#ff4757'} stopOpacity={0.02} />
             </linearGradient>
           </defs>
-          <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-          <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => formatCurrency(v, true)} width={60} domain={['auto', 'auto']} />
+          <XAxis dataKey="date" tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+          <YAxis tick={{ fontSize: 13, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => formatCurrency(v, true)} width={72} domain={['auto', 'auto']} />
           <Tooltip content={<CustomTooltip />} />
           {startBalance && <ReferenceLine y={startBalance} stroke="#ffffff15" strokeDasharray="4 4" />}
           <Area

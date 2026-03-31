@@ -65,10 +65,10 @@ function ThoughtRow({ thought, onDelete, showDate }) {
 
   return (
     <div className="group flex items-start gap-2.5 rounded-lg px-2.5 py-2 hover:bg-white/3 transition-colors">
-      <span className="text-sm shrink-0 leading-none mt-0.5" title={tg.label}>{tg.emoji}</span>
+      <span className="text-xl shrink-0 leading-none mt-0.5" title={tg.label}>{tg.emoji}</span>
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-gray-300 leading-relaxed whitespace-pre-wrap break-words">{thought.text}</p>
-        <p className="text-[11px] text-gray-600 mt-0.5">
+        <p className="text-base text-gray-300 leading-relaxed whitespace-pre-wrap break-words">{thought.text}</p>
+        <p className="text-sm text-gray-600 mt-0.5">
           {showDate && `${formatDateLabel(thought.timestamp)} · `}
           {formatTime(thought.timestamp)}
         </p>
@@ -76,12 +76,12 @@ function ThoughtRow({ thought, onDelete, showDate }) {
       <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5">
         {confirming ? (
           <>
-            <button onClick={() => onDelete(thought.id)} className="text-[11px] text-accent-red hover:underline">Delete</button>
-            <button onClick={() => setConfirming(false)} className="text-[11px] text-gray-500 hover:underline">Cancel</button>
+            <button onClick={() => onDelete(thought.id)} className="text-sm text-accent-red hover:underline">Delete</button>
+            <button onClick={() => setConfirming(false)} className="text-sm text-gray-500 hover:underline">Cancel</button>
           </>
         ) : (
           <button onClick={() => setConfirming(true)} className="text-gray-600 hover:text-accent-red transition-colors p-0.5">
-            <Trash2 size={11} />
+            <Trash2 size={15} />
           </button>
         )}
       </div>
@@ -104,27 +104,27 @@ function MindsetResult({ result }) {
     <div className="space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
-          <Brain size={12} className="text-accent-blue" /> Mindset Analysis
+        <p className="text-base font-semibold text-gray-300 flex items-center gap-1.5">
+          <Brain size={16} className="text-accent-blue" /> Mindset Analysis
         </p>
         {score != null && (
           <div className="flex items-center gap-1.5">
-            <span className={`text-sm font-bold mono ${scoreCol}`}>{score}</span>
-            <span className={`text-[11px] font-medium ${scoreCol}`}>/ 100 · {scoreLbl}</span>
+            <span className={`text-2xl font-bold mono ${scoreCol}`}>{score}</span>
+            <span className={`text-base font-medium ${scoreCol}`}>/ 100 · {scoreLbl}</span>
           </div>
         )}
       </div>
 
       {/* Summary */}
       {result.summary && (
-        <p className="text-xs text-gray-400 leading-relaxed">{result.summary}</p>
+        <p className="text-base text-gray-400 leading-relaxed">{result.summary}</p>
       )}
 
       {/* Patterns */}
       {result.patterns?.length > 0 && (
         <div>
-          <p className="text-[11px] text-gray-600 uppercase tracking-wide font-medium mb-1.5">Patterns Detected</p>
-          <div className="space-y-1.5">
+          <p className="text-sm text-gray-600 uppercase tracking-wide font-medium mb-2">Patterns Detected</p>
+          <div className="space-y-2">
             {result.patterns.map((p, i) => {
               const typeCls = p.type === 'strength'
                 ? 'bg-accent-green/15 text-accent-green'
@@ -132,14 +132,14 @@ function MindsetResult({ result }) {
                 ? 'bg-accent-red/15 text-accent-red'
                 : 'bg-accent-yellow/15 text-accent-yellow'
               return (
-                <div key={i} className="rounded border border-white/8 bg-white/3 px-2.5 py-2">
-                  <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                    <span className="text-xs font-semibold text-white">{p.title}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wide ${typeCls}`}>
+                <div key={i} className="rounded border border-white/8 bg-white/3 px-3 py-2.5">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className="text-base font-semibold text-white">{p.title}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-bold uppercase tracking-wide ${typeCls}`}>
                       {p.type}
                     </span>
                   </div>
-                  <p className="text-[11px] text-gray-500 leading-relaxed">{p.description}</p>
+                  <p className="text-sm text-gray-500 leading-relaxed">{p.description}</p>
                 </div>
               )
             })}
@@ -149,9 +149,9 @@ function MindsetResult({ result }) {
 
       {/* Recommendation */}
       {result.recommendation && (
-        <div className="rounded-lg border border-accent-blue/20 bg-accent-blue/5 px-3 py-2.5">
-          <p className="text-[11px] text-accent-blue font-semibold uppercase tracking-wide mb-1">This Week's Focus</p>
-          <p className="text-xs text-gray-300 leading-relaxed">{result.recommendation}</p>
+        <div className="rounded-lg border border-accent-blue/20 bg-accent-blue/5 px-3 py-3">
+          <p className="text-sm text-accent-blue font-semibold uppercase tracking-wide mb-1">This Week's Focus</p>
+          <p className="text-base text-gray-300 leading-relaxed">{result.recommendation}</p>
         </div>
       )}
     </div>
@@ -230,10 +230,10 @@ export default function TradingThoughts() {
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Brain size={13} className="text-accent-blue" />
-          <h3 className="text-sm font-medium text-gray-300">Trading Thoughts</h3>
+          <Brain size={20} className="text-accent-blue" />
+          <h3 className="text-xl font-medium text-gray-300">Trading Thoughts</h3>
           {todayList.length > 0 && (
-            <span className="text-[11px] bg-surface-200 text-gray-500 px-1.5 py-0.5 rounded-full">
+            <span className="text-base bg-surface-200 text-gray-500 px-2 py-0.5 rounded-full">
               {todayList.length} today
             </span>
           )}
@@ -242,9 +242,9 @@ export default function TradingThoughts() {
           <button
             onClick={handleAnalyze}
             disabled={aiLoading}
-            className="btn-ghost text-xs flex items-center gap-1.5 text-accent-blue hover:text-accent-blue disabled:opacity-40"
+            className="btn-ghost text-sm flex items-center gap-1.5 text-accent-blue hover:text-accent-blue disabled:opacity-40"
           >
-            {aiLoading ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
+            {aiLoading ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
             Analyze Mindset
           </button>
         )}
@@ -294,7 +294,7 @@ export default function TradingThoughts() {
       {/* ── Today's thoughts ────────────────────────────────────────────────── */}
       {todayList.length > 0 && (
         <div className="space-y-0.5 mb-1">
-          <p className="text-[11px] text-gray-600 uppercase tracking-wide font-medium px-2.5 mb-1">Today</p>
+          <p className="text-sm text-gray-600 uppercase tracking-wide font-medium px-2.5 mb-1">Today</p>
           {todayList.map(t => (
             <ThoughtRow key={t.id} thought={t} onDelete={deleteThought} showDate={false} />
           ))}
@@ -305,7 +305,7 @@ export default function TradingThoughts() {
       {olderList.length > 0 && (
         <div className="space-y-0.5">
           {todayList.length > 0 && (
-            <p className="text-[11px] text-gray-600 uppercase tracking-wide font-medium px-2.5 mb-1 mt-3">Recent</p>
+            <p className="text-sm text-gray-600 uppercase tracking-wide font-medium px-2.5 mb-1 mt-3">Recent</p>
           )}
           {displayOlder.map(t => (
             <ThoughtRow key={t.id} thought={t} onDelete={deleteThought} showDate />
@@ -313,7 +313,7 @@ export default function TradingThoughts() {
           {olderList.length > 3 && (
             <button
               onClick={() => setShowAll(p => !p)}
-              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 transition-colors px-2.5 mt-1.5"
+              className="flex items-center gap-1.5 text-base text-gray-500 hover:text-gray-300 transition-colors px-2.5 mt-2"
             >
               {showAll ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
               {showAll ? 'Show less' : `Show ${olderList.length - 3} more`}
@@ -324,7 +324,7 @@ export default function TradingThoughts() {
 
       {/* ── Empty state ─────────────────────────────────────────────────────── */}
       {tradingThoughts.length === 0 && (
-        <p className="text-xs text-gray-600 italic px-2.5 py-1">
+        <p className="text-base text-gray-600 italic px-2.5 py-1">
           Capture discipline moments, market reads, FOMO checks, and mental state throughout the day.
           After a few entries, use <span className="text-accent-blue">Analyze Mindset</span> to find patterns.
         </p>

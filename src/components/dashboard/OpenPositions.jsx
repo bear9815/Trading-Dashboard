@@ -139,8 +139,8 @@ export default function OpenPositions({ openTrades, accountBalance }) {
     <div className="card">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-medium text-gray-300">Open Positions</h3>
-          <span className="text-xs text-gray-500">{positions.length} open</span>
+          <h3 className="text-xl font-medium text-gray-300">Open Positions</h3>
+          <span className="text-base text-gray-500">{positions.length} open</span>
         </div>
         <div className="relative" ref={menuRef}>
           <button
@@ -152,12 +152,12 @@ export default function OpenPositions({ openTrades, accountBalance }) {
           </button>
           {showMenu && (
             <div className="absolute right-0 top-7 z-50 bg-surface-100 border border-white/10 rounded-lg shadow-xl p-2 min-w-36">
-              <p className="text-xs text-gray-500 px-2 pb-1.5 border-b border-white/5 mb-1">Columns</p>
+              <p className="text-sm text-gray-500 px-2 pb-1.5 border-b border-white/5 mb-1">Columns</p>
               {ALL_COLUMNS.map(col => (
                 <button
                   key={col.key}
                   onClick={() => toggleColumn(col.key)}
-                  className="flex items-center gap-2 w-full px-2 py-1 rounded hover:bg-white/5 text-xs text-left transition-colors"
+                  className="flex items-center gap-2 w-full px-2 py-1.5 rounded hover:bg-white/5 text-sm text-left transition-colors"
                 >
                   <span className={`w-3 h-3 rounded-sm border flex items-center justify-center shrink-0 ${
                     visibleKeys.includes(col.key) ? 'bg-accent-blue border-accent-blue' : 'border-white/20'
@@ -177,10 +177,10 @@ export default function OpenPositions({ openTrades, accountBalance }) {
       </div>
 
       {positions.length === 0 ? (
-        <p className="text-sm text-gray-500 text-center py-5">No open positions · All trades closed</p>
+        <p className="text-xl text-gray-500 text-center py-5">No open positions · All trades closed</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-xs table-fixed">
+          <table className="w-full text-sm table-fixed">
             <colgroup>
               <col style={{ width: colWidth('_symbol') }} />
               {show('account')    && <col style={{ width: colWidth('account') }} />}
@@ -195,7 +195,7 @@ export default function OpenPositions({ openTrades, accountBalance }) {
               {show('theme')      && <col style={{ width: colWidth('theme') }} />}
             </colgroup>
             <thead>
-              <tr className="text-xs text-gray-500 border-b border-white/5">
+              <tr className="text-sm text-gray-500 border-b border-white/5">
                 <th className="text-left pb-2 px-2 font-medium">Symbol</th>
                 {show('account')    && <th className="text-left pb-2 px-2 font-medium">Account</th>}
                 {show('entryDate')  && <th className="text-left pb-2 px-2 font-medium">Entry Date</th>}

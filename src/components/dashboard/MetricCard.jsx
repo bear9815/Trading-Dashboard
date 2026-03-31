@@ -9,24 +9,24 @@ export default function MetricCard({ label, value, sub, valueClass = '', icon: I
   const ac = accentMap[accent] || accentMap.blue
 
   return (
-    <div className={`relative flex flex-col gap-2 p-4 rounded-xl bg-surface-50 border border-white/8 border-l-2 ${ac.border} overflow-hidden min-w-0`}>
+    <div className={`relative flex flex-col gap-3 p-5 rounded-xl bg-surface-50 border border-white/8 border-l-2 ${ac.border} overflow-hidden min-w-0`}>
       {/* Subtle glow in corner */}
       <div className="absolute -top-4 -right-4 w-16 h-16 rounded-full opacity-[0.06] bg-white blur-xl pointer-events-none" />
 
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-gray-500 uppercase tracking-wider truncate">{label}</span>
+        <span className="text-base font-medium text-gray-500 uppercase tracking-wider truncate">{label}</span>
         {Icon && (
-          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${ac.icon}`}>
-            <Icon size={13} />
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${ac.icon}`}>
+            <Icon size={20} />
           </div>
         )}
       </div>
 
-      <div className={`text-2xl font-bold tracking-tight mono truncate leading-none ${valueClass}`}>
+      <div className={`text-4xl font-bold tracking-tight mono truncate leading-none ${valueClass}`}>
         {value ?? '—'}
       </div>
 
-      {sub && <div className="text-xs text-gray-600 truncate">{sub}</div>}
+      {sub && <div className="text-sm text-gray-600 truncate">{sub}</div>}
     </div>
   )
 }

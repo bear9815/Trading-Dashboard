@@ -84,13 +84,13 @@ export default function Dashboard({ selectedAccount }) {
       {/* ── Page header ───────────────────────────────────────────────────── */}
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{today}</p>
+          <h1 className="text-5xl font-bold text-white">Dashboard</h1>
+          <p className="text-xl text-gray-500 mt-0.5">{today}</p>
         </div>
         {accountBalance > 0 && (
           <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white mono">{formatCurrency(accountBalance)}</span>
-            <span className={`text-sm font-semibold mono ${signClass(netPL)}`}>
+            <span className="text-6xl font-bold text-white mono">{formatCurrency(accountBalance)}</span>
+            <span className={`text-2xl font-semibold mono ${signClass(netPL)}`}>
               {netPL >= 0 ? '+' : ''}{formatCurrency(netPL, true)} all-time
             </span>
           </div>
@@ -102,8 +102,8 @@ export default function Dashboard({ selectedAccount }) {
         <div className="rounded-xl px-4 py-3 flex items-start gap-3 bg-accent-red/10 border border-accent-red/25 text-accent-red">
           <ShieldAlert size={18} className="shrink-0 mt-0.5" />
           <div>
-            <p className="font-semibold text-sm">Daily Loss Limit Reached — Stop Trading</p>
-            <p className="text-xs opacity-80 mt-0.5">
+            <p className="font-semibold text-xl">Daily Loss Limit Reached — Stop Trading</p>
+            <p className="text-base opacity-80 mt-0.5">
               Today's loss of <strong>{formatCurrency(Math.abs(todayPL))}</strong> has hit your{' '}
               <strong>{dailyLossLimit}%</strong> daily limit ({formatCurrency(dailyLimitDollar)}).
             </p>
@@ -114,8 +114,8 @@ export default function Dashboard({ selectedAccount }) {
         <div className="rounded-xl px-4 py-3 flex items-start gap-3 bg-accent-yellow/8 border border-accent-yellow/20 text-accent-yellow">
           <AlertTriangle size={18} className="shrink-0 mt-0.5" />
           <div>
-            <p className="font-semibold text-sm">Approaching Daily Loss Limit</p>
-            <p className="text-xs opacity-80 mt-0.5">
+            <p className="font-semibold text-xl">Approaching Daily Loss Limit</p>
+            <p className="text-base opacity-80 mt-0.5">
               Loss: <strong>{formatCurrency(Math.abs(todayPL))}</strong> ·
               Limit: <strong>{formatCurrency(dailyLimitDollar)}</strong> ·
               Remaining: <strong>{formatCurrency(dailyLimitDollar - todayLoss)}</strong>
@@ -128,15 +128,15 @@ export default function Dashboard({ selectedAccount }) {
           ${streak.type === 'Win'
             ? 'bg-accent-green/8 border-accent-green/20 text-accent-green'
             : 'bg-accent-red/8 border-accent-red/20 text-accent-red'}`}>
-          <span className="text-lg">{streak.type === 'Win' ? '🔥' : '❄️'}</span>
+          <span className="text-3xl">{streak.type === 'Win' ? '🔥' : '❄️'}</span>
           <div>
-            <span className="font-bold">{streak.count}-{streak.type} Streak</span>
-            <span className="text-xs opacity-70 ml-2">— manage your size accordingly</span>
+            <span className="font-bold text-xl">{streak.count}-{streak.type} Streak</span>
+            <span className="text-base opacity-70 ml-2">— manage your size accordingly</span>
           </div>
         </div>
       )}
       {excludedSymbols.length > 0 && (
-        <div className="rounded-xl px-3 py-2 flex items-center gap-2 bg-surface-200 border border-white/5 text-xs text-gray-500">
+        <div className="rounded-xl px-3 py-2 flex items-center gap-2 bg-surface-200 border border-white/5 text-base text-gray-500">
           <span>Stats exclude:</span>
           {excludedSymbols.map(s => (
             <span key={s} className="mono text-gray-400 bg-surface-300 rounded px-1.5 py-0.5">{s}</span>

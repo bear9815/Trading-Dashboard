@@ -453,10 +453,13 @@ function ProgressiveSizer({ accountBalance, trades, openPositions, quotes }) {
 
   return (
     <div className="card">
-      <h3 className="text-sm font-medium text-gray-300 mb-4 flex items-center gap-2">
-        <Target size={14} className="text-accent-blue" />
-        Progressive Exposure — Position Sizer
-      </h3>
+      <div className="mb-5">
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Trade Planning</p>
+        <h3 className="text-base font-semibold text-white flex items-center gap-2">
+          <Target size={15} className="text-accent-blue" />
+          Progressive Exposure — Position Sizer
+        </h3>
+      </div>
 
       {!accountBalance && (
         <p className="text-xs text-accent-yellow/70 mb-3">Set account balance by importing trades or deposits first.</p>
@@ -519,60 +522,60 @@ function ProgressiveSizer({ accountBalance, trades, openPositions, quotes }) {
 
       {/* Kelly suggestion */}
       {stats && (
-        <div className="rounded-lg bg-surface-200 border border-white/5 px-3 py-2 mb-4 text-xs flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span className="text-gray-500">Kelly Suggestion ({stats.sampleSize} trades):</span>
-          <span className="mono font-semibold text-gray-300">{stats.suggested}%</span>
+        <div className="rounded-xl bg-surface-200 border border-white/5 px-4 py-3 mb-5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          <span className="text-sm text-gray-500">Kelly Suggestion ({stats.sampleSize} trades):</span>
+          <span className="mono font-bold text-base text-gray-200">{stats.suggested}%</span>
           {stats.warnings.map((w, i) => (
-            <span key={i} className="text-accent-yellow/80 flex items-center gap-1">
-              <AlertTriangle size={10} /> {w}
+            <span key={i} className="text-sm text-accent-yellow/80 flex items-center gap-1">
+              <AlertTriangle size={12} /> {w}
             </span>
           ))}
         </div>
       )}
       {!stats && (
-        <p className="text-xs text-gray-600 mb-4">Add 5+ closed trades to see a Kelly-based risk suggestion.</p>
+        <p className="text-sm text-gray-600 mb-5">Add 5+ closed trades to see a Kelly-based risk suggestion.</p>
       )}
 
       {/* Risk level selector */}
-      <div className="mb-4">
-        <p className="label mb-2">Market Conditions</p>
-        <div className="grid grid-cols-4 gap-1.5">
+      <div className="mb-5">
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Market Conditions</p>
+        <div className="grid grid-cols-4 gap-2">
           {RISK_LEVELS.map(l => (
             <button
               key={l.id}
               onClick={() => setRiskLevel(l.id)}
               title={l.desc}
-              className={`px-2 py-2 rounded border text-xs font-medium transition-all flex flex-col items-center gap-0.5 ${
+              className={`px-3 py-3 rounded-xl border text-sm font-semibold transition-all flex flex-col items-center gap-1 ${
                 riskLevel === l.id
                   ? `${l.color} ${l.border} bg-white/5`
-                  : 'text-gray-600 border-gray-700 hover:border-gray-500 hover:text-gray-400'
+                  : 'text-gray-600 border-gray-700/50 hover:border-gray-500 hover:text-gray-400'
               }`}
             >
               <span>{l.label}</span>
-              <span className="text-[10px] opacity-70">{l.pct}%</span>
+              <span className="text-xs font-normal opacity-70">{l.pct}%</span>
             </button>
           ))}
         </div>
-        <p className="text-xs text-gray-600 mt-1.5">{level.desc}</p>
+        <p className="text-xs text-gray-600 mt-2">{level.desc}</p>
       </div>
 
       {/* Effective risk display */}
-      <div className="flex items-center gap-3 mb-4 text-xs">
-        <span className="text-gray-500">Risk per trade:</span>
-        <span className={`font-bold mono text-lg ${
+      <div className="flex items-center gap-3 mb-5 p-3 rounded-xl bg-surface-200 border border-white/5">
+        <span className="text-sm text-gray-400">Risk per trade:</span>
+        <span className={`font-bold mono text-2xl ${
           riskPct <= 0.25 ? 'text-accent-green'
           : riskPct <= 0.5 ? 'text-accent-yellow'
           : riskPct <= 0.75 ? 'text-orange-400'
           : 'text-accent-red'
         }`}>{riskPct}%</span>
         {accountBalance > 0 && (
-          <span className="text-gray-600">= {formatCurrency(accountBalance * riskPct / 100)} at risk</span>
+          <span className="text-sm text-gray-500">= {formatCurrency(accountBalance * riskPct / 100)} at risk</span>
         )}
       </div>
 
       {/* Sizing mode toggle */}
-      <div className="mb-4">
-        <p className="label mb-2">Sizing Method</p>
+      <div className="mb-5">
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Sizing Method</p>
         <div className="flex gap-2">
           {[
             ['atr',  'ATR-Based',   'size = (risk $) ÷ 14-day ATR'],
@@ -582,10 +585,10 @@ function ProgressiveSizer({ accountBalance, trades, openPositions, quotes }) {
               key={id}
               onClick={() => setSizingMode(id)}
               title={desc}
-              className={`flex-1 py-1.5 rounded border text-xs font-medium transition-all ${
+              className={`flex-1 py-2.5 rounded-xl border text-sm font-semibold transition-all ${
                 sizingMode === id
                   ? 'text-accent-blue border-accent-blue/40 bg-accent-blue/10'
-                  : 'text-gray-600 border-gray-700 hover:border-gray-500 hover:text-gray-400'
+                  : 'text-gray-600 border-gray-700/50 hover:border-gray-500 hover:text-gray-400'
               }`}
             >
               {label}
@@ -593,70 +596,70 @@ function ProgressiveSizer({ accountBalance, trades, openPositions, quotes }) {
           ))}
         </div>
         {sizingMode === 'atr' && (
-          <p className="text-xs text-gray-600 mt-1">
+          <p className="text-xs text-gray-600 mt-1.5">
             Shares = ({riskPct}% × account) ÷ ATR. Stop = Entry − ATR.
           </p>
         )}
       </div>
 
       {/* Inputs */}
-      <div className="grid grid-cols-2 gap-3 mb-4">
+      <div className="grid grid-cols-2 gap-3 mb-5">
         <div>
-          <label className="label">Entry Price</label>
+          <label className="text-xs font-medium text-gray-400 uppercase tracking-wider block mb-1.5">Entry Price</label>
           <input type="number" step="0.01" value={entry} onChange={e => setEntry(e.target.value)}
-            placeholder="185.00" className="input text-xs mono" />
+            placeholder="185.00" className="input text-sm mono" />
         </div>
         {sizingMode === 'atr' ? (
           <div>
-            <label className="label">14-Day ATR ($)</label>
+            <label className="text-xs font-medium text-gray-400 uppercase tracking-wider block mb-1.5">14-Day ATR ($)</label>
             <input type="number" step="0.01" value={atr} onChange={e => setAtr(e.target.value)}
-              placeholder="3.50" className="input text-xs mono" />
+              placeholder="3.50" className="input text-sm mono" />
           </div>
         ) : (
           <div>
-            <label className="label">Stop Loss</label>
+            <label className="text-xs font-medium text-gray-400 uppercase tracking-wider block mb-1.5">Stop Loss</label>
             <input type="number" step="0.01" value={stop} onChange={e => setStop(e.target.value)}
-              placeholder="182.00" className="input text-xs mono" />
+              placeholder="182.00" className="input text-sm mono" />
           </div>
         )}
       </div>
 
       {/* Results */}
       {calc ? (
-        <div className="space-y-4">
+        <div className="space-y-5">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="card-sm text-center">
-              <p className="label mb-1">Total Shares</p>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Total Shares</p>
               <p className="text-2xl font-bold mono text-white">{calc.totalShares.toLocaleString()}</p>
             </div>
             <div className="card-sm text-center">
-              <p className="label mb-1">Risk (1R)</p>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Risk (1R)</p>
               <p className="text-xl font-bold mono text-accent-red">{formatCurrency(calc.dollarRisk)}</p>
               <p className="text-xs text-gray-600">${calc.riskPerShare.toFixed(2)}/share</p>
             </div>
             <div className="card-sm text-center">
-              <p className="label mb-1">{sizingMode === 'atr' ? 'Implied Stop' : 'Stop'}</p>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">{sizingMode === 'atr' ? 'Implied Stop' : 'Stop'}</p>
               <p className="text-xl font-bold mono text-accent-yellow">
                 {calc.impliedStop != null ? `$${calc.impliedStop.toFixed(2)}` : '—'}
               </p>
             </div>
             <div className="card-sm text-center">
-              <p className="label mb-1">2R Target</p>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">2R Target</p>
               <p className="text-xl font-bold mono text-accent-green">${calc.target2R.toFixed(2)}</p>
             </div>
           </div>
 
           <div>
-            <p className="text-xs text-gray-500 font-medium mb-2">Progressive Entry Plan</p>
+            <p className="text-sm font-semibold text-gray-300 mb-3">Progressive Entry Plan</p>
             <div className="space-y-2">
               {calc.tiers.map((t, i) => (
-                <div key={i} className="rounded-lg bg-surface-200 px-3 py-2.5 flex items-center justify-between">
+                <div key={i} className="rounded-xl bg-surface-200 border border-white/5 px-4 py-3 flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-medium text-gray-200">{t.label}</p>
+                    <p className="text-sm font-semibold text-gray-200">{t.label}</p>
                     <p className="text-xs text-gray-600 mt-0.5">{t.desc}</p>
                   </div>
                   <div className="text-right shrink-0 ml-4">
-                    <p className="text-sm font-bold mono text-white">{t.shares.toLocaleString()} shares</p>
+                    <p className="text-base font-bold mono text-white">{t.shares.toLocaleString()} shares</p>
                     <p className="text-xs text-gray-500">{formatCurrency(t.cost)} ({t.pct}%)</p>
                   </div>
                 </div>
@@ -1022,48 +1025,75 @@ export default function RiskPanel({ selectedAccount }) {
     return { rows, totalImpact }
   }, [stressScenario, openTrades, atrData, benchmarkAtrPct])
 
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+
   return (
-    <div className="p-4 flex flex-col gap-4">
-      <h2 className="text-base font-semibold text-white">Risk Overview</h2>
+    <div className="p-5 flex flex-col gap-5">
+
+      {/* ── Page header ───────────────────────────────────────────────────── */}
+      <div className="flex items-end justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Risk Overview</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{today}</p>
+        </div>
+        {accountBalance > 0 && (
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-bold text-white mono">{formatCurrency(accountBalance)}</span>
+            <span className="text-sm text-gray-500 font-medium">
+              {openTrades.length} open position{openTrades.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* ── Top widgets ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         {/* Open Heat Gauge */}
-        <div className="card flex flex-col items-center justify-center py-6">
+        <div className="relative flex flex-col items-center justify-center p-5 rounded-xl bg-surface-50 border border-white/8 border-l-2 border-l-accent-yellow overflow-hidden">
+          <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full opacity-[0.05] bg-accent-yellow blur-2xl pointer-events-none" />
+          <div className="self-start mb-2">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Portfolio Heat</p>
+          </div>
           <OpenHeatMeter pct={ner} />
+          <p className="text-xs text-gray-600 mt-1 text-center">
+            {ner < 2 ? 'Risk is well-controlled' : ner < 4 ? 'Moderate exposure — monitor closely' : 'High risk — consider reducing size'}
+          </p>
         </div>
 
         {/* NER / NEP */}
-        <div className="card space-y-4">
+        <div className="relative flex flex-col gap-4 p-5 rounded-xl bg-surface-50 border border-white/8 border-l-2 overflow-hidden
+          border-l-accent-red">
+          <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full opacity-[0.05] bg-accent-red blur-2xl pointer-events-none" />
           <div>
-            <p className="label">NER — Net Equity Risk</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">NER — Net Equity Risk</p>
             <p className={`text-3xl font-bold mono ${ner < 2 ? 'text-accent-green' : ner < 4 ? 'text-accent-yellow' : 'text-accent-red'}`}>
               {ner.toFixed(2)}%
             </p>
             <p className="text-xs text-gray-500 mt-1">% of account currently at risk</p>
           </div>
-          <div className="border-t border-white/10 pt-3">
-            <p className="label">NEP — Net Equity Points</p>
-            <p className="text-2xl font-semibold mono text-white">{formatCurrency(nep)}</p>
+          <div className="border-t border-white/10 pt-4">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">NEP — Net Equity Points</p>
+            <p className="text-2xl font-bold mono text-white">{formatCurrency(nep)}</p>
             <p className="text-xs text-gray-500 mt-1">Dollar amount at risk if all stops hit</p>
           </div>
         </div>
 
         {/* Account balance */}
-        <div className="card space-y-3">
+        <div className="relative flex flex-col gap-4 p-5 rounded-xl bg-surface-50 border border-white/8 border-l-2 border-l-accent-blue overflow-hidden">
+          <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full opacity-[0.05] bg-accent-blue blur-2xl pointer-events-none" />
           <div>
-            <p className="label">Account Balance</p>
-            <p className="text-2xl font-semibold mono text-white">{formatCurrency(accountBalance)}</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Account Balance</p>
+            <p className="text-2xl font-bold mono text-white">{formatCurrency(accountBalance)}</p>
             <p className="text-xs text-gray-500 mt-1">Calculated from deposits + closed P&amp;L</p>
           </div>
-          <div className="border-t border-white/10 pt-3">
-            <p className="label">Open Positions</p>
-            <p className="text-xl font-semibold mono text-accent-blue">{openTrades.length}</p>
+          <div className="border-t border-white/10 pt-4">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Open Positions</p>
+            <p className="text-2xl font-bold mono text-accent-blue">{openTrades.length}</p>
           </div>
           {dailyMoveEstimate > 0 && (
-            <div className="border-t border-white/10 pt-3">
-              <p className="label">Est. Daily Move</p>
-              <p className="text-xl font-semibold mono text-accent-yellow">{formatCurrency(dailyMoveEstimate)}</p>
+            <div className="border-t border-white/10 pt-4">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Est. Daily Move</p>
+              <p className="text-2xl font-bold mono text-accent-yellow">{formatCurrency(dailyMoveEstimate)}</p>
               <p className="text-xs text-gray-500 mt-1">
                 {accountBalance > 0 ? `${(dailyMoveEstimate / accountBalance * 100).toFixed(2)}% of account · ` : ''}ATR-based expected daily portfolio swing
               </p>
@@ -1074,8 +1104,11 @@ export default function RiskPanel({ selectedAccount }) {
 
       {/* ── Position Risk Breakdown ──────────────────────────────────────── */}
       <div className="card">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-gray-300">Open Position Risk Breakdown</h3>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Position Risk Breakdown</p>
+            <h3 className="text-base font-semibold text-white">Open Positions</h3>
+          </div>
           <div className="flex items-center gap-3">
             {lastRefresh && (
               <span className="text-xs text-gray-600">
@@ -1107,18 +1140,18 @@ export default function RiskPanel({ selectedAccount }) {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-xs text-gray-500 border-b border-white/5">
-                    <th className="text-left pb-2 font-medium">Symbol</th>
-                    <th className="text-right pb-2 font-medium">Last Price</th>
-                    <th className="text-right pb-2 font-medium">Entry</th>
-                    <th className="text-right pb-2 font-medium">Stop Loss</th>
-                    <th className="text-right pb-2 font-medium">1st Target</th>
-                    <th className="text-right pb-2 font-medium">Current R</th>
-                    <th className="text-right pb-2 font-medium">Unreal. P&amp;L</th>
-                    <th className="text-right pb-2 font-medium">Risk $</th>
-                    <th className="text-right pb-2 font-medium">Risk %</th>
-                    <th className="text-right pb-2 font-medium">Heat</th>
-                    <th className="pb-2" />
+                  <tr className="text-xs text-gray-400 border-b border-white/8 uppercase tracking-wider font-semibold">
+                    <th className="text-left pb-3 font-semibold">Symbol</th>
+                    <th className="text-right pb-3 font-semibold">Last</th>
+                    <th className="text-right pb-3 font-semibold">Entry</th>
+                    <th className="text-right pb-3 font-semibold">Stop</th>
+                    <th className="text-right pb-3 font-semibold">Target</th>
+                    <th className="text-right pb-3 font-semibold">Cur. R</th>
+                    <th className="text-right pb-3 font-semibold">Unreal. P&amp;L</th>
+                    <th className="text-right pb-3 font-semibold">Risk $</th>
+                    <th className="text-right pb-3 font-semibold">Risk %</th>
+                    <th className="text-right pb-3 font-semibold">Heat</th>
+                    <th className="pb-3" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -1412,32 +1445,35 @@ export default function RiskPanel({ selectedAccount }) {
       </div>
 
       {/* ── Max Pain Scenario + Portfolio Beta (2-col) ──────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
 
         {/* Max Pain Scenario */}
         <div className="card">
-          <h3 className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
-            <AlertTriangle size={14} className="text-accent-red" />
-            Max Pain Scenario
-          </h3>
-          <p className="text-xs text-gray-500 mb-4">If every open stop is triggered simultaneously:</p>
+          <div className="mb-4">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Worst Case</p>
+            <h3 className="text-base font-semibold text-white flex items-center gap-2">
+              <AlertTriangle size={15} className="text-accent-red" />
+              Max Pain Scenario
+            </h3>
+            <p className="text-xs text-gray-500 mt-1">If every open stop is triggered simultaneously:</p>
+          </div>
 
-          <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className="grid grid-cols-3 gap-3 mb-4">
             <div className="card-sm text-center">
-              <p className="label mb-1">Max Loss</p>
-              <p className={`text-lg font-bold mono ${nep > 0 ? 'text-accent-red' : 'text-gray-500'}`}>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Max Loss</p>
+              <p className={`text-xl font-bold mono ${nep > 0 ? 'text-accent-red' : 'text-gray-500'}`}>
                 {nep > 0 ? `-${formatCurrency(nep)}` : '—'}
               </p>
             </div>
             <div className="card-sm text-center">
-              <p className="label mb-1">Account After</p>
-              <p className="text-lg font-bold mono text-white">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Account After</p>
+              <p className="text-xl font-bold mono text-white">
                 {accountBalance > 0 && nep > 0 ? formatCurrency(maxPainAccount) : '—'}
               </p>
             </div>
             <div className="card-sm text-center">
-              <p className="label mb-1">Drawdown</p>
-              <p className={`text-lg font-bold mono ${
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Drawdown</p>
+              <p className={`text-xl font-bold mono ${
                 maxPainPct < 2 ? 'text-accent-green'
                 : maxPainPct < 5 ? 'text-accent-yellow'
                 : 'text-accent-red'
@@ -1475,8 +1511,9 @@ export default function RiskPanel({ selectedAccount }) {
           )}
 
           {/* ATR Stress Test */}
-          <div className="mt-4 pt-3 border-t border-white/10">
-            <p className="text-xs text-gray-500 mb-2">ATR Stress Test — estimated impact if market drops:</p>
+          <div className="mt-5 pt-4 border-t border-white/10">
+            <p className="text-sm font-semibold text-gray-300 mb-1">ATR Stress Test</p>
+            <p className="text-xs text-gray-500 mb-3">Estimated impact if the market drops:</p>
             <div className="flex items-center gap-1.5 flex-wrap mb-3">
               {[1, 2, 3, 5].map(pct => (
                 <button
@@ -1527,11 +1564,14 @@ export default function RiskPanel({ selectedAccount }) {
 
         {/* Effective Market Exposure */}
         <div className="card">
-          <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-            <h3 className="text-sm font-medium text-gray-300 flex items-center gap-2">
-              <Zap size={14} className="text-accent-blue" />
-              Effective Market Exposure
-            </h3>
+          <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Portfolio Volatility</p>
+              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                <Zap size={15} className="text-accent-blue" />
+                Effective Market Exposure
+              </h3>
+            </div>
             {/* SPY / QQQ inline toggle */}
             <div className="flex gap-0.5 bg-surface-300 rounded p-0.5 border border-white/5">
               {['SPY', 'QQQ'].map(sym => (
@@ -1552,7 +1592,7 @@ export default function RiskPanel({ selectedAccount }) {
           </div>
 
           {/* Benchmark ATR baseline */}
-          <div className="flex items-center gap-2 mb-3 text-xs flex-wrap">
+          <div className="flex items-center gap-2 mb-4 text-xs flex-wrap">
             <span className="text-gray-500">{benchmarkSymbol} daily ATR%:</span>
             <input
               type="number"
@@ -1574,9 +1614,9 @@ export default function RiskPanel({ selectedAccount }) {
           ) : (
             <>
               {/* 3 summary tiles */}
-              <div className="grid grid-cols-3 gap-2 mb-3">
+              <div className="grid grid-cols-3 gap-3 mb-4">
                 <div className="card-sm text-center">
-                  <p className="label mb-1">Cash Deployed</p>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Cash Deployed</p>
                   <p className={`text-xl font-bold mono ${
                     exposure.cashPct > 100 ? 'text-accent-red'
                     : exposure.cashPct > 80 ? 'text-accent-yellow'
@@ -1585,7 +1625,7 @@ export default function RiskPanel({ selectedAccount }) {
                   <p className="text-xs text-gray-600">of account</p>
                 </div>
                 <div className="card-sm text-center">
-                  <p className="label mb-1">{benchmarkSymbol} Equiv</p>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">{benchmarkSymbol} Equiv</p>
                   <p className={`text-xl font-bold mono ${
                     exposure.effectivePct > 100 ? 'text-accent-red'
                     : exposure.effectivePct > 75 ? 'text-accent-yellow'
@@ -1596,7 +1636,7 @@ export default function RiskPanel({ selectedAccount }) {
                   <p className="text-xs text-gray-600">effective exposure</p>
                 </div>
                 <div className="card-sm text-center">
-                  <p className="label mb-1">Vol Factor</p>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Vol Factor</p>
                   <p className={`text-xl font-bold mono ${
                     exposure.leverageFactor > 1.5 ? 'text-accent-red'
                     : exposure.leverageFactor > 1.1 ? 'text-accent-yellow'
@@ -1689,11 +1729,14 @@ export default function RiskPanel({ selectedAccount }) {
 
       {/* ── Sector Concentration ─────────────────────────────────────────── */}
       <div className="card">
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <h3 className="text-sm font-medium text-gray-300 flex items-center gap-2">
-            <Layers size={14} className="text-accent-blue" />
-            Sector Concentration
-          </h3>
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Diversification</p>
+            <h3 className="text-base font-semibold text-white flex items-center gap-2">
+              <Layers size={15} className="text-accent-blue" />
+              Sector Concentration
+            </h3>
+          </div>
           <div className="flex items-center gap-2">
             {/* View mode toggle */}
             {enrichedSectors.length > 0 && (
@@ -1732,7 +1775,7 @@ export default function RiskPanel({ selectedAccount }) {
 
         {/* Mode description */}
         {enrichedSectors.length > 0 && (
-          <p className="text-xs text-gray-600 mb-3">
+          <p className="text-xs text-gray-500 mb-4">
             {sectorViewMode === 'deployed' && 'Showing concentration as % of total deployed capital. A single sector at 100% may only be a small slice of your account.'}
             {sectorViewMode === 'account'  && 'Showing concentration as % of total account balance — reflects the true scale of exposure.'}
             {sectorViewMode === 'atr'      && (enrichedSectors.some(s => s.hasAtr)

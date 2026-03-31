@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { ChevronDown, ChevronRight, Trash2, Sparkles, Pencil, Check, X, BarChart2, Image } from 'lucide-react'
+import { ChevronDown, ChevronRight, Trash2, Sparkles, Pencil, Check, X, BarChart2, Image, ZoomIn } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { formatCurrency, formatDate, formatR, signClass } from '../../utils/formatters.js'
@@ -243,6 +243,7 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
   const [aiLoading, setAiLoading]         = useState(false)
   const [editing, setEditing]             = useState(false)
   const [draft, setDraft]                 = useState({})
+  const [lightboxSrc, setLightboxSrc]     = useState(null)
   const { apiKey, accounts: settingsAccounts } = useSettingsStore()
   const { trades: allTrades }             = useTradeStore()
 
@@ -510,6 +511,64 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
                   <p className="text-xs text-gray-300 leading-relaxed">{trade.exitNotes}</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Screenshots (entry / exit / additional) */}
+          {(trade.screenshotEntry || trade.screenshotExit || trade.screenshotsAdditional?.length > 0) && (() => {
+            const shots = [
+              ...(trade.screenshotEntry ? [{ src: trade.screenshotEntry, label: 'Entry' }] : []),
+              ...(trade.screenshotExit  ? [{ src: trade.screenshotExit,  label: 'Exit'  }] : []),
+              ...((trade.screenshotsAdditional || []).map((s, i) => ({ src: s, label: `Note ${i + 1}` }))),
+            ]
+            return (
+              <div className="mb-3">
+                <p className="text-xs text-gray-500 mb-1.5">Screenshots</p>
+                <div className="flex flex-wrap gap-2">
+                  {shots.map((shot, i) => (
+                    <div
+                      key={i}
+                      className="relative group cursor-pointer rounded-lg overflow-hidden border border-white/10 hover:border-accent-blue/40 transition-colors"
+                      style={{ height: 96 }}
+                      onClick={() => setLightboxSrc(shot.src)}
+                    >
+                      <img
+                        src={shot.src}
+                        alt={shot.label}
+                        className="h-full w-auto object-contain bg-black"
+                      />
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity">
+                        <ZoomIn size={18} className="text-white" />
+                      </div>
+                      <span className="absolute bottom-1 left-1 text-[10px] bg-black/70 text-gray-300 px-1.5 py-0.5 rounded font-medium">
+                        {shot.label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Lightbox */}
+          {lightboxSrc && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm"
+              onClick={() => setLightboxSrc(null)}
+            >
+              <button
+                onClick={() => setLightboxSrc(null)}
+                className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"
+              >
+                <X size={18} />
+              </button>
+              <img
+                src={lightboxSrc}
+                alt="Screenshot"
+                className="object-contain rounded-lg shadow-2xl"
+                style={{ maxWidth: 'calc(100vw - 80px)', maxHeight: 'calc(100vh - 80px)', width: 'auto', height: 'auto' }}
+                onClick={e => e.stopPropagation()}
+              />
             </div>
           )}
 
