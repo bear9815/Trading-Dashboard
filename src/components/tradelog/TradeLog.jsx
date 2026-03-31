@@ -1,11 +1,12 @@
 import React, { useState, useMemo } from 'react'
-import { ChevronDown, ChevronRight, Trash2, Sparkles, Pencil, Check, X, BarChart2, Image, ZoomIn } from 'lucide-react'
+import { ChevronDown, ChevronRight, Trash2, Sparkles, Pencil, Check, X, BarChart2, Image, ZoomIn, Clipboard, Upload, Loader2 } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { formatCurrency, formatDate, formatR, signClass } from '../../utils/formatters.js'
 import { analyzeSingleTrade } from '../../utils/ai.js'
 import { enrichTrade } from '../../utils/enrichTrade.js'
 import { calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor, calcTotalR } from '../../utils/metrics.js'
+import { compressImage } from '../../utils/imageUtils.js'
 import TradeChart from './TradeChart.jsx'
 import ChartGallery from '../shared/ChartGallery.jsx'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
@@ -244,6 +245,8 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
   const [editing, setEditing]             = useState(false)
   const [draft, setDraft]                 = useState({})
   const [lightboxSrc, setLightboxSrc]     = useState(null)
+  const [ssTarget, setSsTarget]           = useState('entry')
+  const [ssUploading, setSsUploading]     = useState(false)
   const { apiKey, accounts: settingsAccounts } = useSettingsStore()
   const { trades: allTrades }             = useTradeStore()
 
@@ -259,6 +262,47 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
     } finally {
       setAiLoading(false)
     }
+  }
+
+  async function processScreenshotFile(file) {
+    setSsUploading(true)
+    try {
+      const { base64, mimeType } = await compressImage(file)
+      const dataUrl = `data:${mimeType};base64,${base64}`
+      if (ssTarget === 'entry') {
+        onUpdate(trade.id, { screenshotEntry: dataUrl })
+      } else if (ssTarget === 'exit') {
+        onUpdate(trade.id, { screenshotExit: dataUrl })
+      } else {
+        onUpdate(trade.id, { screenshotsAdditional: [...(trade.screenshotsAdditional || []), dataUrl] })
+      }
+    } catch (e) {
+      console.error('Screenshot error:', e)
+    } finally {
+      setSsUploading(false)
+    }
+  }
+
+  async function handlePaste() {
+    try {
+      const clipItems = await navigator.clipboard.read()
+      for (const item of clipItems) {
+        const imageType = item.types.find(t => t.startsWith('image/'))
+        if (imageType) {
+          const blob = await item.getType(imageType)
+          await processScreenshotFile(blob)
+          return
+        }
+      }
+    } catch (e) {
+      console.error('Clipboard read failed:', e)
+    }
+  }
+
+  function handleFileInput(e) {
+    const file = e.target.files?.[0]
+    if (file) processScreenshotFile(file)
+    e.target.value = ''
   }
 
   function startEdit() {
@@ -515,7 +559,7 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
           )}
 
           {/* Screenshots (entry / exit / additional) */}
-          {(trade.screenshotEntry || trade.screenshotExit || trade.screenshotsAdditional?.length > 0) && (() => {
+          {(() => {
             const shots = [
               ...(trade.screenshotEntry ? [{ src: trade.screenshotEntry, label: 'Entry' }] : []),
               ...(trade.screenshotExit  ? [{ src: trade.screenshotExit,  label: 'Exit'  }] : []),
@@ -523,28 +567,61 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
             ]
             return (
               <div className="mb-3">
-                <p className="text-xs text-gray-500 mb-1.5">Screenshots</p>
-                <div className="flex flex-wrap gap-2">
-                  {shots.map((shot, i) => (
-                    <div
-                      key={i}
-                      className="relative group cursor-pointer rounded-lg overflow-hidden border border-white/10 hover:border-accent-blue/40 transition-colors"
-                      style={{ height: 96 }}
-                      onClick={() => setLightboxSrc(shot.src)}
-                    >
-                      <img
-                        src={shot.src}
-                        alt={shot.label}
-                        className="h-full w-auto object-contain bg-black"
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity">
-                        <ZoomIn size={18} className="text-white" />
-                      </div>
-                      <span className="absolute bottom-1 left-1 text-[10px] bg-black/70 text-gray-300 px-1.5 py-0.5 rounded font-medium">
-                        {shot.label}
-                      </span>
+                {shots.length > 0 && (
+                  <>
+                    <p className="text-xs text-gray-500 mb-1.5">Screenshots</p>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {shots.map((shot, i) => (
+                        <div
+                          key={i}
+                          className="relative group cursor-pointer rounded-lg overflow-hidden border border-white/10 hover:border-accent-blue/40 transition-colors"
+                          style={{ height: 96 }}
+                          onClick={() => setLightboxSrc(shot.src)}
+                        >
+                          <img
+                            src={shot.src}
+                            alt={shot.label}
+                            className="h-full w-auto object-contain bg-black"
+                          />
+                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity">
+                            <ZoomIn size={18} className="text-white" />
+                          </div>
+                          <span className="absolute bottom-1 left-1 text-[10px] bg-black/70 text-gray-300 px-1.5 py-0.5 rounded font-medium">
+                            {shot.label}
+                          </span>
+                        </div>
+                      ))}
                     </div>
+                  </>
+                )}
+                {/* Add screenshot control */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-gray-500">Add screenshot:</span>
+                  {[['entry', 'Entry'], ['exit', 'Exit'], ['additional', 'Additional']].map(([val, label]) => (
+                    <button
+                      key={val}
+                      onClick={() => setSsTarget(val)}
+                      className={`text-xs px-2 py-0.5 rounded-full border transition-all ${
+                        ssTarget === val
+                          ? 'bg-accent-blue/20 text-accent-blue border-accent-blue/40'
+                          : 'text-gray-500 border-gray-700 hover:border-gray-500 hover:text-gray-400'
+                      }`}
+                    >
+                      {label}
+                    </button>
                   ))}
+                  <button
+                    onClick={handlePaste}
+                    disabled={ssUploading}
+                    className="btn-ghost text-xs flex items-center gap-1 disabled:opacity-50"
+                  >
+                    {ssUploading ? <Loader2 size={11} className="animate-spin" /> : <Clipboard size={11} />}
+                    Paste
+                  </button>
+                  <label className="btn-ghost text-xs flex items-center gap-1 cursor-pointer">
+                    <Upload size={11} /> Upload
+                    <input type="file" accept="image/*" className="hidden" onChange={handleFileInput} disabled={ssUploading} />
+                  </label>
                 </div>
               </div>
             )

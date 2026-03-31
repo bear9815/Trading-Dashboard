@@ -9,6 +9,14 @@
       "autoPort": true
     },
     {
+      "name": "trading-dashboard",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/calebearden/Trading Dashboard",
+      "port": 5174,
+      "autoPort": true
+    },
+    {
       "name": "pantry-chef",
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "cd /Users/calebearden/PantryChef && npx expo start --web --port 8081"],
