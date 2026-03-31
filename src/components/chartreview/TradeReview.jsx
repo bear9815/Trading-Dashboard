@@ -82,14 +82,18 @@ function Lightbox({ shots, index, onClose, onPrev, onNext }) {
         </button>
       )}
 
-      {/* Image — 2× bigger: use 90% of viewport with no shrinking */}
-      <img
-        src={shot?.src}
-        alt={shot?.label || 'Screenshot'}
-        className="object-contain rounded-lg shadow-2xl"
-        style={{ width: '90vw', height: '90vh', objectFit: 'contain' }}
+      {/* Image — wrapper div owns the dimensions so img CSS resets can't interfere */}
+      <div
+        style={{ width: '90vw', height: '90vh', flexShrink: 0 }}
         onClick={e => e.stopPropagation()}
-      />
+      >
+        <img
+          src={shot?.src}
+          alt={shot?.label || 'Screenshot'}
+          className="rounded-lg shadow-2xl"
+          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+        />
+      </div>
     </div>
   )
 }
