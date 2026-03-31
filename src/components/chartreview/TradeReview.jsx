@@ -82,18 +82,14 @@ function Lightbox({ shots, index, onClose, onPrev, onNext }) {
         </button>
       )}
 
-      {/* Image — wrapper div owns the dimensions so img CSS resets can't interfere */}
-      <div
-        style={{ width: '90vw', height: '90vh', flexShrink: 0 }}
+      {/* Image — max constraints prevent upscaling blur; natural size fills most of screen */}
+      <img
+        src={shot?.src}
+        alt={shot?.label || 'Screenshot'}
+        className="rounded-lg shadow-2xl"
+        style={{ maxWidth: '92vw', maxHeight: '92vh', width: 'auto', height: 'auto', display: 'block' }}
         onClick={e => e.stopPropagation()}
-      >
-        <img
-          src={shot?.src}
-          alt={shot?.label || 'Screenshot'}
-          className="rounded-lg shadow-2xl"
-          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-        />
-      </div>
+      />
     </div>
   )
 }

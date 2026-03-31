@@ -7,7 +7,7 @@
  * Resizes so the longest edge ≤ maxPx and encodes at `quality`.
  * Returns { base64, mimeType, width, height, sizeKB }
  */
-export function compressImage(file, maxPx = 1200, quality = 0.78) {
+export function compressImage(file, maxPx = 2400, quality = 0.82) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onerror = reject

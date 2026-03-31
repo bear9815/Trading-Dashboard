@@ -31,11 +31,11 @@ function readImageAsBase64(file) {
 }
 
 /**
- * Compress a base64 image via canvas to reduce localStorage footprint.
- * Max dimension 1200px, JPEG quality 0.72 → ~100-200 KB vs 2-5 MB raw PNG.
+ * Compress a base64 image via canvas to reduce storage footprint.
+ * Max dimension 2400px, JPEG quality 0.85 → sharp on retina displays.
  * Falls back to the original string if anything fails.
  */
-function compressImage(base64, maxPx = 900, quality = 0.60) {
+function compressImage(base64, maxPx = 2400, quality = 0.85) {
   return new Promise(resolve => {
     const img = new Image()
     img.onload = () => {
