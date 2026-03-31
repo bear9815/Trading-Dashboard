@@ -74,69 +74,100 @@ export default function Dashboard({ selectedAccount }) {
   const dailyLimitReached = dailyLimitDollar > 0 && todayLoss >= dailyLimitDollar
   const dailyLimitWarning = dailyLimitDollar > 0 && !dailyLimitReached && todayLoss >= dailyLimitDollar * 0.75
 
-  return (
-    <div className="flex flex-col gap-4 p-4">
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+  const wins  = closedTrades.filter(t => t.status === 'Win').length
+  const losses = closedTrades.filter(t => t.status === 'Loss').length
 
-      {/* ── Daily loss limit banners ──────────────────────────────────────── */}
+  return (
+    <div className="flex flex-col gap-5 p-5">
+
+      {/* ── Page header ───────────────────────────────────────────────────── */}
+      <div className="flex items-end justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{today}</p>
+        </div>
+        {accountBalance > 0 && (
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-bold text-white mono">{formatCurrency(accountBalance)}</span>
+            <span className={`text-sm font-semibold mono ${signClass(netPL)}`}>
+              {netPL >= 0 ? '+' : ''}{formatCurrency(netPL, true)} all-time
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* ── Alert banners ────────────────────────────────────────────────── */}
       {dailyLimitReached && (
-        <div className="rounded-lg px-4 py-3 flex items-start gap-3 bg-accent-red/15 border border-accent-red/30 text-accent-red">
+        <div className="rounded-xl px-4 py-3 flex items-start gap-3 bg-accent-red/10 border border-accent-red/25 text-accent-red">
           <ShieldAlert size={18} className="shrink-0 mt-0.5" />
           <div>
             <p className="font-semibold text-sm">Daily Loss Limit Reached — Stop Trading</p>
             <p className="text-xs opacity-80 mt-0.5">
               Today's loss of <strong>{formatCurrency(Math.abs(todayPL))}</strong> has hit your{' '}
               <strong>{dailyLossLimit}%</strong> daily limit ({formatCurrency(dailyLimitDollar)}).
-              Protect your capital and step away for the day.
             </p>
           </div>
         </div>
       )}
       {dailyLimitWarning && (
-        <div className="rounded-lg px-4 py-3 flex items-start gap-3 bg-accent-yellow/10 border border-accent-yellow/20 text-accent-yellow">
+        <div className="rounded-xl px-4 py-3 flex items-start gap-3 bg-accent-yellow/8 border border-accent-yellow/20 text-accent-yellow">
           <AlertTriangle size={18} className="shrink-0 mt-0.5" />
           <div>
             <p className="font-semibold text-sm">Approaching Daily Loss Limit</p>
             <p className="text-xs opacity-80 mt-0.5">
-              Today's loss: <strong>{formatCurrency(Math.abs(todayPL))}</strong> ·
-              Limit: <strong>{formatCurrency(dailyLimitDollar)}</strong> ({dailyLossLimit}%) ·
+              Loss: <strong>{formatCurrency(Math.abs(todayPL))}</strong> ·
+              Limit: <strong>{formatCurrency(dailyLimitDollar)}</strong> ·
               Remaining: <strong>{formatCurrency(dailyLimitDollar - todayLoss)}</strong>
             </p>
           </div>
         </div>
       )}
-
-      {/* ── Excluded symbols notice ───────────────────────────────────────── */}
+      {streak.count >= 2 && (
+        <div className={`rounded-xl px-4 py-2.5 flex items-center gap-3 text-sm border
+          ${streak.type === 'Win'
+            ? 'bg-accent-green/8 border-accent-green/20 text-accent-green'
+            : 'bg-accent-red/8 border-accent-red/20 text-accent-red'}`}>
+          <span className="text-lg">{streak.type === 'Win' ? '🔥' : '❄️'}</span>
+          <div>
+            <span className="font-bold">{streak.count}-{streak.type} Streak</span>
+            <span className="text-xs opacity-70 ml-2">— manage your size accordingly</span>
+          </div>
+        </div>
+      )}
       {excludedSymbols.length > 0 && (
-        <div className="rounded-lg px-3 py-1.5 flex items-center gap-2 bg-surface-200 border border-white/5 text-xs text-gray-500">
+        <div className="rounded-xl px-3 py-2 flex items-center gap-2 bg-surface-200 border border-white/5 text-xs text-gray-500">
           <span>Stats exclude:</span>
           {excludedSymbols.map(s => (
             <span key={s} className="mono text-gray-400 bg-surface-300 rounded px-1.5 py-0.5">{s}</span>
           ))}
-          <span className="ml-1">— their P&L still counts toward account balance</span>
         </div>
       )}
 
-      {/* ── Top metrics row ───────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      {/* ── Metrics grid ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
         <MetricCard
           label="Net P&L"
           value={formatCurrency(netPL, true)}
           valueClass={signClass(netPL)}
           icon={DollarSign}
-          sub={`${filtered.length} trades`}
+          accent={netPL >= 0 ? 'green' : 'red'}
+          sub={`${filtered.length} total trades`}
         />
         <MetricCard
           label="Win Rate"
           value={`${winRate.toFixed(1)}%`}
           valueClass={winRate >= 50 ? 'text-accent-green' : 'text-accent-red'}
           icon={Percent}
-          sub={`${closedTrades.filter(t => t.status === 'Win').length}W / ${closedTrades.filter(t => t.status === 'Loss').length}L`}
+          accent={winRate >= 50 ? 'green' : 'red'}
+          sub={`${wins}W · ${losses}L`}
         />
         <MetricCard
           label="Avg R-Multiple"
           value={formatR(avgR)}
           valueClass={signClass(avgR)}
           icon={TrendingUp}
+          accent={avgR >= 0 ? 'green' : 'red'}
           sub="per closed trade"
         />
         <MetricCard
@@ -144,6 +175,7 @@ export default function Dashboard({ selectedAccount }) {
           value={formatCurrency(expectancy, true)}
           valueClass={signClass(expectancy)}
           icon={Target}
+          accent={expectancy >= 0 ? 'green' : 'red'}
           sub="per trade"
         />
         <MetricCard
@@ -151,46 +183,37 @@ export default function Dashboard({ selectedAccount }) {
           value={isFinite(profitFactor) ? profitFactor.toFixed(2) : '∞'}
           valueClass={profitFactor >= 1.5 ? 'text-accent-green' : profitFactor >= 1 ? 'text-accent-yellow' : 'text-accent-red'}
           icon={BarChart}
-          sub="gross win/loss"
+          accent={profitFactor >= 1.5 ? 'green' : profitFactor >= 1 ? 'yellow' : 'red'}
+          sub="gross win / loss"
         />
         <MetricCard
           label="Open Heat"
           value={`${ner.toFixed(2)}%`}
           valueClass={ner < 2 ? 'text-accent-green' : ner < 4 ? 'text-accent-yellow' : 'text-accent-red'}
           icon={Zap}
+          accent={ner < 2 ? 'green' : ner < 4 ? 'yellow' : 'red'}
           sub={`${formatCurrency(nep, true)} at risk`}
         />
       </div>
 
-      {/* ── Streak banner ─────────────────────────────────────────────────── */}
-      {streak.count >= 2 && (
-        <div className={`rounded-lg px-4 py-2 flex items-center gap-2 text-sm border
-          ${streak.type === 'Win'
-            ? 'bg-accent-green/10 border-accent-green/20 text-accent-green'
-            : 'bg-accent-red/10 border-accent-red/20 text-accent-red'}`}>
-          <span className="font-semibold">{streak.count} {streak.type} Streak</span>
-          <span className="text-xs opacity-70">— manage your size accordingly</span>
-        </div>
-      )}
-
-      {/* ── Trading Thoughts ──────────────────────────────────────────────── */}
-      <TradingThoughts />
-
-      {/* ── Charts row ────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
+      {/* ── Equity + Heatmap ─────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-stretch">
         <div className="lg:col-span-2 flex flex-col">
           <EquityCurve data={equityCurve} />
         </div>
         <CalendarHeatmap dailyPL={dailyPL} />
       </div>
 
-      {/* ── Open Positions ────────────────────────────────────────────────── */}
+      {/* ── Trading Thoughts ─────────────────────────────────────────────── */}
+      <TradingThoughts />
+
+      {/* ── Open Positions ───────────────────────────────────────────────── */}
       <OpenPositions openTrades={openTrades} accountBalance={accountBalance} />
 
-      {/* ── Earnings Calendar ─────────────────────────────────────────────── */}
+      {/* ── Earnings Calendar ────────────────────────────────────────────── */}
       <EarningsCalendar openTrades={openTrades} />
 
-      {/* ── Live Schwab Positions ──────────────────────────────────────────── */}
+      {/* ── Live Positions ───────────────────────────────────────────────── */}
       <LivePositions />
     </div>
   )

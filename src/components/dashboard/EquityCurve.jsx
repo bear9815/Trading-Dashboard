@@ -73,25 +73,42 @@ export default function EquityCurve({ data, startBalance }) {
 
   const isPositive = formatted[formatted.length - 1]?.balance >= (startBalance || formatted[0]?.balance)
 
+  const lastBalance = formatted[formatted.length - 1]?.balance
+  const firstBalance = formatted[0]?.balance
+  const change = lastBalance != null && firstBalance != null ? lastBalance - firstBalance : null
+  const changePct = firstBalance ? (change / Math.abs(firstBalance)) * 100 : null
+
   return (
-    <div className="card flex-1 flex flex-col" style={{ minHeight: 200 }}>
-      <div className="flex items-center justify-between mb-3 shrink-0">
-        <h3 className="text-sm font-medium text-gray-300">Equity Curve</h3>
+    <div className="card flex-1 flex flex-col" style={{ minHeight: 220 }}>
+      <div className="flex items-start justify-between mb-4 shrink-0 flex-wrap gap-2">
+        <div>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Equity Curve</p>
+          {lastBalance != null && (
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-white mono">{formatCurrency(lastBalance)}</span>
+              {change != null && (
+                <span className={`text-sm font-semibold mono ${isPositive ? 'text-accent-green' : 'text-accent-red'}`}>
+                  {change >= 0 ? '+' : ''}{formatCurrency(change, true)}
+                  {changePct != null && ` (${changePct >= 0 ? '+' : ''}${changePct.toFixed(1)}%)`}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
         <div className="flex items-center gap-1">
           {RANGES.map(r => (
             <button
               key={r.label}
               onClick={() => selectRange(r.label)}
-              className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
                 range === r.label
-                  ? 'bg-accent-blue/20 text-accent-blue'
+                  ? 'bg-accent-blue/20 text-accent-blue border border-accent-blue/30'
                   : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
               }`}
             >
               {r.label}
             </button>
           ))}
-          <span className="text-xs text-gray-600 ml-1">{filtered.length} pts</span>
         </div>
       </div>
       {/* Absolute-position wrapper — required for Recharts height="100%" in flex/grid */}
