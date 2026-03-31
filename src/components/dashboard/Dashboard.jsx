@@ -87,14 +87,6 @@ export default function Dashboard({ selectedAccount }) {
           <h1 className="text-5xl font-bold text-white">Dashboard</h1>
           <p className="text-xl text-gray-500 mt-0.5">{today}</p>
         </div>
-        {accountBalance > 0 && (
-          <div className="flex items-baseline gap-2">
-            <span className="text-6xl font-bold text-white mono">{formatCurrency(accountBalance)}</span>
-            <span className={`text-2xl font-semibold mono ${signClass(netPL)}`}>
-              {netPL >= 0 ? '+' : ''}{formatCurrency(netPL, true)} all-time
-            </span>
-          </div>
-        )}
       </div>
 
       {/* ── Alert banners ────────────────────────────────────────────────── */}

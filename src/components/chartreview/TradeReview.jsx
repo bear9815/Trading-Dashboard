@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { formatCurrency } from '../../utils/formatters.js'
-import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, ZoomIn, ZoomOut } from 'lucide-react'
+import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List } from 'lucide-react'
 
 // ── Duration helper ───────────────────────────────────────────────────────────
 function tradeDuration(trade) {
@@ -24,10 +24,6 @@ function Lightbox({ shots, index, onClose, onPrev, onNext }) {
   const shot = shots[index]
   const hasPrev = index > 0
   const hasNext = index < shots.length - 1
-  const [zoomed, setZoomed] = useState(false)
-
-  // Reset zoom when switching images
-  useEffect(() => { setZoomed(false) }, [index])
 
   useEffect(() => {
     const handler = (e) => {
@@ -41,72 +37,58 @@ function Lightbox({ shots, index, onClose, onPrev, onNext }) {
 
   return (
     <div
-      className={`fixed inset-0 z-50 bg-black/95 backdrop-blur-sm ${zoomed ? 'overflow-auto' : 'flex items-center justify-center'}`}
-      onClick={zoomed ? undefined : onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm"
+      onClick={onClose}
     >
-      {/* Top-right controls */}
-      <div className="fixed top-4 right-4 flex items-center gap-2 z-10">
-        {/* Zoom toggle */}
-        <button
-          onClick={e => { e.stopPropagation(); setZoomed(z => !z) }}
-          className="p-2 rounded-full bg-white/10 hover:bg-white/25 transition-colors text-white"
-          title={zoomed ? 'Fit to screen (Z)' : 'Zoom to full size (Z)'}
-        >
-          {zoomed ? <ZoomOut size={18} /> : <ZoomIn size={18} />}
-        </button>
-        {/* Close */}
-        <button
-          onClick={onClose}
-          className="p-2 rounded-full bg-white/10 hover:bg-white/25 transition-colors text-white"
-        >
-          <X size={18} />
-        </button>
-      </div>
+      {/* Close */}
+      <button
+        onClick={onClose}
+        className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"
+      >
+        <X size={18} />
+      </button>
 
       {/* Counter */}
       {shots.length > 1 && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/10 text-white text-xs font-medium z-10">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/10 text-white text-xs font-medium z-10">
           {index + 1} / {shots.length}
         </div>
       )}
 
       {/* Label */}
       {shot?.label && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/10 text-white text-xs font-medium z-10">
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/10 text-white text-xs font-medium z-10">
           {shot.label}
         </div>
       )}
 
       {/* Prev arrow */}
-      {!zoomed && hasPrev && (
+      {hasPrev && (
         <button
           onClick={e => { e.stopPropagation(); onPrev() }}
-          className="fixed left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"
+          className="absolute left-4 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"
         >
           <ChevronLeft size={22} />
         </button>
       )}
 
       {/* Next arrow */}
-      {!zoomed && hasNext && (
+      {hasNext && (
         <button
           onClick={e => { e.stopPropagation(); onNext() }}
-          className="fixed right-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"
+          className="absolute right-4 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"
         >
           <ChevronRight size={22} />
         </button>
       )}
 
-      {/* Image */}
+      {/* Image — 2× bigger: use 90% of viewport with no shrinking */}
       <img
         src={shot?.src}
         alt={shot?.label || 'Screenshot'}
-        className={`rounded-lg shadow-2xl object-contain ${zoomed ? 'cursor-zoom-out block' : 'cursor-zoom-in'}`}
-        style={zoomed
-          ? { maxWidth: 'none', maxHeight: 'none', width: 'auto', height: 'auto', margin: '60px auto', display: 'block' }
-          : { maxWidth: 'calc(100vw - 80px)', maxHeight: 'calc(100vh - 80px)', width: 'auto', height: 'auto' }
-        }
-        onClick={e => { e.stopPropagation(); setZoomed(z => !z) }}
+        className="object-contain rounded-lg shadow-2xl"
+        style={{ width: '90vw', height: '90vh', objectFit: 'contain' }}
+        onClick={e => e.stopPropagation()}
       />
     </div>
   )
