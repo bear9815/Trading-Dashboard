@@ -213,6 +213,72 @@ function SectionCard({ accentColor = '#3d84ff', icon: Icon, title, children }) {
   )
 }
 
+// ── Bullet textarea ───────────────────────────────────────────────────────────
+
+function BulletTextarea({ value, onChange, placeholder, rows = 4 }) {
+  const BULLET = '• '
+
+  function handleKeyDown(e) {
+    const el = e.currentTarget
+    const { selectionStart, selectionEnd } = el
+    const val = el.value
+
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      const before = val.slice(0, selectionStart)
+      const after  = val.slice(selectionEnd)
+      // Start next line with a bullet
+      const insert = '\n' + BULLET
+      const next   = before + insert + after
+      onChange(next)
+      // Move cursor after the new bullet
+      requestAnimationFrame(() => {
+        el.selectionStart = el.selectionEnd = selectionStart + insert.length
+      })
+    }
+
+    if (e.key === 'Backspace') {
+      const lineStart = val.lastIndexOf('\n', selectionStart - 1) + 1
+      const linePrefix = val.slice(lineStart, selectionStart)
+      // If the cursor is right after a lone bullet, remove the whole bullet
+      if (linePrefix === BULLET && selectionStart === selectionEnd) {
+        e.preventDefault()
+        const next = val.slice(0, lineStart) + val.slice(selectionStart)
+        onChange(next)
+        requestAnimationFrame(() => {
+          el.selectionStart = el.selectionEnd = lineStart
+        })
+      }
+    }
+  }
+
+  function handleChange(e) {
+    let val = e.target.value
+    // Auto-prefix first line with bullet if user starts typing fresh
+    if (val && !val.startsWith(BULLET) && !val.startsWith('\n')) {
+      val = BULLET + val
+    }
+    onChange(val)
+  }
+
+  // Ensure existing value starts with bullet
+  const displayValue = value && !value.startsWith(BULLET) && !value.startsWith('\n')
+    ? BULLET + value
+    : value
+
+  return (
+    <textarea
+      value={displayValue}
+      onChange={handleChange}
+      onKeyDown={handleKeyDown}
+      placeholder={BULLET + placeholder}
+      rows={rows}
+      className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm
+                 text-gray-200 focus:outline-none focus:border-accent-blue/50 resize-none leading-relaxed"
+    />
+  )
+}
+
 // ── Field label ───────────────────────────────────────────────────────────────
 
 function FieldLabel({ children, hint }) {
@@ -317,15 +383,9 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
               <PillSelect value={form.mentalState} onChange={v => set('mentalState', v)} options={MENTAL_OPTIONS} />
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <div>
-              <FieldLabel hint="0 = calm · 100 = max FOMO">FOMO Index</FieldLabel>
-              <SliderInput value={form.fomo} onChange={v => set('fomo', v)} min={0} max={100} colorFn={fomoColor} placeholder="50" />
-            </div>
-            <div>
-              <FieldLabel hint="−5 fear → +5 greed">Fear / Greed</FieldLabel>
-              <SliderInput value={form.fearGreed} onChange={v => set('fearGreed', v)} min={-5} max={5} step={0.5} colorFn={fearGreedColor} placeholder="0" />
-            </div>
+          <div>
+            <FieldLabel hint="−5 fear → +5 greed">Fear / Greed</FieldLabel>
+            <SliderInput value={form.fearGreed} onChange={v => set('fearGreed', v)} min={-5} max={5} step={0.5} colorFn={fearGreedColor} placeholder="0" />
           </div>
           <div>
             <FieldLabel hint={form.confidence != null ? ['', 'Very Low', 'Low', 'Moderate', 'High', 'Very High'][form.confidence] : 'click to rate'}>
@@ -343,6 +403,12 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
       {/* ── Market Internals ───────────────────────────────────────────── */}
       <SectionCard accentColor="#3d84ff" icon={TrendingUp} title="Market Internals">
         <div className="space-y-5">
+
+          {/* FOMO */}
+          <div>
+            <FieldLabel hint="0 = calm · 100 = max FOMO">FOMO Index</FieldLabel>
+            <SliderInput value={form.fomo} onChange={v => set('fomo', v)} min={0} max={100} colorFn={fomoColor} placeholder="50" />
+          </div>
 
           {/* NASDAQ H/L + Growth Stocks */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -428,72 +494,51 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
         </div>
       </SectionCard>
 
-      {/* ── Notes (collapsible) ────────────────────────────────────────── */}
-      <div className="rounded-xl border border-white/8 bg-white/[0.015] overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setShowNotes(v => !v)}
-          className="w-full flex items-center justify-between gap-3 px-5 py-4 border-b border-white/6 hover:bg-white/3 transition-colors"
-          style={{ borderLeft: '3px solid #ffa502' }}
-        >
-          <div className="flex items-center gap-3">
-            <Zap size={15} className="text-accent-yellow" />
-            <p className="text-xs font-semibold text-white uppercase tracking-widest">Notes & Gameplan</p>
+      {/* ── Notes & Gameplan (always open) ────────────────────────────── */}
+      <SectionCard accentColor="#ffa502" icon={Zap} title="Notes & Gameplan">
+        <div className="space-y-4">
+          <div>
+            <FieldLabel hint="comma-separated">Focus List</FieldLabel>
+            <input
+              type="text"
+              value={form.focusList}
+              onChange={e => set('focusList', e.target.value)}
+              placeholder="AAPL, NVDA, MSFT, …"
+              className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm
+                         text-gray-200 focus:outline-none focus:border-accent-blue/50"
+            />
           </div>
-          {showNotes ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
-        </button>
-
-        {showNotes && (
-          <div className="px-5 py-5 space-y-4">
+          <div>
+            <FieldLabel>Gameplan</FieldLabel>
+            <BulletTextarea
+              value={form.gameplan}
+              onChange={v => set('gameplan', v)}
+              placeholder="What's the plan for today? Key levels, setups to watch…"
+              rows={5}
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <FieldLabel hint="comma-separated">Focus List</FieldLabel>
-              <input
-                type="text"
-                value={form.focusList}
-                onChange={e => set('focusList', e.target.value)}
-                placeholder="AAPL, NVDA, MSFT, …"
-                className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm
-                           text-gray-200 focus:outline-none focus:border-accent-blue/50"
-              />
-            </div>
-            <div>
-              <FieldLabel>Gameplan</FieldLabel>
-              <textarea
-                value={form.gameplan}
-                onChange={e => set('gameplan', e.target.value)}
-                placeholder="What's the plan for today? Key levels, setups to watch…"
+              <FieldLabel>Prior Day Notes</FieldLabel>
+              <BulletTextarea
+                value={form.priorDayNotes}
+                onChange={v => set('priorDayNotes', v)}
+                placeholder="What happened yesterday?"
                 rows={4}
-                className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm
-                           text-gray-200 focus:outline-none focus:border-accent-blue/50 resize-none leading-relaxed"
               />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <FieldLabel>Prior Day Notes</FieldLabel>
-                <textarea
-                  value={form.priorDayNotes}
-                  onChange={e => set('priorDayNotes', e.target.value)}
-                  placeholder="What happened yesterday?"
-                  rows={3}
-                  className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm
-                             text-gray-200 focus:outline-none focus:border-accent-blue/50 resize-none"
-                />
-              </div>
-              <div>
-                <FieldLabel>Lessons / Process</FieldLabel>
-                <textarea
-                  value={form.lessons}
-                  onChange={e => set('lessons', e.target.value)}
-                  placeholder="What did you follow? What did you slip on?"
-                  rows={3}
-                  className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm
-                             text-gray-200 focus:outline-none focus:border-accent-blue/50 resize-none"
-                />
-              </div>
+            <div>
+              <FieldLabel>Lessons / Process</FieldLabel>
+              <BulletTextarea
+                value={form.lessons}
+                onChange={v => set('lessons', v)}
+                placeholder="What did you follow? What did you slip on?"
+                rows={4}
+              />
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      </SectionCard>
 
       {/* Actions */}
       <div className="flex gap-3 pt-1">
