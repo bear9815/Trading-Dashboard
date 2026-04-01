@@ -1161,7 +1161,10 @@ export default function RiskPanel({ selectedAccount }) {
                     const q          = quotes.get(group.symbol)
                     const currentPrice = q?.price ?? null
                     const isLong     = (group.position ?? 'Long').toLowerCase() !== 'short'
-                    const riskPerShare = group.entryPrice && group.stopLoss ? Math.abs(group.entryPrice - group.stopLoss) : null
+                    // Cur R uses the ORIGINAL stop (frozen at entry) so trailing the stop to
+                    // manage heat doesn't corrupt the R calculation.
+                    const origStop     = group._originalStopLoss ?? group.stopLoss
+                    const riskPerShare = group.entryPrice && origStop ? Math.abs(group.entryPrice - origStop) : null
                     const defaultTP  = group.entryPrice && riskPerShare ? group.entryPrice + (isLong ? 1 : -1) * tpMultiplier * riskPerShare : null
                     const effectiveTP = group.takeProfit ?? defaultTP
                     const currentR   = currentPrice != null && group.entryPrice && riskPerShare && riskPerShare > 0
@@ -1337,7 +1340,8 @@ export default function RiskPanel({ selectedAccount }) {
 
                         {/* ── Individual lot sub-rows (expanded) ── */}
                         {isMulti && isExpanded && group.lots.map((lot, lotIdx) => {
-                          const lotRPS    = lot.entryPrice && lot.stopLoss ? Math.abs(lot.entryPrice - lot.stopLoss) : null
+                          const lotOrigStop = lot._originalStopLoss ?? lot.stopLoss
+                          const lotRPS    = lot.entryPrice && lotOrigStop ? Math.abs(lot.entryPrice - lotOrigStop) : null
                           const lotIsLong = (lot.position ?? 'Long').toLowerCase() !== 'short'
                           const lotDefTP  = lot.entryPrice && lotRPS ? lot.entryPrice + (lotIsLong ? 1 : -1) * tpMultiplier * lotRPS : null
                           const lotEffTP  = lot.takeProfit ?? lotDefTP
