@@ -38,6 +38,12 @@ function daysHeld(entryDate) {
   return Math.floor((Date.now() - new Date(entryDate)) / 86_400_000)
 }
 
+/** True if a trade has been tagged as a hedge in its edges */
+function isHedgeTrade(t) {
+  const edges = t.edges?.length > 0 ? t.edges : (t.strategy ? [t.strategy] : [])
+  return edges.some(e => typeof e === 'string' && e.toLowerCase().includes('hedge'))
+}
+
 /** Consolidate multiple lots of the same symbol into one row */
 function consolidateLots(openTrades) {
   const groups = {}
@@ -128,7 +134,9 @@ export default function OpenPositions({ openTrades, accountBalance }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openTrades, apiKey, needsAI])
 
-  const positions = useMemo(() => consolidateLots(openTrades), [openTrades])
+  const allPositions   = useMemo(() => consolidateLots(openTrades), [openTrades])
+  const positions      = useMemo(() => allPositions.filter(t => !isHedgeTrade(t)), [allPositions])
+  const hedgePositions = useMemo(() => allPositions.filter(t =>  isHedgeTrade(t)), [allPositions])
 
   // Proportional column widths based on visible columns
   const visibleCols = ['_symbol', ...visibleKeys]
@@ -140,7 +148,12 @@ export default function OpenPositions({ openTrades, accountBalance }) {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <h3 className="text-xl font-medium text-gray-300">Open Positions</h3>
-          <span className="text-base text-gray-500">{positions.length} open</span>
+          <span className="text-base text-gray-500">{allPositions.length} open</span>
+          {hedgePositions.length > 0 && (
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-accent-green/10 border border-accent-green/20 text-accent-green">
+              {hedgePositions.length} hedge{hedgePositions.length > 1 ? 's' : ''}
+            </span>
+          )}
         </div>
         <div className="relative" ref={menuRef}>
           <button
@@ -176,9 +189,10 @@ export default function OpenPositions({ openTrades, accountBalance }) {
         </div>
       </div>
 
-      {positions.length === 0 ? (
+      {allPositions.length === 0 ? (
         <p className="text-xl text-gray-500 text-center py-5">No open positions · All trades closed</p>
       ) : (
+        <div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm table-fixed">
             <colgroup>
@@ -301,6 +315,89 @@ export default function OpenPositions({ openTrades, accountBalance }) {
             </tbody>
           </table>
         </div>
+
+        {/* ── Hedge Positions ──────────────────────────────────────────── */}
+        {hedgePositions.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-accent-green/20">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-accent-green" />
+              <p className="text-xs font-semibold text-accent-green uppercase tracking-widest">Hedges</p>
+              <span className="text-xs text-gray-600">— offset to long exposure</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm table-fixed">
+                <colgroup>
+                  <col style={{ width: colWidth('_symbol') }} />
+                  {show('account')    && <col style={{ width: colWidth('account') }} />}
+                  {show('entryDate')  && <col style={{ width: colWidth('entryDate') }} />}
+                  {show('held')       && <col style={{ width: colWidth('held') }} />}
+                  {show('entryPrice') && <col style={{ width: colWidth('entryPrice') }} />}
+                  {show('stop')       && <col style={{ width: colWidth('stop') }} />}
+                  {show('target')     && <col style={{ width: colWidth('target') }} />}
+                  {show('riskDollar') && <col style={{ width: colWidth('riskDollar') }} />}
+                  {show('riskPct')    && <col style={{ width: colWidth('riskPct') }} />}
+                  {show('sector')     && <col style={{ width: colWidth('sector') }} />}
+                  {show('theme')      && <col style={{ width: colWidth('theme') }} />}
+                </colgroup>
+                <tbody className="divide-y divide-accent-green/10">
+                  {hedgePositions.map(t => {
+                    const risk = t._totalRisk ?? calcRiskPerTrade(t)
+                    const riskPct = accountBalance > 0 ? (risk / accountBalance) * 100 : null
+                    const days = daysHeld(t.entryDate)
+                    const isLong = (t.position || '').toLowerCase() !== 'short'
+                    const { sector, theme } = resolveCache(symbolThemes[t.symbol])
+                    const isLoading = loadingThemes[t.symbol]
+                    const aiCell = (content) => (
+                      <span>
+                        {isLoading
+                          ? <Loader size={11} className="text-gray-600 animate-spin inline" />
+                          : content
+                            ? <span className="text-gray-400">{content}</span>
+                            : apiKey
+                              ? <span className="text-gray-600">—</span>
+                              : <span className="text-gray-600 italic text-xs">no key</span>
+                        }
+                      </span>
+                    )
+                    return (
+                      <tr key={t.id} className="bg-accent-green/[0.03] hover:bg-accent-green/[0.06] transition-colors">
+                        <td className="py-2 px-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <TickerTooltip symbol={t.symbol}>
+                              <span className="font-semibold mono text-white truncate">{t.symbol}</span>
+                            </TickerTooltip>
+                            <span className={`shrink-0 px-1.5 py-0.5 rounded text-xs font-medium ${
+                              isLong ? 'bg-accent-green/15 text-accent-green' : 'bg-accent-red/15 text-accent-red'
+                            }`}>{t.position || 'Long'}</span>
+                            <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-accent-green/10 border border-accent-green/25 text-accent-green">HEDGE</span>
+                            {t._lots > 1 && (
+                              <span className="shrink-0 px-1.5 py-0.5 rounded bg-white/8 text-gray-400 text-xs">{t._lots}×</span>
+                            )}
+                          </div>
+                        </td>
+                        {show('account')    && <td className="py-2 px-2 text-gray-400 truncate">{t.account || '—'}</td>}
+                        {show('entryDate')  && <td className="py-2 px-2 text-gray-400 truncate">{formatDate(t.entryDate)}</td>}
+                        {show('held')       && <td className="py-2 px-2 text-right text-gray-400 mono">{days != null ? `${days}d` : '—'}</td>}
+                        {show('entryPrice') && <td className="py-2 px-2 text-right mono text-gray-300">{t.entryPrice != null ? formatCurrency(t.entryPrice) : '—'}</td>}
+                        {show('stop')       && <td className="py-2 px-2 text-right mono text-accent-red">{t.stopLoss != null ? formatCurrency(t.stopLoss) : '—'}</td>}
+                        {show('target')     && <td className="py-2 px-2 text-right mono text-accent-green">{t.takeProfit != null ? formatCurrency(t.takeProfit) : '—'}</td>}
+                        {show('riskDollar') && <td className={`py-2 px-2 text-right mono font-medium ${risk > 0 ? 'text-accent-red' : 'text-gray-500'}`}>{risk > 0 ? formatCurrency(risk) : '—'}</td>}
+                        {show('riskPct')    && (
+                          <td className={`py-2 px-2 text-right mono font-medium ${!riskPct || risk === 0 ? 'text-gray-500' : riskPct >= 4 ? 'text-accent-red' : riskPct >= 2 ? 'text-accent-yellow' : 'text-accent-green'}`}>
+                            {riskPct != null && risk > 0 ? `${riskPct.toFixed(2)}%` : '—'}
+                          </td>
+                        )}
+                        {show('sector') && <td className="py-2 px-2 truncate">{aiCell(sector)}</td>}
+                        {show('theme')  && <td className="py-2 px-2 truncate">{aiCell(theme)}</td>}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
       )}
     </div>
   )
