@@ -107,46 +107,52 @@ const CREDIT_OPTIONS = [
 
 function PillSelect({ value, onChange, options }) {
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap gap-2">
       {options.map(opt => (
         <button
           key={opt.id}
           type="button"
           onClick={() => onChange(value === opt.id ? '' : opt.id)}
-          className={`px-2.5 py-1 rounded border text-xs font-medium transition-all ${
+          className={`px-3.5 py-1.5 rounded-lg border text-sm font-medium transition-all ${
             value === opt.id
-              ? `${opt.cls} border-current bg-white/5`
-              : 'text-gray-500 border-gray-700 hover:border-gray-500 hover:text-gray-400'
+              ? `${opt.cls} border-current bg-white/8 shadow-sm`
+              : 'text-gray-500 border-gray-700/60 hover:border-gray-500 hover:text-gray-300'
           }`}
         >
-          {opt.pct ? (
-            <span>{opt.label} <span className="opacity-60">{opt.pct}</span></span>
-          ) : opt.label}
+          {opt.pct
+            ? <span>{opt.label} <span className="opacity-50 text-xs">{opt.pct}</span></span>
+            : opt.label}
         </button>
       ))}
     </div>
   )
 }
 
-// ── Confidence stars ──────────────────────────────────────────────────────────
+// ── Confidence picker ─────────────────────────────────────────────────────────
 
 function ConfidencePicker({ value, onChange }) {
+  const labels = ['', 'Very Low', 'Low', 'Moderate', 'High', 'Very High']
   return (
-    <div className="flex gap-1.5">
+    <div className="flex items-center gap-2">
       {[1, 2, 3, 4, 5].map(n => (
         <button
           key={n}
           type="button"
           onClick={() => onChange(value === n ? null : n)}
-          className={`w-8 h-8 rounded border text-xs font-bold transition-all ${
+          className={`w-10 h-10 rounded-lg border text-sm font-bold transition-all ${
             value != null && n <= value
-              ? 'border-accent-blue/60 bg-accent-blue/10 text-accent-blue'
-              : 'text-gray-600 border-gray-700 hover:border-gray-500 hover:text-gray-400'
+              ? 'border-accent-blue/60 bg-accent-blue/15 text-accent-blue shadow-sm'
+              : 'text-gray-600 border-gray-700/60 hover:border-gray-500 hover:text-gray-400'
           }`}
         >
           {n}
         </button>
       ))}
+      {value != null && (
+        <span className="text-sm font-semibold ml-1" style={{ color: confidenceColor(value) }}>
+          {labels[value]}
+        </span>
+      )}
     </div>
   )
 }
@@ -155,35 +161,65 @@ function ConfidencePicker({ value, onChange }) {
 
 function SliderInput({ value, onChange, min, max, step = 1, colorFn, placeholder }) {
   const v = value ?? ''
+  const displayColor = colorFn ? colorFn(v === '' ? null : parseFloat(v)) : '#3d84ff'
   return (
-    <div className="flex items-center gap-2">
+    <div className="space-y-3">
       <input
         type="range"
-        min={min}
-        max={max}
-        step={step}
+        min={min} max={max} step={step}
         value={v === '' ? (min + max) / 2 : v}
         onChange={e => onChange(parseFloat(e.target.value))}
-        className="flex-1 h-1 rounded-full appearance-none cursor-pointer bg-surface-300
-                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5
-                   [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full
-                   [&::-webkit-slider-thumb]:bg-accent-blue [&::-webkit-slider-thumb]:cursor-pointer"
+        className="w-full h-2 rounded-full appearance-none cursor-pointer bg-surface-300
+                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4
+                   [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full
+                   [&::-webkit-slider-thumb]:bg-accent-blue [&::-webkit-slider-thumb]:cursor-pointer
+                   [&::-webkit-slider-thumb]:shadow-md"
       />
-      <input
-        type="number"
-        min={min}
-        max={max}
-        step={step}
-        value={v}
-        placeholder={placeholder}
-        onChange={e => {
-          const n = parseFloat(e.target.value)
-          onChange(isNaN(n) ? null : Math.min(max, Math.max(min, n)))
-        }}
-        className="w-14 bg-surface-200 border border-white/10 rounded px-2 py-1 text-xs mono
-                   text-right focus:outline-none focus:border-accent-blue/40"
-        style={colorFn ? { color: colorFn(v === '' ? null : v) } : undefined}
-      />
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-gray-600">{min}</span>
+        <input
+          type="number"
+          min={min} max={max} step={step}
+          value={v}
+          placeholder={placeholder}
+          onChange={e => {
+            const n = parseFloat(e.target.value)
+            onChange(isNaN(n) ? null : Math.min(max, Math.max(min, n)))
+          }}
+          className="w-16 bg-surface-200 border border-white/10 rounded-lg px-2 py-1 text-sm mono
+                     text-center focus:outline-none focus:border-accent-blue/40 font-bold"
+          style={{ color: displayColor }}
+        />
+        <span className="text-xs text-gray-600">{max}</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Section card with colored left accent ─────────────────────────────────────
+
+function SectionCard({ accentColor = '#3d84ff', icon: Icon, title, children }) {
+  return (
+    <div className="rounded-xl border border-white/8 bg-white/[0.015] overflow-hidden">
+      <div className="flex items-center gap-3 px-5 py-4 border-b border-white/6"
+           style={{ borderLeft: `3px solid ${accentColor}` }}>
+        <Icon size={15} style={{ color: accentColor }} />
+        <p className="text-xs font-semibold text-white uppercase tracking-widest">{title}</p>
+      </div>
+      <div className="px-5 py-5">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// ── Field label ───────────────────────────────────────────────────────────────
+
+function FieldLabel({ children, hint }) {
+  return (
+    <div className="flex items-center justify-between mb-2">
+      <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{children}</label>
+      {hint && <span className="text-[11px] text-gray-600">{hint}</span>}
     </div>
   )
 }
@@ -247,240 +283,235 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
   }
 
   return (
-    <form onSubmit={handleSave} className="space-y-5">
+    <form onSubmit={handleSave} className="space-y-4">
 
-      {/* Voice Journal recorder — at the top for quick pre-market capture */}
+      {/* Voice Journal */}
       <VoiceRecorder onFieldsExtracted={handleVoiceFields} />
 
-      {/* Date */}
-      <div className="flex items-center gap-3">
+      {/* Date row */}
+      <div className="flex items-center gap-4">
         <div>
-          <label className="label">Date</label>
+          <FieldLabel>Date</FieldLabel>
           <input
             type="date"
             value={form.date}
             onChange={e => set('date', e.target.value)}
-            className="input mono text-sm"
+            className="bg-surface-300 border border-white/10 rounded-lg px-3 py-2 text-sm mono text-gray-200
+                       focus:outline-none focus:border-accent-blue/50 cursor-pointer"
             required
           />
         </div>
       </div>
 
       {/* ── Market Internals ───────────────────────────────────────────── */}
-      <div>
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-          Market Internals
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <SectionCard accentColor="#3d84ff" icon={TrendingUp} title="Market Internals">
+        <div className="space-y-5">
 
-          <div>
-            <div className="flex justify-between mb-1.5">
-              <label className="label">FOMO Index</label>
-              <span className="text-xs text-gray-600">0 = no fear, 100 = max FOMO</span>
+          {/* FOMO + Fear/Greed side by side */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div>
+              <FieldLabel hint="0 = calm · 100 = max FOMO">FOMO Index</FieldLabel>
+              <SliderInput value={form.fomo} onChange={v => set('fomo', v)} min={0} max={100} colorFn={fomoColor} placeholder="50" />
             </div>
-            <SliderInput
-              value={form.fomo}
-              onChange={v => set('fomo', v)}
-              min={0} max={100}
-              colorFn={fomoColor}
-              placeholder="50"
-            />
-          </div>
-
-          <div>
-            <div className="flex justify-between mb-1.5">
-              <label className="label">Fear / Greed</label>
-              <span className="text-xs text-gray-600">−5 fear → +5 greed</span>
+            <div>
+              <FieldLabel hint="−5 fear → +5 greed">Fear / Greed</FieldLabel>
+              <SliderInput value={form.fearGreed} onChange={v => set('fearGreed', v)} min={-5} max={5} step={0.5} colorFn={fearGreedColor} placeholder="0" />
             </div>
-            <SliderInput
-              value={form.fearGreed}
-              onChange={v => set('fearGreed', v)}
-              min={-5} max={5} step={0.5}
-              colorFn={fearGreedColor}
-              placeholder="0"
-            />
           </div>
 
-          <div>
-            <label className="label">NASDAQ Net H/L</label>
-            <input
-              type="number"
-              value={form.nasdaqNetHL}
-              onChange={e => set('nasdaqNetHL', e.target.value === '' ? '' : parseFloat(e.target.value))}
-              placeholder="-34 or +74"
-              className="input mono"
-            />
+          {/* NASDAQ H/L + NDX MCSI */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div>
+              <FieldLabel hint="e.g. −34 or +74">NASDAQ Net H/L</FieldLabel>
+              <input
+                type="number"
+                value={form.nasdaqNetHL}
+                onChange={e => set('nasdaqNetHL', e.target.value === '' ? '' : parseFloat(e.target.value))}
+                placeholder="-34 or +74"
+                className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm mono
+                           text-gray-200 focus:outline-none focus:border-accent-blue/50"
+              />
+            </div>
+            <div>
+              <FieldLabel>NDX MCSI</FieldLabel>
+              <PillSelect value={form.ndxMcsi} onChange={v => set('ndxMcsi', v)} options={NDX_MCSI_OPTIONS} />
+            </div>
           </div>
 
-          <div>
-            <label className="label">NDX MCSI</label>
-            <PillSelect value={form.ndxMcsi} onChange={v => set('ndxMcsi', v)} options={NDX_MCSI_OPTIONS} />
+          {/* Trend structure */}
+          <div className="pt-1">
+            <p className="text-[11px] font-semibold text-gray-600 uppercase tracking-widest mb-3">Trend Structure</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <FieldLabel>Short-Term</FieldLabel>
+                <PillSelect value={form.shortTermTrend} onChange={v => set('shortTermTrend', v)} options={TREND_OPTIONS} />
+              </div>
+              <div>
+                <FieldLabel>Intermediate</FieldLabel>
+                <PillSelect value={form.intermediateTrend} onChange={v => set('intermediateTrend', v)} options={TREND_OPTIONS} />
+              </div>
+              <div>
+                <FieldLabel>Long-Term</FieldLabel>
+                <PillSelect value={form.longTermTrend} onChange={v => set('longTermTrend', v)} options={TREND_OPTIONS} />
+              </div>
+            </div>
           </div>
 
+          {/* Credit conditions */}
           <div>
-            <label className="label">Short-Term Trend</label>
-            <PillSelect value={form.shortTermTrend} onChange={v => set('shortTermTrend', v)} options={TREND_OPTIONS} />
-          </div>
-
-          <div>
-            <label className="label">Intermediate Trend</label>
-            <PillSelect value={form.intermediateTrend} onChange={v => set('intermediateTrend', v)} options={TREND_OPTIONS} />
-          </div>
-
-          <div>
-            <label className="label">Long-Term Trend</label>
-            <PillSelect value={form.longTermTrend} onChange={v => set('longTermTrend', v)} options={TREND_OPTIONS} />
-          </div>
-
-          <div>
-            <label className="label">Credit Conditions</label>
+            <FieldLabel>Credit Conditions</FieldLabel>
             <PillSelect value={form.creditConditions} onChange={v => set('creditConditions', v)} options={CREDIT_OPTIONS} />
           </div>
         </div>
-      </div>
+      </SectionCard>
 
-      {/* ── Psychology ─────────────────────────────────────────────────── */}
-      <div>
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-          Psychology &amp; Mindset
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-          <div>
-            <label className="label">Sleep Quality</label>
-            <PillSelect value={form.sleepQuality} onChange={v => set('sleepQuality', v)} options={SLEEP_QUALITY_OPTIONS} />
-          </div>
-
-          <div>
-            <label className="label">Confidence</label>
-            <div className="flex items-center gap-3">
-              <ConfidencePicker value={form.confidence} onChange={v => set('confidence', v)} />
-              {form.confidence != null && (
-                <span className="text-sm font-semibold" style={{ color: confidenceColor(form.confidence) }}>
-                  {['', 'Very Low', 'Low', 'Moderate', 'High', 'Very High'][form.confidence]}
-                </span>
-              )}
+      {/* ── Psychology & Mindset ───────────────────────────────────────── */}
+      <SectionCard accentColor="#a855f7" icon={Brain} title="Psychology & Mindset">
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div>
+              <FieldLabel>Sleep Quality</FieldLabel>
+              <PillSelect value={form.sleepQuality} onChange={v => set('sleepQuality', v)} options={SLEEP_QUALITY_OPTIONS} />
+            </div>
+            <div>
+              <FieldLabel>Mental State</FieldLabel>
+              <PillSelect value={form.mentalState} onChange={v => set('mentalState', v)} options={MENTAL_OPTIONS} />
             </div>
           </div>
-
           <div>
-            <label className="label">Mental State</label>
-            <PillSelect value={form.mentalState} onChange={v => set('mentalState', v)} options={MENTAL_OPTIONS} />
+            <FieldLabel hint={form.confidence != null ? ['', 'Very Low', 'Low', 'Moderate', 'High', 'Very High'][form.confidence] : 'click to rate'}>
+              Confidence
+            </FieldLabel>
+            <ConfidencePicker value={form.confidence} onChange={v => set('confidence', v)} />
           </div>
-
           <div>
-            <label className="label">Risk Mode for Today</label>
+            <FieldLabel>Risk Mode for Today</FieldLabel>
             <PillSelect value={form.riskMode} onChange={v => set('riskMode', v)} options={RISK_MODE_OPTIONS} />
           </div>
         </div>
-      </div>
+      </SectionCard>
 
-      {/* ── Exposure ───────────────────────────────────────────────────── */}
-      <div>
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-          Portfolio Exposure
-        </p>
-        <div className="grid grid-cols-2 gap-3">
+      {/* ── Portfolio Exposure ─────────────────────────────────────────── */}
+      <SectionCard accentColor="#00d084" icon={Target} title="Portfolio Exposure">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
-            <label className="label">Cash Deployed %</label>
+            <FieldLabel hint="auto from positions">Cash Deployed %</FieldLabel>
             <input
-              type="number"
-              step="0.1"
+              type="number" step="0.1"
               value={form.cashDeployed}
               onChange={e => set('cashDeployed', e.target.value === '' ? '' : parseFloat(e.target.value))}
               placeholder="auto-calculated"
-              className="input mono"
+              className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm mono
+                         text-gray-200 focus:outline-none focus:border-accent-blue/50"
             />
-            <p className="text-[10px] text-gray-600 mt-0.5">From open positions / account balance</p>
+            <p className="text-xs text-gray-600 mt-1.5">Open positions ÷ account balance</p>
           </div>
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="label mb-0">Effective Exposure %</label>
-              {isNew && (
-                atrFetching
-                  ? <span className="text-[10px] text-gray-500 flex items-center gap-1"><RefreshCw size={9} className="animate-spin" /> fetching ATR…</span>
-                  : autoEffective != null
-                    ? <span className="text-[10px] text-accent-blue flex items-center gap-1"><Zap size={9} /> auto</span>
-                    : <span className="text-[10px] text-gray-600">no open positions</span>
-              )}
-            </div>
+            <FieldLabel hint={
+              isNew
+                ? atrFetching
+                  ? '⟳ fetching ATR…'
+                  : autoEffective != null ? '⚡ auto-filled' : 'no open positions'
+                : undefined
+            }>
+              Effective Exposure %
+            </FieldLabel>
             <input
-              type="number"
-              step="0.1"
+              type="number" step="0.1"
               value={form.effectiveExposure}
               onChange={e => set('effectiveExposure', e.target.value === '' ? '' : parseFloat(e.target.value))}
               placeholder={atrFetching ? 'calculating…' : 'ATR-weighted %'}
-              className="input mono"
+              className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm mono
+                         text-gray-200 focus:outline-none focus:border-accent-blue/50"
             />
-            <p className="text-[10px] text-gray-600 mt-0.5">ATR-weighted vs {useSettingsStore.getState().benchmarkSymbol || 'SPY'}</p>
+            <p className="text-xs text-gray-600 mt-1.5">ATR-weighted vs {useSettingsStore.getState().benchmarkSymbol || 'SPY'}</p>
           </div>
         </div>
-      </div>
+      </SectionCard>
 
       {/* ── Notes (collapsible) ────────────────────────────────────────── */}
-      <div>
+      <div className="rounded-xl border border-white/8 bg-white/[0.015] overflow-hidden">
         <button
           type="button"
           onClick={() => setShowNotes(v => !v)}
-          className="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+          className="w-full flex items-center justify-between gap-3 px-5 py-4 border-b border-white/6 hover:bg-white/3 transition-colors"
+          style={{ borderLeft: '3px solid #ffa502' }}
         >
-          {showNotes ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {showNotes ? 'Hide Notes' : '+ Add Notes (Focus List, Gameplan, Lessons)'}
+          <div className="flex items-center gap-3">
+            <Zap size={15} className="text-accent-yellow" />
+            <p className="text-xs font-semibold text-white uppercase tracking-widest">Notes & Gameplan</p>
+          </div>
+          {showNotes ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
         </button>
 
         {showNotes && (
-          <div className="mt-3 space-y-3">
+          <div className="px-5 py-5 space-y-4">
             <div>
-              <label className="label">Focus List (Tickers)</label>
+              <FieldLabel hint="comma-separated">Focus List</FieldLabel>
               <input
                 type="text"
                 value={form.focusList}
                 onChange={e => set('focusList', e.target.value)}
                 placeholder="AAPL, NVDA, MSFT, …"
-                className="input"
+                className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm
+                           text-gray-200 focus:outline-none focus:border-accent-blue/50"
               />
             </div>
             <div>
-              <label className="label">Gameplan</label>
+              <FieldLabel>Gameplan</FieldLabel>
               <textarea
                 value={form.gameplan}
                 onChange={e => set('gameplan', e.target.value)}
-                placeholder="What's the plan for today?"
-                rows={3}
-                className="input resize-none"
+                placeholder="What's the plan for today? Key levels, setups to watch…"
+                rows={4}
+                className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm
+                           text-gray-200 focus:outline-none focus:border-accent-blue/50 resize-none leading-relaxed"
               />
             </div>
-            <div>
-              <label className="label">Prior Day Notes</label>
-              <textarea
-                value={form.priorDayNotes}
-                onChange={e => set('priorDayNotes', e.target.value)}
-                placeholder="What happened yesterday?"
-                rows={2}
-                className="input resize-none"
-              />
-            </div>
-            <div>
-              <label className="label">Lessons / Process Followed</label>
-              <textarea
-                value={form.lessons}
-                onChange={e => set('lessons', e.target.value)}
-                placeholder="What did you follow? What did you slip on?"
-                rows={2}
-                className="input resize-none"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <FieldLabel>Prior Day Notes</FieldLabel>
+                <textarea
+                  value={form.priorDayNotes}
+                  onChange={e => set('priorDayNotes', e.target.value)}
+                  placeholder="What happened yesterday?"
+                  rows={3}
+                  className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm
+                             text-gray-200 focus:outline-none focus:border-accent-blue/50 resize-none"
+                />
+              </div>
+              <div>
+                <FieldLabel>Lessons / Process</FieldLabel>
+                <textarea
+                  value={form.lessons}
+                  onChange={e => set('lessons', e.target.value)}
+                  placeholder="What did you follow? What did you slip on?"
+                  rows={3}
+                  className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm
+                             text-gray-200 focus:outline-none focus:border-accent-blue/50 resize-none"
+                />
+              </div>
             </div>
           </div>
         )}
       </div>
 
       {/* Actions */}
-      <div className="flex gap-2 pt-1">
-        <button type="submit" className="btn btn-primary flex-1">
+      <div className="flex gap-3 pt-1">
+        <button
+          type="submit"
+          className="flex-1 bg-accent-blue hover:bg-accent-blue/80 text-white font-semibold py-3 rounded-xl
+                     text-sm transition-all shadow-lg shadow-accent-blue/20"
+        >
           Save Entry
         </button>
         {onCancel && (
-          <button type="button" onClick={onCancel} className="btn btn-ghost">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-6 py-3 rounded-xl border border-white/10 text-gray-400 hover:text-gray-200
+                       hover:border-white/20 text-sm font-medium transition-all"
+          >
             Cancel
           </button>
         )}
@@ -1266,9 +1297,10 @@ export default function Morning() {
         {/* Tab switcher */}
         <div className="flex rounded border border-white/10 overflow-hidden text-xs">
           {[
-            { id: 'log',      label: 'Journal',      icon: Sun       },
-            { id: 'analysis', label: 'Analysis',     icon: BarChart2 },
-            { id: 'brief',    label: 'Market Brief', icon: Newspaper },
+            { id: 'log',      label: 'Journal',        icon: Sun       },
+            { id: 'analysis', label: 'Analysis',       icon: BarChart2 },
+            { id: 'charts',   label: 'Morning Charts', icon: Image     },
+            { id: 'brief',    label: 'Market Brief',   icon: Newspaper },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -1289,6 +1321,7 @@ export default function Morning() {
       {/* Content */}
       {tab === 'log'      && <LogTab />}
       {tab === 'analysis' && <AnalysisTab entries={entries} />}
+      {tab === 'charts'   && <MarketBiasTab />}
       {tab === 'brief'    && <MorningBriefing />}
     </div>
   )
