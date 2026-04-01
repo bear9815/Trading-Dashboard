@@ -859,7 +859,7 @@ export default function RiskPanel({ selectedAccount }) {
   // Share computed effective exposure with the Morning journal form so it
   // can auto-fill without doing its own redundant ATR fetch.
   useEffect(() => {
-    if (exposure.effectivePct > 0) {
+    if (exposure.effectivePct !== 0) {
       useSettingsStore.setState({ liveEffectivePct: exposure.effectivePct })
     }
   }, [exposure.effectivePct])
@@ -1639,13 +1639,14 @@ export default function RiskPanel({ selectedAccount }) {
                 <div className="card-sm text-center">
                   <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">{benchmarkSymbol} Equiv</p>
                   <p className={`text-xl font-bold mono ${
-                    exposure.effectivePct > 100 ? 'text-accent-red'
-                    : exposure.effectivePct > 75 ? 'text-accent-yellow'
+                    exposure.effectivePct < 0   ? 'text-accent-green'
+                    : exposure.effectivePct > 100 ? 'text-accent-red'
+                    : exposure.effectivePct > 75  ? 'text-accent-yellow'
                     : 'text-accent-green'
                   }`}>
                     {atrData.size > 0 ? `${exposure.effectivePct.toFixed(1)}%` : '—'}
                   </p>
-                  <p className="text-xs text-gray-600">effective exposure</p>
+                  <p className="text-xs text-gray-600">{exposure.effectivePct < 0 ? 'net short (hedged)' : 'effective exposure'}</p>
                 </div>
                 <div className="card-sm text-center">
                   <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Vol Factor</p>
@@ -1664,18 +1665,21 @@ export default function RiskPanel({ selectedAccount }) {
               <div className="rounded bg-surface-200 px-3 py-2 mb-3 text-xs text-gray-400 leading-relaxed">
                 {atrData.size > 0 && exposure.positions.some(p => p.atrPct > 0) ? (
                   <>
-                    Your <span className="text-gray-200">{exposure.cashPct.toFixed(0)}%</span> deployed moves like{' '}
+                    Your <span className="text-gray-200">{exposure.cashPct.toFixed(0)}%</span> deployed has a net effective exposure of{' '}
                     <span className={`font-semibold ${
-                      exposure.effectivePct > 100 ? 'text-accent-red'
-                      : exposure.effectivePct > 75 ? 'text-accent-yellow'
+                      exposure.effectivePct < 0   ? 'text-accent-green'
+                      : exposure.effectivePct > 100 ? 'text-accent-red'
+                      : exposure.effectivePct > 75  ? 'text-accent-yellow'
                       : 'text-accent-green'
                     }`}>{exposure.effectivePct.toFixed(1)}%</span>{' '}
-                    of your account in {benchmarkSymbol}.{' '}
-                    {exposure.leverageFactor > 1.2
-                      ? `Your stocks are ~${((exposure.leverageFactor - 1) * 100).toFixed(0)}% more volatile than ${benchmarkSymbol} on average — expect larger swings than your cash deployment suggests.`
+                    in {benchmarkSymbol}.{' '}
+                    {exposure.effectivePct < 0
+                      ? `Your short/hedge positions more than offset your long exposure — you are net short the market on a volatility-adjusted basis.`
+                      : exposure.leverageFactor > 1.2
+                      ? `Your long positions are ~${((exposure.leverageFactor - 1) * 100).toFixed(0)}% more volatile than ${benchmarkSymbol} on average — expect larger swings than cash deployed suggests.`
                       : exposure.leverageFactor < 0.85
-                      ? `Your stocks are less volatile than ${benchmarkSymbol} — your effective market risk is lower than cash deployed.`
-                      : `Your portfolio volatility is roughly in line with ${benchmarkSymbol}.`
+                      ? `Your long positions are less volatile than ${benchmarkSymbol} — effective long-side risk is lower than cash deployed.`
+                      : `Your long-side portfolio volatility is roughly in line with ${benchmarkSymbol}.`
                     }
                   </>
                 ) : (
@@ -1697,16 +1701,21 @@ export default function RiskPanel({ selectedAccount }) {
                     </thead>
                     <tbody className="divide-y divide-white/5">
                       {exposure.positions.map(p => (
-                        <tr key={p.symbol}>
-                          <td className="py-1.5 mono text-gray-300 font-medium">{p.symbol}</td>
+                        <tr key={p.symbol} className={p.isShort ? 'bg-accent-green/[0.03]' : ''}>
+                          <td className="py-1.5 mono font-medium">
+                            <span className="text-gray-300">{p.symbol}</span>
+                            {p.isShort && <span className="ml-1.5 text-[10px] font-semibold text-accent-green bg-accent-green/10 border border-accent-green/20 rounded px-1 py-0.5">SHORT</span>}
+                          </td>
                           <td className="py-1.5 text-right mono text-gray-400">{formatCurrency(p.notional, true)}</td>
                           <td className="py-1.5 text-right mono text-gray-300">
                             {p.atrPct > 0
                               ? <span className={p.atrPct > benchmarkAtrPct * 1.5 ? 'text-accent-red' : p.atrPct > benchmarkAtrPct ? 'text-accent-yellow' : 'text-accent-green'}>{p.atrPct.toFixed(2)}%</span>
                               : <span className="text-gray-600">—</span>}
                           </td>
-                          <td className="py-1.5 text-right mono text-white font-medium">
-                            {p.effective > 0 ? formatCurrency(p.effective, true) : <span className="text-gray-600">—</span>}
+                          <td className="py-1.5 text-right mono font-medium">
+                            {p.effective !== 0
+                              ? <span className={p.isShort ? 'text-accent-green' : 'text-white'}>{p.isShort ? '−' : ''}{formatCurrency(Math.abs(p.effective), true)}</span>
+                              : <span className="text-gray-600">—</span>}
                           </td>
                         </tr>
                       ))}

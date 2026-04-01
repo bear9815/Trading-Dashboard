@@ -79,19 +79,32 @@ export function calcEffectiveExposure(openTrades, atrMap, benchmarkAtrPct, accou
   let totalNotional  = 0
 
   const positions = openTrades.map(t => {
-    const sz        = t.remainingShares ?? t.positionSize
-    const notional  = Math.abs((sz || 0) * (t.entryPrice || 0))
-    const atrPct    = atrMap?.get(t.symbol)?.atrPct || 0
-    const effective = atrPct > 0 ? notional * (atrPct / benchmarkAtrPct) : 0
+    const sz       = t.remainingShares ?? t.positionSize
+    const notional = Math.abs((sz || 0) * (t.entryPrice || 0))
+    const atrPct   = atrMap?.get(t.symbol)?.atrPct || 0
+    // Shorts and puts reduce net market exposure — they are a counterweight.
+    const isShort  = (t.position || 'Long').toLowerCase() === 'short'
+    const sign     = isShort ? -1 : 1
+    const effective = atrPct > 0 ? sign * notional * (atrPct / benchmarkAtrPct) : 0
     totalEffective += effective
     totalNotional  += notional
-    return { symbol: t.symbol, notional, atrPct, effective }
+    return { symbol: t.symbol, notional, atrPct, effective, isShort }
   })
+
+  // leverageFactor uses gross longs only so it still tells you about long-side
+  // volatility amplification (dividing signed net by total would give a
+  // misleading number when a large short offsets everything).
+  const grossLongEffective = positions
+    .filter(p => !p.isShort)
+    .reduce((s, p) => s + p.effective, 0)
+  const grossLongNotional = positions
+    .filter(p => !p.isShort)
+    .reduce((s, p) => s + p.notional, 0)
 
   return {
     effectivePct:   accountBalance > 0 ? (totalEffective / accountBalance) * 100 : 0,
     cashPct:        accountBalance > 0 ? (totalNotional  / accountBalance) * 100 : 0,
-    leverageFactor: totalNotional > 0 ? totalEffective / totalNotional : 1,
+    leverageFactor: grossLongNotional > 0 ? grossLongEffective / grossLongNotional : 1,
     positions,
   }
 }
