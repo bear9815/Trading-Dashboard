@@ -10,8 +10,8 @@
     },
     {
       "name": "trading-dashboard",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": ["/Users/calebearden/Trading Dashboard/.claude/start-dev.sh"],
       "cwd": "/Users/calebearden/Trading Dashboard",
       "port": 5174,
       "autoPort": true

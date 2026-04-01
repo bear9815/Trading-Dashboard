@@ -1748,6 +1748,162 @@ export default function RiskPanel({ selectedAccount }) {
         </div>
       </div>
 
+      {/* ── Hedge Analysis ───────────────────────────────────────────────── */}
+      {atrData.size > 0 && exposure.positions.some(p => p.isShort) && (() => {
+        const longs     = exposure.positions.filter(p => !p.isShort)
+        const hedges    = exposure.positions.filter(p => p.isShort)
+        const grossLongEff  = longs.reduce((s, p) => s + p.effective, 0)
+        const hedgeEff      = Math.abs(hedges.reduce((s, p) => s + p.effective, 0))
+        const netEff        = grossLongEff - hedgeEff
+        const grossLongPct  = accountBalance > 0 ? (grossLongEff / accountBalance) * 100 : 0
+        const hedgePct      = accountBalance > 0 ? (hedgeEff    / accountBalance) * 100 : 0
+        const netPct        = accountBalance > 0 ? (netEff      / accountBalance) * 100 : 0
+        const hedgeCoverage = grossLongEff > 0 ? (hedgeEff / grossLongEff) * 100 : 0
+
+        const SCENARIOS = [-1, -2, -3, -5, -7, -10]
+        const scenarioRows = SCENARIOS.map(pct => {
+          let longspl = 0, hedgepl = 0
+          exposure.positions.forEach(p => {
+            if (!p.atrPct) return
+            const posMove = (pct / 100) * (p.atrPct / benchmarkAtrPct)
+            const pl = (p.isShort ? -1 : 1) * p.notional * posMove
+            if (p.isShort) hedgepl += pl
+            else longspl += pl
+          })
+          return { pct, longspl, hedgepl, netpl: longspl + hedgepl }
+        })
+
+        const coverageColor =
+          hedgeCoverage < 20 ? 'text-gray-400'
+          : hedgeCoverage < 50 ? 'text-accent-yellow'
+          : hedgeCoverage < 80 ? 'text-accent-green'
+          : 'text-accent-blue'
+
+        return (
+          <div className="card">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Risk Tools</p>
+                <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                  <ShieldCheck size={15} className="text-accent-green" />
+                  Hedge Analysis
+                </h3>
+              </div>
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-accent-green/10 border border-accent-green/20">
+                <span className="text-xs font-semibold text-accent-green">{hedges.length}</span>
+                <span className="text-xs text-gray-500">hedge{hedges.length !== 1 ? 's' : ''} on</span>
+              </div>
+            </div>
+
+            {/* ── 1. Exposure Decomposition Bar ─────────────────────────── */}
+            <div className="mb-5">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">Exposure Decomposition</p>
+              {[
+                { label: 'Gross Longs', pct: grossLongPct, color: '#ff6b35', bgColor: 'bg-orange-500/80' },
+                { label: 'Hedge Offset', pct: -hedgePct, color: '#00d084', bgColor: 'bg-accent-green/80', isHedge: true },
+                { label: 'Net Exposure', pct: netPct, color: netPct > 80 ? '#ff4757' : netPct > 50 ? '#ffa502' : '#00d084', bgColor: netPct > 80 ? 'bg-accent-red/80' : netPct > 50 ? 'bg-accent-yellow/80' : 'bg-accent-green/80' },
+              ].map(row => {
+                const maxPct = Math.max(grossLongPct, 1)
+                const fillPct = Math.min((Math.abs(row.pct) / maxPct) * 100, 100)
+                return (
+                  <div key={row.label} className="flex items-center gap-3 mb-2">
+                    <span className="text-xs text-gray-500 w-24 shrink-0">{row.label}</span>
+                    <div className="flex-1 h-4 rounded bg-white/5 overflow-hidden relative">
+                      <div
+                        className={`h-full rounded transition-all duration-500 ${row.bgColor}`}
+                        style={{ width: `${fillPct}%` }}
+                      />
+                    </div>
+                    <span className="text-xs mono font-semibold w-14 text-right shrink-0" style={{ color: row.color }}>
+                      {row.isHedge ? '−' : ''}{Math.abs(row.pct).toFixed(1)}%
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* ── 2. Hedge Coverage Ratio ───────────────────────────────── */}
+            <div className="mb-5">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">Hedge Coverage Ratio</p>
+              <div className="flex items-center gap-4">
+                <div className="relative w-20 h-20 shrink-0">
+                  <svg viewBox="0 0 80 80" className="w-full h-full -rotate-90">
+                    <circle cx="40" cy="40" r="30" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
+                    <circle
+                      cx="40" cy="40" r="30" fill="none"
+                      stroke={hedgeCoverage < 20 ? '#4b5563' : hedgeCoverage < 50 ? '#ffa502' : hedgeCoverage < 80 ? '#00d084' : '#3d84ff'}
+                      strokeWidth="8"
+                      strokeLinecap="round"
+                      strokeDasharray={`${Math.PI * 60}`}
+                      strokeDashoffset={`${Math.PI * 60 * (1 - Math.min(hedgeCoverage, 100) / 100)}`}
+                      style={{ transition: 'stroke-dashoffset 0.6s ease' }}
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className={`text-lg font-bold mono leading-none ${coverageColor}`}>{hedgeCoverage.toFixed(0)}%</span>
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <p className={`text-xl font-bold mono ${coverageColor}`}>{hedgeCoverage.toFixed(1)}%</p>
+                  <p className="text-xs text-gray-400 mt-0.5">of long exposure offset by hedges</p>
+                  <p className="text-xs text-gray-600 mt-2 leading-relaxed">
+                    {hedgeCoverage < 20
+                      ? 'Token hedge — minimal protection against a market selloff.'
+                      : hedgeCoverage < 50
+                      ? 'Partial hedge — cushions downside but longs still dominate.'
+                      : hedgeCoverage < 80
+                      ? 'Well-hedged — meaningful downside protection in place.'
+                      : 'Near fully hedged — long and short exposure closely balanced.'}
+                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                    <div><span className="text-gray-600">Long eff:</span> <span className="mono text-gray-300">{formatCurrency(grossLongEff, true)} ({grossLongPct.toFixed(1)}%)</span></div>
+                    <div><span className="text-gray-600">Hedge eff:</span> <span className="mono text-accent-green">−{formatCurrency(hedgeEff, true)} (−{hedgePct.toFixed(1)}%)</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── 3. Down-Move Scenario Table ───────────────────────────── */}
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">Down-Move Scenarios</p>
+              <p className="text-xs text-gray-600 mb-2">Estimated P&amp;L if {benchmarkSymbol} drops — ATR-weighted across all positions.</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-gray-600 border-b border-white/5">
+                      <th className="text-left pb-1.5 font-medium">Move</th>
+                      <th className="text-right pb-1.5 font-medium">Longs</th>
+                      <th className="text-right pb-1.5 font-medium">Hedge</th>
+                      <th className="text-right pb-1.5 font-medium">Net P&amp;L</th>
+                      <th className="text-right pb-1.5 font-medium">% Acct</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {scenarioRows.map(row => {
+                      const acctImpact = accountBalance > 0 ? (row.netpl / accountBalance) * 100 : 0
+                      return (
+                        <tr key={row.pct} className={Math.abs(acctImpact) >= 3 ? 'bg-accent-red/[0.04]' : ''}>
+                          <td className="py-1.5 mono font-semibold text-gray-400">{row.pct}%</td>
+                          <td className="py-1.5 text-right mono text-accent-red">{formatCurrency(row.longspl, true)}</td>
+                          <td className="py-1.5 text-right mono text-accent-green">+{formatCurrency(Math.abs(row.hedgepl), true)}</td>
+                          <td className={`py-1.5 text-right mono font-semibold ${row.netpl >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                            {row.netpl >= 0 ? '+' : ''}{formatCurrency(row.netpl, true)}
+                          </td>
+                          <td className={`py-1.5 text-right mono ${Math.abs(acctImpact) >= 3 ? 'text-accent-red font-semibold' : Math.abs(acctImpact) >= 1.5 ? 'text-accent-yellow' : 'text-gray-400'}`}>
+                            {acctImpact >= 0 ? '+' : ''}{acctImpact.toFixed(2)}%
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* ── Sector Concentration ─────────────────────────────────────────── */}
       <div className="card">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -1954,163 +2110,6 @@ export default function RiskPanel({ selectedAccount }) {
               setCloseAllGroup(null)
             }}
           />
-        )
-      })()}
-
-      {/* ── Hedge Analysis ───────────────────────────────────────────────── */}
-      {atrData.size > 0 && exposure.positions.some(p => p.isShort) && (() => {
-        const longs     = exposure.positions.filter(p => !p.isShort)
-        const hedges    = exposure.positions.filter(p => p.isShort)
-        const grossLongEff  = longs.reduce((s, p) => s + p.effective, 0)
-        const hedgeEff      = Math.abs(hedges.reduce((s, p) => s + p.effective, 0))
-        const netEff        = grossLongEff - hedgeEff
-        const grossLongPct  = accountBalance > 0 ? (grossLongEff / accountBalance) * 100 : 0
-        const hedgePct      = accountBalance > 0 ? (hedgeEff    / accountBalance) * 100 : 0
-        const netPct        = accountBalance > 0 ? (netEff      / accountBalance) * 100 : 0
-        const hedgeCoverage = grossLongEff > 0 ? (hedgeEff / grossLongEff) * 100 : 0
-
-        const SCENARIOS = [-1, -2, -3, -5, -7, -10]
-        const scenarioRows = SCENARIOS.map(pct => {
-          let longspl = 0, hedgepl = 0
-          exposure.positions.forEach(p => {
-            if (!p.atrPct) return
-            const posMove = (pct / 100) * (p.atrPct / benchmarkAtrPct)
-            const pl = (p.isShort ? -1 : 1) * p.notional * posMove
-            if (p.isShort) hedgepl += pl
-            else longspl += pl
-          })
-          return { pct, longspl, hedgepl, netpl: longspl + hedgepl }
-        })
-
-        const coverageColor =
-          hedgeCoverage < 20 ? 'text-gray-400'
-          : hedgeCoverage < 50 ? 'text-accent-yellow'
-          : hedgeCoverage < 80 ? 'text-accent-green'
-          : 'text-accent-blue'
-
-        return (
-          <div className="card">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Risk Tools</p>
-                <h3 className="text-base font-semibold text-white flex items-center gap-2">
-                  <ShieldCheck size={15} className="text-accent-green" />
-                  Hedge Analysis
-                </h3>
-              </div>
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-accent-green/10 border border-accent-green/20">
-                <span className="text-xs font-semibold text-accent-green">{hedges.length}</span>
-                <span className="text-xs text-gray-500">hedge{hedges.length !== 1 ? 's' : ''} on</span>
-              </div>
-            </div>
-
-            {/* ── 1. Exposure Decomposition Bar ─────────────────────────── */}
-            <div className="mb-5">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">Exposure Decomposition</p>
-              {[
-                { label: 'Gross Longs', pct: grossLongPct, color: '#ff6b35', bgColor: 'bg-orange-500/80' },
-                { label: 'Hedge Offset', pct: -hedgePct, color: '#00d084', bgColor: 'bg-accent-green/80', isHedge: true },
-                { label: 'Net Exposure', pct: netPct, color: netPct > 80 ? '#ff4757' : netPct > 50 ? '#ffa502' : '#00d084', bgColor: netPct > 80 ? 'bg-accent-red/80' : netPct > 50 ? 'bg-accent-yellow/80' : 'bg-accent-green/80' },
-              ].map(row => {
-                const barWidth = Math.min(Math.abs(row.pct), 120) // cap at 120% for display
-                const maxPct = Math.max(grossLongPct, 1)
-                const fillPct = Math.min((Math.abs(row.pct) / maxPct) * 100, 100)
-                return (
-                  <div key={row.label} className="flex items-center gap-3 mb-2">
-                    <span className="text-xs text-gray-500 w-24 shrink-0">{row.label}</span>
-                    <div className="flex-1 h-4 rounded bg-white/5 overflow-hidden relative">
-                      <div
-                        className={`h-full rounded transition-all duration-500 ${row.bgColor}`}
-                        style={{ width: `${fillPct}%` }}
-                      />
-                    </div>
-                    <span className="text-xs mono font-semibold w-14 text-right shrink-0" style={{ color: row.color }}>
-                      {row.isHedge ? '−' : ''}{Math.abs(row.pct).toFixed(1)}%
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* ── 2. Hedge Coverage Ratio ───────────────────────────────── */}
-            <div className="mb-5">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">Hedge Coverage Ratio</p>
-              <div className="flex items-center gap-4">
-                <div className="relative w-20 h-20 shrink-0">
-                  <svg viewBox="0 0 80 80" className="w-full h-full -rotate-90">
-                    <circle cx="40" cy="40" r="30" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
-                    <circle
-                      cx="40" cy="40" r="30" fill="none"
-                      stroke={hedgeCoverage < 20 ? '#4b5563' : hedgeCoverage < 50 ? '#ffa502' : hedgeCoverage < 80 ? '#00d084' : '#3d84ff'}
-                      strokeWidth="8"
-                      strokeLinecap="round"
-                      strokeDasharray={`${Math.PI * 60}`}
-                      strokeDashoffset={`${Math.PI * 60 * (1 - Math.min(hedgeCoverage, 100) / 100)}`}
-                      style={{ transition: 'stroke-dashoffset 0.6s ease' }}
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className={`text-lg font-bold mono leading-none ${coverageColor}`}>{hedgeCoverage.toFixed(0)}%</span>
-                  </div>
-                </div>
-                <div className="flex-1">
-                  <p className={`text-xl font-bold mono ${coverageColor}`}>{hedgeCoverage.toFixed(1)}%</p>
-                  <p className="text-xs text-gray-400 mt-0.5">of long exposure offset by hedges</p>
-                  <p className="text-xs text-gray-600 mt-2 leading-relaxed">
-                    {hedgeCoverage < 20
-                      ? 'Token hedge — minimal protection against a market selloff.'
-                      : hedgeCoverage < 50
-                      ? 'Partial hedge — cushions downside but longs still dominate.'
-                      : hedgeCoverage < 80
-                      ? 'Well-hedged — meaningful downside protection in place.'
-                      : 'Near fully hedged — long and short exposure closely balanced.'}
-                  </p>
-                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                    <div><span className="text-gray-600">Long eff:</span> <span className="mono text-gray-300">{formatCurrency(grossLongEff, true)} ({grossLongPct.toFixed(1)}%)</span></div>
-                    <div><span className="text-gray-600">Hedge eff:</span> <span className="mono text-accent-green">−{formatCurrency(hedgeEff, true)} (−{hedgePct.toFixed(1)}%)</span></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* ── 3. Down-Move Scenario Table ───────────────────────────── */}
-            <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">Down-Move Scenarios</p>
-              <p className="text-xs text-gray-600 mb-2">Estimated P&amp;L if {benchmarkSymbol} drops — ATR-weighted across all positions.</p>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-gray-600 border-b border-white/5">
-                      <th className="text-left pb-1.5 font-medium">Move</th>
-                      <th className="text-right pb-1.5 font-medium">Longs</th>
-                      <th className="text-right pb-1.5 font-medium">Hedge</th>
-                      <th className="text-right pb-1.5 font-medium">Net P&amp;L</th>
-                      <th className="text-right pb-1.5 font-medium">% Acct</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5">
-                    {scenarioRows.map(row => {
-                      const acctImpact = accountBalance > 0 ? (row.netpl / accountBalance) * 100 : 0
-                      return (
-                        <tr key={row.pct} className={Math.abs(acctImpact) >= 3 ? 'bg-accent-red/[0.04]' : ''}>
-                          <td className="py-1.5 mono font-semibold text-gray-400">{row.pct}%</td>
-                          <td className="py-1.5 text-right mono text-accent-red">{formatCurrency(row.longspl, true)}</td>
-                          <td className="py-1.5 text-right mono text-accent-green">+{formatCurrency(Math.abs(row.hedgepl), true)}</td>
-                          <td className={`py-1.5 text-right mono font-semibold ${row.netpl >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
-                            {row.netpl >= 0 ? '+' : ''}{formatCurrency(row.netpl, true)}
-                          </td>
-                          <td className={`py-1.5 text-right mono ${Math.abs(acctImpact) >= 3 ? 'text-accent-red font-semibold' : Math.abs(acctImpact) >= 1.5 ? 'text-accent-yellow' : 'text-gray-400'}`}>
-                            {acctImpact >= 0 ? '+' : ''}{acctImpact.toFixed(2)}%
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
         )
       })()}
 
