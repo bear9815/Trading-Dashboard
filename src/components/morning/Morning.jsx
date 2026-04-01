@@ -83,6 +83,25 @@ const RISK_MODE_OPTIONS = [
   { id: 'good',     label: 'Good',       pct: '0.75%', cls: 'text-accent-green'  },
   { id: 'great',    label: 'Great',      pct: '1%',    cls: 'text-accent-blue'   },
 ]
+const SLEEP_QUALITY_OPTIONS = [
+  { id: 'poor',    label: 'Poor',    cls: 'text-accent-red'    },
+  { id: 'average', label: 'Average', cls: 'text-accent-yellow' },
+  { id: 'good',    label: 'Good',    cls: 'text-accent-green'  },
+]
+const TREND_OPTIONS = [
+  { id: 'Bearish',         label: 'Bearish',   cls: 'text-accent-red'    },
+  { id: 'Neutral/Bearish', label: 'N/Bearish', cls: 'text-orange-400'    },
+  { id: 'Neutral',         label: 'Neutral',   cls: 'text-gray-300'      },
+  { id: 'Neutral/Bullish', label: 'N/Bullish', cls: 'text-accent-yellow' },
+  { id: 'Bullish',         label: 'Bullish',   cls: 'text-accent-green'  },
+]
+const CREDIT_OPTIONS = [
+  { id: 'tight',      label: 'Tight',      cls: 'text-accent-red'    },
+  { id: 'tightening', label: 'Tightening', cls: 'text-orange-400'    },
+  { id: 'neutral',    label: 'Neutral',    cls: 'text-gray-300'      },
+  { id: 'easing',     label: 'Easing',     cls: 'text-accent-yellow' },
+  { id: 'loose',      label: 'Loose',      cls: 'text-accent-green'  },
+]
 
 // ── Reusable pill selector ────────────────────────────────────────────────────
 
@@ -171,17 +190,21 @@ function SliderInput({ value, onChange, min, max, step = 1, colorFn, placeholder
 
 // ── Empty blank entry ─────────────────────────────────────────────────────────
 
-function blankForm(date, cashDeployed, effectiveExposure) {
+function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode) {
   return {
     date,
     fomo:               50,
     fearGreed:          0,
     nasdaqNetHL:        '',
     ndxMcsi:            '',
-    marketBias:         '',
+    shortTermTrend:     '',
+    intermediateTrend:  '',
+    longTermTrend:      '',
+    creditConditions:   '',
+    sleepQuality:       '',
     confidence:         null,
     mentalState:        '',
-    riskMode:           'normal',
+    riskMode:           lastRiskMode ?? 'normal',
     cashDeployed:       cashDeployed != null ? Math.round(cashDeployed * 10) / 10 : '',
     effectiveExposure:  effectiveExposure != null ? Math.round(effectiveExposure * 10) / 10 : '',
     focusList:          '',
@@ -293,6 +316,26 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
             <label className="label">NDX MCSI</label>
             <PillSelect value={form.ndxMcsi} onChange={v => set('ndxMcsi', v)} options={NDX_MCSI_OPTIONS} />
           </div>
+
+          <div>
+            <label className="label">Short-Term Trend</label>
+            <PillSelect value={form.shortTermTrend} onChange={v => set('shortTermTrend', v)} options={TREND_OPTIONS} />
+          </div>
+
+          <div>
+            <label className="label">Intermediate Trend</label>
+            <PillSelect value={form.intermediateTrend} onChange={v => set('intermediateTrend', v)} options={TREND_OPTIONS} />
+          </div>
+
+          <div>
+            <label className="label">Long-Term Trend</label>
+            <PillSelect value={form.longTermTrend} onChange={v => set('longTermTrend', v)} options={TREND_OPTIONS} />
+          </div>
+
+          <div>
+            <label className="label">Credit Conditions</label>
+            <PillSelect value={form.creditConditions} onChange={v => set('creditConditions', v)} options={CREDIT_OPTIONS} />
+          </div>
         </div>
       </div>
 
@@ -304,8 +347,8 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
           <div>
-            <label className="label">My Market Bias</label>
-            <PillSelect value={form.marketBias} onChange={v => set('marketBias', v)} options={BIAS_OPTIONS} />
+            <label className="label">Sleep Quality</label>
+            <PillSelect value={form.sleepQuality} onChange={v => set('sleepQuality', v)} options={SLEEP_QUALITY_OPTIONS} />
           </div>
 
           <div>
@@ -780,9 +823,9 @@ function AnalysisTab({ entries }) {
                   <th className="text-left pb-2 font-medium">Date</th>
                   <th className="text-right pb-2 font-medium">FOMO</th>
                   <th className="text-right pb-2 font-medium">F/G</th>
+                  <th className="text-center pb-2 font-medium">Sleep</th>
                   <th className="text-center pb-2 font-medium">Conf.</th>
                   <th className="text-center pb-2 font-medium">State</th>
-                  <th className="text-center pb-2 font-medium">Bias</th>
                   <th className="text-center pb-2 font-medium">Mode</th>
                   <th className="text-right pb-2 font-medium">Trades</th>
                   <th className="text-right pb-2 font-medium">W/L</th>
@@ -800,6 +843,9 @@ function AnalysisTab({ entries }) {
                       {r.fearGreed != null ? (r.fearGreed > 0 ? `+${r.fearGreed}` : r.fearGreed) : '—'}
                     </td>
                     <td className="py-2 text-center">
+                      <MorningBadge value={r.sleepQuality} options={SLEEP_QUALITY_OPTIONS} />
+                    </td>
+                    <td className="py-2 text-center">
                       {r.confidence != null
                         ? <span className="font-semibold" style={{ color: confidenceColor(r.confidence) }}>{r.confidence}/5</span>
                         : <span className="text-gray-600">—</span>
@@ -807,9 +853,6 @@ function AnalysisTab({ entries }) {
                     </td>
                     <td className="py-2 text-center">
                       <MorningBadge value={r.mentalState} options={MENTAL_OPTIONS} />
-                    </td>
-                    <td className="py-2 text-center">
-                      <MorningBadge value={r.marketBias} options={BIAS_OPTIONS} />
                     </td>
                     <td className="py-2 text-center">
                       <MorningBadge value={r.riskMode} options={RISK_MODE_OPTIONS} />
@@ -852,7 +895,7 @@ function AnalysisTab({ entries }) {
         const matrix = {}
         for (const t of eligible) {
           const entry  = entryByDate.get(normDate(t.entryDate))
-          const cond   = entry?.ndxMcsi || entry?.marketBias
+          const cond   = entry?.ndxMcsi || entry?.shortTermTrend
           if (!cond) continue
           const tEdges = t.edges?.length > 0 ? t.edges : (t.strategy ? [t.strategy] : [])
           for (const edge of tEdges) {
@@ -1021,9 +1064,11 @@ function LogTab() {
 
   const formInitial = useMemo(() => {
     if (mode === 'edit' && editingEntry) return { ...editingEntry }
+    // Carry forward the most recent risk mode so the user doesn't have to re-select it each day
+    const lastRiskMode = sorted.find(e => e.date < TODAY)?.riskMode ?? sorted[0]?.riskMode ?? null
     // New entry: pre-fill cash deployed + effective exposure (if ATR already resolved)
-    return blankForm(TODAY, autoCash, autoEffective)
-  }, [mode, editingEntry, autoCash, autoEffective])
+    return blankForm(TODAY, autoCash, autoEffective, lastRiskMode)
+  }, [mode, editingEntry, autoCash, autoEffective, sorted])
 
   return (
     <div className="space-y-4">
@@ -1084,10 +1129,13 @@ function LogTab() {
           <h3 className="text-sm font-medium text-gray-300 mb-4">Recent Entries</h3>
           <div className="space-y-2">
             {sorted.slice(0, 30).map(entry => {
-              const ndx  = NDX_MCSI_OPTIONS.find(o => o.id === entry.ndxMcsi)
-              const bias = BIAS_OPTIONS.find(o => o.id === entry.marketBias)
-              const mode = RISK_MODE_OPTIONS.find(o => o.id === entry.riskMode)
-              const ment = MENTAL_OPTIONS.find(o => o.id === entry.mentalState)
+              const ndx   = NDX_MCSI_OPTIONS.find(o => o.id === entry.ndxMcsi)
+              const sleep = SLEEP_QUALITY_OPTIONS.find(o => o.id === entry.sleepQuality)
+              const mode  = RISK_MODE_OPTIONS.find(o => o.id === entry.riskMode)
+              const ment  = MENTAL_OPTIONS.find(o => o.id === entry.mentalState)
+              const stTrend = TREND_OPTIONS.find(o => o.id === entry.shortTermTrend)
+              const ltTrend = TREND_OPTIONS.find(o => o.id === entry.longTermTrend)
+              const credit  = CREDIT_OPTIONS.find(o => o.id === entry.creditConditions)
 
               return (
                 <div key={entry.id} className="rounded-lg bg-surface-200 border border-white/5 px-3 py-2.5">
@@ -1106,8 +1154,11 @@ function LogTab() {
                             F/G {entry.fearGreed > 0 ? `+${entry.fearGreed}` : entry.fearGreed}
                           </span>
                         )}
+                        {sleep && <span className={`text-xs ${sleep.cls}`}>Sleep: {sleep.label}</span>}
                         {ndx && <span className={`text-xs ${ndx.cls}`}>{ndx.id}</span>}
-                        {bias && <span className={`text-xs ${bias.cls}`}>{bias.label}</span>}
+                        {stTrend && <span className={`text-xs ${stTrend.cls}`}>ST: {stTrend.label}</span>}
+                        {ltTrend && <span className={`text-xs ${ltTrend.cls}`}>LT: {ltTrend.label}</span>}
+                        {credit && <span className={`text-xs ${credit.cls}`}>Credit: {credit.label}</span>}
                         {mode && <span className={`text-xs ${mode.cls}`}>{mode.label} {mode.pct}</span>}
                         {ment && <span className={`text-xs ${ment.cls}`}>{ment.label}</span>}
                         {entry.confidence != null && (
@@ -1195,7 +1246,7 @@ function LogTab() {
 
 export default function Morning() {
   const { entries } = useMorningStore()
-  const [tab, setTab] = useState('brief')
+  const [tab, setTab] = useState('log')
 
   return (
     <div className="p-4 flex flex-col gap-4">
@@ -1215,10 +1266,9 @@ export default function Morning() {
         {/* Tab switcher */}
         <div className="flex rounded border border-white/10 overflow-hidden text-xs">
           {[
-            { id: 'brief',    label: 'Market Brief', icon: Newspaper },
-            { id: 'bias',     label: 'Chart Bias',   icon: Image     },
             { id: 'log',      label: 'Journal',      icon: Sun       },
             { id: 'analysis', label: 'Analysis',     icon: BarChart2 },
+            { id: 'brief',    label: 'Market Brief', icon: Newspaper },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -1237,10 +1287,9 @@ export default function Morning() {
       </div>
 
       {/* Content */}
-      {tab === 'brief'    && <MorningBriefing />}
-      {tab === 'bias'     && <MarketBiasTab />}
       {tab === 'log'      && <LogTab />}
       {tab === 'analysis' && <AnalysisTab entries={entries} />}
+      {tab === 'brief'    && <MorningBriefing />}
     </div>
   )
 }
