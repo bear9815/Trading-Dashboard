@@ -856,6 +856,14 @@ export default function RiskPanel({ selectedAccount }) {
     [openTrades, atrData, benchmarkAtrPct, accountBalance]
   )
 
+  // Share computed effective exposure with the Morning journal form so it
+  // can auto-fill without doing its own redundant ATR fetch.
+  useEffect(() => {
+    if (exposure.effectivePct > 0) {
+      useSettingsStore.setState({ liveEffectivePct: exposure.effectivePct })
+    }
+  }, [exposure.effectivePct])
+
   // ── Live price fetch ───────────────────────────────────────────────────────
   const refreshPrices = useCallback(async () => {
     const symbols = [...new Set(openTrades.map(t => t.symbol).filter(Boolean))]

@@ -46,6 +46,11 @@ export const useSettingsStore = create(
       alpacaApiSecret: '',
       finnhubApiKey: '',
 
+      // Runtime-only: written by RiskPanel whenever effective exposure is computed.
+      // Persisted so the morning form has a value immediately on load even if the
+      // Risk tab hasn't been visited yet this session.
+      liveEffectivePct: null,
+
       equityCurveRange: 'All',
       analyticsTimeframe: 'All',
       analyticsWinLossMode: '$',

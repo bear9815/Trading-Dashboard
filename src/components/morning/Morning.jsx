@@ -1053,7 +1053,7 @@ function AnalysisTab({ entries }) {
 function LogTab() {
   const { entries, addEntry, updateEntry, deleteEntry, getEntryByDate } = useMorningStore()
   const { trades, getAccountBalance }  = useTradeStore()
-  const { benchmarkSymbol } = useSettingsStore()
+  const { benchmarkSymbol, liveEffectivePct } = useSettingsStore()
 
   const accountBalance = getAccountBalance()
   const openTrades     = trades.filter(t => t.status === 'Open')
@@ -1086,10 +1086,13 @@ function LogTab() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const autoEffective = useMemo(() => {
+    // Prefer the value already computed & cached by the Risk tab — immediate, no fetch.
+    if (liveEffectivePct != null && liveEffectivePct > 0) return liveEffectivePct
+    // Fallback: compute from our own ATR fetch if Risk tab hasn't been visited.
     if (!accountBalance || !benchmarkAtrPct || !atrData.size) return null
     const { effectivePct } = calcEffectiveExposure(openTrades, atrData, benchmarkAtrPct, accountBalance)
     return effectivePct > 0 ? effectivePct : null
-  }, [openTrades, atrData, benchmarkAtrPct, accountBalance])
+  }, [liveEffectivePct, openTrades, atrData, benchmarkAtrPct, accountBalance])
 
   const todayEntry = getEntryByDate(TODAY)
 
