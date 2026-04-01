@@ -233,6 +233,7 @@ function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode) {
     fearGreed:          0,
     nasdaqNetHL:        '',
     ndxMcsi:            '',
+    growthStocks:       '',
     shortTermTrend:     '',
     intermediateTrend:  '',
     longTermTrend:      '',
@@ -303,11 +304,19 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
         </div>
       </div>
 
-      {/* ── Market Internals ───────────────────────────────────────────── */}
-      <SectionCard accentColor="#3d84ff" icon={TrendingUp} title="Market Internals">
+      {/* ── Psychology & Mindset ───────────────────────────────────────── */}
+      <SectionCard accentColor="#a855f7" icon={Brain} title="Psychology & Mindset">
         <div className="space-y-5">
-
-          {/* FOMO + Fear/Greed side by side */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div>
+              <FieldLabel>Sleep Quality</FieldLabel>
+              <PillSelect value={form.sleepQuality} onChange={v => set('sleepQuality', v)} options={SLEEP_QUALITY_OPTIONS} />
+            </div>
+            <div>
+              <FieldLabel>Mental State</FieldLabel>
+              <PillSelect value={form.mentalState} onChange={v => set('mentalState', v)} options={MENTAL_OPTIONS} />
+            </div>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div>
               <FieldLabel hint="0 = calm · 100 = max FOMO">FOMO Index</FieldLabel>
@@ -318,8 +327,24 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
               <SliderInput value={form.fearGreed} onChange={v => set('fearGreed', v)} min={-5} max={5} step={0.5} colorFn={fearGreedColor} placeholder="0" />
             </div>
           </div>
+          <div>
+            <FieldLabel hint={form.confidence != null ? ['', 'Very Low', 'Low', 'Moderate', 'High', 'Very High'][form.confidence] : 'click to rate'}>
+              Confidence
+            </FieldLabel>
+            <ConfidencePicker value={form.confidence} onChange={v => set('confidence', v)} />
+          </div>
+          <div>
+            <FieldLabel>Risk Mode for Today</FieldLabel>
+            <PillSelect value={form.riskMode} onChange={v => set('riskMode', v)} options={RISK_MODE_OPTIONS} />
+          </div>
+        </div>
+      </SectionCard>
 
-          {/* NASDAQ H/L + NDX MCSI */}
+      {/* ── Market Internals ───────────────────────────────────────────── */}
+      <SectionCard accentColor="#3d84ff" icon={TrendingUp} title="Market Internals">
+        <div className="space-y-5">
+
+          {/* NASDAQ H/L + Growth Stocks */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div>
               <FieldLabel hint="e.g. −34 or +74">NASDAQ Net H/L</FieldLabel>
@@ -333,8 +358,8 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
               />
             </div>
             <div>
-              <FieldLabel>NDX MCSI</FieldLabel>
-              <PillSelect value={form.ndxMcsi} onChange={v => set('ndxMcsi', v)} options={NDX_MCSI_OPTIONS} />
+              <FieldLabel>Growth Stocks</FieldLabel>
+              <PillSelect value={form.growthStocks} onChange={v => set('growthStocks', v)} options={TREND_OPTIONS} />
             </div>
           </div>
 
@@ -361,32 +386,6 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
           <div>
             <FieldLabel>Credit Conditions</FieldLabel>
             <PillSelect value={form.creditConditions} onChange={v => set('creditConditions', v)} options={CREDIT_OPTIONS} />
-          </div>
-        </div>
-      </SectionCard>
-
-      {/* ── Psychology & Mindset ───────────────────────────────────────── */}
-      <SectionCard accentColor="#a855f7" icon={Brain} title="Psychology & Mindset">
-        <div className="space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <div>
-              <FieldLabel>Sleep Quality</FieldLabel>
-              <PillSelect value={form.sleepQuality} onChange={v => set('sleepQuality', v)} options={SLEEP_QUALITY_OPTIONS} />
-            </div>
-            <div>
-              <FieldLabel>Mental State</FieldLabel>
-              <PillSelect value={form.mentalState} onChange={v => set('mentalState', v)} options={MENTAL_OPTIONS} />
-            </div>
-          </div>
-          <div>
-            <FieldLabel hint={form.confidence != null ? ['', 'Very Low', 'Low', 'Moderate', 'High', 'Very High'][form.confidence] : 'click to rate'}>
-              Confidence
-            </FieldLabel>
-            <ConfidencePicker value={form.confidence} onChange={v => set('confidence', v)} />
-          </div>
-          <div>
-            <FieldLabel>Risk Mode for Today</FieldLabel>
-            <PillSelect value={form.riskMode} onChange={v => set('riskMode', v)} options={RISK_MODE_OPTIONS} />
           </div>
         </div>
       </SectionCard>
@@ -926,7 +925,7 @@ function AnalysisTab({ entries }) {
         const matrix = {}
         for (const t of eligible) {
           const entry  = entryByDate.get(normDate(t.entryDate))
-          const cond   = entry?.ndxMcsi || entry?.shortTermTrend
+          const cond   = entry?.growthStocks || entry?.ndxMcsi || entry?.shortTermTrend
           if (!cond) continue
           const tEdges = t.edges?.length > 0 ? t.edges : (t.strategy ? [t.strategy] : [])
           for (const edge of tEdges) {
@@ -1160,8 +1159,9 @@ function LogTab() {
           <h3 className="text-sm font-medium text-gray-300 mb-4">Recent Entries</h3>
           <div className="space-y-2">
             {sorted.slice(0, 30).map(entry => {
-              const ndx   = NDX_MCSI_OPTIONS.find(o => o.id === entry.ndxMcsi)
-              const sleep = SLEEP_QUALITY_OPTIONS.find(o => o.id === entry.sleepQuality)
+              const ndx     = NDX_MCSI_OPTIONS.find(o => o.id === entry.ndxMcsi)
+              const growth  = TREND_OPTIONS.find(o => o.id === entry.growthStocks)
+              const sleep   = SLEEP_QUALITY_OPTIONS.find(o => o.id === entry.sleepQuality)
               const mode  = RISK_MODE_OPTIONS.find(o => o.id === entry.riskMode)
               const ment  = MENTAL_OPTIONS.find(o => o.id === entry.mentalState)
               const stTrend = TREND_OPTIONS.find(o => o.id === entry.shortTermTrend)
@@ -1186,6 +1186,7 @@ function LogTab() {
                           </span>
                         )}
                         {sleep && <span className={`text-xs ${sleep.cls}`}>Sleep: {sleep.label}</span>}
+                        {growth && <span className={`text-xs ${growth.cls}`}>Growth: {growth.label}</span>}
                         {ndx && <span className={`text-xs ${ndx.cls}`}>{ndx.id}</span>}
                         {stTrend && <span className={`text-xs ${stTrend.cls}`}>ST: {stTrend.label}</span>}
                         {ltTrend && <span className={`text-xs ${ltTrend.cls}`}>LT: {ltTrend.label}</span>}
