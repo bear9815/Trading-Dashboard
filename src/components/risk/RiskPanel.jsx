@@ -153,13 +153,16 @@ function ClosePositionModal({ position, onClose, onConfirm }) {
   const [screenshot, setScreenshot] = useState(null)
   const [pasting, setPasting]       = useState(false)
 
-  const ep0  = position.entryPrice || 0
-  const sh0  = parseFloat(shares) || 0
-  const ep   = parseFloat(exitPrice) || 0
-  const comm = parseFloat(commission) || 0
-  const ba   = ep0 * sh0
-  const gross = ep > 0 && sh0 > 0 ? ep * sh0 : null
-  const pl    = gross != null ? gross - ba - comm : null
+  const ep0     = position.entryPrice || 0
+  const sh0     = parseFloat(shares) || 0
+  const ep      = parseFloat(exitPrice) || 0
+  const comm    = parseFloat(commission) || 0
+  const isShort = (position.position || '').toLowerCase().includes('short')
+  const ba      = ep0 * sh0
+  const gross   = ep > 0 && sh0 > 0 ? ep * sh0 : null
+  // Short: profit when cover price (ep) < entry price (ep0) → ba - gross
+  // Long:  profit when exit price (ep) > entry price (ep0) → gross - ba
+  const pl      = gross != null ? (isShort ? ba - gross - comm : gross - ba - comm) : null
 
   const rMultiple = position.stopLoss && ep0 && sh0 && pl != null
     ? pl / (Math.abs(ep0 - position.stopLoss) * sh0)
