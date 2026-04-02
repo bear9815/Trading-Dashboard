@@ -758,9 +758,8 @@ export default function RiskPanel({ selectedAccount }) {
   const [quotes, setQuotes]           = useState(new Map())
   const [fetching, setFetching]       = useState(false)
   const [lastRefresh, setLastRefresh] = useState(null)
-  const [closeTarget, setCloseTarget]       = useState(null) // single lot to close
-  const [lotPickTarget, setLotPickTarget]   = useState(null) // multi-lot group awaiting lot selection
-  const [closeAllGroup, setCloseAllGroup]   = useState(null) // group to close all lots at once
+  const [closeTarget, setCloseTarget] = useState(null) // single lot to close
+  const [fifoGroup,   setFifoGroup]   = useState(null) // multi-lot group → FIFO close modal
   const [expandedSymbols, setExpandedSymbols] = useState(new Set())
   const [ladderSymbols,   setLadderSymbols]   = useState(new Set())
 
@@ -1313,7 +1312,7 @@ export default function RiskPanel({ selectedAccount }) {
                                 </button>
                               )}
                               <button
-                                onClick={() => isMulti ? setLotPickTarget(group) : setCloseTarget(group.lots[0])}
+                                onClick={() => isMulti ? setFifoGroup(group) : setCloseTarget(group.lots[0])}
                                 className="text-[11px] px-2 py-1 rounded border border-accent-red/30 text-accent-red hover:bg-accent-red/10 transition-all whitespace-nowrap"
                               >
                                 Close
@@ -1415,22 +1414,30 @@ export default function RiskPanel({ selectedAccount }) {
                 </tbody>
                 <tfoot>
                   {(() => {
-                    // Compute totals over all positions with live quote data
+                    // Compute totals over grouped positions (one per symbol) with live quotes.
+                    // Using groupedPositions avoids double-counting R for multi-lot symbols.
                     let totalUnrealPL = null
                     let totalCurrentR = null
-                    let rCount = 0
-                    for (const p of positions) {
-                      const q = quotes.get(p.symbol)
+                    for (const group of groupedPositions) {
+                      const q  = quotes.get(group.symbol)
                       const cp = q?.price ?? null
-                      if (cp != null && p.entryPrice && p.positionSize) {
-                        totalUnrealPL = (totalUnrealPL ?? 0) + (cp - p.entryPrice) * p.positionSize
+                      const isLong = (group.position ?? 'Long').toLowerCase() !== 'short'
+                      // Unrealized P&L: sum across individual lots so each lot's entry/size is exact
+                      if (cp != null) {
+                        const upl = group.lots.reduce((s, l) => {
+                          const sz  = l.remainingShares ?? l.positionSize
+                          const lng = (l.position ?? 'Long').toLowerCase() !== 'short'
+                          return s + ((lng ? cp - l.entryPrice : l.entryPrice - cp) * (sz || 0))
+                        }, 0)
+                        totalUnrealPL = (totalUnrealPL ?? 0) + upl
                       }
-                      if (cp != null && p.entryPrice && p.stopLoss) {
-                        const rps = Math.abs(p.entryPrice - p.stopLoss)
+                      // Current R: use original stop so trailing doesn't distort the number
+                      const origStop = group._originalStopLoss ?? group.stopLoss
+                      if (cp != null && group.entryPrice && origStop) {
+                        const rps = Math.abs(group.entryPrice - origStop)
                         if (rps > 0) {
-                          const lng = (p.position ?? 'Long').toLowerCase() !== 'short'
-                          totalCurrentR = (totalCurrentR ?? 0) + (lng ? cp - p.entryPrice : p.entryPrice - cp) / rps
-                          rCount++
+                          totalCurrentR = (totalCurrentR ?? 0) +
+                            (isLong ? cp - group.entryPrice : group.entryPrice - cp) / rps
                         }
                       }
                     }
@@ -2059,58 +2066,72 @@ export default function RiskPanel({ selectedAccount }) {
         />
       )}
 
-      {/* ── Lot Picker Modal (multi-lot group → pick which lot to close) ─── */}
-      {lotPickTarget && (
-        <LotPickerModal
-          group={lotPickTarget}
-          onClose={() => setLotPickTarget(null)}
-          onPickLot={(lot) => {
-            setLotPickTarget(null)
-            setCloseTarget(lot)
-          }}
-          onCloseAll={() => {
-            setLotPickTarget(null)
-            setCloseAllGroup(lotPickTarget)
-          }}
-        />
-      )}
-
-      {/* ── Close All Lots Modal ────────────────────────────────────────────── */}
-      {closeAllGroup && (() => {
-        const g = closeAllGroup
+      {/* ── FIFO Close Modal (multi-lot group → oldest lot filled first) ──── */}
+      {fifoGroup && (() => {
+        const g = fifoGroup
+        // Synthetic position uses group averages so the modal shows blended entry/stop
         const syntheticPosition = {
           ...g.lots[0],
-          positionSize: g.positionSize,
-          entryPrice:   g.entryPrice,
-          stopLoss:     g.stopLoss,
-          exits:        [],
+          symbol:                  g.symbol,
+          position:                g.position,
+          entryPrice:              g.entryPrice,
+          stopLoss:                g.stopLoss,
+          takeProfit:              g.takeProfit,
+          positionSize:            g.positionSize,
+          _originalPositionSize:   g.positionSize,
+          exits:                   [],
         }
         return (
           <ClosePositionModal
             position={syntheticPosition}
-            onClose={() => setCloseAllGroup(null)}
+            onClose={() => setFifoGroup(null)}
             onConfirm={(updates) => {
-              const lastExit    = updates.exits?.[updates.exits.length - 1] ?? {}
-              const ep          = lastExit.price ?? 0
-              const exitDate    = lastExit.date
-              const totalComm   = lastExit.commission ?? 0
-              const totalShares = g.positionSize || 1
-              g.lots.forEach(lot => {
-                const lotShares = lot.positionSize || 0
-                if (!ep || lotShares <= 0) return
-                const lotComm   = Math.round(totalComm * (lotShares / totalShares) * 100) / 100
-                const lotAmount = ep * lotShares
-                const lotBa     = (lot.entryPrice || 0) * lotShares
-                const isShort   = (lot.position || 'Long').toLowerCase().includes('short')
-                const lotPl     = Math.round(((isShort ? lotBa - lotAmount : lotAmount - lotBa) - lotComm) * 100) / 100
-                updateTrade(lot.id, {
-                  status:     lotPl > 0 ? 'Win' : lotPl < 0 ? 'Loss' : 'Scratch',
-                  pl:         lotPl,
-                  sellAmount: lotAmount - lotComm,
-                  exits:      [...(lot.exits || []), { price: ep, amount: lotAmount, shares: lotShares, date: exitDate, commission: lotComm }],
-                })
-              })
-              setCloseAllGroup(null)
+              const newExit     = updates.exits?.[updates.exits.length - 1] ?? {}
+              const exitPrice   = newExit.price ?? 0
+              const exitDate    = newExit.date
+              const totalShares = newExit.shares ?? 0
+              const totalComm   = newExit.commission ?? 0
+              if (!exitPrice || !totalShares) return
+
+              // FIFO: sort lots oldest-first, fill from the front
+              const sorted = [...g.lots].sort((a, b) =>
+                new Date(a.entryDate || 0) - new Date(b.entryDate || 0)
+              )
+              let remaining = totalShares
+              for (const lot of sorted) {
+                if (remaining <= 0) break
+                const alreadyExited = (lot.exits || []).reduce((s, ex) => {
+                  const sh = ex.shares != null ? Math.abs(ex.shares)
+                           : (ex.amount && ex.price ? Math.round(Math.abs(ex.amount) / Math.abs(ex.price)) : 0)
+                  return s + sh
+                }, 0)
+                const origSz     = lot._originalPositionSize ?? lot.positionSize ?? 0
+                const lotRem     = Math.max(0, Math.round(origSz - alreadyExited))
+                if (lotRem <= 0) continue
+
+                const sharesToClose = Math.min(remaining, lotRem)
+                remaining -= sharesToClose
+                const isFullClose = sharesToClose >= lotRem
+                const lotComm     = totalShares > 0 ? Math.round(totalComm * (sharesToClose / totalShares) * 100) / 100 : 0
+                const lotAmount   = exitPrice * sharesToClose
+                const lotBa       = (lot.entryPrice || 0) * sharesToClose
+                const isShort     = (lot.position || 'Long').toLowerCase().includes('short')
+                const lotPl       = Math.round(((isShort ? lotBa - lotAmount : lotAmount - lotBa) - lotComm) * 100) / 100
+
+                const lotUpdates = {
+                  exits: [...(lot.exits || []), {
+                    price: exitPrice, amount: lotAmount,
+                    shares: sharesToClose, date: exitDate, commission: lotComm,
+                  }],
+                }
+                if (isFullClose) {
+                  lotUpdates.status     = lotPl > 0 ? 'Win' : lotPl < 0 ? 'Loss' : 'Scratch'
+                  lotUpdates.pl         = lotPl
+                  lotUpdates.sellAmount = lotAmount - lotComm
+                }
+                updateTrade(lot.id, lotUpdates)
+              }
+              setFifoGroup(null)
             }}
           />
         )
