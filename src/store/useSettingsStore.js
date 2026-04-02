@@ -60,6 +60,8 @@ export const useSettingsStore = create(
       analyticsSqnMode:  'sqn',
       dashboardNote: '',
       openPositionsColumns: ['entryDate', 'held', 'entryPrice', 'stop', 'target', 'riskDollar', 'riskPct', 'sector', 'theme'],
+      openPositionsColumnOrder: null,
+      riskColumnOrder: null,
       symbolThemes: {},
 
       excludedSymbols: [],
@@ -110,6 +112,8 @@ export const useSettingsStore = create(
       setAnalyticsSqnMode:     (v)         => { set({ analyticsSqnMode: v });     saveToCloud({ ...get(), analyticsSqnMode: v })     },
       setDashboardNote:    (v)             => { set({ dashboardNote: v });      saveToCloud({ ...get(), dashboardNote: v })      },
       setOpenPositionsColumns: (cols)      => { set({ openPositionsColumns: cols }); saveToCloud({ ...get(), openPositionsColumns: cols }) },
+      setOpenPositionsColumnOrder: (order) => set({ openPositionsColumnOrder: order }),
+      setRiskColumnOrder:          (order) => set({ riskColumnOrder: order }),
       setTpMultiplier:     (v)             => { set({ tpMultiplier: Number(v) }); saveToCloud({ ...get(), tpMultiplier: Number(v) }) },
       setDailyLossLimit:   (v)             => { set({ dailyLossLimit: Number(v) }); saveToCloud({ ...get(), dailyLossLimit: Number(v) }) },
       setMaxDrawdownLimit: (v)             => { set({ maxDrawdownLimit: Number(v) }); saveToCloud({ ...get(), maxDrawdownLimit: Number(v) }) },

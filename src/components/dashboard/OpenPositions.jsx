@@ -91,10 +91,13 @@ export default function OpenPositions({ openTrades, accountBalance }) {
   const {
     apiKey,
     openPositionsColumns, setOpenPositionsColumns,
+    openPositionsColumnOrder, setOpenPositionsColumnOrder,
     symbolThemes, setSymbolTheme,
   } = useSettingsStore()
 
   const [showMenu, setShowMenu] = useState(false)
+  const [dragCol, setDragCol] = useState(null)
+  const [dragOverCol, setDragOverCol] = useState(null)
   const [loadingThemes, setLoadingThemes] = useState({})
   const [quotes, setQuotes] = useState(new Map())
   const menuRef = useRef(null)
@@ -102,6 +105,18 @@ export default function OpenPositions({ openTrades, accountBalance }) {
   const visibleKeys = openPositionsColumns || ALL_COLUMNS.map(c => c.key)
   const show = key => visibleKeys.includes(key)
   const needsAI = show('sector') || show('theme')
+
+  const ALL_KEYS = ALL_COLUMNS.map(c => c.key)
+  const columnOrder = useMemo(() => {
+    const base = openPositionsColumnOrder ?? ALL_KEYS
+    const extra = ALL_KEYS.filter(k => !base.includes(k))
+    return [...base, ...extra]
+  }, [openPositionsColumnOrder])
+
+  const orderedVisibleKeys = useMemo(
+    () => columnOrder.filter(k => show(k)),
+    [columnOrder, visibleKeys]
+  )
 
   function toggleColumn(key) {
     setOpenPositionsColumns(
@@ -150,7 +165,7 @@ export default function OpenPositions({ openTrades, accountBalance }) {
   }, [allPositions.length])
 
   // Proportional column widths based on visible columns
-  const visibleCols = ['_symbol', ...visibleKeys]
+  const visibleCols = ['_symbol', ...orderedVisibleKeys]
   const totalWeight = visibleCols.reduce((s, k) => s + (WEIGHTS[k] || 10), 0)
   const colWidth = key => `${((WEIGHTS[key] || 10) / totalWeight * 100).toFixed(1)}%`
 
@@ -175,26 +190,51 @@ export default function OpenPositions({ openTrades, accountBalance }) {
             <Settings2 size={14} />
           </button>
           {showMenu && (
-            <div className="absolute right-0 top-7 z-50 bg-surface-100 border border-white/10 rounded-lg shadow-xl p-2 min-w-36">
-              <p className="text-sm text-gray-500 px-2 pb-1.5 border-b border-white/5 mb-1">Columns</p>
-              {ALL_COLUMNS.map(col => (
-                <button
-                  key={col.key}
-                  onClick={() => toggleColumn(col.key)}
-                  className="flex items-center gap-2 w-full px-2 py-1.5 rounded hover:bg-white/5 text-sm text-left transition-colors"
-                >
-                  <span className={`w-3 h-3 rounded-sm border flex items-center justify-center shrink-0 ${
-                    visibleKeys.includes(col.key) ? 'bg-accent-blue border-accent-blue' : 'border-white/20'
-                  }`}>
-                    {visibleKeys.includes(col.key) && (
-                      <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
-                        <path d="M1 3l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    )}
-                  </span>
-                  <span className={visibleKeys.includes(col.key) ? 'text-gray-200' : 'text-gray-500'}>{col.label}</span>
-                </button>
-              ))}
+            <div className="absolute right-0 top-7 z-50 bg-surface-100 border border-white/10 rounded-lg shadow-xl p-2 min-w-40">
+              <p className="text-xs text-gray-500 px-2 pb-1.5 border-b border-white/5 mb-1">Drag to reorder · click to toggle</p>
+              {columnOrder.map(key => {
+                const col = ALL_COLUMNS.find(c => c.key === key)
+                if (!col) return null
+                return (
+                  <div
+                    key={key}
+                    draggable
+                    onDragStart={() => setDragCol(key)}
+                    onDragOver={e => { e.preventDefault(); setDragOverCol(key) }}
+                    onDrop={() => {
+                      if (!dragCol || dragCol === key) { setDragCol(null); setDragOverCol(null); return }
+                      const next = [...columnOrder]
+                      const from = next.indexOf(dragCol)
+                      const to   = next.indexOf(key)
+                      next.splice(from, 1)
+                      next.splice(to, 0, dragCol)
+                      setOpenPositionsColumnOrder(next)
+                      setDragCol(null); setDragOverCol(null)
+                    }}
+                    onDragEnd={() => { setDragCol(null); setDragOverCol(null) }}
+                    className={`flex items-center gap-2 w-full px-2 py-1.5 rounded transition-colors cursor-default
+                      ${dragOverCol === key && dragCol !== key ? 'border-t-2 border-accent-blue' : ''}
+                      ${dragCol === key ? 'opacity-40' : 'hover:bg-white/5'}`}
+                  >
+                    <span className="text-gray-600 cursor-grab select-none text-base leading-none">⠿</span>
+                    <span className={`w-3 h-3 rounded-sm border flex items-center justify-center shrink-0 ${
+                      visibleKeys.includes(key) ? 'bg-accent-blue border-accent-blue' : 'border-white/20'
+                    }`} onClick={() => toggleColumn(key)} style={{cursor:'pointer'}}>
+                      {visibleKeys.includes(key) && (
+                        <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
+                          <path d="M1 3l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                    </span>
+                    <button
+                      onClick={() => toggleColumn(key)}
+                      className={`flex-1 text-left text-sm ${visibleKeys.includes(key) ? 'text-gray-200' : 'text-gray-500'}`}
+                    >
+                      {col.label}
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -208,32 +248,16 @@ export default function OpenPositions({ openTrades, accountBalance }) {
           <table className="w-full text-sm table-fixed">
             <colgroup>
               <col style={{ width: colWidth('_symbol') }} />
-              {show('account')    && <col style={{ width: colWidth('account') }} />}
-              {show('entryDate')  && <col style={{ width: colWidth('entryDate') }} />}
-              {show('held')       && <col style={{ width: colWidth('held') }} />}
-              {show('mktVal')     && <col style={{ width: colWidth('mktVal') }} />}
-              {show('entryPrice') && <col style={{ width: colWidth('entryPrice') }} />}
-              {show('stop')       && <col style={{ width: colWidth('stop') }} />}
-              {show('target')     && <col style={{ width: colWidth('target') }} />}
-              {show('riskDollar') && <col style={{ width: colWidth('riskDollar') }} />}
-              {show('riskPct')    && <col style={{ width: colWidth('riskPct') }} />}
-              {show('sector')     && <col style={{ width: colWidth('sector') }} />}
-              {show('theme')      && <col style={{ width: colWidth('theme') }} />}
+              {orderedVisibleKeys.map(k => <col key={k} style={{ width: colWidth(k) }} />)}
             </colgroup>
             <thead>
               <tr className="text-sm text-gray-500 border-b border-white/5">
                 <th className="text-left pb-2 px-2 font-medium">Symbol</th>
-                {show('account')    && <th className="text-left pb-2 px-2 font-medium">Account</th>}
-                {show('entryDate')  && <th className="text-left pb-2 px-2 font-medium">Entry Date</th>}
-                {show('held')       && <th className="text-right pb-2 px-2 font-medium">Held</th>}
-                {show('mktVal')     && <th className="text-right pb-2 px-2 font-medium">Mkt Val</th>}
-                {show('entryPrice') && <th className="text-right pb-2 px-2 font-medium">Entry</th>}
-                {show('stop')       && <th className="text-right pb-2 px-2 font-medium">Stop</th>}
-                {show('target')     && <th className="text-right pb-2 px-2 font-medium">Target</th>}
-                {show('riskDollar') && <th className="text-right pb-2 px-2 font-medium">Risk $</th>}
-                {show('riskPct')    && <th className="text-right pb-2 px-2 font-medium">Risk %</th>}
-                {show('sector')     && <th className="text-left pb-2 px-2 font-medium">Sector</th>}
-                {show('theme')      && <th className="text-left pb-2 px-2 font-medium">Theme</th>}
+                {orderedVisibleKeys.map(k => {
+                  const col = ALL_COLUMNS.find(c => c.key === k)
+                  const right = !['account', 'entryDate', 'sector', 'theme'].includes(k)
+                  return <th key={k} className={`pb-2 px-2 font-medium ${right ? 'text-right' : 'text-left'}`}>{col?.label ?? k}</th>
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -275,62 +299,39 @@ export default function OpenPositions({ openTrades, accountBalance }) {
                         )}
                       </div>
                     </td>
-                    {show('account') && (
-                      <td className="py-2 px-2 text-gray-400 truncate">{t.account || '—'}</td>
-                    )}
-                    {show('entryDate') && (
-                      <td className="py-2 px-2 text-gray-400 truncate">{formatDate(t.entryDate)}</td>
-                    )}
-                    {show('held') && (
-                      <td className="py-2 px-2 text-right text-gray-400 mono">
-                        {days != null ? `${days}d` : '—'}
-                      </td>
-                    )}
-                    {show('mktVal') && (
-                      <td className="py-2 px-2 text-right mono text-gray-300 font-medium">
-                        {(() => {
-                          const price = quotes.get(t.symbol)?.price ?? t.entryPrice
-                          const val = price != null && t.positionSize ? price * t.positionSize : null
-                          return val != null ? formatCurrency(val, true) : '—'
-                        })()}
-                      </td>
-                    )}
-                    {show('entryPrice') && (
-                      <td className="py-2 px-2 text-right mono text-gray-300">
-                        {t.entryPrice != null ? formatCurrency(t.entryPrice) : '—'}
-                      </td>
-                    )}
-                    {show('stop') && (
-                      <td className="py-2 px-2 text-right mono text-accent-red">
-                        {t.stopLoss != null ? formatCurrency(t.stopLoss) : '—'}
-                      </td>
-                    )}
-                    {show('target') && (
-                      <td className="py-2 px-2 text-right mono text-accent-green">
-                        {t.takeProfit != null ? formatCurrency(t.takeProfit) : '—'}
-                      </td>
-                    )}
-                    {show('riskDollar') && (
-                      <td className={`py-2 px-2 text-right mono font-medium ${risk > 0 ? 'text-accent-red' : 'text-gray-500'}`}>
-                        {risk > 0 ? formatCurrency(risk) : '—'}
-                      </td>
-                    )}
-                    {show('riskPct') && (
-                      <td className={`py-2 px-2 text-right mono font-medium ${
-                        !riskPct || risk === 0 ? 'text-gray-500'
-                        : riskPct >= 4 ? 'text-accent-red'
-                        : riskPct >= 2 ? 'text-accent-yellow'
-                        : 'text-accent-green'
-                      }`}>
-                        {riskPct != null && risk > 0 ? `${riskPct.toFixed(2)}%` : '—'}
-                      </td>
-                    )}
-                    {show('sector') && (
-                      <td className="py-2 px-2 truncate">{aiCell(sector)}</td>
-                    )}
-                    {show('theme') && (
-                      <td className="py-2 px-2 truncate">{aiCell(theme)}</td>
-                    )}
+                    {orderedVisibleKeys.map(key => {
+                      switch (key) {
+                        case 'account':
+                          return <td key={key} className="py-2 px-2 text-gray-400 truncate">{t.account || '—'}</td>
+                        case 'entryDate':
+                          return <td key={key} className="py-2 px-2 text-gray-400 truncate">{formatDate(t.entryDate)}</td>
+                        case 'held':
+                          return <td key={key} className="py-2 px-2 text-right text-gray-400 mono">{days != null ? `${days}d` : '—'}</td>
+                        case 'mktVal':
+                          return <td key={key} className="py-2 px-2 text-right mono text-gray-300 font-medium">{(() => {
+                            const price = quotes.get(t.symbol)?.price ?? t.entryPrice
+                            const val = price != null && t.positionSize ? price * t.positionSize : null
+                            return val != null ? formatCurrency(val, true) : '—'
+                          })()}</td>
+                        case 'entryPrice':
+                          return <td key={key} className="py-2 px-2 text-right mono text-gray-300">{t.entryPrice != null ? formatCurrency(t.entryPrice) : '—'}</td>
+                        case 'stop':
+                          return <td key={key} className="py-2 px-2 text-right mono text-accent-red">{t.stopLoss != null ? formatCurrency(t.stopLoss) : '—'}</td>
+                        case 'target':
+                          return <td key={key} className="py-2 px-2 text-right mono text-accent-green">{t.takeProfit != null ? formatCurrency(t.takeProfit) : '—'}</td>
+                        case 'riskDollar':
+                          return <td key={key} className={`py-2 px-2 text-right mono font-medium ${risk > 0 ? 'text-accent-red' : 'text-gray-500'}`}>{risk > 0 ? formatCurrency(risk) : '—'}</td>
+                        case 'riskPct':
+                          return <td key={key} className={`py-2 px-2 text-right mono font-medium ${!riskPct || risk === 0 ? 'text-gray-500' : riskPct >= 4 ? 'text-accent-red' : riskPct >= 2 ? 'text-accent-yellow' : 'text-accent-green'}`}>
+                            {riskPct != null && risk > 0 ? `${riskPct.toFixed(2)}%` : '—'}
+                          </td>
+                        case 'sector':
+                          return <td key={key} className="py-2 px-2 truncate">{aiCell(sector)}</td>
+                        case 'theme':
+                          return <td key={key} className="py-2 px-2 truncate">{aiCell(theme)}</td>
+                        default: return null
+                      }
+                    })}
                   </tr>
                 )
               })}
@@ -350,17 +351,7 @@ export default function OpenPositions({ openTrades, accountBalance }) {
               <table className="w-full text-sm table-fixed">
                 <colgroup>
                   <col style={{ width: colWidth('_symbol') }} />
-                  {show('account')    && <col style={{ width: colWidth('account') }} />}
-                  {show('entryDate')  && <col style={{ width: colWidth('entryDate') }} />}
-                  {show('held')       && <col style={{ width: colWidth('held') }} />}
-                  {show('mktVal')     && <col style={{ width: colWidth('mktVal') }} />}
-                  {show('entryPrice') && <col style={{ width: colWidth('entryPrice') }} />}
-                  {show('stop')       && <col style={{ width: colWidth('stop') }} />}
-                  {show('target')     && <col style={{ width: colWidth('target') }} />}
-                  {show('riskDollar') && <col style={{ width: colWidth('riskDollar') }} />}
-                  {show('riskPct')    && <col style={{ width: colWidth('riskPct') }} />}
-                  {show('sector')     && <col style={{ width: colWidth('sector') }} />}
-                  {show('theme')      && <col style={{ width: colWidth('theme') }} />}
+                  {orderedVisibleKeys.map(k => <col key={k} style={{ width: colWidth(k) }} />)}
                 </colgroup>
                 <tbody className="divide-y divide-accent-green/10">
                   {hedgePositions.map(t => {
@@ -398,29 +389,39 @@ export default function OpenPositions({ openTrades, accountBalance }) {
                             )}
                           </div>
                         </td>
-                        {show('account')    && <td className="py-2 px-2 text-gray-400 truncate">{t.account || '—'}</td>}
-                        {show('entryDate')  && <td className="py-2 px-2 text-gray-400 truncate">{formatDate(t.entryDate)}</td>}
-                        {show('held')       && <td className="py-2 px-2 text-right text-gray-400 mono">{days != null ? `${days}d` : '—'}</td>}
-                        {show('mktVal')     && (
-                          <td className="py-2 px-2 text-right mono text-gray-300 font-medium">
-                            {(() => {
-                              const price = quotes.get(t.symbol)?.price ?? t.entryPrice
-                              const val = price != null && t.positionSize ? price * t.positionSize : null
-                              return val != null ? formatCurrency(val, true) : '—'
-                            })()}
-                          </td>
-                        )}
-                        {show('entryPrice') && <td className="py-2 px-2 text-right mono text-gray-300">{t.entryPrice != null ? formatCurrency(t.entryPrice) : '—'}</td>}
-                        {show('stop')       && <td className="py-2 px-2 text-right mono text-accent-red">{t.stopLoss != null ? formatCurrency(t.stopLoss) : '—'}</td>}
-                        {show('target')     && <td className="py-2 px-2 text-right mono text-accent-green">{t.takeProfit != null ? formatCurrency(t.takeProfit) : '—'}</td>}
-                        {show('riskDollar') && <td className={`py-2 px-2 text-right mono font-medium ${risk > 0 ? 'text-accent-red' : 'text-gray-500'}`}>{risk > 0 ? formatCurrency(risk) : '—'}</td>}
-                        {show('riskPct')    && (
-                          <td className={`py-2 px-2 text-right mono font-medium ${!riskPct || risk === 0 ? 'text-gray-500' : riskPct >= 4 ? 'text-accent-red' : riskPct >= 2 ? 'text-accent-yellow' : 'text-accent-green'}`}>
-                            {riskPct != null && risk > 0 ? `${riskPct.toFixed(2)}%` : '—'}
-                          </td>
-                        )}
-                        {show('sector') && <td className="py-2 px-2 truncate">{aiCell(sector)}</td>}
-                        {show('theme')  && <td className="py-2 px-2 truncate">{aiCell(theme)}</td>}
+                        {orderedVisibleKeys.map(key => {
+                          switch (key) {
+                            case 'account':
+                              return <td key={key} className="py-2 px-2 text-gray-400 truncate">{t.account || '—'}</td>
+                            case 'entryDate':
+                              return <td key={key} className="py-2 px-2 text-gray-400 truncate">{formatDate(t.entryDate)}</td>
+                            case 'held':
+                              return <td key={key} className="py-2 px-2 text-right text-gray-400 mono">{days != null ? `${days}d` : '—'}</td>
+                            case 'mktVal':
+                              return <td key={key} className="py-2 px-2 text-right mono text-gray-300 font-medium">{(() => {
+                                const price = quotes.get(t.symbol)?.price ?? t.entryPrice
+                                const val = price != null && t.positionSize ? price * t.positionSize : null
+                                return val != null ? formatCurrency(val, true) : '—'
+                              })()}</td>
+                            case 'entryPrice':
+                              return <td key={key} className="py-2 px-2 text-right mono text-gray-300">{t.entryPrice != null ? formatCurrency(t.entryPrice) : '—'}</td>
+                            case 'stop':
+                              return <td key={key} className="py-2 px-2 text-right mono text-accent-red">{t.stopLoss != null ? formatCurrency(t.stopLoss) : '—'}</td>
+                            case 'target':
+                              return <td key={key} className="py-2 px-2 text-right mono text-accent-green">{t.takeProfit != null ? formatCurrency(t.takeProfit) : '—'}</td>
+                            case 'riskDollar':
+                              return <td key={key} className={`py-2 px-2 text-right mono font-medium ${risk > 0 ? 'text-accent-red' : 'text-gray-500'}`}>{risk > 0 ? formatCurrency(risk) : '—'}</td>
+                            case 'riskPct':
+                              return <td key={key} className={`py-2 px-2 text-right mono font-medium ${!riskPct || risk === 0 ? 'text-gray-500' : riskPct >= 4 ? 'text-accent-red' : riskPct >= 2 ? 'text-accent-yellow' : 'text-accent-green'}`}>
+                                {riskPct != null && risk > 0 ? `${riskPct.toFixed(2)}%` : '—'}
+                              </td>
+                            case 'sector':
+                              return <td key={key} className="py-2 px-2 truncate">{aiCell(sector)}</td>
+                            case 'theme':
+                              return <td key={key} className="py-2 px-2 truncate">{aiCell(theme)}</td>
+                            default: return null
+                          }
+                        })}
                       </tr>
                     )
                   })}

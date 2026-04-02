@@ -1,5 +1,5 @@
-import { useMemo, useState, useEffect, useCallback, Fragment } from 'react'
-import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck } from 'lucide-react'
+import { useMemo, useState, useEffect, useCallback, Fragment, useRef } from 'react'
+import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck, Settings2 } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
@@ -9,6 +9,19 @@ import { calcWinRate, calcAvgR } from '../../utils/metrics.js'
 import { fetchQuotes, fetchATR14, fetchSectors } from '../../utils/marketData.js'
 import OpenHeatMeter from './OpenHeatMeter.jsx'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
+
+const RISK_COLUMNS = [
+  { key: 'last',       label: 'Last' },
+  { key: 'mktVal',     label: 'Mkt Val' },
+  { key: 'entry',      label: 'Entry' },
+  { key: 'stop',       label: 'Stop' },
+  { key: 'target',     label: 'Target' },
+  { key: 'curR',       label: 'Cur. R' },
+  { key: 'upl',        label: 'Unreal. P&L' },
+  { key: 'riskDollar', label: 'Risk $' },
+  { key: 'riskPct',    label: 'Risk %' },
+  { key: 'heat',       label: 'Heat' },
+]
 
 // ── Image helpers ─────────────────────────────────────────────────────────────
 function readImageAsBase64(file) {
@@ -752,7 +765,7 @@ function LotPickerModal({ group, onClose, onPickLot, onCloseAll }) {
 
 export default function RiskPanel({ selectedAccount }) {
   const { trades, accountActivities, updateTrade, getAccountBalance } = useTradeStore()
-  const { benchmarkSymbol, setBenchmarkSymbol, tpMultiplier = 2 } = useSettingsStore()
+  const { benchmarkSymbol, setBenchmarkSymbol, tpMultiplier = 2, riskColumnOrder, setRiskColumnOrder } = useSettingsStore()
   const accountBalance = getAccountBalance(selectedAccount)
 
   const [quotes, setQuotes]           = useState(new Map())
@@ -793,6 +806,28 @@ export default function RiskPanel({ selectedAccount }) {
 
   // ATR Stress Test state
   const [stressScenario, setStressScenario] = useState(null) // null | 1 | 2 | 3 | 5
+
+  // ── Risk column order ──────────────────────────────────────────────────────
+  const ALL_RISK_KEYS = RISK_COLUMNS.map(c => c.key)
+  const riskColOrder = useMemo(() => {
+    const base = riskColumnOrder ?? ALL_RISK_KEYS
+    const extra = ALL_RISK_KEYS.filter(k => !base.includes(k))
+    return [...base, ...extra]
+  }, [riskColumnOrder])
+
+  const [riskDragCol, setRiskDragCol]         = useState(null)
+  const [riskDragOverCol, setRiskDragOverCol] = useState(null)
+  const [showRiskColMenu, setShowRiskColMenu] = useState(false)
+  const riskColMenuRef = useRef(null)
+
+  useEffect(() => {
+    if (!showRiskColMenu) return
+    function handler(e) {
+      if (riskColMenuRef.current && !riskColMenuRef.current.contains(e.target)) setShowRiskColMenu(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showRiskColMenu])
 
   const { excludedSymbols } = useSettingsStore()
   const excludedSet = useMemo(
@@ -1167,6 +1202,49 @@ export default function RiskPanel({ selectedAccount }) {
               <RefreshCw size={12} className={fetching ? 'animate-spin' : ''} />
               {fetching ? 'Fetching…' : 'Refresh Prices'}
             </button>
+            <div className="relative" ref={riskColMenuRef}>
+              <button
+                onClick={() => setShowRiskColMenu(v => !v)}
+                className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+                title="Reorder columns"
+              >
+                <Settings2 size={14} />
+              </button>
+              {showRiskColMenu && (
+                <div className="absolute right-0 top-7 z-50 bg-surface-100 border border-white/10 rounded-lg shadow-xl p-2 min-w-40">
+                  <p className="text-xs text-gray-500 px-2 pb-1.5 border-b border-white/5 mb-1">Drag to reorder</p>
+                  {riskColOrder.map(key => {
+                    const col = RISK_COLUMNS.find(c => c.key === key)
+                    if (!col) return null
+                    return (
+                      <div
+                        key={key}
+                        draggable
+                        onDragStart={() => setRiskDragCol(key)}
+                        onDragOver={e => { e.preventDefault(); setRiskDragOverCol(key) }}
+                        onDrop={() => {
+                          if (!riskDragCol || riskDragCol === key) { setRiskDragCol(null); setRiskDragOverCol(null); return }
+                          const next = [...riskColOrder]
+                          const from = next.indexOf(riskDragCol)
+                          const to   = next.indexOf(key)
+                          next.splice(from, 1)
+                          next.splice(to, 0, riskDragCol)
+                          setRiskColumnOrder(next)
+                          setRiskDragCol(null); setRiskDragOverCol(null)
+                        }}
+                        onDragEnd={() => { setRiskDragCol(null); setRiskDragOverCol(null) }}
+                        className={`flex items-center gap-2 w-full px-2 py-1.5 rounded text-sm transition-colors cursor-default
+                          ${riskDragOverCol === key && riskDragCol !== key ? 'border-t-2 border-accent-blue' : ''}
+                          ${riskDragCol === key ? 'opacity-40' : 'hover:bg-white/5 text-gray-300'}`}
+                      >
+                        <span className="text-gray-600 cursor-grab select-none text-base leading-none">⠿</span>
+                        <span>{col.label}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1185,16 +1263,11 @@ export default function RiskPanel({ selectedAccount }) {
                 <thead>
                   <tr className="text-xs text-gray-400 border-b border-white/8 uppercase tracking-wider font-semibold">
                     <th className="text-left pb-3 font-semibold">Symbol</th>
-                    <th className="text-right pb-3 font-semibold">Last</th>
-                    <th className="text-right pb-3 font-semibold">Mkt Val</th>
-                    <th className="text-right pb-3 font-semibold">Entry</th>
-                    <th className="text-right pb-3 font-semibold">Stop</th>
-                    <th className="text-right pb-3 font-semibold">Target</th>
-                    <th className="text-right pb-3 font-semibold">Cur. R</th>
-                    <th className="text-right pb-3 font-semibold">Unreal. P&amp;L</th>
-                    <th className="text-right pb-3 font-semibold">Risk $</th>
-                    <th className="text-right pb-3 font-semibold">Risk %</th>
-                    <th className="text-right pb-3 font-semibold">Heat</th>
+                    {riskColOrder.map(key => {
+                      const col = RISK_COLUMNS.find(c => c.key === key)
+                      const right = key !== 'heat'
+                      return <th key={key} className={`pb-3 font-semibold ${right ? 'text-right' : ''}`}>{col?.label ?? key}</th>
+                    })}
                     <th className="pb-3" />
                   </tr>
                 </thead>
@@ -1285,54 +1358,62 @@ export default function RiskPanel({ selectedAccount }) {
                               </div>
                             )}
                           </td>
-                          <td className="py-2 text-right mono text-white font-medium">
-                            {currentPrice != null ? `$${currentPrice.toFixed(2)}` : '—'}
-                          </td>
-                          <td className="py-2 text-right mono text-gray-300 font-medium">
-                            {(() => {
-                              const price = currentPrice ?? group.entryPrice
-                              const val = price != null && group.positionSize ? price * group.positionSize : null
-                              return val != null ? formatCurrency(val, true) : '—'
-                            })()}
-                          </td>
-                          <td className="py-2 text-right mono text-gray-300">
-                            {group.entryPrice != null ? `$${group.entryPrice.toFixed(2)}` : '—'}
-                          </td>
-                          <td className="py-2 text-right" onClick={e => e.stopPropagation()}>
-                            <StopLossInput value={group.stopLoss} onSave={val => updateTrade(group.lots[0].id, { stopLoss: val })} />
-                          </td>
-                          <td className="py-2 text-right" onClick={e => e.stopPropagation()}>
-                            <TakeProfitInput value={effectiveTP} onSave={val => updateTrade(group.lots[0].id, { takeProfit: val })} />
-                          </td>
-                          <td className="py-2 text-right mono text-xs">
-                            {currentR != null
-                              ? <span className={`font-semibold ${currentR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
-                                  {currentR >= 0 ? '+' : ''}{currentR.toFixed(2)}R
-                                </span>
-                              : <span className="text-gray-600">—</span>}
-                          </td>
-                          <td className={`py-2 text-right mono font-medium ${plColor}`}>
-                            {unrealizedPL != null ? (unrealizedPL >= 0 ? '+' : '') + formatCurrency(unrealizedPL) : '—'}
-                          </td>
-                          <td className="py-2 text-right mono text-accent-red font-medium">
-                            {group.riskDollar > 0 ? formatCurrency(group.riskDollar) : <span className="text-gray-600">—</span>}
-                          </td>
-                          <td className="py-2 text-right mono text-accent-yellow">
-                            {group.riskPct > 0 ? `${group.riskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
-                          </td>
-                          <td className="py-2 text-right">
-                            <div className="w-20 ml-auto">
-                              <div className="h-1.5 bg-surface-300 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full rounded-full transition-all"
-                                  style={{
-                                    width: `${Math.min(group.riskPct / 5 * 100, 100)}%`,
-                                    backgroundColor: group.riskPct < 1 ? '#00d084' : group.riskPct < 2 ? '#ffa502' : '#ff4757',
-                                  }}
-                                />
-                              </div>
-                            </div>
-                          </td>
+                          {riskColOrder.map(key => {
+                            switch(key) {
+                              case 'last':
+                                return <td key={key} className="py-2 text-right mono text-white font-medium">
+                                  {currentPrice != null ? `$${currentPrice.toFixed(2)}` : '—'}
+                                </td>
+                              case 'mktVal':
+                                return <td key={key} className="py-2 text-right mono text-gray-300 font-medium">{(() => {
+                                  const price = currentPrice ?? group.entryPrice
+                                  const val = price != null && group.positionSize ? price * group.positionSize : null
+                                  return val != null ? formatCurrency(val, true) : '—'
+                                })()}</td>
+                              case 'entry':
+                                return <td key={key} className="py-2 text-right mono text-gray-300">
+                                  {group.entryPrice != null ? `$${group.entryPrice.toFixed(2)}` : '—'}
+                                </td>
+                              case 'stop':
+                                return <td key={key} className="py-2 text-right" onClick={e => e.stopPropagation()}>
+                                  <StopLossInput value={group.stopLoss} onSave={val => updateTrade(group.lots[0].id, { stopLoss: val })} />
+                                </td>
+                              case 'target':
+                                return <td key={key} className="py-2 text-right" onClick={e => e.stopPropagation()}>
+                                  <TakeProfitInput value={effectiveTP} onSave={val => updateTrade(group.lots[0].id, { takeProfit: val })} />
+                                </td>
+                              case 'curR':
+                                return <td key={key} className="py-2 text-right mono text-xs">
+                                  {currentR != null
+                                    ? <span className={`font-semibold ${currentR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{currentR >= 0 ? '+' : ''}{currentR.toFixed(2)}R</span>
+                                    : <span className="text-gray-600">—</span>}
+                                </td>
+                              case 'upl':
+                                return <td key={key} className={`py-2 text-right mono font-medium ${plColor}`}>
+                                  {unrealizedPL != null ? (unrealizedPL >= 0 ? '+' : '') + formatCurrency(unrealizedPL) : '—'}
+                                </td>
+                              case 'riskDollar':
+                                return <td key={key} className="py-2 text-right mono text-accent-red font-medium">
+                                  {group.riskDollar > 0 ? formatCurrency(group.riskDollar) : <span className="text-gray-600">—</span>}
+                                </td>
+                              case 'riskPct':
+                                return <td key={key} className="py-2 text-right mono text-accent-yellow">
+                                  {group.riskPct > 0 ? `${group.riskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
+                                </td>
+                              case 'heat':
+                                return <td key={key} className="py-2 text-right">
+                                  <div className="w-20 ml-auto">
+                                    <div className="h-1.5 bg-surface-300 rounded-full overflow-hidden">
+                                      <div className="h-full rounded-full transition-all" style={{
+                                        width: `${Math.min(group.riskPct / 5 * 100, 100)}%`,
+                                        backgroundColor: group.riskPct < 1 ? '#00d084' : group.riskPct < 2 ? '#ffa502' : '#ff4757',
+                                      }} />
+                                    </div>
+                                  </div>
+                                </td>
+                              default: return null
+                            }
+                          })}
                           <td className="py-2 pl-3" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center gap-1.5">
                               {group.entryPrice && group.stopLoss && (
@@ -1372,7 +1453,7 @@ export default function RiskPanel({ selectedAccount }) {
                           }))
                           return (
                             <tr className="bg-white/[0.01]">
-                              <td colSpan={12} className="pb-2 pt-0 px-2">
+                              <td colSpan={riskColOrder.length + 2} className="pb-2 pt-0 px-2">
                                 <div className="flex items-center gap-1 flex-wrap">
                                   <span className="text-[10px] text-gray-600 shrink-0 mr-0.5">R Levels:</span>
                                   {levels.map(l => (
@@ -1409,43 +1490,54 @@ export default function RiskPanel({ selectedAccount }) {
                                 Lot {lotIdx + 1}
                                 <span className="ml-1.5 text-gray-600">{lotSz?.toLocaleString()} sh</span>
                               </td>
-                              <td className="py-1.5 text-right mono text-gray-500">
-                                {currentPrice != null ? `$${currentPrice.toFixed(2)}` : '—'}
-                              </td>
-                              <td className="py-1.5 text-right mono text-gray-400">
-                                {(() => {
-                                  const price = currentPrice ?? lot.entryPrice
-                                  const sz = lot.remainingShares ?? lot.positionSize
-                                  const val = price != null && sz ? price * sz : null
-                                  return val != null ? formatCurrency(val, true) : '—'
-                                })()}
-                              </td>
-                              <td className="py-1.5 text-right mono text-gray-400">
-                                ${lot.entryPrice?.toFixed(2) ?? '—'}
-                              </td>
-                              <td className="py-1.5 text-right">
-                                <StopLossInput value={lot.stopLoss} onSave={val => updateTrade(lot.id, { stopLoss: val })} />
-                              </td>
-                              <td className="py-1.5 text-right">
-                                <TakeProfitInput value={lotEffTP} onSave={val => updateTrade(lot.id, { takeProfit: val })} />
-                              </td>
-                              <td className="py-1.5 text-right mono">
-                                {lotCurR != null
-                                  ? <span className={`font-semibold ${lotCurR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
-                                      {lotCurR >= 0 ? '+' : ''}{lotCurR.toFixed(2)}R
-                                    </span>
-                                  : <span className="text-gray-600">—</span>}
-                              </td>
-                              <td className={`py-1.5 text-right mono ${lotPlClr}`}>
-                                {lotUPL != null ? (lotUPL >= 0 ? '+' : '') + formatCurrency(lotUPL) : '—'}
-                              </td>
-                              <td className="py-1.5 text-right mono text-accent-red/60">
-                                {lot.riskDollar > 0 ? formatCurrency(lot.riskDollar) : <span className="text-gray-600">—</span>}
-                              </td>
-                              <td className="py-1.5 text-right mono text-accent-yellow/60">
-                                {lot.riskPct > 0 ? `${lot.riskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
-                              </td>
-                              <td />
+                              {riskColOrder.map(key => {
+                                switch(key) {
+                                  case 'last':
+                                    return <td key={key} className="py-1.5 text-right mono text-gray-500">
+                                      {currentPrice != null ? `$${currentPrice.toFixed(2)}` : '—'}
+                                    </td>
+                                  case 'mktVal':
+                                    return <td key={key} className="py-1.5 text-right mono text-gray-400">{(() => {
+                                      const price = currentPrice ?? lot.entryPrice
+                                      const sz = lot.remainingShares ?? lot.positionSize
+                                      const val = price != null && sz ? price * sz : null
+                                      return val != null ? formatCurrency(val, true) : '—'
+                                    })()}</td>
+                                  case 'entry':
+                                    return <td key={key} className="py-1.5 text-right mono text-gray-400">
+                                      ${lot.entryPrice?.toFixed(2) ?? '—'}
+                                    </td>
+                                  case 'stop':
+                                    return <td key={key} className="py-1.5 text-right">
+                                      <StopLossInput value={lot.stopLoss} onSave={val => updateTrade(lot.id, { stopLoss: val })} />
+                                    </td>
+                                  case 'target':
+                                    return <td key={key} className="py-1.5 text-right">
+                                      <TakeProfitInput value={lotEffTP} onSave={val => updateTrade(lot.id, { takeProfit: val })} />
+                                    </td>
+                                  case 'curR':
+                                    return <td key={key} className="py-1.5 text-right mono">
+                                      {lotCurR != null
+                                        ? <span className={`font-semibold ${lotCurR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{lotCurR >= 0 ? '+' : ''}{lotCurR.toFixed(2)}R</span>
+                                        : <span className="text-gray-600">—</span>}
+                                    </td>
+                                  case 'upl':
+                                    return <td key={key} className={`py-1.5 text-right mono ${lotPlClr}`}>
+                                      {lotUPL != null ? (lotUPL >= 0 ? '+' : '') + formatCurrency(lotUPL) : '—'}
+                                    </td>
+                                  case 'riskDollar':
+                                    return <td key={key} className="py-1.5 text-right mono text-accent-red/60">
+                                      {lot.riskDollar > 0 ? formatCurrency(lot.riskDollar) : <span className="text-gray-600">—</span>}
+                                    </td>
+                                  case 'riskPct':
+                                    return <td key={key} className="py-1.5 text-right mono text-accent-yellow/60">
+                                      {lot.riskPct > 0 ? `${lot.riskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
+                                    </td>
+                                  case 'heat':
+                                    return <td key={key} />
+                                  default: return null
+                                }
+                              })}
                               <td className="py-1.5 pl-3">
                                 <button
                                   onClick={() => setCloseTarget(lot)}
@@ -1501,20 +1593,23 @@ export default function RiskPanel({ selectedAccount }) {
                     return (
                       <tr className="border-t border-white/10 text-sm text-gray-400 font-semibold">
                         <td className="pt-2">Total</td>
+                        {riskColOrder.map(key => {
+                          switch(key) {
+                            case 'mktVal':
+                              return <td key={key} className="pt-2 text-right mono text-gray-300">{totalMktVal != null ? formatCurrency(totalMktVal, true) : '—'}</td>
+                            case 'curR':
+                              return <td key={key} className={`pt-2 text-right mono ${rColor}`}>{totalCurrentR != null ? `${totalCurrentR >= 0 ? '+' : ''}${totalCurrentR.toFixed(2)}R` : '—'}</td>
+                            case 'upl':
+                              return <td key={key} className={`pt-2 text-right mono ${plColor}`}>{totalUnrealPL != null ? (totalUnrealPL >= 0 ? '+' : '') + formatCurrency(totalUnrealPL) : '—'}</td>
+                            case 'riskDollar':
+                              return <td key={key} className="pt-2 text-right mono text-accent-red">{nep > 0 ? formatCurrency(nep) : '—'}</td>
+                            case 'riskPct':
+                              return <td key={key} className="pt-2 text-right mono text-accent-yellow">{ner > 0 ? `${ner.toFixed(2)}%` : '—'}</td>
+                            default:
+                              return <td key={key} />
+                          }
+                        })}
                         <td />
-                        <td className="pt-2 text-right mono text-gray-300">
-                          {totalMktVal != null ? formatCurrency(totalMktVal, true) : '—'}
-                        </td>
-                        <td /><td />
-                        <td className={`pt-2 text-right mono ${rColor}`}>
-                          {totalCurrentR != null ? `${totalCurrentR >= 0 ? '+' : ''}${totalCurrentR.toFixed(2)}R` : '—'}
-                        </td>
-                        <td className={`pt-2 text-right mono ${plColor}`}>
-                          {totalUnrealPL != null ? (totalUnrealPL >= 0 ? '+' : '') + formatCurrency(totalUnrealPL) : '—'}
-                        </td>
-                        <td className="pt-2 text-right mono text-accent-red">{nep > 0 ? formatCurrency(nep) : '—'}</td>
-                        <td className="pt-2 text-right mono text-accent-yellow">{ner > 0 ? `${ner.toFixed(2)}%` : '—'}</td>
-                        <td /><td />
                       </tr>
                     )
                   })()}
