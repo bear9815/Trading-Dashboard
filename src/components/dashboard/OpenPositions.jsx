@@ -4,26 +4,29 @@ import { formatCurrency, formatDate } from '../../utils/formatters.js'
 import { calcRiskPerTrade } from '../../utils/riskCalcs.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { classifySymbolTheme } from '../../utils/ai.js'
+import { fetchQuotes } from '../../utils/marketData.js'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
 
 const ALL_COLUMNS = [
-  { key: 'account',    label: 'Account' },
-  { key: 'entryDate',  label: 'Entry Date' },
-  { key: 'held',       label: 'Held' },
-  { key: 'entryPrice', label: 'Entry' },
-  { key: 'stop',       label: 'Stop' },
-  { key: 'target',     label: 'Target' },
-  { key: 'riskDollar', label: 'Risk $' },
-  { key: 'riskPct',    label: 'Risk %' },
-  { key: 'sector',     label: 'Sector' },
-  { key: 'theme',      label: 'Theme' },
+  { key: 'account',     label: 'Account' },
+  { key: 'entryDate',   label: 'Entry Date' },
+  { key: 'held',        label: 'Held' },
+  { key: 'mktVal',      label: 'Mkt Val' },
+  { key: 'entryPrice',  label: 'Entry' },
+  { key: 'stop',        label: 'Stop' },
+  { key: 'target',      label: 'Target' },
+  { key: 'riskDollar',  label: 'Risk $' },
+  { key: 'riskPct',     label: 'Risk %' },
+  { key: 'sector',      label: 'Sector' },
+  { key: 'theme',       label: 'Theme' },
 ]
 
 const WEIGHTS = {
-  _symbol:    14,
+  _symbol:    13,
   account:     9,
   entryDate:  10,
   held:        5,
+  mktVal:      9,
   entryPrice:  9,
   stop:        9,
   target:      9,
@@ -93,6 +96,7 @@ export default function OpenPositions({ openTrades, accountBalance }) {
 
   const [showMenu, setShowMenu] = useState(false)
   const [loadingThemes, setLoadingThemes] = useState({})
+  const [quotes, setQuotes] = useState(new Map())
   const menuRef = useRef(null)
 
   const visibleKeys = openPositionsColumns || ALL_COLUMNS.map(c => c.key)
@@ -137,6 +141,13 @@ export default function OpenPositions({ openTrades, accountBalance }) {
   const allPositions   = useMemo(() => consolidateLots(openTrades), [openTrades])
   const positions      = useMemo(() => allPositions.filter(t => !isHedgeTrade(t)), [allPositions])
   const hedgePositions = useMemo(() => allPositions.filter(t =>  isHedgeTrade(t)), [allPositions])
+
+  // Fetch live prices for market value column
+  useEffect(() => {
+    const symbols = [...new Set(allPositions.map(t => t.symbol).filter(Boolean))]
+    if (!symbols.length) return
+    fetchQuotes(symbols).then(setQuotes).catch(() => {})
+  }, [allPositions.length])
 
   // Proportional column widths based on visible columns
   const visibleCols = ['_symbol', ...visibleKeys]
@@ -200,6 +211,7 @@ export default function OpenPositions({ openTrades, accountBalance }) {
               {show('account')    && <col style={{ width: colWidth('account') }} />}
               {show('entryDate')  && <col style={{ width: colWidth('entryDate') }} />}
               {show('held')       && <col style={{ width: colWidth('held') }} />}
+              {show('mktVal')     && <col style={{ width: colWidth('mktVal') }} />}
               {show('entryPrice') && <col style={{ width: colWidth('entryPrice') }} />}
               {show('stop')       && <col style={{ width: colWidth('stop') }} />}
               {show('target')     && <col style={{ width: colWidth('target') }} />}
@@ -214,6 +226,7 @@ export default function OpenPositions({ openTrades, accountBalance }) {
                 {show('account')    && <th className="text-left pb-2 px-2 font-medium">Account</th>}
                 {show('entryDate')  && <th className="text-left pb-2 px-2 font-medium">Entry Date</th>}
                 {show('held')       && <th className="text-right pb-2 px-2 font-medium">Held</th>}
+                {show('mktVal')     && <th className="text-right pb-2 px-2 font-medium">Mkt Val</th>}
                 {show('entryPrice') && <th className="text-right pb-2 px-2 font-medium">Entry</th>}
                 {show('stop')       && <th className="text-right pb-2 px-2 font-medium">Stop</th>}
                 {show('target')     && <th className="text-right pb-2 px-2 font-medium">Target</th>}
@@ -271,6 +284,15 @@ export default function OpenPositions({ openTrades, accountBalance }) {
                     {show('held') && (
                       <td className="py-2 px-2 text-right text-gray-400 mono">
                         {days != null ? `${days}d` : '—'}
+                      </td>
+                    )}
+                    {show('mktVal') && (
+                      <td className="py-2 px-2 text-right mono text-gray-300 font-medium">
+                        {(() => {
+                          const price = quotes.get(t.symbol)?.price ?? t.entryPrice
+                          const val = price != null && t.positionSize ? price * t.positionSize : null
+                          return val != null ? formatCurrency(val, true) : '—'
+                        })()}
                       </td>
                     )}
                     {show('entryPrice') && (
@@ -331,6 +353,7 @@ export default function OpenPositions({ openTrades, accountBalance }) {
                   {show('account')    && <col style={{ width: colWidth('account') }} />}
                   {show('entryDate')  && <col style={{ width: colWidth('entryDate') }} />}
                   {show('held')       && <col style={{ width: colWidth('held') }} />}
+                  {show('mktVal')     && <col style={{ width: colWidth('mktVal') }} />}
                   {show('entryPrice') && <col style={{ width: colWidth('entryPrice') }} />}
                   {show('stop')       && <col style={{ width: colWidth('stop') }} />}
                   {show('target')     && <col style={{ width: colWidth('target') }} />}
@@ -378,6 +401,15 @@ export default function OpenPositions({ openTrades, accountBalance }) {
                         {show('account')    && <td className="py-2 px-2 text-gray-400 truncate">{t.account || '—'}</td>}
                         {show('entryDate')  && <td className="py-2 px-2 text-gray-400 truncate">{formatDate(t.entryDate)}</td>}
                         {show('held')       && <td className="py-2 px-2 text-right text-gray-400 mono">{days != null ? `${days}d` : '—'}</td>}
+                        {show('mktVal')     && (
+                          <td className="py-2 px-2 text-right mono text-gray-300 font-medium">
+                            {(() => {
+                              const price = quotes.get(t.symbol)?.price ?? t.entryPrice
+                              const val = price != null && t.positionSize ? price * t.positionSize : null
+                              return val != null ? formatCurrency(val, true) : '—'
+                            })()}
+                          </td>
+                        )}
                         {show('entryPrice') && <td className="py-2 px-2 text-right mono text-gray-300">{t.entryPrice != null ? formatCurrency(t.entryPrice) : '—'}</td>}
                         {show('stop')       && <td className="py-2 px-2 text-right mono text-accent-red">{t.stopLoss != null ? formatCurrency(t.stopLoss) : '—'}</td>}
                         {show('target')     && <td className="py-2 px-2 text-right mono text-accent-green">{t.takeProfit != null ? formatCurrency(t.takeProfit) : '—'}</td>}

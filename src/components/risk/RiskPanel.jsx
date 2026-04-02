@@ -1186,6 +1186,7 @@ export default function RiskPanel({ selectedAccount }) {
                   <tr className="text-xs text-gray-400 border-b border-white/8 uppercase tracking-wider font-semibold">
                     <th className="text-left pb-3 font-semibold">Symbol</th>
                     <th className="text-right pb-3 font-semibold">Last</th>
+                    <th className="text-right pb-3 font-semibold">Mkt Val</th>
                     <th className="text-right pb-3 font-semibold">Entry</th>
                     <th className="text-right pb-3 font-semibold">Stop</th>
                     <th className="text-right pb-3 font-semibold">Target</th>
@@ -1287,6 +1288,13 @@ export default function RiskPanel({ selectedAccount }) {
                           <td className="py-2 text-right mono text-white font-medium">
                             {currentPrice != null ? `$${currentPrice.toFixed(2)}` : '—'}
                           </td>
+                          <td className="py-2 text-right mono text-gray-300 font-medium">
+                            {(() => {
+                              const price = currentPrice ?? group.entryPrice
+                              const val = price != null && group.positionSize ? price * group.positionSize : null
+                              return val != null ? formatCurrency(val, true) : '—'
+                            })()}
+                          </td>
                           <td className="py-2 text-right mono text-gray-300">
                             {group.entryPrice != null ? `$${group.entryPrice.toFixed(2)}` : '—'}
                           </td>
@@ -1364,7 +1372,7 @@ export default function RiskPanel({ selectedAccount }) {
                           }))
                           return (
                             <tr className="bg-white/[0.01]">
-                              <td colSpan={11} className="pb-2 pt-0 px-2">
+                              <td colSpan={12} className="pb-2 pt-0 px-2">
                                 <div className="flex items-center gap-1 flex-wrap">
                                   <span className="text-[10px] text-gray-600 shrink-0 mr-0.5">R Levels:</span>
                                   {levels.map(l => (
@@ -1403,6 +1411,14 @@ export default function RiskPanel({ selectedAccount }) {
                               </td>
                               <td className="py-1.5 text-right mono text-gray-500">
                                 {currentPrice != null ? `$${currentPrice.toFixed(2)}` : '—'}
+                              </td>
+                              <td className="py-1.5 text-right mono text-gray-400">
+                                {(() => {
+                                  const price = currentPrice ?? lot.entryPrice
+                                  const sz = lot.remainingShares ?? lot.positionSize
+                                  const val = price != null && sz ? price * sz : null
+                                  return val != null ? formatCurrency(val, true) : '—'
+                                })()}
                               </td>
                               <td className="py-1.5 text-right mono text-gray-400">
                                 ${lot.entryPrice?.toFixed(2) ?? '—'}
@@ -1451,6 +1467,7 @@ export default function RiskPanel({ selectedAccount }) {
                     // Using groupedPositions avoids double-counting R for multi-lot symbols.
                     let totalUnrealPL = null
                     let totalCurrentR = null
+                    let totalMktVal   = null
                     for (const group of groupedPositions) {
                       const q  = quotes.get(group.symbol)
                       const cp = q?.price ?? null
@@ -1463,6 +1480,11 @@ export default function RiskPanel({ selectedAccount }) {
                           return s + ((lng ? cp - l.entryPrice : l.entryPrice - cp) * (sz || 0))
                         }, 0)
                         totalUnrealPL = (totalUnrealPL ?? 0) + upl
+                      }
+                      // Market value: current price (or entry as fallback) × total shares
+                      const mvPrice = cp ?? group.entryPrice
+                      if (mvPrice != null && group.positionSize) {
+                        totalMktVal = (totalMktVal ?? 0) + mvPrice * group.positionSize
                       }
                       // Current R: use original stop so trailing doesn't distort the number
                       const origStop = group._originalStopLoss ?? group.stopLoss
@@ -1479,7 +1501,11 @@ export default function RiskPanel({ selectedAccount }) {
                     return (
                       <tr className="border-t border-white/10 text-sm text-gray-400 font-semibold">
                         <td className="pt-2">Total</td>
-                        <td /><td /><td /><td />
+                        <td />
+                        <td className="pt-2 text-right mono text-gray-300">
+                          {totalMktVal != null ? formatCurrency(totalMktVal, true) : '—'}
+                        </td>
+                        <td /><td />
                         <td className={`pt-2 text-right mono ${rColor}`}>
                           {totalCurrentR != null ? `${totalCurrentR >= 0 ? '+' : ''}${totalCurrentR.toFixed(2)}R` : '—'}
                         </td>

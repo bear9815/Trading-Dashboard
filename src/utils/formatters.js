@@ -1,10 +1,12 @@
 export function formatCurrency(val, compact = false) {
   if (val == null || isNaN(val)) return '—'
   if (compact && Math.abs(val) >= 1_000_000) {
-    return `${val < 0 ? '-' : ''}$${(Math.abs(val) / 1_000_000).toFixed(2)}M`
+    const n = (Math.abs(val) / 1_000_000).toFixed(2).replace(/\.?0+$/, '')
+    return `${val < 0 ? '-' : ''}$${n}M`
   }
   if (compact && Math.abs(val) >= 1_000) {
-    return `${val < 0 ? '-' : ''}$${(Math.abs(val) / 1_000).toFixed(1)}k`
+    const n = (Math.abs(val) / 1_000).toFixed(1).replace(/\.0$/, '')
+    return `${val < 0 ? '-' : ''}$${n}k`
   }
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
