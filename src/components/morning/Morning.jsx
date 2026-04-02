@@ -1053,9 +1053,10 @@ function AnalysisTab({ entries }) {
 function LogTab() {
   const { entries, addEntry, updateEntry, deleteEntry, getEntryByDate } = useMorningStore()
   const { trades, getAccountBalance }  = useTradeStore()
-  const { benchmarkSymbol, liveEffectivePct } = useSettingsStore()
+  const { benchmarkSymbol, liveEffectivePct, liveAccountBalance } = useSettingsStore()
 
-  const accountBalance = getAccountBalance()
+  // Use live balance (with unrealized P&L) when RiskPanel has fetched prices
+  const accountBalance = liveAccountBalance > 0 ? liveAccountBalance : getAccountBalance()
   const openTrades     = trades.filter(t => t.status === 'Open')
   const autoCash       = accountBalance > 0
     ? Math.round((openTrades.reduce((s, t) =>

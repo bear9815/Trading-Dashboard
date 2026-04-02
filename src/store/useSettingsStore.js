@@ -46,9 +46,11 @@ export const useSettingsStore = create(
       alpacaApiSecret: '',
       finnhubApiKey: '',
 
-      // Runtime-only: written by RiskPanel whenever effective exposure is computed.
-      // Persisted so the morning form has a value immediately on load even if the
-      // Risk tab hasn't been visited yet this session.
+      // Runtime-only: written by RiskPanel whenever live prices are available.
+      // liveAccountBalance = static balance + unrealized P&L from live quotes.
+      // liveEffectivePct   = ATR-weighted effective exposure (written on ATR fetch).
+      // Both persisted so morning form has values immediately on load.
+      liveAccountBalance: null,
       liveEffectivePct: null,
 
       equityCurveRange: 'All',

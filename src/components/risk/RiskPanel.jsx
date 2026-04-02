@@ -809,9 +809,26 @@ export default function RiskPanel({ selectedAccount }) {
       : open.filter(t => t.account === selectedAccount)
   }, [trades, selectedAccount, excludedSet])
 
+  // ── Real-time balance: static base + unrealized P&L from live quotes ─────
+  // unrealizedPL is computed directly from openTrades so there is no circular
+  // dependency with positions/groupedPositions.
+  const unrealizedPL = useMemo(() => {
+    if (quotes.size === 0) return 0
+    return openTrades.reduce((total, t) => {
+      const cp = quotes.get(t.symbol)?.price
+      if (cp == null || !t.entryPrice) return total
+      const sz  = t.remainingShares ?? t.positionSize
+      const lng = (t.position ?? 'Long').toLowerCase() !== 'short'
+      return total + ((lng ? cp - t.entryPrice : t.entryPrice - cp) * (sz || 0))
+    }, 0)
+  }, [openTrades, quotes])
+
+  // liveBalance falls back to static balance when quotes haven't been fetched yet
+  const liveBalance = accountBalance > 0 ? accountBalance + unrealizedPL : accountBalance
+
   const positions = useMemo(
-    () => buildOpenPositionRisk(openTrades, accountBalance),
-    [openTrades, accountBalance]
+    () => buildOpenPositionRisk(openTrades, liveBalance),
+    [openTrades, liveBalance]
   )
 
   // Group same-symbol lots into a single summary row (expandable to see each lot)
@@ -832,7 +849,7 @@ export default function RiskPanel({ selectedAccount }) {
       const wStopDen      = lotsWithStop.reduce((s, l) => s + l.positionSize, 0)
       const weightedStop  = wStopDen > 0 ? wStopNum / wStopDen : null
       const totalRisk     = lots.reduce((s, l) => s + (l.riskDollar || 0), 0)
-      const totalRiskPct  = accountBalance > 0 ? (totalRisk / accountBalance) * 100 : 0
+      const totalRiskPct  = liveBalance > 0 ? (totalRisk / liveBalance) * 100 : 0
       return {
         id:           `group-${symbol}`,
         symbol,
@@ -847,19 +864,25 @@ export default function RiskPanel({ selectedAccount }) {
         riskPct:      totalRiskPct,
       }
     })
-  }, [positions, accountBalance])
+  }, [positions, liveBalance])
 
   const nep = calcNEP(openTrades)
-  const ner = calcNER(openTrades, accountBalance)
+  const ner = calcNER(openTrades, liveBalance)
 
   // Effective exposure (ATR-weighted)
   const exposure = useMemo(
-    () => calcEffectiveExposure(openTrades, atrData, benchmarkAtrPct, accountBalance),
-    [openTrades, atrData, benchmarkAtrPct, accountBalance]
+    () => calcEffectiveExposure(openTrades, atrData, benchmarkAtrPct, liveBalance),
+    [openTrades, atrData, benchmarkAtrPct, liveBalance]
   )
 
-  // Share computed effective exposure with the Morning journal form so it
-  // can auto-fill without doing its own redundant ATR fetch.
+  // Write live balance + effective exposure to settings store so other components
+  // (Morning journal, Dashboard) can read them without re-fetching quotes.
+  useEffect(() => {
+    if (liveBalance > 0) {
+      useSettingsStore.setState({ liveAccountBalance: liveBalance })
+    }
+  }, [liveBalance])
+
   useEffect(() => {
     if (exposure.effectivePct !== 0) {
       useSettingsStore.setState({ liveEffectivePct: exposure.effectivePct })
@@ -985,7 +1008,7 @@ export default function RiskPanel({ selectedAccount }) {
   const enrichedSectors = useMemo(() => {
     if (!sectorData.length) return []
     return sectorData.map(sec => {
-      const accountPct = accountBalance > 0 ? (sec.value / accountBalance) * 100 : 0
+      const accountPct = liveBalance > 0 ? (sec.value / liveBalance) * 100 : 0
 
       let atrEffective = 0
       if (atrData.size > 0 && benchmarkAtrPct > 0) {
@@ -995,16 +1018,16 @@ export default function RiskPanel({ selectedAccount }) {
           if (posAtr > 0) atrEffective += notional * (posAtr / benchmarkAtrPct)
         }
       }
-      const atrPct = accountBalance > 0 ? (atrEffective / accountBalance) * 100 : 0
+      const atrPct = liveBalance > 0 ? (atrEffective / liveBalance) * 100 : 0
       return { ...sec, accountPct, atrPct, hasAtr: atrEffective > 0 }
     })
-  }, [sectorData, accountBalance, atrData, benchmarkAtrPct])
+  }, [sectorData, liveBalance, atrData, benchmarkAtrPct])
 
   // ── Max Pain calculation ───────────────────────────────────────────────────
   const positionsWithStop   = positions.filter(p => p.stopLoss && p.riskDollar > 0)
   const positionsWithoutStop = positions.filter(p => !p.stopLoss || p.riskDollar <= 0)
-  const maxPainAccount = accountBalance > 0 ? Math.max(accountBalance - nep, 0) : 0
-  const maxPainPct = accountBalance > 0 ? (nep / accountBalance) * 100 : 0
+  const maxPainAccount = liveBalance > 0 ? Math.max(liveBalance - nep, 0) : 0
+  const maxPainPct = liveBalance > 0 ? (nep / liveBalance) * 100 : 0
 
   // ── Portfolio Daily Move Estimate (ATR-based) ──────────────────────────────
   const dailyMoveEstimate = useMemo(() => {
@@ -1046,11 +1069,16 @@ export default function RiskPanel({ selectedAccount }) {
           <h1 className="text-2xl font-bold text-white">Risk Overview</h1>
           <p className="text-sm text-gray-500 mt-0.5">{today}</p>
         </div>
-        {accountBalance > 0 && (
-          <div className="flex items-baseline gap-2">
-            <span className="text-3xl font-bold text-white mono">{formatCurrency(accountBalance)}</span>
+        {liveBalance > 0 && (
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-3xl font-bold text-white mono">{formatCurrency(liveBalance)}</span>
+            {unrealizedPL !== 0 && (
+              <span className={`text-sm font-semibold mono ${unrealizedPL >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                {unrealizedPL >= 0 ? '+' : ''}{formatCurrency(unrealizedPL)} open
+              </span>
+            )}
             <span className="text-sm text-gray-500 font-medium">
-              {openTrades.length} open position{openTrades.length !== 1 ? 's' : ''}
+              {openTrades.length} position{openTrades.length !== 1 ? 's' : ''}
             </span>
           </div>
         )}
@@ -1093,8 +1121,13 @@ export default function RiskPanel({ selectedAccount }) {
           <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full opacity-[0.05] bg-accent-blue blur-2xl pointer-events-none" />
           <div>
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Account Balance</p>
-            <p className="text-2xl font-bold mono text-white">{formatCurrency(accountBalance)}</p>
-            <p className="text-xs text-gray-500 mt-1">Calculated from deposits + closed P&amp;L</p>
+            <p className="text-2xl font-bold mono text-white">{formatCurrency(liveBalance)}</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {unrealizedPL !== 0
+                ? <>Static {formatCurrency(accountBalance)} {unrealizedPL >= 0 ? '+' : ''}<span className={unrealizedPL >= 0 ? 'text-accent-green' : 'text-accent-red'}>{formatCurrency(unrealizedPL)}</span> open P&amp;L</>
+                : 'Deposits + closed P&L · load prices for live balance'
+              }
+            </p>
           </div>
           <div className="border-t border-white/10 pt-4">
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Open Positions</p>
@@ -1105,7 +1138,7 @@ export default function RiskPanel({ selectedAccount }) {
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Est. Daily Move</p>
               <p className="text-2xl font-bold mono text-accent-yellow">{formatCurrency(dailyMoveEstimate)}</p>
               <p className="text-xs text-gray-500 mt-1">
-                {accountBalance > 0 ? `${(dailyMoveEstimate / accountBalance * 100).toFixed(2)}% of account · ` : ''}ATR-based expected daily portfolio swing
+                {liveBalance > 0 ? `${(dailyMoveEstimate / liveBalance * 100).toFixed(2)}% of account · ` : ''}ATR-based expected daily portfolio swing
               </p>
             </div>
           )}
@@ -1490,7 +1523,7 @@ export default function RiskPanel({ selectedAccount }) {
             <div className="card-sm text-center">
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Account After</p>
               <p className="text-xl font-bold mono text-white">
-                {accountBalance > 0 && nep > 0 ? formatCurrency(maxPainAccount) : '—'}
+                {liveBalance > 0 && nep > 0 ? formatCurrency(maxPainAccount) : '—'}
               </p>
             </div>
             <div className="card-sm text-center">
@@ -1563,7 +1596,7 @@ export default function RiskPanel({ selectedAccount }) {
                     {stressResult.totalImpact >= 0 ? '+' : ''}{formatCurrency(stressResult.totalImpact)}
                     {accountBalance > 0 && (
                       <span className="text-xs font-normal text-gray-500 ml-1">
-                        ({(stressResult.totalImpact / accountBalance * 100).toFixed(2)}%)
+                        ({(stressResult.totalImpact / liveBalance * 100).toFixed(2)}%)
                       </span>
                     )}
                   </span>
@@ -1765,9 +1798,9 @@ export default function RiskPanel({ selectedAccount }) {
         const grossLongEff  = longs.reduce((s, p) => s + p.effective, 0)
         const hedgeEff      = Math.abs(hedges.reduce((s, p) => s + p.effective, 0))
         const netEff        = grossLongEff - hedgeEff
-        const grossLongPct  = accountBalance > 0 ? (grossLongEff / accountBalance) * 100 : 0
-        const hedgePct      = accountBalance > 0 ? (hedgeEff    / accountBalance) * 100 : 0
-        const netPct        = accountBalance > 0 ? (netEff      / accountBalance) * 100 : 0
+        const grossLongPct  = liveBalance > 0 ? (grossLongEff / liveBalance) * 100 : 0
+        const hedgePct      = liveBalance > 0 ? (hedgeEff    / liveBalance) * 100 : 0
+        const netPct        = liveBalance > 0 ? (netEff      / liveBalance) * 100 : 0
         const hedgeCoverage = grossLongEff > 0 ? (hedgeEff / grossLongEff) * 100 : 0
 
         const SCENARIOS = [-1, -2, -3, -5, -7, -10]
@@ -1891,7 +1924,7 @@ export default function RiskPanel({ selectedAccount }) {
                   </thead>
                   <tbody className="divide-y divide-white/5">
                     {scenarioRows.map(row => {
-                      const acctImpact = accountBalance > 0 ? (row.netpl / accountBalance) * 100 : 0
+                      const acctImpact = liveBalance > 0 ? (row.netpl / liveBalance) * 100 : 0
                       return (
                         <tr key={row.pct} className={Math.abs(acctImpact) >= 3 ? 'bg-accent-red/[0.04]' : ''}>
                           <td className="py-1.5 mono font-semibold text-gray-400">{row.pct}%</td>
@@ -2029,9 +2062,9 @@ export default function RiskPanel({ selectedAccount }) {
                 ) : (
                   <p className="text-xs text-accent-green">✓ Portfolio is reasonably diversified across sectors.</p>
                 )}
-                {sectorViewMode === 'account' && accountBalance > 0 && (
+                {sectorViewMode === 'account' && liveBalance > 0 && (
                   <p className="text-xs text-gray-600">
-                    Total deployed: {formatCurrency(enrichedSectors.reduce((s, sec) => s + sec.value, 0), true)} ({(enrichedSectors.reduce((s, sec) => s + sec.value, 0) / accountBalance * 100).toFixed(1)}% of {formatCurrency(accountBalance, true)} account)
+                    Total deployed: {formatCurrency(enrichedSectors.reduce((s, sec) => s + sec.value, 0), true)} ({(enrichedSectors.reduce((s, sec) => s + sec.value, 0) / liveBalance * 100).toFixed(1)}% of {formatCurrency(liveBalance, true)} account)
                   </p>
                 )}
               </div>
@@ -2048,7 +2081,7 @@ export default function RiskPanel({ selectedAccount }) {
 
       {/* ── Progressive Exposure Position Sizer ─────────────────────────── */}
       <ProgressiveSizer
-        accountBalance={accountBalance}
+        accountBalance={liveBalance}
         trades={trades}
         openPositions={positions}
         quotes={quotes}

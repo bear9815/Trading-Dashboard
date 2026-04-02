@@ -18,7 +18,7 @@ import { formatCurrency, formatR, signClass } from '../../utils/formatters.js'
 
 export default function Dashboard({ selectedAccount }) {
   const { trades, accountActivities } = useTradeStore()
-  const { dailyLossLimit, excludedSymbols } = useSettingsStore()
+  const { dailyLossLimit, excludedSymbols, liveAccountBalance } = useSettingsStore()
 
   // Uppercase set for fast lookup
   const excludedSet = useMemo(
@@ -46,7 +46,10 @@ export default function Dashboard({ selectedAccount }) {
     () => buildEquityCurve(filteredFull, accountActivities),
     [filteredFull, accountActivities]
   )
-  const accountBalance = equityCurve.length > 0 ? equityCurve[equityCurve.length - 1].balance : 0
+  // Prefer liveAccountBalance (written by RiskPanel with unrealized P&L included)
+  // so the dashboard reflects the true real-time value when prices are loaded.
+  const staticBalance  = equityCurve.length > 0 ? equityCurve[equityCurve.length - 1].balance : 0
+  const accountBalance = liveAccountBalance > 0 ? liveAccountBalance : staticBalance
 
   // Stats are computed on the filtered (non-excluded) set
   const netPL        = calcNetPL(filtered)
