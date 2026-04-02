@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useCallback, Fragment, useRef } from 'react'
+import { useColumnResize } from '../../hooks/useColumnResize.js'
 import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck, Settings2 } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
@@ -22,6 +23,20 @@ const RISK_COLUMNS = [
   { key: 'riskPct',    label: 'Risk %' },
   { key: 'heat',       label: 'Heat' },
 ]
+
+const RISK_DEFAULT_WIDTHS = {
+  _symbol:    150,
+  last:        85,
+  mktVal:      95,
+  entry:       85,
+  stop:        85,
+  target:      85,
+  curR:        75,
+  upl:        115,
+  riskDollar:  95,
+  riskPct:     80,
+  heat:       100,
+}
 
 // ── Image helpers ─────────────────────────────────────────────────────────────
 function readImageAsBase64(file) {
@@ -765,7 +780,7 @@ function LotPickerModal({ group, onClose, onPickLot, onCloseAll }) {
 
 export default function RiskPanel({ selectedAccount }) {
   const { trades, accountActivities, updateTrade, getAccountBalance } = useTradeStore()
-  const { benchmarkSymbol, setBenchmarkSymbol, tpMultiplier = 2, riskColumnOrder, setRiskColumnOrder } = useSettingsStore()
+  const { benchmarkSymbol, setBenchmarkSymbol, tpMultiplier = 2, riskColumnOrder, setRiskColumnOrder, riskColumnWidths, setRiskColumnWidths } = useSettingsStore()
   const accountBalance = getAccountBalance(selectedAccount)
 
   const [quotes, setQuotes]           = useState(new Map())
@@ -814,6 +829,14 @@ export default function RiskPanel({ selectedAccount }) {
     const extra = ALL_RISK_KEYS.filter(k => !base.includes(k))
     return [...base, ...extra]
   }, [riskColumnOrder])
+
+  const RISK_RESIZE_KEYS = ['_symbol', ...ALL_RISK_KEYS]
+  const { widths: riskColWidths, startResize: startRiskResize } = useColumnResize(
+    RISK_RESIZE_KEYS,
+    riskColumnWidths,
+    RISK_DEFAULT_WIDTHS,
+    setRiskColumnWidths,
+  )
 
   const [riskDragCol, setRiskDragCol]         = useState(null)
   const [riskDragOverCol, setRiskDragOverCol] = useState(null)
@@ -1259,14 +1282,27 @@ export default function RiskPanel({ selectedAccount }) {
             )}
 
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
+                <colgroup>
+                  <col style={{ width: riskColWidths._symbol }} />
+                  {riskColOrder.map(k => <col key={k} style={{ width: riskColWidths[k] }} />)}
+                  <col style={{ width: 48 }} />
+                </colgroup>
                 <thead>
                   <tr className="text-xs text-gray-400 border-b border-white/8 uppercase tracking-wider font-semibold">
-                    <th className="text-left pb-3 font-semibold">Symbol</th>
+                    <th className="text-left pb-3 font-semibold relative select-none">
+                      Symbol
+                      <div onMouseDown={e => startRiskResize('_symbol', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent-blue/60 rounded" />
+                    </th>
                     {riskColOrder.map(key => {
                       const col = RISK_COLUMNS.find(c => c.key === key)
                       const right = key !== 'heat'
-                      return <th key={key} className={`pb-3 font-semibold ${right ? 'text-right' : ''}`}>{col?.label ?? key}</th>
+                      return (
+                        <th key={key} className={`pb-3 font-semibold relative select-none ${right ? 'text-right' : ''}`}>
+                          {col?.label ?? key}
+                          <div onMouseDown={e => startRiskResize(key, e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent-blue/60 rounded" />
+                        </th>
+                      )
                     })}
                     <th className="pb-3" />
                   </tr>

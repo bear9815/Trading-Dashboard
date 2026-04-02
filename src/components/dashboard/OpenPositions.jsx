@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
+import { useColumnResize } from '../../hooks/useColumnResize.js'
 import { Settings2, Loader } from 'lucide-react'
 import { formatCurrency, formatDate } from '../../utils/formatters.js'
 import { calcRiskPerTrade } from '../../utils/riskCalcs.js'
@@ -21,19 +22,19 @@ const ALL_COLUMNS = [
   { key: 'theme',       label: 'Theme' },
 ]
 
-const WEIGHTS = {
-  _symbol:    13,
-  account:     9,
-  entryDate:  10,
-  held:        5,
-  mktVal:      9,
-  entryPrice:  9,
-  stop:        9,
-  target:      9,
-  riskDollar:  9,
-  riskPct:     7,
-  sector:     12,
-  theme:      14,
+const OP_DEFAULT_WIDTHS = {
+  _symbol:    150,
+  account:    100,
+  entryDate:  110,
+  held:        60,
+  mktVal:      95,
+  entryPrice:  95,
+  stop:        95,
+  target:      95,
+  riskDollar:  95,
+  riskPct:     80,
+  sector:     130,
+  theme:      150,
 }
 
 function daysHeld(entryDate) {
@@ -92,6 +93,7 @@ export default function OpenPositions({ openTrades, accountBalance }) {
     apiKey,
     openPositionsColumns, setOpenPositionsColumns,
     openPositionsColumnOrder, setOpenPositionsColumnOrder,
+    openPositionsColumnWidths, setOpenPositionsColumnWidths,
     symbolThemes, setSymbolTheme,
   } = useSettingsStore()
 
@@ -164,10 +166,13 @@ export default function OpenPositions({ openTrades, accountBalance }) {
     fetchQuotes(symbols).then(setQuotes).catch(() => {})
   }, [allPositions.length])
 
-  // Proportional column widths based on visible columns
-  const visibleCols = ['_symbol', ...orderedVisibleKeys]
-  const totalWeight = visibleCols.reduce((s, k) => s + (WEIGHTS[k] || 10), 0)
-  const colWidth = key => `${((WEIGHTS[key] || 10) / totalWeight * 100).toFixed(1)}%`
+  const ALL_RESIZE_KEYS = ['_symbol', ...ALL_KEYS]
+  const { widths: colWidths, startResize } = useColumnResize(
+    ALL_RESIZE_KEYS,
+    openPositionsColumnWidths,
+    OP_DEFAULT_WIDTHS,
+    setOpenPositionsColumnWidths,
+  )
 
   return (
     <div className="card">
@@ -247,16 +252,24 @@ export default function OpenPositions({ openTrades, accountBalance }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm table-fixed">
             <colgroup>
-              <col style={{ width: colWidth('_symbol') }} />
-              {orderedVisibleKeys.map(k => <col key={k} style={{ width: colWidth(k) }} />)}
+              <col style={{ width: colWidths._symbol }} />
+              {orderedVisibleKeys.map(k => <col key={k} style={{ width: colWidths[k] }} />)}
             </colgroup>
             <thead>
               <tr className="text-sm text-gray-500 border-b border-white/5">
-                <th className="text-left pb-2 px-2 font-medium">Symbol</th>
+                <th className="text-left pb-2 px-2 font-medium relative select-none">
+                  Symbol
+                  <div onMouseDown={e => startResize('_symbol', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent-blue/60 rounded" />
+                </th>
                 {orderedVisibleKeys.map(k => {
                   const col = ALL_COLUMNS.find(c => c.key === k)
                   const right = !['account', 'entryDate', 'sector', 'theme'].includes(k)
-                  return <th key={k} className={`pb-2 px-2 font-medium ${right ? 'text-right' : 'text-left'}`}>{col?.label ?? k}</th>
+                  return (
+                    <th key={k} className={`pb-2 px-2 font-medium relative select-none ${right ? 'text-right' : 'text-left'}`}>
+                      {col?.label ?? k}
+                      <div onMouseDown={e => startResize(k, e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent-blue/60 rounded" />
+                    </th>
+                  )
                 })}
               </tr>
             </thead>
@@ -350,8 +363,8 @@ export default function OpenPositions({ openTrades, accountBalance }) {
             <div className="overflow-x-auto">
               <table className="w-full text-sm table-fixed">
                 <colgroup>
-                  <col style={{ width: colWidth('_symbol') }} />
-                  {orderedVisibleKeys.map(k => <col key={k} style={{ width: colWidth(k) }} />)}
+                  <col style={{ width: colWidths._symbol }} />
+                  {orderedVisibleKeys.map(k => <col key={k} style={{ width: colWidths[k] }} />)}
                 </colgroup>
                 <tbody className="divide-y divide-accent-green/10">
                   {hedgePositions.map(t => {

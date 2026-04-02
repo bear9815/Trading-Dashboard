@@ -62,6 +62,8 @@ export const useSettingsStore = create(
       openPositionsColumns: ['entryDate', 'held', 'entryPrice', 'stop', 'target', 'riskDollar', 'riskPct', 'sector', 'theme'],
       openPositionsColumnOrder: null,
       riskColumnOrder: null,
+      openPositionsColumnWidths: {},
+      riskColumnWidths: {},
       symbolThemes: {},
 
       excludedSymbols: [],
@@ -114,6 +116,8 @@ export const useSettingsStore = create(
       setOpenPositionsColumns: (cols)      => { set({ openPositionsColumns: cols }); saveToCloud({ ...get(), openPositionsColumns: cols }) },
       setOpenPositionsColumnOrder: (order) => set({ openPositionsColumnOrder: order }),
       setRiskColumnOrder:          (order) => set({ riskColumnOrder: order }),
+      setOpenPositionsColumnWidths: (w) => set({ openPositionsColumnWidths: w }),
+      setRiskColumnWidths:          (w) => set({ riskColumnWidths: w }),
       setTpMultiplier:     (v)             => { set({ tpMultiplier: Number(v) }); saveToCloud({ ...get(), tpMultiplier: Number(v) }) },
       setDailyLossLimit:   (v)             => { set({ dailyLossLimit: Number(v) }); saveToCloud({ ...get(), dailyLossLimit: Number(v) }) },
       setMaxDrawdownLimit: (v)             => { set({ maxDrawdownLimit: Number(v) }); saveToCloud({ ...get(), maxDrawdownLimit: Number(v) }) },
