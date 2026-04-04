@@ -1358,7 +1358,13 @@ export default function RiskPanel({ selectedAccount }) {
                           className={`hover:bg-white/3 ${isMulti ? 'cursor-pointer' : ''}`}
                           onClick={isMulti ? toggleExpand : undefined}
                         >
-                          <td className="py-2 font-semibold mono text-white">
+                          <td className={`py-2 font-semibold mono text-white border-l-2 pl-2 ${
+                            group.riskPct >= 3
+                              ? 'border-l-accent-red'
+                              : group.riskPct >= 1.5
+                              ? 'border-l-accent-yellow'
+                              : 'border-l-accent-green/40'
+                          }`}>
                             <div className="flex items-center gap-1.5">
                               {isMulti && (
                                 <ChevronDown

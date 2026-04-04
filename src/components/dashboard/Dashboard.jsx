@@ -90,6 +90,12 @@ export default function Dashboard({ selectedAccount }) {
           <h1 className="text-5xl font-bold text-white">Dashboard</h1>
           <p className="text-xl text-gray-500 mt-0.5">{today}</p>
         </div>
+        {accountBalance > 0 && (
+          <div className="text-right">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Account Balance</p>
+            <p className="text-4xl font-bold text-white mono tabular-nums">{formatCurrency(accountBalance)}</p>
+          </div>
+        )}
       </div>
 
       {/* ── Alert banners ────────────────────────────────────────────────── */}
@@ -156,6 +162,7 @@ export default function Dashboard({ selectedAccount }) {
           icon={Percent}
           accent={winRate >= 50 ? 'green' : 'red'}
           sub={`${wins}W · ${losses}L`}
+          progress={winRate}
         />
         <MetricCard
           label="Avg R-Multiple"
@@ -180,6 +187,7 @@ export default function Dashboard({ selectedAccount }) {
           icon={BarChart}
           accent={profitFactor >= 1.5 ? 'green' : profitFactor >= 1 ? 'yellow' : 'red'}
           sub="gross win / loss"
+          progress={isFinite(profitFactor) ? Math.min(profitFactor / 3 * 100, 100) : 100}
         />
         <MetricCard
           label="Open Heat"
@@ -188,6 +196,7 @@ export default function Dashboard({ selectedAccount }) {
           icon={Zap}
           accent={ner < 2 ? 'green' : ner < 4 ? 'yellow' : 'red'}
           sub={`${formatCurrency(nep, true)} at risk`}
+          progress={Math.min(ner / 6 * 100, 100)}
         />
       </div>
 
