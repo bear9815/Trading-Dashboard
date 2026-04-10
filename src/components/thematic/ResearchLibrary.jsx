@@ -564,7 +564,8 @@ export default function ResearchLibrary() {
         }
       } catch (err) {
         console.error(err)
-        setError(`Failed to process "${file.name}": ${err.message}`)
+        const msg = err?.message || (typeof err === 'string' ? err : null) || 'Unknown error — check console for details'
+        setError(`Failed to process "${file.name}": ${msg}`)
       }
     }
 

@@ -1,30 +1,38 @@
 /**
  * Extract plain text from a PDF File/Blob.
- * Loads pdfjs-dist from CDN at runtime so Rollup/Vite never needs to
- * bundle or resolve the package at build time.
+ * Loads pdfjs-dist from unpkg CDN at runtime so Rollup/Vite never needs
+ * to bundle or resolve the package at build time.
  */
 
+// Pin to a stable version that definitely exists on unpkg
 const PDFJS_VERSION = '4.4.168'
-const PDFJS_CDN    = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}`
+const CDN_BASE      = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build`
 
 let _loaded = false
 
 async function loadPdfJs() {
-  if (_loaded || window.pdfjsLib) {
+  // Already available — nothing to do
+  if (window.pdfjsLib) return window.pdfjsLib
+
+  if (!_loaded) {
+    await new Promise((resolve, reject) => {
+      const script    = document.createElement('script')
+      script.src      = `${CDN_BASE}/pdf.min.js`
+      script.onload   = resolve
+      // Wrap the Event in a real Error so callers get a readable message
+      script.onerror  = () => reject(
+        new Error(`Could not load PDF.js from CDN (${CDN_BASE}/pdf.min.js). Check your internet connection.`)
+      )
+      document.head.appendChild(script)
+    })
     _loaded = true
-    return window.pdfjsLib
   }
 
-  await new Promise((resolve, reject) => {
-    const script  = document.createElement('script')
-    script.src    = `${PDFJS_CDN}/pdf.min.js`
-    script.onload = resolve
-    script.onerror = reject
-    document.head.appendChild(script)
-  })
+  if (!window.pdfjsLib) {
+    throw new Error('PDF.js script loaded but window.pdfjsLib is not defined.')
+  }
 
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS_CDN}/pdf.worker.min.js`
-  _loaded = true
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = `${CDN_BASE}/pdf.worker.min.js`
   return window.pdfjsLib
 }
 
@@ -35,9 +43,9 @@ async function loadPdfJs() {
  * @returns {Promise<string>}
  */
 export async function extractPdfText(file, maxChars = 20000) {
-  const pdfjsLib   = await loadPdfJs()
+  const pdfjsLib    = await loadPdfJs()
   const arrayBuffer = await file.arrayBuffer()
-  const pdf        = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+  const pdf         = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
 
   const pages = []
   for (let i = 1; i <= pdf.numPages; i++) {

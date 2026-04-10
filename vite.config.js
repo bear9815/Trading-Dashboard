@@ -6,11 +6,6 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['pdfjs-dist'],
   },
-  build: {
-    rollupOptions: {
-      external: ['pdfjs-dist'],
-    },
-  },
   plugins: [
     react(),
     VitePWA({
