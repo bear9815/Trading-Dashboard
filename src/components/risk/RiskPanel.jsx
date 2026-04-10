@@ -4,6 +4,7 @@ import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
+import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
 import { buildOpenPositionRisk, calcNEP, calcNER, calcEffectiveExposure } from '../../utils/riskCalcs.js'
 import { formatCurrency } from '../../utils/formatters.js'
 import { calcWinRate, calcAvgR } from '../../utils/metrics.js'
@@ -933,17 +934,19 @@ export default function RiskPanel({ selectedAccount }) {
     [openTrades, atrData, benchmarkAtrPct, liveBalance]
   )
 
-  // Write live balance + effective exposure to settings store so other components
-  // (Morning journal, Dashboard) can read them without re-fetching quotes.
+  // Write live balance + effective exposure to the transient runtime store so
+  // other components (Morning journal, Dashboard) can read them without
+  // re-fetching quotes. Using a separate non-persisted store prevents cascade
+  // re-renders across every settings consumer when prices refresh.
   useEffect(() => {
     if (liveBalance > 0) {
-      useSettingsStore.setState({ liveAccountBalance: liveBalance })
+      useLiveMarketStore.getState().setLiveAccountBalance(liveBalance)
     }
   }, [liveBalance])
 
   useEffect(() => {
     if (exposure.effectivePct !== 0) {
-      useSettingsStore.setState({ liveEffectivePct: exposure.effectivePct })
+      useLiveMarketStore.getState().setLiveEffectivePct(exposure.effectivePct)
     }
   }, [exposure.effectivePct])
 

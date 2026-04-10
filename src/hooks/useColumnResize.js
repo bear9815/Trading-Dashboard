@@ -34,6 +34,21 @@ export function useColumnResize(keys, stored, defaults, onSave) {
   const widthsRef = useRef(widths)
   useEffect(() => { widthsRef.current = widths }, [widths])
 
+  // Track active drag handlers so we can tear them down on unmount
+  const activeHandlersRef = useRef(null)
+
+  useEffect(() => {
+    // Cleanup any in-flight drag listeners when the component unmounts mid-drag
+    return () => {
+      if (activeHandlersRef.current) {
+        const { onMove, onUp } = activeHandlersRef.current
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup',   onUp)
+        activeHandlersRef.current = null
+      }
+    }
+  }, [])
+
   const startResize = useCallback((key, e) => {
     e.preventDefault()
     const startX     = e.clientX
@@ -47,12 +62,14 @@ export function useColumnResize(keys, stored, defaults, onSave) {
     const onUp = (ev) => {
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup',   onUp)
+      activeHandlersRef.current = null
       const w    = Math.max(40, startWidth + (ev.clientX - startX))
       const next = { ...widthsRef.current, [key]: w }
       setWidths(next)
       onSave(next)
     }
 
+    activeHandlersRef.current = { onMove, onUp }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup',   onUp)
   }, [defaults, onSave])

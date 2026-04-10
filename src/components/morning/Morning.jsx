@@ -16,6 +16,7 @@ import {
 import { useMorningStore }  from '../../store/useMorningStore.js'
 import { useTradeStore }    from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
+import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
 import { calcCashDeployed, calcEffectiveExposure } from '../../utils/riskCalcs.js'
 import { fetchHistory, fetchATR14 }     from '../../utils/marketData.js'
 import { formatCurrency }   from '../../utils/formatters.js'
@@ -1053,7 +1054,9 @@ function AnalysisTab({ entries }) {
 function LogTab() {
   const { entries, addEntry, updateEntry, deleteEntry, getEntryByDate } = useMorningStore()
   const { trades, getAccountBalance }  = useTradeStore()
-  const { benchmarkSymbol, liveEffectivePct, liveAccountBalance } = useSettingsStore()
+  const { benchmarkSymbol } = useSettingsStore()
+  const liveEffectivePct   = useLiveMarketStore(s => s.liveEffectivePct)
+  const liveAccountBalance = useLiveMarketStore(s => s.liveAccountBalance)
 
   // Use live balance (with unrealized P&L) when RiskPanel has fetched prices
   const accountBalance = liveAccountBalance > 0 ? liveAccountBalance : getAccountBalance()

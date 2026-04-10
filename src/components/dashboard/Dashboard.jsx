@@ -9,6 +9,7 @@ import TradingThoughts from './TradingThoughts.jsx'
 import LivePositions from './LivePositions.jsx'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
+import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
 import {
   calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor, calcNetPL, calcConsecutiveStreak
 } from '../../utils/metrics.js'
@@ -18,7 +19,8 @@ import { formatCurrency, formatR, signClass } from '../../utils/formatters.js'
 
 export default function Dashboard({ selectedAccount }) {
   const { trades, accountActivities } = useTradeStore()
-  const { dailyLossLimit, excludedSymbols, liveAccountBalance } = useSettingsStore()
+  const { dailyLossLimit, excludedSymbols } = useSettingsStore()
+  const liveAccountBalance = useLiveMarketStore(s => s.liveAccountBalance)
 
   // Uppercase set for fast lookup
   const excludedSet = useMemo(
@@ -51,20 +53,27 @@ export default function Dashboard({ selectedAccount }) {
   const staticBalance  = equityCurve.length > 0 ? equityCurve[equityCurve.length - 1].balance : 0
   const accountBalance = liveAccountBalance > 0 ? liveAccountBalance : staticBalance
 
-  // Stats are computed on the filtered (non-excluded) set
-  const netPL        = calcNetPL(filtered)
-  const winRate      = calcWinRate(filtered)
-  const avgR         = calcAvgR(filtered)
-  const expectancy   = calcExpectancy(filtered)
-  const profitFactor = calcProfitFactor(filtered)
-  const streak       = calcConsecutiveStreak(filtered)
-  const ner          = calcNER(openTrades, accountBalance)
-  const nep          = calcNEP(openTrades)
+  // Stats are computed on the filtered (non-excluded) set. Memoize so they
+  // don't re-run on every unrelated render (e.g. RiskPanel writing live balance).
+  const stats = useMemo(() => ({
+    netPL:        calcNetPL(filtered),
+    winRate:      calcWinRate(filtered),
+    avgR:         calcAvgR(filtered),
+    expectancy:   calcExpectancy(filtered),
+    profitFactor: calcProfitFactor(filtered),
+    streak:       calcConsecutiveStreak(filtered),
+  }), [filtered])
+  const { netPL, winRate, avgR, expectancy, profitFactor, streak } = stats
+
+  const ner = useMemo(() => calcNER(openTrades, accountBalance), [openTrades, accountBalance])
+  const nep = useMemo(() => calcNEP(openTrades),                 [openTrades])
 
   // Daily P&L heatmap uses filtered trades (excluded symbols hidden from calendar)
   const dailyPL = useMemo(() => buildDailyPL(filtered), [filtered])
 
   // ── Daily loss limit ──────────────────────────────────────────────────────
+  // Computed once per render from module-scope — date string doesn't change
+  // intra-session so we don't need useMemo just to stabilize the reference.
   const todayStr = new Date().toISOString().slice(0, 10)
   const todayPL = useMemo(() => {
     return filtered
@@ -78,8 +87,16 @@ export default function Dashboard({ selectedAccount }) {
   const dailyLimitWarning = dailyLimitDollar > 0 && !dailyLimitReached && todayLoss >= dailyLimitDollar * 0.75
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
-  const wins  = closedTrades.filter(t => t.status === 'Win').length
-  const losses = closedTrades.filter(t => t.status === 'Loss').length
+
+  // Derived from already-memoized closedTrades — single pass
+  const { wins, losses } = useMemo(() => {
+    let w = 0, l = 0
+    for (const t of closedTrades) {
+      if (t.status === 'Win')  w++
+      else if (t.status === 'Loss') l++
+    }
+    return { wins: w, losses: l }
+  }, [closedTrades])
 
   return (
     <div className="flex flex-col gap-5 p-5">
