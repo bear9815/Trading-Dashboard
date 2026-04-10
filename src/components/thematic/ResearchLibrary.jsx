@@ -9,6 +9,10 @@ import { useAuthStore }            from '../../store/useAuthStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { useThematicStore }        from '../../store/useThematicStore.js'
 import { processWithGeminiCombined, readFileAsBase64 } from '../../utils/thematicGemini.js'
+import { initGoogleDrive, requestDriveToken, openDrivePicker, downloadDriveFile } from '../../utils/googleDrive.js'
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
+const GOOGLE_API_KEY   = import.meta.env.VITE_GOOGLE_API_KEY   || ''
 
 // ── Gemini: extraction ────────────────────────────────────────────────────────
 function buildExtractionPrompt(sourceType, tickerHint, themeHint) {
@@ -475,7 +479,42 @@ export default function ResearchLibrary() {
   const [error,        setError]        = useState(null)
   const [analysis,     setAnalysis]     = useState(null)
   const [showLibrary,  setShowLibrary]  = useState(true)
+  const [driveLoading, setDriveLoading] = useState(false)
   const inputRef = useRef()
+
+  const handleGoogleDrive = useCallback(async () => {
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) {
+      setError('Google Drive is not configured. Add VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to your .env.local file.')
+      return
+    }
+    try {
+      setDriveLoading(true)
+      setError(null)
+      await initGoogleDrive()
+      const token = await requestDriveToken(GOOGLE_CLIENT_ID)
+      openDrivePicker({
+        apiKey: GOOGLE_API_KEY,
+        token,
+        onCancel: () => setDriveLoading(false),
+        onSelect: async (docs) => {
+          try {
+            const files = await Promise.all(
+              docs.map(doc => downloadDriveFile(doc.id, doc.name, token))
+            )
+            setDriveLoading(false)
+            handleFiles(files)
+          } catch (err) {
+            setDriveLoading(false)
+            setError(`Drive download failed: ${err.message}`)
+          }
+        },
+      })
+      // driveLoading stays true until picker resolves (pick or cancel)
+    } catch (err) {
+      setDriveLoading(false)
+      setError(`Google Drive: ${err.message}`)
+    }
+  }, [handleFiles])
 
   useEffect(() => {
     if (user?.id) loadSources()
@@ -664,22 +703,25 @@ export default function ResearchLibrary() {
                   </p>
                   <p className="text-[10px] text-gray-600 mt-0.5">multiple files supported</p>
                 </div>
-                <a
-                  href="https://drive.google.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 w-full border border-white/10 rounded-xl py-2.5 text-xs text-gray-500 hover:text-gray-300 hover:border-white/20 hover:bg-white/[0.02] transition-all"
+                <button
+                  onClick={handleGoogleDrive}
+                  disabled={driveLoading}
+                  className="flex items-center justify-center gap-2 w-full border border-white/10 rounded-xl py-2.5 text-xs text-gray-500 hover:text-gray-300 hover:border-white/20 hover:bg-white/[0.02] transition-all disabled:opacity-50 disabled:cursor-wait"
                 >
-                  <svg width="13" height="13" viewBox="0 0 87.3 78" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066DA"/>
-                    <path d="M43.65 25L29.9 1.2C28.55 2 27.4 3.1 26.6 4.5L1.2 48.4c-.8 1.4-1.2 2.95-1.2 4.5h27.5l16.15-27.9z" fill="#00AC47"/>
-                    <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.8l5.65 9.6 8.1 14.2z" fill="#EA4335"/>
-                    <path d="M43.65 25L57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2L43.65 25z" fill="#00832D"/>
-                    <path d="M59.8 53H27.5L13.75 76.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2L59.8 53z" fill="#2684FC"/>
-                    <path d="M73.4 26.5l-12.8-22.2c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25 59.8 53h27.45c0-1.55-.4-3.1-1.2-4.5l-12.65-22z" fill="#FFBA00"/>
-                  </svg>
-                  Open Google Drive
-                </a>
+                  {driveLoading ? (
+                    <Loader size={13} className="animate-spin text-accent-blue"/>
+                  ) : (
+                    <svg width="13" height="13" viewBox="0 0 87.3 78" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066DA"/>
+                      <path d="M43.65 25L29.9 1.2C28.55 2 27.4 3.1 26.6 4.5L1.2 48.4c-.8 1.4-1.2 2.95-1.2 4.5h27.5l16.15-27.9z" fill="#00AC47"/>
+                      <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.8l5.65 9.6 8.1 14.2z" fill="#EA4335"/>
+                      <path d="M43.65 25L57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2L43.65 25z" fill="#00832D"/>
+                      <path d="M59.8 53H27.5L13.75 76.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2L59.8 53z" fill="#2684FC"/>
+                      <path d="M73.4 26.5l-12.8-22.2c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25 59.8 53h27.45c0-1.55-.4-3.1-1.2-4.5l-12.65-22z" fill="#FFBA00"/>
+                    </svg>
+                  )}
+                  {driveLoading ? 'Connecting to Drive…' : 'Open Google Drive'}
+                </button>
               </div>
             )}
           </div>
