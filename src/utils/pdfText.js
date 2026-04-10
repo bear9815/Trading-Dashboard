@@ -4,8 +4,9 @@
  * to bundle or resolve the package at build time.
  */
 
-// Pin to a stable version that definitely exists on unpkg
-const PDFJS_VERSION = '4.4.168'
+// v3.11.174 is the last version that ships a UMD build at build/pdf.min.js.
+// v4+ ships only ESM at build/pdf.min.mjs which cannot be loaded via <script>.
+const PDFJS_VERSION = '3.11.174'
 const CDN_BASE      = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build`
 
 let _loaded = false
