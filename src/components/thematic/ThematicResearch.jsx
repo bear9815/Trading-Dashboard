@@ -5,7 +5,7 @@ import { useAuthStore }            from '../../store/useAuthStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import ResearchLibrary, { ActiveSignals } from './ResearchLibrary.jsx'
 import { refreshNewFields } from '../../utils/thematicGemini.js'
-import { ollamaChatStream } from '../../utils/ollama.js'
+import { ollamaChatStream, checkOllama } from '../../utils/ollama.js'
 import {
   ChevronDown, AlertTriangle, Gem, Zap, FileText,
   Trash2, Send, Bot, TrendingUp,
@@ -540,6 +540,18 @@ function ThematicChat({ themes, apiKey, useLocalLLM, librarySources = [] }) {
     try {
       if (useLocalLLM) {
         // ── Local path: Gemma 4 via Ollama ──────────────────────────────────
+        // First check Ollama is reachable — gives a clear error instead of a
+        // cryptic network failure (also catches CORS block from Vercel origin)
+        const alive = await checkOllama()
+        if (!alive) {
+          throw new Error(
+            'Cannot reach Ollama at localhost:11434.\n\n' +
+            '• Make sure Ollama is running (check your menu bar)\n' +
+            '• If accessing from the Vercel URL, run this once in Terminal:\n' +
+            '  launchctl setenv OLLAMA_ORIGINS "https://trading-dashboard-ten-tau.vercel.app"\n' +
+            '  then restart Ollama'
+          )
+        }
         const systemPrompt = `You are an expert investment research analyst. You have access to the user's thematic dossiers and research library below. Answer questions analytically, cite specific evidence from the provided context, and be direct about what you do and don't know.
 
 THEMATIC DOSSIERS:
