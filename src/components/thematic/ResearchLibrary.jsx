@@ -482,40 +482,6 @@ export default function ResearchLibrary() {
   const [driveLoading, setDriveLoading] = useState(false)
   const inputRef = useRef()
 
-  const handleGoogleDrive = useCallback(async () => {
-    if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) {
-      setError('Google Drive is not configured. Add VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to your .env.local file.')
-      return
-    }
-    try {
-      setDriveLoading(true)
-      setError(null)
-      await initGoogleDrive()
-      const token = await requestDriveToken(GOOGLE_CLIENT_ID)
-      openDrivePicker({
-        apiKey: GOOGLE_API_KEY,
-        token,
-        onCancel: () => setDriveLoading(false),
-        onSelect: async (docs) => {
-          try {
-            const files = await Promise.all(
-              docs.map(doc => downloadDriveFile(doc.id, doc.name, token))
-            )
-            setDriveLoading(false)
-            handleFiles(files)
-          } catch (err) {
-            setDriveLoading(false)
-            setError(`Drive download failed: ${err.message}`)
-          }
-        },
-      })
-      // driveLoading stays true until picker resolves (pick or cancel)
-    } catch (err) {
-      setDriveLoading(false)
-      setError(`Google Drive: ${err.message}`)
-    }
-  }, [handleFiles])
-
   useEffect(() => {
     if (user?.id) loadSources()
   }, [user?.id])
@@ -609,6 +575,39 @@ export default function ResearchLibrary() {
     e.preventDefault(); setDragging(false)
     const files = [...e.dataTransfer.files].filter(f => f.type === 'application/pdf')
     if (files.length) handleFiles(files)
+  }, [handleFiles])
+
+  const handleGoogleDrive = useCallback(async () => {
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) {
+      setError('Google Drive is not configured. Add VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to your .env.local file.')
+      return
+    }
+    try {
+      setDriveLoading(true)
+      setError(null)
+      await initGoogleDrive()
+      const token = await requestDriveToken(GOOGLE_CLIENT_ID)
+      openDrivePicker({
+        apiKey: GOOGLE_API_KEY,
+        token,
+        onCancel: () => setDriveLoading(false),
+        onSelect: async (docs) => {
+          try {
+            const files = await Promise.all(
+              docs.map(doc => downloadDriveFile(doc.id, doc.name, token))
+            )
+            setDriveLoading(false)
+            handleFiles(files)
+          } catch (err) {
+            setDriveLoading(false)
+            setError(`Drive download failed: ${err.message}`)
+          }
+        },
+      })
+    } catch (err) {
+      setDriveLoading(false)
+      setError(`Google Drive: ${err.message}`)
+    }
   }, [handleFiles])
 
   const deepDiveCount    = sources.filter(s => s.source_type === 'deep_dive').length
