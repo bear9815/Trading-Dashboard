@@ -1,18 +1,16 @@
 /**
  * Extract plain text from a PDF File/Blob using pdfjs-dist (runs in browser).
+ * Uses a dynamic import so Rollup/Vite can bundle it without resolution errors.
  */
-import * as pdfjsLib from 'pdfjs-dist'
-
-// Point to the worker bundled with pdfjs-dist
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url
-).href
 
 /**
  * Returns extracted text from all pages, capped at maxChars.
  */
 export async function extractPdfText(file, maxChars = 20000) {
+  const pdfjsLib = await import('pdfjs-dist')
+  // Use the CDN worker so Rollup never needs to resolve the worker file path
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
+
   const arrayBuffer = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
   const pages = []

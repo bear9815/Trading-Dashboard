@@ -1111,7 +1111,7 @@ export default function Analytics({ selectedAccount }) {
                     </div>
                   ))}
                 </div>
-                <p className="text-gray-600">Top hedge funds target Calmar > 1.0. Elite funds run 3.0+. Addresses SQN's weakness with trend-following systems.</p>
+                <p className="text-gray-600">Top hedge funds target Calmar &gt; 1.0. Elite funds run 3.0+. Addresses SQN's weakness with trend-following systems.</p>
               </>,
             },
           ]}
