@@ -547,8 +547,8 @@ function ThematicChat({ themes, apiKey, useLocalLLM, librarySources = [] }) {
           throw new Error(
             'Cannot reach Ollama at localhost:11434.\n\n' +
             '• Make sure Ollama is running (check your menu bar)\n' +
-            '• If accessing from the Vercel URL, run this once in Terminal:\n' +
-            '  launchctl setenv OLLAMA_ORIGINS "https://trading-dashboard-ten-tau.vercel.app"\n' +
+            '• If accessing from a non-localhost URL, run this once in Terminal:\n' +
+            `  launchctl setenv OLLAMA_ORIGINS "${window.location.origin}"\n` +
             '  then restart Ollama'
           )
         }
@@ -705,9 +705,9 @@ Note: You do not have live web search in local mode. Base your answers on the pr
           onKeyDown={e => e.key==='Enter' && !e.shiftKey && send()}
           placeholder="Ask anything across your research…"
           className="flex-1 bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors"
-          disabled={loading || !apiKey}
+          disabled={loading || (!useLocalLLM && !apiKey)}
         />
-        <button onClick={() => send()} disabled={!input.trim() || loading || !apiKey}
+        <button onClick={() => send()} disabled={!input.trim() || loading || (!useLocalLLM && !apiKey)}
           className="p-2 rounded-lg bg-accent-blue/20 hover:bg-accent-blue/30 border border-accent-blue/30 text-accent-blue disabled:opacity-40 disabled:cursor-not-allowed transition-all">
           <Send size={15}/>
         </button>

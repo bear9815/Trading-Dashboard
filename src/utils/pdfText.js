@@ -9,32 +9,37 @@
 const PDFJS_VERSION = '3.11.174'
 const CDN_BASE      = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build`
 
-let _loaded = false
+// Serialized load promise — prevents race conditions when multiple PDFs
+// are dropped at once. Subsequent calls await the in-flight load instead
+// of double-injecting the <script> tag.
+let _loadingPromise = null
 
-async function loadPdfJs() {
-  // Already available — nothing to do
-  if (window.pdfjsLib) return window.pdfjsLib
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib)
+  if (_loadingPromise)  return _loadingPromise
 
-  if (!_loaded) {
-    await new Promise((resolve, reject) => {
-      const script    = document.createElement('script')
-      script.src      = `${CDN_BASE}/pdf.min.js`
-      script.onload   = resolve
-      // Wrap the Event in a real Error so callers get a readable message
-      script.onerror  = () => reject(
-        new Error(`Could not load PDF.js from CDN (${CDN_BASE}/pdf.min.js). Check your internet connection.`)
-      )
-      document.head.appendChild(script)
-    })
-    _loaded = true
-  }
+  _loadingPromise = new Promise((resolve, reject) => {
+    const script   = document.createElement('script')
+    script.src     = `${CDN_BASE}/pdf.min.js`
+    script.onload  = () => {
+      if (!window.pdfjsLib) {
+        reject(new Error('PDF.js script loaded but window.pdfjsLib is not defined.'))
+        return
+      }
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = `${CDN_BASE}/pdf.worker.min.js`
+      resolve(window.pdfjsLib)
+    }
+    script.onerror = () => {
+      // Reset so a subsequent attempt can retry (e.g. after reconnecting)
+      _loadingPromise = null
+      reject(new Error(
+        `Could not load PDF.js from CDN (${CDN_BASE}/pdf.min.js). Check your internet connection.`
+      ))
+    }
+    document.head.appendChild(script)
+  })
 
-  if (!window.pdfjsLib) {
-    throw new Error('PDF.js script loaded but window.pdfjsLib is not defined.')
-  }
-
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc = `${CDN_BASE}/pdf.worker.min.js`
-  return window.pdfjsLib
+  return _loadingPromise
 }
 
 /**

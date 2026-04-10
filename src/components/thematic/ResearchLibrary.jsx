@@ -349,7 +349,7 @@ function SignalSection({ label, items, dot, border, bg }) {
 export function ActiveSignals() {
   const { sources, updateSource }  = useResearchLibraryStore()
   const { themes }                 = useThematicStore()
-  const { apiKey }                 = useSettingsStore()
+  const { apiKey, useLocalLLM }    = useSettingsStore()
   const [reanalyzing, setReanalyzing] = useState(false)
   const [currentId,   setCurrentId]   = useState(null)
   const [show,        setShow]        = useState(true)
@@ -371,15 +371,18 @@ export function ActiveSignals() {
   const hasDossiers    = Object.keys(themes).length > 0
 
   async function reanalyzeAll() {
-    if (!apiKey || reanalyzing || !hasDossiers) return
+    if (reanalyzing || !hasDossiers) return
+    if (!useLocalLLM && !apiKey) return
     setReanalyzing(true)
     for (const source of sources) {
       setCurrentId(source.id)
       try {
-        const result = await autoAnalyzeWithGemini(source, themes, apiKey)
+        const result = useLocalLLM
+          ? await autoAnalyzeWithOllama(source, themes)
+          : await autoAnalyzeWithGemini(source, themes, apiKey)
         if (result) await updateSource(source.id, { insights: result })
       } catch (e) {
-        console.warn(`[ActiveSignals] re-analysis failed for "${source.title}":`, e.message)
+        console.warn(`[ActiveSignals] re-analysis failed for "${source.title}":`, e?.message)
       }
     }
     setReanalyzing(false)
@@ -418,7 +421,7 @@ export function ActiveSignals() {
                 : `${sources.length} source${sources.length !== 1 ? 's' : ''} · ${totalSignals} signal${totalSignals !== 1 ? 's' : ''}`}
             </p>
             <button onClick={reanalyzeAll}
-              disabled={reanalyzing || !apiKey || !hasDossiers}
+              disabled={reanalyzing || (!useLocalLLM && !apiKey) || !hasDossiers}
               title={!hasDossiers ? 'Add thematic dossiers first' : ''}
               className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-accent-blue border border-white/10 hover:border-accent-blue/30 rounded-lg px-2.5 py-1.5 transition-all disabled:opacity-40">
               <RefreshCw size={11} className={reanalyzing ? 'animate-spin' : ''}/>
@@ -549,17 +552,21 @@ export default function ResearchLibrary() {
           }
         }
 
-        if (saved && Object.keys(themes).length > 0) {
+        // Read the latest themes from the store — if the combined upload
+        // just added a new dossier via addTheme above, the `themes` closure
+        // value is stale and would miss it.
+        const currentThemes = useThematicStore.getState().themes
+        if (saved && Object.keys(currentThemes).length > 0) {
           try {
             const result = useLocalLLM
-              ? await autoAnalyzeWithOllama(saved, themes)
-              : await autoAnalyzeWithGemini(saved, themes, apiKey)
+              ? await autoAnalyzeWithOllama(saved, currentThemes)
+              : await autoAnalyzeWithGemini(saved, currentThemes, apiKey)
             if (result) {
               setAnalysis(result)
               await updateSource(saved.id, { insights: result })
             }
           } catch (ae) {
-            console.warn('[ResearchLibrary] auto-analysis failed:', ae.message)
+            console.warn('[ResearchLibrary] auto-analysis failed:', ae?.message)
           }
         }
       } catch (err) {
