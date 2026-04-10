@@ -11,7 +11,7 @@ export async function autoDetectAndParse(file, brokerHint = null) {
 
   if (ext === 'xlsx' || ext === 'xls') {
     const buffer = await file.arrayBuffer()
-    const result = parseExcelJournal(buffer)
+    const result = await parseExcelJournal(buffer)
     // Excel parser applies enrichTrade internally; trades already enriched
     return { type: 'excel', ...result }
   }

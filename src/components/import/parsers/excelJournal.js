@@ -1,6 +1,18 @@
-import * as XLSX from 'xlsx'
+// xlsx is a ~500KB gzipped dependency used only for Excel journal imports.
+// Loaded lazily so it never touches the module graph on app startup.
 import { v4 as uuidv4 } from 'uuid'
 import { enrichTrade } from '../../../utils/enrichTrade.js'
+
+// Module-level handle populated by the first parseExcelJournal call.
+let XLSX = null
+
+async function loadXLSX() {
+  if (XLSX) return XLSX
+  const mod = await import('xlsx')
+  // xlsx ships as both default export and namespace — support both.
+  XLSX = mod.default || mod
+  return XLSX
+}
 
 /**
  * Parse the HannDev Excel journal.
@@ -12,7 +24,8 @@ import { enrichTrade } from '../../../utils/enrichTrade.js'
  *    their positions in the header row and read by index, NOT by column name.
  *  - Dates are stored as JavaScript Date objects when XLSX is read with cellDates:true
  */
-export function parseExcelJournal(buffer) {
+export async function parseExcelJournal(buffer) {
+  await loadXLSX()
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true })
   const trades         = parseTradeData(wb)
   const journalEntries = parseJournalEntries(wb)

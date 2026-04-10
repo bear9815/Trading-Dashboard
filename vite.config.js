@@ -6,6 +6,24 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['pdfjs-dist'],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split vendor code into cacheable chunks so changes to app code
+        // don't invalidate heavy libraries, and heavy libs don't block the
+        // initial paint on pages that don't use them.
+        manualChunks: {
+          'vendor-react':    ['react', 'react-dom'],
+          'vendor-charts':   ['recharts', 'lightweight-charts'],
+          'vendor-supabase': ['@supabase/supabase-js'],
+          'vendor-icons':    ['lucide-react'],
+          'vendor-state':    ['zustand'],
+        },
+      },
+    },
+    // Bump chunk size warning — charts vendor chunk is expected to be large
+    chunkSizeWarningLimit: 600,
+  },
   plugins: [
     react(),
     VitePWA({
