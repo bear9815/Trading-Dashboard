@@ -39,39 +39,51 @@ Return ONLY valid JSON (no markdown, no explanation):
 
 async function extractWithGemini(file, apiKey, sourceType, tickerHint, themeHint) {
   const base64 = await readFileAsBase64(file)
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          role: 'user',
-          parts: [
-            { inlineData: { mimeType: 'application/pdf', data: base64 } },
-            { text: buildExtractionPrompt(sourceType, tickerHint, themeHint) },
-          ],
-        }],
-        generationConfig: { maxOutputTokens: 8192, temperature: 0.1 },
-      }),
+
+  // Retry up to 3 times with exponential backoff for 429/503 overload errors
+  let lastError
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise(r => setTimeout(r, 1500 * Math.pow(2, attempt - 1))) // 1.5s, 3s
     }
-  )
-  if (!res.ok) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            role: 'user',
+            parts: [
+              { inlineData: { mimeType: 'application/pdf', data: base64 } },
+              { text: buildExtractionPrompt(sourceType, tickerHint, themeHint) },
+            ],
+          }],
+          generationConfig: { maxOutputTokens: 8192, temperature: 0.1 },
+        }),
+      }
+    )
+    if (res.ok) {
+      const data = await res.json()
+      let raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
+      if (raw.startsWith('```')) raw = raw.split('\n').slice(1).join('\n')
+      if (raw.endsWith('```')) raw = raw.slice(0, raw.lastIndexOf('```'))
+      raw = raw.trim()
+      try {
+        return JSON.parse(raw)
+      } catch (e) {
+        const finishReason = data.candidates?.[0]?.finishReason
+        if (finishReason === 'MAX_TOKENS') throw new Error('Response truncated — document may be too large.')
+        throw new Error(`Failed to parse Gemini response: ${e.message}`)
+      }
+    }
     const err = await res.json().catch(() => ({}))
-    throw new Error(err?.error?.message || `Gemini API error ${res.status}`)
+    const msg = err?.error?.message || `Gemini API error ${res.status}`
+    // Only retry on overload/rate-limit errors
+    if (res.status !== 429 && res.status !== 503) throw new Error(msg)
+    lastError = new Error(msg)
   }
-  const data = await res.json()
-  let raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
-  if (raw.startsWith('```')) raw = raw.split('\n').slice(1).join('\n')
-  if (raw.endsWith('```')) raw = raw.slice(0, raw.lastIndexOf('```'))
-  raw = raw.trim()
-  try {
-    return JSON.parse(raw)
-  } catch (e) {
-    const finishReason = data.candidates?.[0]?.finishReason
-    if (finishReason === 'MAX_TOKENS') throw new Error('Response truncated — document may be too large.')
-    throw new Error(`Failed to parse Gemini response: ${e.message}`)
-  }
+  throw lastError
 }
 
 // ── Gemini: auto-analysis ─────────────────────────────────────────────────────
