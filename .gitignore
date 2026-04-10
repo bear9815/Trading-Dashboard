@@ -30,3 +30,5 @@ yarn-error.log*
 
 # Local Vite cache
 .vite
+
+.vscode/cline_mcp_settings.json
