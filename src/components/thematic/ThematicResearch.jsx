@@ -5,6 +5,7 @@ import { useAuthStore }            from '../../store/useAuthStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import ResearchLibrary, { ActiveSignals } from './ResearchLibrary.jsx'
 import { refreshNewFields } from '../../utils/thematicGemini.js'
+import { ollamaChatStream } from '../../utils/ollama.js'
 import {
   ChevronDown, AlertTriangle, Gem, Zap, FileText,
   Trash2, Send, Bot, TrendingUp,
@@ -514,7 +515,7 @@ function MacroMatrix({ themes }) {
 }
 
 // ── AI Research Chat ──────────────────────────────────────────────────────────
-function ThematicChat({ themes, apiKey, librarySources = [] }) {
+function ThematicChat({ themes, apiKey, useLocalLLM, librarySources = [] }) {
   const themeNames = Object.keys(themes)
   const [messages, setMessages] = useState([{
     role: 'assistant',
@@ -535,34 +536,78 @@ function ThematicChat({ themes, apiKey, librarySources = [] }) {
     setInput('')
     setMessages(prev => [...prev, { role: 'user', text: msg }])
     setLoading(true)
+
     try {
-      const history = messages.slice(1).map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.text }],
-      }))
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            system_instruction: { parts: [{ text: `You are an expert investment research analyst with access to live web search, thematic dossiers, and a research library of uploaded documents.\n\nTHEMATIC DOSSIERS:\n${context}${libraryCtx ? `\n\n---\nRESEARCH LIBRARY (deep dives & earnings calls):\n\n${libraryCtx}` : ''}\n\nFor current prices, news, or market conditions — use web search. For thesis, catalysts, cross-referencing what companies are saying against the investment thesis, or spotting catalysts in motion — draw from the dossiers and library. Be analytical, specific, and cite sources.` }] },
-            contents: [...history, { role: 'user', parts: [{ text: msg }] }],
-            tools: [{ googleSearch: {} }],
-          }),
-        }
-      )
-      const data      = await res.json()
-      const candidate = data.candidates?.[0]
-      const reply     = candidate?.content?.parts?.[0]?.text || 'Unable to generate a response.'
-      const grounding = candidate?.groundingMetadata
-      const sources   = grounding?.groundingChunks
-        ?.map(c => c.web)
-        .filter(Boolean)
-        .filter((s, i, arr) => arr.findIndex(x => x.uri === s.uri) === i)
-        .slice(0, 5) || []
-      const queries   = grounding?.webSearchQueries || []
-      setMessages(prev => [...prev, { role: 'assistant', text: reply, sources, queries }])
+      if (useLocalLLM) {
+        // ── Local path: Gemma 4 via Ollama ──────────────────────────────────
+        const systemPrompt = `You are an expert investment research analyst. You have access to the user's thematic dossiers and research library below. Answer questions analytically, cite specific evidence from the provided context, and be direct about what you do and don't know.
+
+THEMATIC DOSSIERS:
+${context}${libraryCtx ? `\n\n---\nRESEARCH LIBRARY:\n\n${libraryCtx}` : ''}
+
+Note: You do not have live web search in local mode. Base your answers on the provided dossiers and library.`
+
+        const history = messages.slice(1).map(m => ({
+          role: m.role === 'user' ? 'user' : 'assistant',
+          content: m.text,
+        }))
+
+        const reply = await ollamaChatStream({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...history,
+            { role: 'user', content: msg },
+          ],
+          temperature: 0.3,
+          onChunk: (partial) => {
+            setMessages(prev => {
+              const next = [...prev]
+              const last = next[next.length - 1]
+              if (last?.role === 'assistant' && last?._streaming) {
+                next[next.length - 1] = { role: 'assistant', text: partial, _streaming: true }
+              } else {
+                next.push({ role: 'assistant', text: partial, _streaming: true, sources: [], queries: [] })
+              }
+              return next
+            })
+          },
+        })
+        // Finalise — remove _streaming flag
+        setMessages(prev => {
+          const next = [...prev]
+          const last = next[next.length - 1]
+          if (last?._streaming) next[next.length - 1] = { role: 'assistant', text: reply, sources: [], queries: [] }
+          return next
+        })
+      } else {
+        // ── Cloud path: Gemini API ───────────────────────────────────────────
+        const history = messages.slice(1).map(m => ({
+          role: m.role === 'user' ? 'user' : 'model',
+          parts: [{ text: m.text }],
+        }))
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              system_instruction: { parts: [{ text: `You are an expert investment research analyst with access to live web search, thematic dossiers, and a research library of uploaded documents.\n\nTHEMATIC DOSSIERS:\n${context}${libraryCtx ? `\n\n---\nRESEARCH LIBRARY (deep dives & earnings calls):\n\n${libraryCtx}` : ''}\n\nFor current prices, news, or market conditions — use web search. For thesis, catalysts, cross-referencing what companies are saying against the investment thesis, or spotting catalysts in motion — draw from the dossiers and library. Be analytical, specific, and cite sources.` }] },
+              contents: [...history, { role: 'user', parts: [{ text: msg }] }],
+              tools: [{ googleSearch: {} }],
+            }),
+          }
+        )
+        const data      = await res.json()
+        const candidate = data.candidates?.[0]
+        const reply     = candidate?.content?.parts?.[0]?.text || 'Unable to generate a response.'
+        const grounding = candidate?.groundingMetadata
+        const sources   = grounding?.groundingChunks
+          ?.map(c => c.web).filter(Boolean)
+          .filter((s, i, arr) => arr.findIndex(x => x.uri === s.uri) === i)
+          .slice(0, 5) || []
+        const queries   = grounding?.webSearchQueries || []
+        setMessages(prev => [...prev, { role: 'assistant', text: reply, sources, queries }])
+      }
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', text: `Error: ${err.message}` }])
     }
@@ -1244,7 +1289,7 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function ThematicResearch() {
-  const { apiKey } = useSettingsStore()
+  const { apiKey, useLocalLLM, setUseLocalLLM } = useSettingsStore()
   const { themes, removeTheme, convictions, setConviction, patchThemeDossier } = useThematicStore()
   const { user }   = useAuthStore()
   const { sources: librarySources, loadSources } = useResearchLibraryStore()
@@ -1279,13 +1324,27 @@ export default function ThematicResearch() {
 
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Growth Research Center</h1>
-          <p className="text-sm text-gray-400 mt-1">
-            {themeCount > 0
-              ? `${themeCount} theme${themeCount!==1?'s':''} distilled · Upload PDFs to the library to add more`
-              : 'Secular compounder research — upload deep dive PDFs to build your growth thesis database'}
-          </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Growth Research Center</h1>
+            <p className="text-sm text-gray-400 mt-1">
+              {themeCount > 0
+                ? `${themeCount} theme${themeCount!==1?'s':''} distilled · Upload PDFs to the library to add more`
+                : 'Secular compounder research — upload deep dive PDFs to build your growth thesis database'}
+            </p>
+          </div>
+          <button
+            onClick={() => setUseLocalLLM(!useLocalLLM)}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border font-medium transition-all ${
+              useLocalLLM
+                ? 'bg-accent-green/15 border-accent-green/30 text-accent-green'
+                : 'bg-white/5 border-white/15 text-gray-500 hover:text-gray-300'
+            }`}
+            title={useLocalLLM ? 'Using Gemma 4 (local) — click to switch to Gemini' : 'Using Gemini (cloud) — click to switch to local Gemma 4'}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${useLocalLLM ? 'bg-accent-green' : 'bg-gray-600'}`}/>
+            {useLocalLLM ? 'Gemma 4 · Local' : 'Gemini · Cloud'}
+          </button>
         </div>
         {themeCount > 0 && (
           <button onClick={() => { if (confirm('Clear all theme dossiers?')) useThematicStore.getState().clearAll() }}
@@ -1331,7 +1390,7 @@ export default function ThematicResearch() {
             </button>
             {showChat && (
               <div className="border-t border-white/10">
-                <ThematicChat themes={themes} apiKey={apiKey} librarySources={librarySources} />
+                <ThematicChat themes={themes} apiKey={apiKey} useLocalLLM={useLocalLLM} librarySources={librarySources} />
               </div>
             )}
           </div>

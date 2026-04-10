@@ -10,6 +10,7 @@ import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { useThematicStore }        from '../../store/useThematicStore.js'
 import { processWithGeminiCombined, readFileAsBase64 } from '../../utils/thematicGemini.js'
 import { initGoogleDrive, requestDriveToken, openDrivePicker, downloadDriveFile } from '../../utils/googleDrive.js'
+import { extractWithOllama, autoAnalyzeWithOllama } from '../../utils/localResearch.js'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 const GOOGLE_API_KEY   = import.meta.env.VITE_GOOGLE_API_KEY   || ''
@@ -462,7 +463,7 @@ export function ActiveSignals() {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ResearchLibrary() {
-  const { apiKey }  = useSettingsStore()
+  const { apiKey, useLocalLLM }  = useSettingsStore()
   const { user }    = useAuthStore()
   const { themes }  = useThematicStore()
   const { sources, loading: storeLoading, loadSources, addSource, removeSource, updateSource } = useResearchLibraryStore()
@@ -493,7 +494,7 @@ export default function ResearchLibrary() {
 
   const handleFiles = useCallback(async (files) => {
     if (!files.length) return
-    if (!apiKey) { setError('No Gemini API key. Add it in Settings → API Keys.'); return }
+    if (!useLocalLLM && !apiKey) { setError('No Gemini API key. Add it in Settings → API Keys.'); return }
     if (!user?.id) { setError('You must be signed in to save to the research library.'); return }
     setError(null)
     setAnalysis(null)
@@ -507,7 +508,9 @@ export default function ResearchLibrary() {
       try {
         let extracted, dossierThemes = null
 
-        if (createDossier) {
+        if (useLocalLLM) {
+          extracted = await extractWithOllama(file, sourceType, tickerInput.trim(), themeInput.trim())
+        } else if (createDossier) {
           // Single call: returns both library metadata and thematic dossier
           const combined = await processWithGeminiCombined(file, apiKey, sourceType, tickerInput.trim(), themeInput.trim())
           extracted     = combined.library || {}
@@ -548,7 +551,9 @@ export default function ResearchLibrary() {
 
         if (saved && Object.keys(themes).length > 0) {
           try {
-            const result = await autoAnalyzeWithGemini(saved, themes, apiKey)
+            const result = useLocalLLM
+              ? await autoAnalyzeWithOllama(saved, themes)
+              : await autoAnalyzeWithGemini(saved, themes, apiKey)
             if (result) {
               setAnalysis(result)
               await updateSource(saved.id, { insights: result })
@@ -569,7 +574,7 @@ export default function ResearchLibrary() {
     setUploadFile('')
     setUploadIndex(0)
     setUploadTotal(0)
-  }, [apiKey, user?.id, sourceType, tickerInput, themeInput, themes, addSource])
+  }, [apiKey, useLocalLLM, user?.id, sourceType, tickerInput, themeInput, themes, addSource])
 
   const handleDrop = useCallback(e => {
     e.preventDefault(); setDragging(false)

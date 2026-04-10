@@ -70,6 +70,8 @@ export const useSettingsStore = create(
       strategies: [],
       edges: [],
 
+      useLocalLLM: false,
+
       // ── Cloud sync ─────────────────────────────────────────────────────────
 
       loadFromCloud: async (userId) => {
@@ -135,6 +137,8 @@ export const useSettingsStore = create(
         set(s => ({ accounts: s.accounts.map(a => a.name === name ? { ...a, ...updates } : a) }))
         get()._sync()
       },
+
+      setUseLocalLLM: (v) => set({ useLocalLLM: v }),
 
       setSymbolTheme: (symbol, theme) => set(s => ({ symbolThemes: { ...s.symbolThemes, [symbol]: theme } })),
       // symbolThemes intentionally not synced — large cache, not critical
