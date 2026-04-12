@@ -51,6 +51,10 @@ const TABS = [
 
 const STORAGE_KEY = 'factor-regime-visible'
 const COMP_STORAGE_KEY = 'factor-regime-comparisons'
+const CUSTOM_COMP_KEY = 'factor-regime-custom-tickers'
+
+// Palette for auto-assigned custom ticker colors
+const CUSTOM_COLORS = ['#e879f9','#34d399','#fbbf24','#f472b6','#60a5fa','#a3e635','#f97316','#22d3ee','#c084fc','#fb7185']
 
 function loadFromStorage(key, fallback) {
   try {
@@ -61,6 +65,14 @@ function loadFromStorage(key, fallback) {
     }
   } catch { /* ignore */ }
   return new Set(fallback)
+}
+
+function loadCustomTickers() {
+  try {
+    const saved = localStorage.getItem(CUSTOM_COMP_KEY)
+    if (saved) return JSON.parse(saved) // [{ symbol, label, color }]
+  } catch { /* ignore */ }
+  return []
 }
 
 function saveToStorage(key, setVal) {
@@ -152,11 +164,43 @@ function RegimeCard({ factor, result }) {
   )
 }
 
-function ZScoreChart({ chartRows, height = 440, factors = FACTORS, brushRange, onBrushChange }) {
+// Shared hover values bar — replaces popup tooltip
+function HoverValuesBar({ data, items, hoveredIndex, formatter }) {
+  if (hoveredIndex == null || !data[hoveredIndex]) return null
+  const row = data[hoveredIndex]
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] mono min-h-[16px]">
+      <span className="text-gray-600">{row.date}</span>
+      {items.map(item => {
+        const val = row[item.symbol]
+        if (val == null) return null
+        return (
+          <span key={item.symbol} style={{ color: item.color }}>
+            {item.label}: {formatter(val)}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+function ZScoreChart({ chartRows, height = 440, factors = FACTORS, brushRange, onBrushChange, hoveredIndex, onHover }) {
   const fmt = (v) => typeof v === 'number' ? v.toFixed(2) : '-'
+  const hoveredDate = hoveredIndex != null ? chartRows[hoveredIndex]?.date : null
+
+  const handleMouseMove = useCallback((state) => {
+    if (state?.activeTooltipIndex != null) onHover(state.activeTooltipIndex)
+  }, [onHover])
+  const handleMouseLeave = useCallback(() => onHover(null), [onHover])
+
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={chartRows} margin={{ top: 8, right: 16, bottom: 0, left: -8 }}>
+      <LineChart
+        data={chartRows}
+        margin={{ top: 8, right: 16, bottom: 0, left: -8 }}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+      >
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
         <XAxis
           dataKey="date"
@@ -172,15 +216,10 @@ function ZScoreChart({ chartRows, height = 440, factors = FACTORS, brushRange, o
           width={32}
         />
         <ReferenceLine y={0} stroke="rgba(255,255,255,0.2)" strokeDasharray="4 4" />
-        <Tooltip
-          contentStyle={{ background: '#1a1d27', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
-          labelStyle={{ color: '#9ca3af', marginBottom: 4 }}
-          formatter={(v, name) => [fmt(v), name]}
-        />
-        <Legend
-          wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
-          formatter={(value) => <span style={{ color: '#9ca3af' }}>{value}</span>}
-        />
+        {hoveredDate && (
+          <ReferenceLine x={hoveredDate} stroke="rgba(255,255,255,0.3)" strokeDasharray="3 3" />
+        )}
+        <Tooltip content={() => null} cursor={false} />
         {factors.map(f => (
           <Line
             key={f.symbol}
@@ -209,9 +248,9 @@ function ZScoreChart({ chartRows, height = 440, factors = FACTORS, brushRange, o
   )
 }
 
-// ── Comparison chart (synced timeframe) ──────────────────────────────────────
+// ── Comparison chart (synced timeframe, log scale) ───────────────────────────
 
-function ComparisonToggles({ selected, onToggle }) {
+function ComparisonToggles({ selected, onToggle, customTickers, onRemoveCustom }) {
   const groups = {}
   COMPARISONS.forEach(c => {
     if (!groups[c.group]) groups[c.group] = []
@@ -244,17 +283,88 @@ function ComparisonToggles({ selected, onToggle }) {
           })}
         </div>
       ))}
+      {customTickers.length > 0 && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-gray-600 font-medium uppercase tracking-wider mr-0.5">Custom</span>
+          {customTickers.map(c => {
+            const active = selected.has(c.symbol)
+            return (
+              <button
+                key={c.symbol}
+                onClick={() => onToggle(c.symbol)}
+                className="group flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-all border"
+                style={{
+                  background:  active ? `${c.color}15` : 'transparent',
+                  borderColor: active ? `${c.color}40` : 'rgba(255,255,255,0.06)',
+                  color:       active ? c.color : '#6b7280',
+                  opacity:     active ? 1 : 0.5,
+                }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: active ? c.color : '#4b5563' }} />
+                {c.label}
+                <span
+                  onClick={(e) => { e.stopPropagation(); onRemoveCustom(c.symbol) }}
+                  className="ml-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 cursor-pointer text-gray-400"
+                >
+                  ×
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
 
-function ComparisonChart({ slicedData, selected, height = 260 }) {
-  const activeComps = COMPARISONS.filter(c => selected.has(c.symbol))
+function CustomTickerInput({ onAdd }) {
+  const [value, setValue] = useState('')
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    const ticker = value.trim().toUpperCase()
+    if (ticker && ticker.length <= 6) {
+      onAdd(ticker)
+      setValue('')
+    }
+  }
+  return (
+    <form onSubmit={handleSubmit} className="flex items-center gap-1.5">
+      <input
+        type="text"
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        placeholder="Add ticker…"
+        className="w-24 px-2 py-1 rounded text-[11px] bg-white/5 border border-white/10 text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-blue/40"
+        maxLength={6}
+      />
+      <button
+        type="submit"
+        disabled={!value.trim()}
+        className="px-2 py-1 rounded text-[10px] font-medium bg-accent-blue/10 text-accent-blue border border-accent-blue/20 hover:bg-accent-blue/20 disabled:opacity-30 transition-all"
+      >
+        Add
+      </button>
+    </form>
+  )
+}
+
+function ComparisonChart({ slicedData, allComps, selected, height = 260, hoveredDate, onHover }) {
+  const activeComps = allComps.filter(c => selected.has(c.symbol))
   if (activeComps.length === 0 || slicedData.length === 0) return null
+
+  const handleMouseMove = useCallback((state) => {
+    if (state?.activeLabel) onHover(state.activeLabel)
+  }, [onHover])
+  const handleMouseLeave = useCallback(() => onHover(null), [onHover])
 
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={slicedData} margin={{ top: 8, right: 16, bottom: 0, left: -8 }}>
+      <LineChart
+        data={slicedData}
+        margin={{ top: 8, right: 16, bottom: 0, left: -8 }}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+      >
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
         <XAxis
           dataKey="date"
@@ -264,20 +374,21 @@ function ComparisonChart({ slicedData, selected, height = 260 }) {
           minTickGap={80}
         />
         <YAxis
+          scale="log"
+          domain={['auto', 'auto']}
           tick={{ fontSize: 10, fill: '#6b7280' }}
-          tickFormatter={v => `${v > 0 ? '+' : ''}${v}%`}
+          tickFormatter={v => {
+            const pct = v - 100
+            return `${pct > 0 ? '+' : ''}${pct.toFixed(0)}%`
+          }}
           width={48}
+          allowDataOverflow
         />
-        <ReferenceLine y={0} stroke="rgba(255,255,255,0.15)" strokeDasharray="4 4" />
-        <Tooltip
-          contentStyle={{ background: '#1a1d27', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
-          labelStyle={{ color: '#9ca3af', marginBottom: 4 }}
-          formatter={(v, name) => [`${v > 0 ? '+' : ''}${v}%`, name]}
-        />
-        <Legend
-          wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
-          formatter={(value) => <span style={{ color: '#9ca3af' }}>{value}</span>}
-        />
+        <ReferenceLine y={100} stroke="rgba(255,255,255,0.15)" strokeDasharray="4 4" />
+        {hoveredDate && (
+          <ReferenceLine x={hoveredDate} stroke="rgba(255,255,255,0.3)" strokeDasharray="3 3" />
+        )}
+        <Tooltip content={() => null} cursor={false} />
         {activeComps.map(c => (
           <Line
             key={c.symbol}
@@ -297,14 +408,30 @@ function ComparisonChart({ slicedData, selected, height = 260 }) {
 
 // ── Tab: Dashboard ────────────────────────────────────────────────────────────
 
-function TabDashboard({ regimes, combinedRows, factors, compPrices, compSelected, onCompToggle, compLoading }) {
+function TabDashboard({ regimes, combinedRows, factors, compPrices, compSelected, onCompToggle, compLoading, customTickers, onAddCustom, onRemoveCustom, allComps }) {
   // Brush state — default to last ~2 years
   const [brushRange, setBrushRange] = useState(() => ({
     startIndex: Math.max(0, combinedRows.length - 504),
     endIndex:   combinedRows.length - 1,
   }))
 
-  // Normalize comparison prices to % return rebased at the start of the brush window
+  // Shared hover state for crosshair sync
+  const [hoveredIndex, setHoveredIndex] = useState(null)
+  const [hoveredCompDate, setHoveredCompDate] = useState(null)
+
+  // Convert hovered z-score index to a date for the comparison crosshair
+  const hoveredDateFromZScore = hoveredIndex != null ? combinedRows[hoveredIndex]?.date : null
+  // Convert hovered comparison date to z-score index
+  const hoveredIndexFromComp = useMemo(() => {
+    if (!hoveredCompDate) return null
+    return combinedRows.findIndex(r => r.date === hoveredCompDate)
+  }, [hoveredCompDate, combinedRows])
+
+  // Effective hover — either source wins
+  const effectiveZIndex = hoveredIndex ?? (hoveredIndexFromComp >= 0 ? hoveredIndexFromComp : null)
+  const effectiveCompDate = hoveredCompDate ?? hoveredDateFromZScore
+
+  // Normalize comparison prices to growth-of-100 (log-friendly, always positive)
   const compSliced = useMemo(() => {
     if (compSelected.size === 0 || combinedRows.length === 0) return []
     const { startIndex, endIndex } = brushRange
@@ -312,12 +439,9 @@ function TabDashboard({ regimes, combinedRows, factors, compPrices, compSelected
     if (slice.length === 0) return []
 
     const activeSymbols = [...compSelected].filter(s => compPrices[s])
-
-    // Build a date→price lookup per symbol
     const priceLookups = {}
     activeSymbols.forEach(sym => { priceLookups[sym] = compPrices[sym] })
 
-    // Find the base price (first available price in the window) per symbol
     const basePrices = {}
     activeSymbols.forEach(sym => {
       for (const row of slice) {
@@ -326,7 +450,6 @@ function TabDashboard({ regimes, combinedRows, factors, compPrices, compSelected
       }
     })
 
-    // Downsample if > 1500 points
     const step = Math.max(1, Math.ceil(slice.length / 1500))
 
     return slice
@@ -336,13 +459,25 @@ function TabDashboard({ regimes, combinedRows, factors, compPrices, compSelected
         activeSymbols.forEach(sym => {
           const price = priceLookups[sym]?.[row.date]
           const base  = basePrices[sym]
+          // Growth of 100: base=100, +50% → 150, -20% → 80
           out[sym] = (price != null && base)
-            ? +((price / base - 1) * 100).toFixed(2)
+            ? +(price / base * 100).toFixed(2)
             : null
         })
         return out
       })
   }, [combinedRows, brushRange, compSelected, compPrices])
+
+  // Build comp hover items for the values bar
+  const activeCompItems = useMemo(
+    () => allComps.filter(c => compSelected.has(c.symbol) && compPrices[c.symbol]),
+    [allComps, compSelected, compPrices]
+  )
+  const compHoveredIdx = useMemo(() => {
+    if (!effectiveCompDate || compSliced.length === 0) return null
+    const idx = compSliced.findIndex(r => r.date === effectiveCompDate)
+    return idx >= 0 ? idx : null
+  }, [effectiveCompDate, compSliced])
 
   return (
     <div className="space-y-5">
@@ -355,12 +490,22 @@ function TabDashboard({ regimes, combinedRows, factors, compPrices, compSelected
 
       {/* Main z-score chart */}
       <div className="card">
-        <p className="text-sm font-semibold text-white mb-4">Smoothed Z-Scores Over Time</p>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-sm font-semibold text-white">Smoothed Z-Scores Over Time</p>
+        </div>
+        <HoverValuesBar
+          data={combinedRows}
+          items={factors}
+          hoveredIndex={effectiveZIndex}
+          formatter={v => v.toFixed(2)}
+        />
         <ZScoreChart
           chartRows={combinedRows}
           factors={factors}
           brushRange={brushRange}
           onBrushChange={setBrushRange}
+          hoveredIndex={effectiveZIndex}
+          onHover={setHoveredIndex}
         />
       </div>
 
@@ -371,13 +516,28 @@ function TabDashboard({ regimes, combinedRows, factors, compPrices, compSelected
             Comparison · Performance
             {compLoading && <span className="text-gray-500 font-normal ml-2 text-xs">loading…</span>}
           </p>
+          <CustomTickerInput onAdd={onAddCustom} />
         </div>
-        <ComparisonToggles selected={compSelected} onToggle={onCompToggle} />
+        <ComparisonToggles selected={compSelected} onToggle={onCompToggle} customTickers={customTickers} onRemoveCustom={onRemoveCustom} />
         {compSelected.size > 0 && (
-          <ComparisonChart slicedData={compSliced} selected={compSelected} />
+          <>
+            <HoverValuesBar
+              data={compSliced}
+              items={activeCompItems}
+              hoveredIndex={compHoveredIdx}
+              formatter={v => { const pct = v - 100; return `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%` }}
+            />
+            <ComparisonChart
+              slicedData={compSliced}
+              allComps={allComps}
+              selected={compSelected}
+              hoveredDate={effectiveCompDate}
+              onHover={setHoveredCompDate}
+            />
+          </>
         )}
         {compSelected.size === 0 && (
-          <p className="text-xs text-gray-600 py-6 text-center">Select indices, sectors, or ETFs above to compare performance against factor regimes</p>
+          <p className="text-xs text-gray-600 py-6 text-center">Select indices, sectors, or ETFs above — or add a custom ticker — to compare performance</p>
         )}
       </div>
 
@@ -578,10 +738,17 @@ export default function FactorRegime() {
   const [visibleSet, setVisibleSet] = useState(() => loadFromStorage(STORAGE_KEY, FACTORS.map(f => f.symbol)))
 
   // Comparison instrument state
-  const [compSelected, setCompSelected] = useState(() => loadFromStorage(COMP_STORAGE_KEY, []))
-  const [compPrices,   setCompPrices]   = useState({})   // { symbol: { date: price } }
-  const [compLoading,  setCompLoading]  = useState(false)
-  const compFetchedRef = useRef(new Set())               // track already-fetched symbols
+  const [compSelected,  setCompSelected]  = useState(() => loadFromStorage(COMP_STORAGE_KEY, []))
+  const [compPrices,    setCompPrices]    = useState({})
+  const [compLoading,   setCompLoading]   = useState(false)
+  const [customTickers, setCustomTickers] = useState(loadCustomTickers)
+  const compFetchedRef = useRef(new Set())
+
+  // All comparison instruments = built-in + custom
+  const allComps = useMemo(
+    () => [...COMPARISONS, ...customTickers.map(c => ({ ...c, group: 'Custom' }))],
+    [customTickers]
+  )
 
   const toggleFactor = useCallback((symbol) => {
     setVisibleSet(prev => {
@@ -605,6 +772,54 @@ export default function FactorRegime() {
       return next
     })
   }, [])
+
+  const addCustomTicker = useCallback((ticker) => {
+    // Skip if already exists in built-in or custom
+    if (COMPARISONS.some(c => c.symbol === ticker)) {
+      // Just select the built-in one
+      setCompSelected(prev => {
+        const next = new Set(prev)
+        next.add(ticker)
+        saveToStorage(COMP_STORAGE_KEY, next)
+        return next
+      })
+      return
+    }
+    if (customTickers.some(c => c.symbol === ticker)) {
+      setCompSelected(prev => {
+        const next = new Set(prev)
+        next.add(ticker)
+        saveToStorage(COMP_STORAGE_KEY, next)
+        return next
+      })
+      return
+    }
+    const color = CUSTOM_COLORS[customTickers.length % CUSTOM_COLORS.length]
+    const entry = { symbol: ticker, label: ticker, color }
+    const updated = [...customTickers, entry]
+    setCustomTickers(updated)
+    localStorage.setItem(CUSTOM_COMP_KEY, JSON.stringify(updated))
+    // Auto-select it
+    setCompSelected(prev => {
+      const next = new Set(prev)
+      next.add(ticker)
+      saveToStorage(COMP_STORAGE_KEY, next)
+      return next
+    })
+  }, [customTickers])
+
+  const removeCustomTicker = useCallback((symbol) => {
+    const updated = customTickers.filter(c => c.symbol !== symbol)
+    setCustomTickers(updated)
+    localStorage.setItem(CUSTOM_COMP_KEY, JSON.stringify(updated))
+    // Deselect it
+    setCompSelected(prev => {
+      const next = new Set(prev)
+      next.delete(symbol)
+      saveToStorage(COMP_STORAGE_KEY, next)
+      return next
+    })
+  }, [customTickers])
 
   // Lazy-fetch comparison instruments when selected
   useEffect(() => {
@@ -858,7 +1073,7 @@ export default function FactorRegime() {
             <FactorToggles factors={activeFactors} visibleSet={visibleSet} onToggle={toggleFactor} />
           </div>
 
-          {tab === 'dashboard'  && <TabDashboard   regimes={activeRegimes} combinedRows={combinedRows} factors={visibleFactors} compPrices={compPrices} compSelected={compSelected} onCompToggle={toggleComparison} compLoading={compLoading} />}
+          {tab === 'dashboard'  && <TabDashboard   regimes={activeRegimes} combinedRows={combinedRows} factors={visibleFactors} compPrices={compPrices} compSelected={compSelected} onCompToggle={toggleComparison} compLoading={compLoading} customTickers={customTickers} onAddCustom={addCustomTicker} onRemoveCustom={removeCustomTicker} allComps={allComps} />}
           {tab === 'charts'     && <TabCharts       regimes={activeRegimes} factors={visibleFactors} />}
           {tab === 'statistics' && <TabStatistics   regimes={activeRegimes} factors={visibleFactors} />}
         </>
