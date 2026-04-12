@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ReferenceLine, Legend, Area, ComposedChart, Brush,
@@ -21,6 +21,28 @@ const FACTORS = [
 ]
 const ALL_SYMBOLS = [...FACTORS.map(f => f.symbol), 'SPY']
 
+const COMPARISONS = [
+  // Indices
+  { symbol: 'SPY',  label: 'S&P 500',       color: '#94a3b8', group: 'Indices' },
+  { symbol: 'QQQ',  label: 'Nasdaq 100',    color: '#818cf8', group: 'Indices' },
+  { symbol: 'IWM',  label: 'Russell 2000',  color: '#fb923c', group: 'Indices' },
+  { symbol: 'DIA',  label: 'Dow 30',        color: '#38bdf8', group: 'Indices' },
+  // Sectors
+  { symbol: 'XLK',  label: 'Tech',          color: '#a78bfa', group: 'Sectors' },
+  { symbol: 'XLF',  label: 'Financials',    color: '#4ade80', group: 'Sectors' },
+  { symbol: 'XLE',  label: 'Energy',        color: '#f87171', group: 'Sectors' },
+  { symbol: 'XLV',  label: 'Healthcare',    color: '#2dd4bf', group: 'Sectors' },
+  { symbol: 'XLU',  label: 'Utilities',     color: '#fbbf24', group: 'Sectors' },
+  { symbol: 'XLP',  label: 'Cons Staples',  color: '#86efac', group: 'Sectors' },
+  { symbol: 'XLI',  label: 'Industrials',   color: '#93c5fd', group: 'Sectors' },
+  { symbol: 'XLRE', label: 'Real Estate',   color: '#c084fc', group: 'Sectors' },
+  // Alternatives
+  { symbol: 'TLT',  label: '20Y Treasury',  color: '#67e8f9', group: 'Bonds & Alts' },
+  { symbol: 'GLD',  label: 'Gold',          color: '#fcd34d', group: 'Bonds & Alts' },
+  { symbol: 'HYG',  label: 'High Yield',    color: '#fb7185', group: 'Bonds & Alts' },
+]
+const COMP_BY_SYMBOL = Object.fromEntries(COMPARISONS.map(c => [c.symbol, c]))
+
 const TABS = [
   { id: 'dashboard',  label: 'Dashboard'     },
   { id: 'charts',     label: 'Regime Charts'  },
@@ -28,20 +50,21 @@ const TABS = [
 ]
 
 const STORAGE_KEY = 'factor-regime-visible'
+const COMP_STORAGE_KEY = 'factor-regime-comparisons'
 
-function loadVisibleFactors() {
+function loadFromStorage(key, fallback) {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY)
+    const saved = localStorage.getItem(key)
     if (saved) {
       const parsed = JSON.parse(saved)
-      if (Array.isArray(parsed) && parsed.length > 0) return new Set(parsed)
+      if (Array.isArray(parsed)) return new Set(parsed)
     }
   } catch { /* ignore */ }
-  return new Set(FACTORS.map(f => f.symbol))
+  return new Set(fallback)
 }
 
-function saveVisibleFactors(symbols) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify([...symbols]))
+function saveToStorage(key, setVal) {
+  localStorage.setItem(key, JSON.stringify([...setVal]))
 }
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
@@ -129,11 +152,8 @@ function RegimeCard({ factor, result }) {
   )
 }
 
-function ZScoreChart({ chartRows, height = 440, factors = FACTORS }) {
+function ZScoreChart({ chartRows, height = 440, factors = FACTORS, brushRange, onBrushChange }) {
   const fmt = (v) => typeof v === 'number' ? v.toFixed(2) : '-'
-  // Show last 2 years by default if enough data
-  const defaultEnd   = chartRows.length - 1
-  const defaultStart = Math.max(0, chartRows.length - 504) // ~2 years of trading days
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={chartRows} margin={{ top: 8, right: 16, bottom: 0, left: -8 }}>
@@ -179,10 +199,97 @@ function ZScoreChart({ chartRows, height = 440, factors = FACTORS }) {
           stroke="rgba(61,132,255,0.4)"
           fill="rgba(26,29,39,0.9)"
           tickFormatter={d => d?.slice(0, 7)}
-          startIndex={defaultStart}
-          endIndex={defaultEnd}
+          startIndex={brushRange.startIndex}
+          endIndex={brushRange.endIndex}
           travellerWidth={8}
+          onChange={onBrushChange}
         />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+
+// ── Comparison chart (synced timeframe) ──────────────────────────────────────
+
+function ComparisonToggles({ selected, onToggle }) {
+  const groups = {}
+  COMPARISONS.forEach(c => {
+    if (!groups[c.group]) groups[c.group] = []
+    groups[c.group].push(c)
+  })
+
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      {Object.entries(groups).map(([group, items]) => (
+        <div key={group} className="flex items-center gap-1.5">
+          <span className="text-[10px] text-gray-600 font-medium uppercase tracking-wider mr-0.5">{group}</span>
+          {items.map(c => {
+            const active = selected.has(c.symbol)
+            return (
+              <button
+                key={c.symbol}
+                onClick={() => onToggle(c.symbol)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-all border"
+                style={{
+                  background:  active ? `${c.color}15` : 'transparent',
+                  borderColor: active ? `${c.color}40` : 'rgba(255,255,255,0.06)',
+                  color:       active ? c.color : '#6b7280',
+                  opacity:     active ? 1 : 0.5,
+                }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: active ? c.color : '#4b5563' }} />
+                {c.label}
+              </button>
+            )
+          })}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ComparisonChart({ slicedData, selected, height = 260 }) {
+  const activeComps = COMPARISONS.filter(c => selected.has(c.symbol))
+  if (activeComps.length === 0 || slicedData.length === 0) return null
+
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <LineChart data={slicedData} margin={{ top: 8, right: 16, bottom: 0, left: -8 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+        <XAxis
+          dataKey="date"
+          tick={{ fontSize: 10, fill: '#6b7280' }}
+          tickFormatter={d => d?.slice(0, 7)}
+          interval="preserveStartEnd"
+          minTickGap={80}
+        />
+        <YAxis
+          tick={{ fontSize: 10, fill: '#6b7280' }}
+          tickFormatter={v => `${v > 0 ? '+' : ''}${v}%`}
+          width={48}
+        />
+        <ReferenceLine y={0} stroke="rgba(255,255,255,0.15)" strokeDasharray="4 4" />
+        <Tooltip
+          contentStyle={{ background: '#1a1d27', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
+          labelStyle={{ color: '#9ca3af', marginBottom: 4 }}
+          formatter={(v, name) => [`${v > 0 ? '+' : ''}${v}%`, name]}
+        />
+        <Legend
+          wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+          formatter={(value) => <span style={{ color: '#9ca3af' }}>{value}</span>}
+        />
+        {activeComps.map(c => (
+          <Line
+            key={c.symbol}
+            type="monotone"
+            dataKey={c.symbol}
+            name={c.label}
+            stroke={c.color}
+            strokeWidth={1.5}
+            dot={false}
+            connectNulls={false}
+          />
+        ))}
       </LineChart>
     </ResponsiveContainer>
   )
@@ -190,7 +297,53 @@ function ZScoreChart({ chartRows, height = 440, factors = FACTORS }) {
 
 // ── Tab: Dashboard ────────────────────────────────────────────────────────────
 
-function TabDashboard({ regimes, combinedRows, factors }) {
+function TabDashboard({ regimes, combinedRows, factors, compPrices, compSelected, onCompToggle, compLoading }) {
+  // Brush state — default to last ~2 years
+  const [brushRange, setBrushRange] = useState(() => ({
+    startIndex: Math.max(0, combinedRows.length - 504),
+    endIndex:   combinedRows.length - 1,
+  }))
+
+  // Normalize comparison prices to % return rebased at the start of the brush window
+  const compSliced = useMemo(() => {
+    if (compSelected.size === 0 || combinedRows.length === 0) return []
+    const { startIndex, endIndex } = brushRange
+    const slice = combinedRows.slice(startIndex, endIndex + 1)
+    if (slice.length === 0) return []
+
+    const activeSymbols = [...compSelected].filter(s => compPrices[s])
+
+    // Build a date→price lookup per symbol
+    const priceLookups = {}
+    activeSymbols.forEach(sym => { priceLookups[sym] = compPrices[sym] })
+
+    // Find the base price (first available price in the window) per symbol
+    const basePrices = {}
+    activeSymbols.forEach(sym => {
+      for (const row of slice) {
+        const p = priceLookups[sym]?.[row.date]
+        if (p != null) { basePrices[sym] = p; break }
+      }
+    })
+
+    // Downsample if > 1500 points
+    const step = Math.max(1, Math.ceil(slice.length / 1500))
+
+    return slice
+      .filter((_, i) => i % step === 0)
+      .map(row => {
+        const out = { date: row.date }
+        activeSymbols.forEach(sym => {
+          const price = priceLookups[sym]?.[row.date]
+          const base  = basePrices[sym]
+          out[sym] = (price != null && base)
+            ? +((price / base - 1) * 100).toFixed(2)
+            : null
+        })
+        return out
+      })
+  }, [combinedRows, brushRange, compSelected, compPrices])
+
   return (
     <div className="space-y-5">
       {/* Factor regime cards */}
@@ -203,7 +356,29 @@ function TabDashboard({ regimes, combinedRows, factors }) {
       {/* Main z-score chart */}
       <div className="card">
         <p className="text-sm font-semibold text-white mb-4">Smoothed Z-Scores Over Time</p>
-        <ZScoreChart chartRows={combinedRows} factors={factors} />
+        <ZScoreChart
+          chartRows={combinedRows}
+          factors={factors}
+          brushRange={brushRange}
+          onBrushChange={setBrushRange}
+        />
+      </div>
+
+      {/* Comparison chart */}
+      <div className="card space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-white shrink-0">
+            Comparison · Performance
+            {compLoading && <span className="text-gray-500 font-normal ml-2 text-xs">loading…</span>}
+          </p>
+        </div>
+        <ComparisonToggles selected={compSelected} onToggle={onCompToggle} />
+        {compSelected.size > 0 && (
+          <ComparisonChart slicedData={compSliced} selected={compSelected} />
+        )}
+        {compSelected.size === 0 && (
+          <p className="text-xs text-gray-600 py-6 text-center">Select indices, sectors, or ETFs above to compare performance against factor regimes</p>
+        )}
       </div>
 
       {/* Methodology */}
@@ -400,20 +575,74 @@ export default function FactorRegime() {
   const [error,      setError]      = useState(null)
   const [regimes,    setRegimes]    = useState(null)
   const [showCfg,    setShowCfg]    = useState(false)
-  const [visibleSet, setVisibleSet] = useState(loadVisibleFactors)
+  const [visibleSet, setVisibleSet] = useState(() => loadFromStorage(STORAGE_KEY, FACTORS.map(f => f.symbol)))
+
+  // Comparison instrument state
+  const [compSelected, setCompSelected] = useState(() => loadFromStorage(COMP_STORAGE_KEY, []))
+  const [compPrices,   setCompPrices]   = useState({})   // { symbol: { date: price } }
+  const [compLoading,  setCompLoading]  = useState(false)
+  const compFetchedRef = useRef(new Set())               // track already-fetched symbols
 
   const toggleFactor = useCallback((symbol) => {
     setVisibleSet(prev => {
       const next = new Set(prev)
       if (next.has(symbol)) {
-        if (next.size > 1) next.delete(symbol) // keep at least one
+        if (next.size > 1) next.delete(symbol)
       } else {
         next.add(symbol)
       }
-      saveVisibleFactors(next)
+      saveToStorage(STORAGE_KEY, next)
       return next
     })
   }, [])
+
+  const toggleComparison = useCallback((symbol) => {
+    setCompSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(symbol)) next.delete(symbol)
+      else next.add(symbol)
+      saveToStorage(COMP_STORAGE_KEY, next)
+      return next
+    })
+  }, [])
+
+  // Lazy-fetch comparison instruments when selected
+  useEffect(() => {
+    const needed = [...compSelected].filter(s => !compFetchedRef.current.has(s))
+    if (needed.length === 0) return
+
+    let cancelled = false
+    setCompLoading(true)
+
+    // SPY is already fetched with factor data — reuse it
+    const toFetch = needed.filter(s => {
+      if (s === 'SPY' && regimes?.priceMap?.SPY) {
+        compFetchedRef.current.add('SPY')
+        setCompPrices(prev => ({ ...prev, SPY: regimes.priceMap.SPY }))
+        return false
+      }
+      return true
+    })
+
+    if (toFetch.length === 0) { setCompLoading(false); return }
+
+    Promise.allSettled(toFetch.map(fetchPrices)).then(results => {
+      if (cancelled) return
+      const updates = {}
+      toFetch.forEach((sym, i) => {
+        if (results[i].status === 'fulfilled' && results[i].value) {
+          updates[sym] = results[i].value
+          compFetchedRef.current.add(sym)
+        }
+      })
+      if (Object.keys(updates).length > 0) {
+        setCompPrices(prev => ({ ...prev, ...updates }))
+      }
+      setCompLoading(false)
+    })
+
+    return () => { cancelled = true }
+  }, [compSelected, regimes])
 
   // Configurable parameters
   const [halflife1,   setHalflife1]   = useState(63)
@@ -629,7 +858,7 @@ export default function FactorRegime() {
             <FactorToggles factors={activeFactors} visibleSet={visibleSet} onToggle={toggleFactor} />
           </div>
 
-          {tab === 'dashboard'  && <TabDashboard   regimes={activeRegimes} combinedRows={combinedRows} factors={visibleFactors} />}
+          {tab === 'dashboard'  && <TabDashboard   regimes={activeRegimes} combinedRows={combinedRows} factors={visibleFactors} compPrices={compPrices} compSelected={compSelected} onCompToggle={toggleComparison} compLoading={compLoading} />}
           {tab === 'charts'     && <TabCharts       regimes={activeRegimes} factors={visibleFactors} />}
           {tab === 'statistics' && <TabStatistics   regimes={activeRegimes} factors={visibleFactors} />}
         </>
