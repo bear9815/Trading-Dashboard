@@ -165,9 +165,11 @@ function RegimeCard({ factor, result }) {
 }
 
 // Shared hover values bar — replaces popup tooltip
-function HoverValuesBar({ data, items, hoveredIndex, formatter }) {
-  if (hoveredIndex == null || !data[hoveredIndex]) return null
-  const row = data[hoveredIndex]
+function HoverValuesBar({ data, items, hoveredDate, formatter }) {
+  if (!hoveredDate || !data) return null
+  // Binary-ish search for nearest date
+  const row = data.find(r => r.date === hoveredDate) ?? data.find(r => r.date >= hoveredDate)
+  if (!row) return null
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] mono min-h-[16px]">
       <span className="text-gray-600">{row.date}</span>
@@ -184,14 +186,13 @@ function HoverValuesBar({ data, items, hoveredIndex, formatter }) {
   )
 }
 
-function ZScoreChart({ chartRows, height = 440, factors = FACTORS, brushRange, onBrushChange, hoveredIndex, onHover }) {
+function ZScoreChart({ chartRows, height = 440, factors = FACTORS, brushRange, onBrushChange, hoveredDate, onHoverDate }) {
   const fmt = (v) => typeof v === 'number' ? v.toFixed(2) : '-'
-  const hoveredDate = hoveredIndex != null ? chartRows[hoveredIndex]?.date : null
 
   const handleMouseMove = useCallback((state) => {
-    if (state?.activeTooltipIndex != null) onHover(state.activeTooltipIndex)
-  }, [onHover])
-  const handleMouseLeave = useCallback(() => onHover(null), [onHover])
+    if (state?.activeLabel) onHoverDate(state.activeLabel)
+  }, [onHoverDate])
+  const handleMouseLeave = useCallback(() => onHoverDate(null), [onHoverDate])
 
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -230,6 +231,7 @@ function ZScoreChart({ chartRows, height = 440, factors = FACTORS, brushRange, o
             strokeWidth={1.5}
             dot={false}
             connectNulls={false}
+            isAnimationActive={false}
           />
         ))}
         <Brush
@@ -399,6 +401,7 @@ function ComparisonChart({ slicedData, allComps, selected, height = 260, hovered
             strokeWidth={1.5}
             dot={false}
             connectNulls={false}
+            isAnimationActive={false}
           />
         ))}
       </LineChart>
@@ -415,21 +418,8 @@ function TabDashboard({ regimes, combinedRows, factors, compPrices, compSelected
     endIndex:   combinedRows.length - 1,
   }))
 
-  // Shared hover state for crosshair sync
-  const [hoveredIndex, setHoveredIndex] = useState(null)
-  const [hoveredCompDate, setHoveredCompDate] = useState(null)
-
-  // Convert hovered z-score index to a date for the comparison crosshair
-  const hoveredDateFromZScore = hoveredIndex != null ? combinedRows[hoveredIndex]?.date : null
-  // Convert hovered comparison date to z-score index
-  const hoveredIndexFromComp = useMemo(() => {
-    if (!hoveredCompDate) return null
-    return combinedRows.findIndex(r => r.date === hoveredCompDate)
-  }, [hoveredCompDate, combinedRows])
-
-  // Effective hover — either source wins
-  const effectiveZIndex = hoveredIndex ?? (hoveredIndexFromComp >= 0 ? hoveredIndexFromComp : null)
-  const effectiveCompDate = hoveredCompDate ?? hoveredDateFromZScore
+  // Shared hover state — single date string, used by both charts
+  const [hoveredDate, setHoveredDate] = useState(null)
 
   // Normalize comparison prices to growth-of-100 (log-friendly, always positive)
   const compSliced = useMemo(() => {
@@ -473,11 +463,6 @@ function TabDashboard({ regimes, combinedRows, factors, compPrices, compSelected
     () => allComps.filter(c => compSelected.has(c.symbol) && compPrices[c.symbol]),
     [allComps, compSelected, compPrices]
   )
-  const compHoveredIdx = useMemo(() => {
-    if (!effectiveCompDate || compSliced.length === 0) return null
-    const idx = compSliced.findIndex(r => r.date === effectiveCompDate)
-    return idx >= 0 ? idx : null
-  }, [effectiveCompDate, compSliced])
 
   return (
     <div className="space-y-5">
@@ -496,7 +481,7 @@ function TabDashboard({ regimes, combinedRows, factors, compPrices, compSelected
         <HoverValuesBar
           data={combinedRows}
           items={factors}
-          hoveredIndex={effectiveZIndex}
+          hoveredDate={hoveredDate}
           formatter={v => v.toFixed(2)}
         />
         <ZScoreChart
@@ -504,8 +489,8 @@ function TabDashboard({ regimes, combinedRows, factors, compPrices, compSelected
           factors={factors}
           brushRange={brushRange}
           onBrushChange={setBrushRange}
-          hoveredIndex={effectiveZIndex}
-          onHover={setHoveredIndex}
+          hoveredDate={hoveredDate}
+          onHoverDate={setHoveredDate}
         />
       </div>
 
@@ -524,15 +509,15 @@ function TabDashboard({ regimes, combinedRows, factors, compPrices, compSelected
             <HoverValuesBar
               data={compSliced}
               items={activeCompItems}
-              hoveredIndex={compHoveredIdx}
+              hoveredDate={hoveredDate}
               formatter={v => { const pct = v - 100; return `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%` }}
             />
             <ComparisonChart
               slicedData={compSliced}
               allComps={allComps}
               selected={compSelected}
-              hoveredDate={effectiveCompDate}
-              onHover={setHoveredCompDate}
+              hoveredDate={hoveredDate}
+              onHover={setHoveredDate}
             />
           </>
         )}
