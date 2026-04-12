@@ -1,20 +1,23 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, ReferenceLine, Legend, AreaChart, Area, ComposedChart, Bar,
+  Tooltip, ReferenceLine, Legend, Area, ComposedChart, Brush,
 } from 'recharts'
-import { RefreshCw, TrendingUp, TrendingDown, Settings2, Info } from 'lucide-react'
-import { computeFactorRegime, runBacktest, calcRegimeStats } from '../../utils/regimeCalcs.js'
+import { RefreshCw, Settings2, Info } from 'lucide-react'
+import { computeFactorRegime, calcRegimeStats } from '../../utils/regimeCalcs.js'
 import { fetchHistory } from '../../utils/marketData.js'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const FACTORS = [
-  { symbol: 'VLUE', label: 'Value',    color: '#f59e0b' },
-  { symbol: 'SIZE', label: 'Size',     color: '#06b6d4' },
-  { symbol: 'MTUM', label: 'Momentum', color: '#3d84ff' },
-  { symbol: 'QUAL', label: 'Quality',  color: '#10b981' },
-  { symbol: 'IWF',  label: 'Growth',   color: '#a855f7' },
+  { symbol: 'VLUE', label: 'Value',       color: '#f59e0b' },
+  { symbol: 'SIZE', label: 'Size',        color: '#06b6d4' },
+  { symbol: 'MTUM', label: 'Momentum',    color: '#3d84ff' },
+  { symbol: 'QUAL', label: 'Quality',     color: '#10b981' },
+  { symbol: 'IWF',  label: 'Growth',      color: '#a855f7' },
+  { symbol: 'USMV', label: 'Low Vol',     color: '#ec4899' },
+  { symbol: 'DGRO', label: 'Div Growth',  color: '#14b8a6' },
+  { symbol: 'HDV',  label: 'High Div',    color: '#f97316' },
 ]
 const ALL_SYMBOLS = [...FACTORS.map(f => f.symbol), 'SPY']
 
@@ -22,8 +25,24 @@ const TABS = [
   { id: 'dashboard',  label: 'Dashboard'     },
   { id: 'charts',     label: 'Regime Charts'  },
   { id: 'statistics', label: 'Statistics'     },
-  { id: 'backtest',   label: 'Backtest'       },
 ]
+
+const STORAGE_KEY = 'factor-regime-visible'
+
+function loadVisibleFactors() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      if (Array.isArray(parsed) && parsed.length > 0) return new Set(parsed)
+    }
+  } catch { /* ignore */ }
+  return new Set(FACTORS.map(f => f.symbol))
+}
+
+function saveVisibleFactors(symbols) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...symbols]))
+}
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
@@ -63,6 +82,35 @@ async function fetchPrices(symbol) {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
+function FactorToggles({ factors, visibleSet, onToggle }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {factors.map(f => {
+        const active = visibleSet.has(f.symbol)
+        return (
+          <button
+            key={f.symbol}
+            onClick={() => onToggle(f.symbol)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border"
+            style={{
+              background:    active ? `${f.color}15` : 'transparent',
+              borderColor:   active ? `${f.color}40` : 'rgba(255,255,255,0.06)',
+              color:         active ? f.color : '#6b7280',
+              opacity:       active ? 1 : 0.5,
+            }}
+          >
+            <span
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ background: active ? f.color : '#4b5563' }}
+            />
+            {f.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function RegimeCard({ factor, result }) {
   const isBull = result.currentRegime === 'BULL'
   return (
@@ -81,8 +129,11 @@ function RegimeCard({ factor, result }) {
   )
 }
 
-function ZScoreChart({ chartRows, height = 340, factors = FACTORS }) {
+function ZScoreChart({ chartRows, height = 440, factors = FACTORS }) {
   const fmt = (v) => typeof v === 'number' ? v.toFixed(2) : '-'
+  // Show last 2 years by default if enough data
+  const defaultEnd   = chartRows.length - 1
+  const defaultStart = Math.max(0, chartRows.length - 504) // ~2 years of trading days
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={chartRows} margin={{ top: 8, right: 16, bottom: 0, left: -8 }}>
@@ -122,6 +173,16 @@ function ZScoreChart({ chartRows, height = 340, factors = FACTORS }) {
             connectNulls={false}
           />
         ))}
+        <Brush
+          dataKey="date"
+          height={28}
+          stroke="rgba(61,132,255,0.4)"
+          fill="rgba(26,29,39,0.9)"
+          tickFormatter={d => d?.slice(0, 7)}
+          startIndex={defaultStart}
+          endIndex={defaultEnd}
+          travellerWidth={8}
+        />
       </LineChart>
     </ResponsiveContainer>
   )
@@ -133,7 +194,7 @@ function TabDashboard({ regimes, combinedRows, factors }) {
   return (
     <div className="space-y-5">
       {/* Factor regime cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
         {factors.map(f => (
           <RegimeCard key={f.symbol} factor={f} result={regimes[f.symbol]} />
         ))}
@@ -301,7 +362,7 @@ function TabStatistics({ regimes, factors }) {
       </div>
 
       {/* Bull/Bear duration breakdown per factor */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {factors.map(f => {
           const r = regimes[f.symbol]
           const s = stats[f.symbol]
@@ -331,149 +392,28 @@ function TabStatistics({ regimes, factors }) {
   )
 }
 
-// ── Tab: Backtest ─────────────────────────────────────────────────────────────
-
-function TabBacktest({ backtestResult }) {
-  const { dates, stratCum, spyCum, bullCounts } = backtestResult
-
-  // Downsample for chart performance
-  const step = Math.max(1, Math.ceil(dates.length / 1500))
-  const chartData = dates
-    .filter((_, i) => i % step === 0)
-    .map((d, i) => {
-      const origI = i * step
-      return {
-        date:     d,
-        strategy: +((stratCum[origI] - 1) * 100).toFixed(2),
-        spy:      +((spyCum[origI]   - 1) * 100).toFixed(2),
-        bulls:    bullCounts[origI],
-      }
-    })
-
-  const lastStrat = stratCum[stratCum.length - 1]
-  const lastSPY   = spyCum[spyCum.length - 1]
-  const alpha     = ((lastStrat - lastSPY) * 100).toFixed(1)
-  const excess    = lastStrat > lastSPY
-
-  // Simple annualized return
-  const years    = dates.length / 252
-  const stratAnn = ((Math.pow(lastStrat, 1 / years) - 1) * 100).toFixed(1)
-  const spyAnn   = ((Math.pow(lastSPY,   1 / years) - 1) * 100).toFixed(1)
-
-  // Max drawdown
-  function maxDrawdown(cum) {
-    let peak = cum[0], maxDD = 0
-    for (const v of cum) {
-      if (v > peak) peak = v
-      const dd = (v - peak) / peak
-      if (dd < maxDD) maxDD = dd
-    }
-    return (maxDD * 100).toFixed(1)
-  }
-
-  return (
-    <div className="space-y-5">
-      {/* Summary metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="card-sm text-center">
-          <p className="text-[10px] text-gray-500 mb-1">Strategy Total Return</p>
-          <p className={`text-lg font-bold mono ${lastStrat >= 1 ? 'text-accent-green' : 'text-accent-red'}`}>
-            +{((lastStrat - 1) * 100).toFixed(1)}%
-          </p>
-          <p className="text-[10px] text-gray-600">{stratAnn}% ann.</p>
-        </div>
-        <div className="card-sm text-center">
-          <p className="text-[10px] text-gray-500 mb-1">SPY Buy &amp; Hold</p>
-          <p className={`text-lg font-bold mono ${lastSPY >= 1 ? 'text-accent-green' : 'text-accent-red'}`}>
-            +{((lastSPY - 1) * 100).toFixed(1)}%
-          </p>
-          <p className="text-[10px] text-gray-600">{spyAnn}% ann.</p>
-        </div>
-        <div className="card-sm text-center">
-          <p className="text-[10px] text-gray-500 mb-1">Alpha vs SPY</p>
-          <p className={`text-lg font-bold mono ${excess ? 'text-accent-green' : 'text-accent-red'}`}>
-            {excess ? '+' : ''}{alpha}%
-          </p>
-          <p className="text-[10px] text-gray-600">total</p>
-        </div>
-        <div className="card-sm text-center">
-          <p className="text-[10px] text-gray-500 mb-1">Max Drawdown</p>
-          <p className="text-lg font-bold mono text-accent-red">{maxDrawdown(stratCum)}%</p>
-          <p className="text-[10px] text-gray-600">vs SPY {maxDrawdown(spyCum)}%</p>
-        </div>
-      </div>
-
-      {/* Cumulative return chart */}
-      <div className="card">
-        <p className="text-sm font-semibold text-white mb-1">Cumulative Return</p>
-        <p className="text-[10px] text-gray-500 mb-4">
-          Strategy = equal-weight BULL factors each day · if no BULL factors, hold SPY
-        </p>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis
-              dataKey="date"
-              tick={{ fontSize: 10, fill: '#6b7280' }}
-              tickFormatter={d => d?.slice(0, 7)}
-              interval="preserveStartEnd"
-              minTickGap={80}
-            />
-            <YAxis
-              tick={{ fontSize: 10, fill: '#6b7280' }}
-              tickFormatter={v => `${v}%`}
-              width={48}
-            />
-            <ReferenceLine y={0} stroke="rgba(255,255,255,0.1)" />
-            <Tooltip
-              contentStyle={{ background: '#1a1d27', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
-              labelStyle={{ color: '#9ca3af', marginBottom: 4 }}
-              formatter={(v) => [`${v}%`]}
-            />
-            <Legend
-              wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
-              formatter={(value) => <span style={{ color: '#9ca3af' }}>{value}</span>}
-            />
-            <Line type="monotone" dataKey="strategy" name="Regime Strategy" stroke="#3d84ff" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="spy"       name="SPY Buy & Hold" stroke="#6b7280" strokeWidth={1.5} dot={false} strokeDasharray="5 3" />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* Bull factor count over time */}
-      <div className="card">
-        <p className="text-sm font-semibold text-white mb-4">Active BULL Factors per Day</p>
-        <ResponsiveContainer width="100%" height={120}>
-          <BarChart data={chartData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-            <XAxis dataKey="date" tick={{ fontSize: 9, fill: '#6b7280' }} tickFormatter={d => d?.slice(0, 7)} interval="preserveStartEnd" minTickGap={80} />
-            <YAxis tick={{ fontSize: 9, fill: '#6b7280' }} domain={[0, 5]} ticks={[0, 1, 2, 3, 4, 5]} width={20} />
-            <Tooltip
-              contentStyle={{ background: '#1a1d27', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
-              labelStyle={{ color: '#9ca3af' }}
-              formatter={(v) => [v, 'BULL factors']}
-            />
-            <Bar dataKey="bulls" name="BULL Factors" fill="#3d84ff" opacity={0.7} radius={[2, 2, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="rounded-lg bg-surface-200 px-3 py-2 text-[10px] text-gray-500">
-        <strong className="text-gray-400">Note:</strong> Backtest assumes no transaction costs, no slippage, and daily rebalancing.
-        Past regime performance does not guarantee future results.
-      </div>
-    </div>
-  )
-}
-
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function FactorRegime() {
-  const [tab,      setTab]      = useState('dashboard')
-  const [loading,  setLoading]  = useState(false)
-  const [error,    setError]    = useState(null)
-  const [regimes,  setRegimes]  = useState(null)
-  const [showCfg,  setShowCfg]  = useState(false)
+  const [tab,        setTab]        = useState('dashboard')
+  const [loading,    setLoading]    = useState(false)
+  const [error,      setError]      = useState(null)
+  const [regimes,    setRegimes]    = useState(null)
+  const [showCfg,    setShowCfg]    = useState(false)
+  const [visibleSet, setVisibleSet] = useState(loadVisibleFactors)
+
+  const toggleFactor = useCallback((symbol) => {
+    setVisibleSet(prev => {
+      const next = new Set(prev)
+      if (next.has(symbol)) {
+        if (next.size > 1) next.delete(symbol) // keep at least one
+      } else {
+        next.add(symbol)
+      }
+      saveVisibleFactors(next)
+      return next
+    })
+  }, [])
 
   // Configurable parameters
   const [halflife1,   setHalflife1]   = useState(63)
@@ -563,6 +503,12 @@ export default function FactorRegime() {
     [activeRegimes]
   )
 
+  // Visible factors = active factors filtered by user selection
+  const visibleFactors = useMemo(
+    () => activeFactors.filter(f => visibleSet.has(f.symbol)),
+    [activeFactors, visibleSet]
+  )
+
   // Build combined rows for the main z-score chart
   const combinedRows = useMemo(() => {
     if (!activeRegimes || activeFactors.length === 0) return []
@@ -586,22 +532,10 @@ export default function FactorRegime() {
       })
   }, [activeRegimes, activeFactors])
 
-  // Backtest
-  const backtestResult = useMemo(() => {
-    if (!activeRegimes || !recomputed || activeFactors.length === 0) return null
-    const { common } = recomputed
-
-    const factorRets = {}
-    activeFactors.forEach(f => { factorRets[f.symbol] = activeRegimes[f.symbol].factorRet })
-    const spyRet = activeRegimes[activeFactors[0].symbol].spyRet
-
-    return runBacktest(activeRegimes, common, factorRets, spyRet)
-  }, [activeRegimes, recomputed, activeFactors])
-
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-4 flex flex-col gap-4 max-w-6xl">
+    <div className="p-4 flex flex-col gap-4">
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -669,33 +603,35 @@ export default function FactorRegime() {
       {loading && !activeRegimes && (
         <div className="card flex items-center gap-3 text-gray-400 text-sm py-8 justify-center">
           <RefreshCw size={16} className="animate-spin shrink-0" />
-          <span>Fetching 15 years of data for 6 symbols…</span>
+          <span>Fetching 10 years of data for {ALL_SYMBOLS.length} symbols…</span>
         </div>
       )}
 
       {/* Tabs */}
       {activeRegimes && (
         <>
-          <div className="flex gap-1 border-b border-white/10 pb-0">
-            {TABS.map(t => (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-all -mb-px border-b-2 ${
-                  tab === t.id
-                    ? 'text-accent-blue border-accent-blue'
-                    : 'text-gray-500 border-transparent hover:text-gray-300'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+          <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-0">
+            <div className="flex gap-1">
+              {TABS.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setTab(t.id)}
+                  className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-all -mb-px border-b-2 ${
+                    tab === t.id
+                      ? 'text-accent-blue border-accent-blue'
+                      : 'text-gray-500 border-transparent hover:text-gray-300'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <FactorToggles factors={activeFactors} visibleSet={visibleSet} onToggle={toggleFactor} />
           </div>
 
-          {tab === 'dashboard'  && <TabDashboard   regimes={activeRegimes} combinedRows={combinedRows} factors={activeFactors} />}
-          {tab === 'charts'     && <TabCharts       regimes={activeRegimes} factors={activeFactors} />}
-          {tab === 'statistics' && <TabStatistics   regimes={activeRegimes} factors={activeFactors} />}
-          {tab === 'backtest'   && backtestResult   && <TabBacktest backtestResult={backtestResult} />}
+          {tab === 'dashboard'  && <TabDashboard   regimes={activeRegimes} combinedRows={combinedRows} factors={visibleFactors} />}
+          {tab === 'charts'     && <TabCharts       regimes={activeRegimes} factors={visibleFactors} />}
+          {tab === 'statistics' && <TabStatistics   regimes={activeRegimes} factors={visibleFactors} />}
         </>
       )}
     </div>
