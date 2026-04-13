@@ -5,6 +5,7 @@
 
 import { ollamaChat } from './ollama.js'
 import { extractPdfText } from './pdfText.js'
+import { buildRefreshPrompt } from './researchPrompts.js'
 
 function buildExtractionPrompt(text, sourceType, tickerHint, themeHint) {
   const typeLabel = sourceType === 'deep_dive' ? 'deep-dive research report'
@@ -101,4 +102,17 @@ Return ONLY valid JSON:
     temperature: 0.2,
   })
   try { return parseJson(reply) } catch { return null }
+}
+
+/** Refresh growth research fields using local Gemma 4 */
+export async function refreshNewFieldsWithOllama(themeName, dossier, deep) {
+  const prompt = buildRefreshPrompt(themeName, dossier, deep)
+  const reply = await ollamaChat({
+    messages: [
+      { role: 'system', content: 'You are a senior growth investment analyst. Always respond with valid JSON only.' },
+      { role: 'user', content: prompt },
+    ],
+    temperature: 0.2,
+  })
+  try { return parseJson(reply) } catch (e) { throw new Error(`Failed to parse local LLM response: ${e.message}`) }
 }

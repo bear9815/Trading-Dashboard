@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase.js'
 // Fields synced to Supabase (business data that must match across devices)
 const CLOUD_FIELDS = [
   'apiKey', 'anthropicApiKey', 'alpacaApiKey', 'alpacaApiSecret', 'finnhubApiKey',
+  'openRouterApiKey', 'researchAiProvider', 'researchOpenRouterModel',
   'theme', 'accounts', 'dailyLossLimit', 'maxDrawdownLimit',
   'benchmarkSymbol', 'tpMultiplier',
   'equityCurveRange', 'analyticsTimeframe', 'analyticsWinLossMode',
@@ -35,6 +36,7 @@ export const useSettingsStore = create(
     (set, get) => ({
       apiKey: '',
       anthropicApiKey: '',
+      openRouterApiKey: '',
       theme: 'dark',
       accounts: [],           // [{ name, broker, balance }]
       dailyLossLimit: 2,
@@ -67,6 +69,8 @@ export const useSettingsStore = create(
       strategies: [],
       edges: [],
 
+      researchAiProvider: 'gemini',
+      researchOpenRouterModel: 'openai/gpt-4o-mini',
       useLocalLLM: false,
 
       // ── Cloud sync ─────────────────────────────────────────────────────────
@@ -135,7 +139,18 @@ export const useSettingsStore = create(
         get()._sync()
       },
 
-      setUseLocalLLM: (v) => set({ useLocalLLM: v }),
+      setOpenRouterApiKey: (key) => { set({ openRouterApiKey: key }); saveToCloud({ ...get(), openRouterApiKey: key }) },
+      setResearchAiProvider: (provider) => {
+        const nextProvider = provider || 'gemini'
+        set({ researchAiProvider: nextProvider, useLocalLLM: nextProvider === 'local' })
+        saveToCloud({ ...get(), researchAiProvider: nextProvider })
+      },
+      setResearchOpenRouterModel: (model) => { set({ researchOpenRouterModel: model }); saveToCloud({ ...get(), researchOpenRouterModel: model }) },
+      setUseLocalLLM: (v) => {
+        const nextProvider = v ? 'local' : 'gemini'
+        set({ useLocalLLM: v, researchAiProvider: nextProvider })
+        saveToCloud({ ...get(), useLocalLLM: v, researchAiProvider: nextProvider })
+      },
 
       setSymbolTheme: (symbol, theme) => set(s => ({ symbolThemes: { ...s.symbolThemes, [symbol]: theme } })),
       // symbolThemes intentionally not synced — large cache, not critical
@@ -167,6 +182,16 @@ export const useSettingsStore = create(
         get()._sync()
       },
     }),
-    { name: 'risk-tool-settings' }
+    {
+      name: 'risk-tool-settings',
+      merge: (persistedState, currentState) => {
+        const merged = { ...currentState, ...persistedState }
+        if (!persistedState?.researchAiProvider) {
+          merged.researchAiProvider = persistedState?.useLocalLLM ? 'local' : 'gemini'
+        }
+        merged.useLocalLLM = merged.researchAiProvider === 'local'
+        return merged
+      },
+    }
   )
 )

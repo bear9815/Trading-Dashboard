@@ -26,6 +26,7 @@ export default function Settings() {
   const {
     apiKey, setApiKey,
     anthropicApiKey, setAnthropicApiKey,
+    openRouterApiKey, setOpenRouterApiKey,
     theme, setTheme,
     alpacaApiKey, alpacaApiSecret, setAlpacaKeys,
     finnhubApiKey, setFinnhubApiKey,
@@ -94,6 +95,12 @@ export default function Settings() {
   const [anthropicInput, setAnthropicInput] = useState(anthropicApiKey)
   const [showAnthropic,  setShowAnthropic]  = useState(false)
   const [anthropicSaved, setAnthropicSaved] = useState(false)
+
+  // OpenRouter key
+  const [openRouterInput, setOpenRouterInput] = useState(openRouterApiKey)
+  const [showOpenRouter,  setShowOpenRouter]  = useState(false)
+  const [openRouterSaved, setOpenRouterSaved] = useState(false)
+
   const [newAcct, setNewAcct]   = useState({ name: '', broker: BROKERS[0], balance: '' })
 
   // Alpaca keys
@@ -170,6 +177,12 @@ export default function Settings() {
     setAnthropicApiKey(anthropicInput.trim())
     setAnthropicSaved(true)
     setTimeout(() => setAnthropicSaved(false), 2000)
+  }
+
+  function saveOpenRouter() {
+    setOpenRouterApiKey(openRouterInput.trim())
+    setOpenRouterSaved(true)
+    setTimeout(() => setOpenRouterSaved(false), 2000)
   }
 
   function handleAddAccount() {
@@ -369,6 +382,38 @@ export default function Settings() {
         </div>
         {anthropicApiKey && (
           <p className="text-xs text-accent-green">✓ Claude fallback configured — will activate on Gemini rate limit</p>
+        )}
+      </div>
+
+      {/* OpenRouter Key */}
+      <div className="card space-y-3">
+        <div className="flex items-center gap-2">
+          <SectionTitle>OpenRouter API Key</SectionTitle>
+        </div>
+        <p className="text-xs text-gray-400">
+          Used for Growth Research PDF analysis when you choose OpenRouter in the dashboard.
+          Get a key at <span className="text-accent-blue">openrouter.ai</span>.
+        </p>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <input
+              type={showOpenRouter ? 'text' : 'password'}
+              value={openRouterInput}
+              onChange={e => setOpenRouterInput(e.target.value)}
+              placeholder="sk-or-v1-..."
+              className="input pr-10 font-mono text-xs"
+            />
+            <button onClick={() => setShowOpenRouter(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300">
+              {showOpenRouter ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+          <button onClick={saveOpenRouter} className="btn-primary flex items-center gap-1.5 shrink-0">
+            <Save size={14} />
+            {openRouterSaved ? 'Saved!' : 'Save'}
+          </button>
+        </div>
+        {openRouterApiKey && (
+          <p className="text-xs text-accent-green">✓ OpenRouter key configured — select a model in Growth Research</p>
         )}
       </div>
 

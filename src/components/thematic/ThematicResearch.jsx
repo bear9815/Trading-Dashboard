@@ -5,6 +5,9 @@ import { useAuthStore }            from '../../store/useAuthStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import ResearchLibrary, { ActiveSignals } from './ResearchLibrary.jsx'
 import { refreshNewFields } from '../../utils/thematicGemini.js'
+import { refreshNewFieldsWithOpenRouter } from '../../utils/researchAi.js'
+import { refreshNewFieldsWithOllama } from '../../utils/localResearch.js'
+import { chatWithOpenRouter } from '../../utils/researchAi.js'
 import { ollamaChatStream, checkOllama } from '../../utils/ollama.js'
 import {
   ChevronDown, AlertTriangle, Gem, Zap, FileText,
@@ -515,7 +518,7 @@ function MacroMatrix({ themes }) {
 }
 
 // ── AI Research Chat ──────────────────────────────────────────────────────────
-function ThematicChat({ themes, apiKey, useLocalLLM, librarySources = [] }) {
+function ThematicChat({ themes, apiKey, useLocalLLM, provider, openRouterApiKey, researchOpenRouterModel, librarySources = [] }) {
   const themeNames = Object.keys(themes)
   const [messages, setMessages] = useState([{
     role: 'assistant',
@@ -538,7 +541,30 @@ function ThematicChat({ themes, apiKey, useLocalLLM, librarySources = [] }) {
     setLoading(true)
 
     try {
-      if (useLocalLLM) {
+      if (provider === 'openrouter') {
+        // ── OpenRouter path ──────────────────────────────────────────────────
+        const systemPrompt = `You are an expert investment research analyst. You have access to the user's thematic dossiers and research library below. Answer questions analytically, cite specific evidence from the provided context, and be direct about what you do and don't know.
+
+THEMATIC DOSSIERS:
+${context}${libraryCtx ? `\n\n---\nRESEARCH LIBRARY:\n\n${libraryCtx}` : ''}
+
+Note: You do not have live web search. Base your answers on the provided dossiers and library.`
+
+        const history = messages.slice(1).map(m => ({
+          role: m.role === 'user' ? 'user' : 'assistant',
+          content: m.text,
+        }))
+
+        const reply = await chatWithOpenRouter({
+          apiKey: openRouterApiKey,
+          model: researchOpenRouterModel,
+          messages: [...history, { role: 'user', content: msg }],
+          systemInstruction: systemPrompt,
+          temperature: 0.3,
+          maxTokens: 4096,
+        })
+        setMessages(prev => [...prev, { role: 'assistant', text: reply, sources: [], queries: [] }])
+      } else if (useLocalLLM) {
         // ── Local path: Gemma 4 via Ollama ──────────────────────────────────
         // First check Ollama is reachable — gives a clear error instead of a
         // cryptic network failure (also catches CORS block from Vercel origin)
@@ -705,9 +731,9 @@ Note: You do not have live web search in local mode. Base your answers on the pr
           onKeyDown={e => e.key==='Enter' && !e.shiftKey && send()}
           placeholder="Ask anything across your research…"
           className="flex-1 bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors"
-          disabled={loading || (!useLocalLLM && !apiKey)}
+          disabled={loading || (provider === 'gemini' && !apiKey) || (provider === 'openrouter' && !openRouterApiKey)}
         />
-        <button onClick={() => send()} disabled={!input.trim() || loading || (!useLocalLLM && !apiKey)}
+        <button onClick={() => send()} disabled={!input.trim() || loading || (provider === 'gemini' && !apiKey) || (provider === 'openrouter' && !openRouterApiKey)}
           className="p-2 rounded-lg bg-accent-blue/20 hover:bg-accent-blue/30 border border-accent-blue/30 text-accent-blue disabled:opacity-40 disabled:cursor-not-allowed transition-all">
           <Send size={15}/>
         </button>
@@ -1301,10 +1327,12 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function ThematicResearch() {
-  const { apiKey, useLocalLLM, setUseLocalLLM } = useSettingsStore()
+  const { apiKey, openRouterApiKey, researchAiProvider, setResearchAiProvider, researchOpenRouterModel, setResearchOpenRouterModel, useLocalLLM, setUseLocalLLM } = useSettingsStore()
   const { themes, removeTheme, convictions, setConviction, patchThemeDossier } = useThematicStore()
   const { user }   = useAuthStore()
   const { sources: librarySources, loadSources } = useResearchLibraryStore()
+  const provider = researchAiProvider || (useLocalLLM ? 'local' : 'gemini')
+  const [modelInput, setModelInput] = useState(researchOpenRouterModel || 'openai/gpt-4o-mini')
 
   useEffect(() => {
     if (user?.id) loadSources()
@@ -1316,11 +1344,17 @@ export default function ThematicResearch() {
   const [refreshing, setRefreshing] = useState({}) // { [themeName]: true }
 
   const handleRefresh = async (name) => {
-    if (!apiKey) return alert('Add your Gemini API key in Settings first.')
+    if (provider === 'gemini' && !apiKey) return alert('Add your Gemini API key in Settings first.')
+    if (provider === 'openrouter' && !openRouterApiKey) return alert('Add your OpenRouter API key in Settings first.')
+    if (provider === 'local') { /* no key needed */ }
     setRefreshing(p => ({ ...p, [name]: true }))
     try {
       const data = themes[name]
-      const fields = await refreshNewFields(name, data.dossier || {}, data.deep || {}, apiKey)
+      const fields = provider === 'openrouter'
+        ? await refreshNewFieldsWithOpenRouter(name, data.dossier || {}, data.deep || {}, openRouterApiKey, researchOpenRouterModel)
+        : provider === 'local'
+        ? await refreshNewFieldsWithOllama(name, data.dossier || {}, data.deep || {})
+        : await refreshNewFields(name, data.dossier || {}, data.deep || {}, apiKey)
       patchThemeDossier(name, fields)
     } catch (e) {
       alert(`Refresh failed: ${e.message}`)
@@ -1345,18 +1379,42 @@ export default function ThematicResearch() {
                 : 'Secular compounder research — upload deep dive PDFs to build your growth thesis database'}
             </p>
           </div>
-          <button
-            onClick={() => setUseLocalLLM(!useLocalLLM)}
-            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border font-medium transition-all ${
-              useLocalLLM
-                ? 'bg-accent-green/15 border-accent-green/30 text-accent-green'
-                : 'bg-white/5 border-white/15 text-gray-500 hover:text-gray-300'
-            }`}
-            title={useLocalLLM ? 'Using Gemma 4 (local) — click to switch to Gemini' : 'Using Gemini (cloud) — click to switch to local Gemma 4'}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${useLocalLLM ? 'bg-accent-green' : 'bg-gray-600'}`}/>
-            {useLocalLLM ? 'Gemma 4 · Local' : 'Gemini · Cloud'}
-          </button>
+          {/* AI Provider Selector */}
+          <div className="flex items-center gap-1.5">
+            {[
+              { id: 'gemini',     label: 'Gemini · Cloud',  color: 'accent-blue',   dot: 'bg-accent-blue' },
+              { id: 'openrouter', label: 'OpenRouter',       color: 'accent-yellow', dot: 'bg-accent-yellow' },
+              { id: 'local',      label: 'Gemma 4 · Local', color: 'accent-green',  dot: 'bg-accent-green' },
+            ].map(p => (
+              <button
+                key={p.id}
+                onClick={() => setResearchAiProvider(p.id)}
+                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border font-medium transition-all ${
+                  provider === p.id
+                    ? `bg-${p.color}/15 border-${p.color}/30 text-${p.color}`
+                    : 'bg-white/5 border-white/15 text-gray-500 hover:text-gray-300'
+                }`}
+                title={`Use ${p.label} for Growth Research AI`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${provider === p.id ? p.dot : 'bg-gray-600'}`}/>
+                {p.label}
+              </button>
+            ))}
+          </div>
+          {provider === 'openrouter' && (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={modelInput}
+                onChange={e => setModelInput(e.target.value)}
+                onBlur={() => setResearchOpenRouterModel(modelInput.trim() || 'openai/gpt-4o-mini')}
+                onKeyDown={e => { if (e.key === 'Enter') setResearchOpenRouterModel(modelInput.trim() || 'openai/gpt-4o-mini') }}
+                placeholder="e.g. openai/gpt-4o-mini"
+                className="bg-white/[0.04] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-gray-300 placeholder-gray-600 font-mono w-48 focus:outline-none focus:border-accent-blue/50 transition-colors"
+              />
+              <a href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer" className="text-xs text-accent-blue hover:underline">models</a>
+            </div>
+          )}
         </div>
         {themeCount > 0 && (
           <button onClick={() => { if (confirm('Clear all theme dossiers?')) useThematicStore.getState().clearAll() }}
@@ -1367,10 +1425,16 @@ export default function ThematicResearch() {
       </div>
 
       {/* Banners */}
-      {!apiKey && (
+      {provider === 'gemini' && !apiKey && (
         <div className="flex items-start gap-3 bg-accent-yellow/8 border border-accent-yellow/25 rounded-xl px-4 py-3">
           <AlertTriangle size={16} className="text-accent-yellow mt-0.5 shrink-0"/>
           <p className="text-sm text-accent-yellow">Add your Gemini API key in <strong>Settings</strong> to enable PDF processing.</p>
+        </div>
+      )}
+      {provider === 'openrouter' && !openRouterApiKey && (
+        <div className="flex items-start gap-3 bg-accent-yellow/8 border border-accent-yellow/25 rounded-xl px-4 py-3">
+          <AlertTriangle size={16} className="text-accent-yellow mt-0.5 shrink-0"/>
+          <p className="text-sm text-accent-yellow">Add your OpenRouter API key in <strong>Settings</strong> to enable PDF processing.</p>
         </div>
       )}
 
@@ -1402,7 +1466,7 @@ export default function ThematicResearch() {
             </button>
             {showChat && (
               <div className="border-t border-white/10">
-                <ThematicChat themes={themes} apiKey={apiKey} useLocalLLM={useLocalLLM} librarySources={librarySources} />
+                <ThematicChat themes={themes} apiKey={apiKey} useLocalLLM={useLocalLLM} provider={provider} openRouterApiKey={openRouterApiKey} researchOpenRouterModel={researchOpenRouterModel} librarySources={librarySources} />
               </div>
             )}
           </div>

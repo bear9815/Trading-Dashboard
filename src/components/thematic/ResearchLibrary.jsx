@@ -11,6 +11,7 @@ import { useThematicStore }        from '../../store/useThematicStore.js'
 import { processWithGeminiCombined, readFileAsBase64 } from '../../utils/thematicGemini.js'
 import { initGoogleDrive, requestDriveToken, openDrivePicker, downloadDriveFile } from '../../utils/googleDrive.js'
 import { extractWithOllama, autoAnalyzeWithOllama } from '../../utils/localResearch.js'
+import { extractWithOpenRouter, processWithOpenRouterCombined, autoAnalyzeWithOpenRouter } from '../../utils/researchAi.js'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 const GOOGLE_API_KEY   = import.meta.env.VITE_GOOGLE_API_KEY   || ''
@@ -349,10 +350,11 @@ function SignalSection({ label, items, dot, border, bg }) {
 export function ActiveSignals() {
   const { sources, updateSource }  = useResearchLibraryStore()
   const { themes }                 = useThematicStore()
-  const { apiKey, useLocalLLM }    = useSettingsStore()
+  const { apiKey, openRouterApiKey, researchAiProvider, researchOpenRouterModel, useLocalLLM } = useSettingsStore()
   const [reanalyzing, setReanalyzing] = useState(false)
   const [currentId,   setCurrentId]   = useState(null)
   const [show,        setShow]        = useState(true)
+  const provider = researchAiProvider || (useLocalLLM ? 'local' : 'gemini')
 
   const allSignals = useMemo(() => {
     const catalysts = [], confirmations = [], contradictions = [], newInfo = []
@@ -372,13 +374,16 @@ export function ActiveSignals() {
 
   async function reanalyzeAll() {
     if (reanalyzing || !hasDossiers) return
-    if (!useLocalLLM && !apiKey) return
+    if (provider === 'gemini' && !apiKey) return
+    if (provider === 'openrouter' && !openRouterApiKey) return
     setReanalyzing(true)
     for (const source of sources) {
       setCurrentId(source.id)
       try {
-        const result = useLocalLLM
+        const result = provider === 'local'
           ? await autoAnalyzeWithOllama(source, themes)
+          : provider === 'openrouter'
+          ? await autoAnalyzeWithOpenRouter(source, themes, openRouterApiKey, researchOpenRouterModel)
           : await autoAnalyzeWithGemini(source, themes, apiKey)
         if (result) await updateSource(source.id, { insights: result })
       } catch (e) {
@@ -421,8 +426,8 @@ export function ActiveSignals() {
                 : `${sources.length} source${sources.length !== 1 ? 's' : ''} · ${totalSignals} signal${totalSignals !== 1 ? 's' : ''}`}
             </p>
             <button onClick={reanalyzeAll}
-              disabled={reanalyzing || (!useLocalLLM && !apiKey) || !hasDossiers}
-              title={!hasDossiers ? 'Add thematic dossiers first' : ''}
+              disabled={reanalyzing || !hasDossiers || (provider === 'gemini' && !apiKey) || (provider === 'openrouter' && !openRouterApiKey)}
+              title={!hasDossiers ? 'Add thematic dossiers first' : provider === 'gemini' && !apiKey ? 'Add Gemini API key in Settings' : provider === 'openrouter' && !openRouterApiKey ? 'Add OpenRouter API key in Settings' : ''}
               className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-accent-blue border border-white/10 hover:border-accent-blue/30 rounded-lg px-2.5 py-1.5 transition-all disabled:opacity-40">
               <RefreshCw size={11} className={reanalyzing ? 'animate-spin' : ''}/>
               {reanalyzing ? 'Analyzing…' : 'Re-analyze all'}
@@ -466,10 +471,11 @@ export function ActiveSignals() {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ResearchLibrary() {
-  const { apiKey, useLocalLLM }  = useSettingsStore()
+  const { apiKey, openRouterApiKey, researchAiProvider, researchOpenRouterModel, useLocalLLM }  = useSettingsStore()
   const { user }    = useAuthStore()
   const { themes }  = useThematicStore()
   const { sources, loading: storeLoading, loadSources, addSource, removeSource, updateSource } = useResearchLibraryStore()
+  const provider = researchAiProvider || (useLocalLLM ? 'local' : 'gemini')
 
   const [sourceType,    setSourceType]    = useState('deep_dive')
   const [createDossier, setCreateDossier] = useState(true)
@@ -497,7 +503,8 @@ export default function ResearchLibrary() {
 
   const handleFiles = useCallback(async (files) => {
     if (!files.length) return
-    if (!useLocalLLM && !apiKey) { setError('No Gemini API key. Add it in Settings → API Keys.'); return }
+    if (provider === 'gemini' && !apiKey) { setError('No Gemini API key. Add it in Settings → API Keys.'); return }
+    if (provider === 'openrouter' && !openRouterApiKey) { setError('No OpenRouter API key. Add it in Settings → OpenRouter API Key.'); return }
     if (!user?.id) { setError('You must be signed in to save to the research library.'); return }
     setError(null)
     setAnalysis(null)
@@ -511,8 +518,14 @@ export default function ResearchLibrary() {
       try {
         let extracted, dossierThemes = null
 
-        if (useLocalLLM) {
+        if (provider === 'local') {
           extracted = await extractWithOllama(file, sourceType, tickerInput.trim(), themeInput.trim())
+        } else if (provider === 'openrouter' && createDossier) {
+          const combined = await processWithOpenRouterCombined(file, openRouterApiKey, researchOpenRouterModel, sourceType, tickerInput.trim(), themeInput.trim())
+          extracted     = combined.library || {}
+          dossierThemes = combined.themes  || null
+        } else if (provider === 'openrouter') {
+          extracted = await extractWithOpenRouter(file, openRouterApiKey, researchOpenRouterModel, sourceType, tickerInput.trim(), themeInput.trim())
         } else if (createDossier) {
           // Single call: returns both library metadata and thematic dossier
           const combined = await processWithGeminiCombined(file, apiKey, sourceType, tickerInput.trim(), themeInput.trim())
@@ -558,8 +571,10 @@ export default function ResearchLibrary() {
         const currentThemes = useThematicStore.getState().themes
         if (saved && Object.keys(currentThemes).length > 0) {
           try {
-            const result = useLocalLLM
+            const result = provider === 'local'
               ? await autoAnalyzeWithOllama(saved, currentThemes)
+              : provider === 'openrouter'
+              ? await autoAnalyzeWithOpenRouter(saved, currentThemes, openRouterApiKey, researchOpenRouterModel)
               : await autoAnalyzeWithGemini(saved, currentThemes, apiKey)
             if (result) {
               setAnalysis(result)
@@ -582,7 +597,7 @@ export default function ResearchLibrary() {
     setUploadFile('')
     setUploadIndex(0)
     setUploadTotal(0)
-  }, [apiKey, useLocalLLM, user?.id, sourceType, tickerInput, themeInput, themes, addSource])
+  }, [apiKey, openRouterApiKey, researchOpenRouterModel, provider, user?.id, sourceType, tickerInput, themeInput, themes, addSource])
 
   const handleDrop = useCallback(e => {
     e.preventDefault(); setDragging(false)
