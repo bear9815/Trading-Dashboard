@@ -16,6 +16,7 @@ const RISK_COLUMNS = [
   { key: 'last',       label: 'Last' },
   { key: 'mktVal',     label: 'Mkt Val' },
   { key: 'entry',      label: 'Entry' },
+  { key: 'breakeven',  label: 'Breakeven' },
   { key: 'stop',       label: 'Stop' },
   { key: 'target',     label: 'Target' },
   { key: 'curR',       label: 'Cur. R' },
@@ -30,6 +31,7 @@ const RISK_DEFAULT_WIDTHS = {
   last:        85,
   mktVal:      95,
   entry:       85,
+  breakeven:   95,
   stop:        85,
   target:      85,
   curR:        75,
@@ -791,6 +793,12 @@ export default function RiskPanel({ selectedAccount }) {
   const [fifoGroup,   setFifoGroup]   = useState(null) // multi-lot group → FIFO close modal
   const [expandedSymbols, setExpandedSymbols] = useState(new Set())
   const [ladderSymbols,   setLadderSymbols]   = useState(new Set())
+  const [sortCol, setSortCol]       = useState(null)  // column key
+  const [sortDir, setSortDir]       = useState('asc') // 'asc' | 'desc'
+  const [hypoSymbol, setHypoSymbol] = useState(null)  // symbol showing hypothetical input
+  const [hypoShares, setHypoShares] = useState('')
+  const [hypoPrice,  setHypoPrice]  = useState('')
+  const [hypoSide,   setHypoSide]   = useState('buy') // 'buy' | 'sell'
 
   // ── Avg loser hold time (for position age flag) ────────────────────────────
   const avgLossDays = useMemo(() => {
@@ -898,7 +906,19 @@ export default function RiskPanel({ selectedAccount }) {
       bySymbol[p.symbol].push(p)
     }
     return Object.entries(bySymbol).map(([symbol, lots]) => {
-      if (lots.length === 1) return { ...lots[0], lots, isGroup: false }
+      // Breakeven = weighted average cost of all remaining shares across lots
+      const calcBreakeven = (lotsArr) => {
+        let totalShrs = 0, totalCost = 0
+        for (const l of lotsArr) {
+          const sz = l.remainingShares ?? l.positionSize ?? 0
+          const ep = l.entryPrice ?? 0
+          if (sz > 0 && ep > 0) { totalShrs += sz; totalCost += sz * ep }
+        }
+        return totalShrs > 0 ? totalCost / totalShrs : null
+      }
+      const breakeven = calcBreakeven(lots)
+
+      if (lots.length === 1) return { ...lots[0], lots, isGroup: false, breakeven }
       // Weighted-average entry and stop across all lots
       const totalShares   = lots.reduce((s, l) => s + (l.positionSize  || 0), 0)
       const totalNotional = lots.reduce((s, l) => s + (l.entryPrice    || 0) * (l.positionSize || 0), 0)
@@ -917,6 +937,7 @@ export default function RiskPanel({ selectedAccount }) {
         position:     lots[0]?.position ?? 'Long',
         positionSize: totalShares,
         entryPrice:   avgEntry != null ? Math.round(avgEntry * 1000) / 1000 : null,
+        breakeven,
         stopLoss:     weightedStop != null ? Math.round(weightedStop * 1000) / 1000 : null,
         takeProfit:   lots[0]?.takeProfit ?? null,
         riskDollar:   totalRisk,
@@ -924,6 +945,82 @@ export default function RiskPanel({ selectedAccount }) {
       }
     })
   }, [positions, liveBalance])
+
+  // Sort grouped positions
+  const sortedPositions = useMemo(() => {
+    if (!sortCol) return groupedPositions
+    const sorted = [...groupedPositions]
+    sorted.sort((a, b) => {
+      let av, bv
+      const qA = quotes.get(a.symbol), qB = quotes.get(b.symbol)
+      const cpA = qA?.price ?? null, cpB = qB?.price ?? null
+      switch (sortCol) {
+        case '_symbol':   av = a.symbol; bv = b.symbol; break
+        case 'last':      av = cpA ?? -Infinity; bv = cpB ?? -Infinity; break
+        case 'mktVal':    av = (cpA ?? a.entryPrice ?? 0) * (a.positionSize || 0); bv = (cpB ?? b.entryPrice ?? 0) * (b.positionSize || 0); break
+        case 'entry':     av = a.entryPrice ?? -Infinity; bv = b.entryPrice ?? -Infinity; break
+        case 'breakeven': av = a.breakeven ?? -Infinity; bv = b.breakeven ?? -Infinity; break
+        case 'stop':      av = a.stopLoss ?? -Infinity; bv = b.stopLoss ?? -Infinity; break
+        case 'target':    av = a.takeProfit ?? -Infinity; bv = b.takeProfit ?? -Infinity; break
+        case 'curR': {
+          const rpsA = a.entryPrice && (a._originalStopLoss ?? a.stopLoss) ? Math.abs(a.entryPrice - (a._originalStopLoss ?? a.stopLoss)) : 0
+          const rpsB = b.entryPrice && (b._originalStopLoss ?? b.stopLoss) ? Math.abs(b.entryPrice - (b._originalStopLoss ?? b.stopLoss)) : 0
+          const isLongA = (a.position ?? 'Long').toLowerCase() !== 'short'
+          const isLongB = (b.position ?? 'Long').toLowerCase() !== 'short'
+          av = cpA != null && rpsA > 0 ? (isLongA ? cpA - a.entryPrice : a.entryPrice - cpA) / rpsA : -Infinity
+          bv = cpB != null && rpsB > 0 ? (isLongB ? cpB - b.entryPrice : b.entryPrice - cpB) / rpsB : -Infinity
+          break
+        }
+        case 'upl': {
+          const uplA = cpA != null ? a.lots.reduce((s, l) => { const sz = l.remainingShares ?? l.positionSize; const lng = (l.position ?? 'Long').toLowerCase() !== 'short'; return s + ((lng ? cpA - l.entryPrice : l.entryPrice - cpA) * (sz || 0)) }, 0) : -Infinity
+          const uplB = cpB != null ? b.lots.reduce((s, l) => { const sz = l.remainingShares ?? l.positionSize; const lng = (l.position ?? 'Long').toLowerCase() !== 'short'; return s + ((lng ? cpB - l.entryPrice : l.entryPrice - cpB) * (sz || 0)) }, 0) : -Infinity
+          av = uplA; bv = uplB; break
+        }
+        case 'riskDollar': av = a.riskDollar ?? -Infinity; bv = b.riskDollar ?? -Infinity; break
+        case 'riskPct':    av = a.riskPct ?? -Infinity; bv = b.riskPct ?? -Infinity; break
+        case 'heat':       av = a.riskPct ?? -Infinity; bv = b.riskPct ?? -Infinity; break
+        default: return 0
+      }
+      if (typeof av === 'string') return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av)
+      return sortDir === 'asc' ? av - bv : bv - av
+    })
+    return sorted
+  }, [groupedPositions, sortCol, sortDir, quotes])
+
+  const handleSort = useCallback((col) => {
+    if (sortCol === col) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortCol(col)
+      setSortDir('asc')
+    }
+  }, [sortCol])
+
+  // Hypothetical breakeven calculator
+  const calcHypoBreakeven = useCallback((group) => {
+    const shares = parseFloat(hypoShares)
+    const price  = parseFloat(hypoPrice)
+    if (!shares || shares <= 0 || !price || price <= 0) return null
+
+    let totalShrs = 0, totalCost = 0
+    for (const l of group.lots) {
+      const sz = l.remainingShares ?? l.positionSize ?? 0
+      const ep = l.entryPrice ?? 0
+      if (sz > 0 && ep > 0) { totalShrs += sz; totalCost += sz * ep }
+    }
+
+    if (hypoSide === 'buy') {
+      totalShrs += shares
+      totalCost += shares * price
+    } else {
+      // Selling reduces shares but doesn't change remaining cost basis
+      // unless selling at a loss — breakeven of remaining = original cost basis
+      totalShrs = Math.max(0, totalShrs - shares)
+      totalCost = Math.max(0, totalCost - shares * (totalCost / (totalShrs + shares)))
+    }
+
+    return totalShrs > 0 ? totalCost / totalShrs : null
+  }, [hypoShares, hypoPrice, hypoSide])
 
   const nep = calcNEP(openTrades)
   const ner = calcNER(openTrades, liveBalance)
@@ -1293,17 +1390,30 @@ export default function RiskPanel({ selectedAccount }) {
                 </colgroup>
                 <thead>
                   <tr className="text-xs text-gray-400 border-b border-white/8 uppercase tracking-wider font-semibold">
-                    <th className="text-left pb-3 font-semibold relative select-none">
-                      Symbol
-                      <div onMouseDown={e => startRiskResize('_symbol', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent-blue/60 rounded" />
+                    <th
+                      className="text-left pb-3 font-semibold relative select-none cursor-pointer hover:text-gray-200 transition-colors"
+                      onClick={() => handleSort('_symbol')}
+                    >
+                      <span className="flex items-center gap-1">
+                        Symbol
+                        {sortCol === '_symbol' && <span className="text-accent-blue text-[10px]">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+                      </span>
+                      <div onMouseDown={e => { e.stopPropagation(); startRiskResize('_symbol', e) }} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent-blue/60 rounded" />
                     </th>
                     {riskColOrder.map(key => {
                       const col = RISK_COLUMNS.find(c => c.key === key)
                       const right = key !== 'heat'
                       return (
-                        <th key={key} className={`pb-3 font-semibold relative select-none ${right ? 'text-right' : ''}`}>
-                          {col?.label ?? key}
-                          <div onMouseDown={e => startRiskResize(key, e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent-blue/60 rounded" />
+                        <th
+                          key={key}
+                          className={`pb-3 font-semibold relative select-none cursor-pointer hover:text-gray-200 transition-colors ${right ? 'text-right' : ''}`}
+                          onClick={() => handleSort(key)}
+                        >
+                          <span className={`flex items-center gap-1 ${right ? 'justify-end' : ''}`}>
+                            {col?.label ?? key}
+                            {sortCol === key && <span className="text-accent-blue text-[10px]">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+                          </span>
+                          <div onMouseDown={e => { e.stopPropagation(); startRiskResize(key, e) }} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent-blue/60 rounded" />
                         </th>
                       )
                     })}
@@ -1311,7 +1421,7 @@ export default function RiskPanel({ selectedAccount }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {groupedPositions.map(group => {
+                  {sortedPositions.map(group => {
                     const isMulti    = group.isGroup
                     const isExpanded = expandedSymbols.has(group.symbol)
                     const q          = quotes.get(group.symbol)
@@ -1419,6 +1529,36 @@ export default function RiskPanel({ selectedAccount }) {
                                 return <td key={key} className="py-2 text-right mono text-gray-300">
                                   {group.entryPrice != null ? `$${group.entryPrice.toFixed(2)}` : '—'}
                                 </td>
+                              case 'breakeven': {
+                                const hypoActive = hypoSymbol === group.symbol
+                                const hypoBE = hypoActive ? calcHypoBreakeven(group) : null
+                                return <td key={key} className="py-2 text-right" onClick={e => e.stopPropagation()}>
+                                  <div className="flex items-center justify-end gap-1">
+                                    {group.breakeven != null ? (
+                                      <span className="mono text-gray-300">${group.breakeven.toFixed(2)}</span>
+                                    ) : <span className="text-gray-600">—</span>}
+                                    <button
+                                      onClick={() => {
+                                        if (hypoActive) { setHypoSymbol(null) }
+                                        else { setHypoSymbol(group.symbol); setHypoShares(''); setHypoPrice(''); setHypoSide('buy') }
+                                      }}
+                                      className={`text-[10px] px-1 py-0.5 rounded border transition-all ${
+                                        hypoActive
+                                          ? 'border-accent-blue/50 bg-accent-blue/15 text-accent-blue'
+                                          : 'border-white/10 text-gray-600 hover:text-gray-400 hover:border-white/20'
+                                      }`}
+                                      title="Hypothetical buy/sell"
+                                    >
+                                      ±
+                                    </button>
+                                  </div>
+                                  {hypoBE != null && (
+                                    <div className="text-[10px] text-accent-blue mono mt-0.5 text-right">
+                                      → ${hypoBE.toFixed(2)}
+                                    </div>
+                                  )}
+                                </td>
+                              }
                               case 'stop':
                                 return <td key={key} className="py-2 text-right" onClick={e => e.stopPropagation()}>
                                   <StopLossInput value={group.stopLoss} onSave={val => updateTrade(group.lots[0].id, { stopLoss: val })} />
@@ -1515,6 +1655,66 @@ export default function RiskPanel({ selectedAccount }) {
                           )
                         })()}
 
+                        {/* ── Hypothetical buy/sell sub-row ── */}
+                        {hypoSymbol === group.symbol && (
+                          <tr className="bg-white/[0.01]">
+                            <td colSpan={riskColOrder.length + 2} className="pb-2 pt-1 px-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-[10px] text-gray-500 shrink-0">What-if:</span>
+                                <div className="flex items-center gap-0.5">
+                                  <button
+                                    onClick={() => setHypoSide('buy')}
+                                    className={`text-[10px] px-2 py-0.5 rounded-l border transition-all ${
+                                      hypoSide === 'buy'
+                                        ? 'bg-accent-green/15 border-accent-green/30 text-accent-green'
+                                        : 'border-white/10 text-gray-600'
+                                    }`}
+                                  >Buy</button>
+                                  <button
+                                    onClick={() => setHypoSide('sell')}
+                                    className={`text-[10px] px-2 py-0.5 rounded-r border border-l-0 transition-all ${
+                                      hypoSide === 'sell'
+                                        ? 'bg-accent-red/15 border-accent-red/30 text-accent-red'
+                                        : 'border-white/10 text-gray-600'
+                                    }`}
+                                  >Sell</button>
+                                </div>
+                                <input
+                                  type="number"
+                                  value={hypoShares}
+                                  onChange={e => setHypoShares(e.target.value)}
+                                  placeholder="Shares"
+                                  className="w-20 px-2 py-0.5 rounded text-[11px] bg-white/5 border border-white/10 text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-blue/40 mono"
+                                />
+                                <span className="text-[10px] text-gray-600">@</span>
+                                <input
+                                  type="number"
+                                  value={hypoPrice}
+                                  onChange={e => setHypoPrice(e.target.value)}
+                                  placeholder="Price"
+                                  className="w-24 px-2 py-0.5 rounded text-[11px] bg-white/5 border border-white/10 text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-blue/40 mono"
+                                />
+                                {(() => {
+                                  const newBE = calcHypoBreakeven(group)
+                                  if (newBE == null) return null
+                                  const diff = group.breakeven ? newBE - group.breakeven : 0
+                                  return (
+                                    <span className="text-[10px] mono ml-1">
+                                      <span className="text-gray-500">New BE:</span>{' '}
+                                      <span className="text-accent-blue font-medium">${newBE.toFixed(2)}</span>
+                                      {group.breakeven != null && (
+                                        <span className={`ml-1 ${diff <= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                                          ({diff > 0 ? '+' : ''}{diff.toFixed(2)})
+                                        </span>
+                                      )}
+                                    </span>
+                                  )
+                                })()}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+
                         {/* ── Individual lot sub-rows (expanded) ── */}
                         {isMulti && isExpanded && group.lots.map((lot, lotIdx) => {
                           const lotOrigStop = lot._originalStopLoss ?? lot.stopLoss
@@ -1551,6 +1751,10 @@ export default function RiskPanel({ selectedAccount }) {
                                   case 'entry':
                                     return <td key={key} className="py-1.5 text-right mono text-gray-400">
                                       ${lot.entryPrice?.toFixed(2) ?? '—'}
+                                    </td>
+                                  case 'breakeven':
+                                    return <td key={key} className="py-1.5 text-right mono text-gray-500">
+                                      {lot.entryPrice != null ? `$${lot.entryPrice.toFixed(2)}` : '—'}
                                     </td>
                                   case 'stop':
                                     return <td key={key} className="py-1.5 text-right">
