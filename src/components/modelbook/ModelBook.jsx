@@ -1,8 +1,8 @@
-import { useMemo, useState, useCallback, useRef, useEffect, Fragment } from 'react'
+import { useMemo, useState, useCallback, useRef, useEffect } from 'react'
 import {
-  Plus, Trash2, X, Image, Upload, ChevronDown, ChevronUp,
-  Sparkles, Loader2, Tag, Calendar, StickyNote, Search,
-  TrendingUp, AlertTriangle, CheckCircle2, BarChart2, Eye,
+  Plus, Trash2, X, Image, Upload, ChevronLeft, ChevronRight,
+  Sparkles, Loader2, Tag, Calendar, Search, List, Check,
+  TrendingUp, BarChart2, MessageSquare, StickyNote,
 } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -20,9 +20,9 @@ import {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const MARKET_INDICES = [
-  { symbol: 'SPY', label: 'S&P 500',  color: '#60a5fa' },
-  { symbol: 'QQQ', label: 'Nasdaq',   color: '#a78bfa' },
-  { symbol: 'IWM', label: 'Russell',  color: '#34d399' },
+  { symbol: 'SPY', label: 'S&P 500', color: '#60a5fa' },
+  { symbol: 'QQQ', label: 'Nasdaq',  color: '#a78bfa' },
+  { symbol: 'IWM', label: 'Russell', color: '#34d399' },
 ]
 
 const SUGGESTED_TAGS = [
@@ -31,12 +31,56 @@ const SUGGESTED_TAGS = [
   'Leader', 'Growth', 'Momentum', 'Sector Rotation',
 ]
 
+// ── Lightbox ─────────────────────────────────────────────────────────────────
+
+function Lightbox({ charts, index, onClose, onPrev, onNext }) {
+  const chart = charts[index]
+  const hasPrev = index > 0
+  const hasNext = index < charts.length - 1
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'ArrowLeft'  && hasPrev) onPrev()
+      if (e.key === 'ArrowRight' && hasNext) onNext()
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [hasPrev, hasNext, onPrev, onNext, onClose])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm" onClick={onClose}>
+      <button onClick={onClose} className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"><X size={18} /></button>
+      {charts.length > 1 && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/10 text-white text-xs font-medium z-10">
+          {index + 1} / {charts.length}
+        </div>
+      )}
+      {chart?.label && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/10 text-white text-xs font-medium z-10">{chart.label}</div>
+      )}
+      {hasPrev && (
+        <button onClick={e => { e.stopPropagation(); onPrev() }} className="absolute left-4 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"><ChevronLeft size={22} /></button>
+      )}
+      {hasNext && (
+        <button onClick={e => { e.stopPropagation(); onNext() }} className="absolute right-4 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"><ChevronRight size={22} /></button>
+      )}
+      <img
+        src={toDataUrl(chart.base64, chart.mimeType)}
+        alt={chart.label || 'Chart'}
+        className="rounded-lg shadow-2xl"
+        style={{ maxWidth: '92vw', maxHeight: '92vh', width: 'auto', height: 'auto', display: 'block' }}
+        onClick={e => e.stopPropagation()}
+      />
+    </div>
+  )
+}
+
 // ── Add / Edit Model Modal ──────────────────────────────────────────────────
 
 function ModelFormModal({ model, onSave, onClose }) {
   const [symbol, setSymbol]       = useState(model?.symbol || '')
   const [name, setName]           = useState(model?.name || '')
-  const [notes, setNotes]         = useState(model?.notes || '')
   const [startDate, setStartDate] = useState(model?.startDate || '')
   const [endDate, setEndDate]     = useState(model?.endDate || '')
   const [tags, setTags]           = useState(model?.tags || [])
@@ -54,7 +98,6 @@ function ModelFormModal({ model, onSave, onClose }) {
     onSave({
       symbol: symbol.trim().toUpperCase(),
       name: name.trim(),
-      notes: notes.trim(),
       startDate: startDate || null,
       endDate: endDate || null,
       tags,
@@ -72,23 +115,13 @@ function ModelFormModal({ model, onSave, onClose }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Symbol *</label>
-              <input
-                value={symbol} onChange={e => setSymbol(e.target.value)}
-                placeholder="AAPL" maxLength={10}
-                className="input w-full mono text-sm uppercase"
-                autoFocus
-              />
+              <input value={symbol} onChange={e => setSymbol(e.target.value)} placeholder="AAPL" maxLength={10} className="input w-full mono text-sm uppercase" autoFocus />
             </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">Name</label>
-              <input
-                value={name} onChange={e => setName(e.target.value)}
-                placeholder="Apple Inc."
-                className="input w-full text-sm"
-              />
+              <input value={name} onChange={e => setName(e.target.value)} placeholder="Apple Inc." className="input w-full text-sm" />
             </div>
           </div>
-
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Trade Start</label>
@@ -99,17 +132,6 @@ function ModelFormModal({ model, onSave, onClose }) {
               <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="input w-full text-sm" />
             </div>
           </div>
-
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Notes</label>
-            <textarea
-              value={notes} onChange={e => setNotes(e.target.value)}
-              placeholder="What made this trade special? Entry trigger, catalyst, sector theme..."
-              rows={4}
-              className="input w-full text-sm resize-none"
-            />
-          </div>
-
           <div>
             <label className="block text-xs text-gray-500 mb-1.5">Tags</label>
             <div className="flex flex-wrap gap-1.5 mb-2">
@@ -120,27 +142,19 @@ function ModelFormModal({ model, onSave, onClose }) {
                 </span>
               ))}
             </div>
-            <div className="flex gap-1.5">
-              <input
-                value={tagInput} onChange={e => setTagInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(tagInput) } }}
-                placeholder="Add tag…"
-                className="input flex-1 text-xs"
-              />
-            </div>
-            <div className="flex flex-wrap gap-1 mt-2">
+            <input
+              value={tagInput} onChange={e => setTagInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(tagInput) } }}
+              placeholder="Add tag…" className="input w-full text-xs mb-2"
+            />
+            <div className="flex flex-wrap gap-1">
               {SUGGESTED_TAGS.filter(t => !tags.includes(t)).map(t => (
-                <button
-                  key={t} type="button"
-                  onClick={() => addTag(t)}
+                <button key={t} type="button" onClick={() => addTag(t)}
                   className="text-[9px] px-1.5 py-0.5 rounded border border-white/10 text-gray-600 hover:text-gray-300 hover:border-white/20 transition-colors"
-                >
-                  + {t}
-                </button>
+                >+ {t}</button>
               ))}
             </div>
           </div>
-
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={onClose} className="btn-ghost text-xs">Cancel</button>
             <button type="submit" disabled={!symbol.trim()} className="btn-primary text-xs flex items-center gap-1.5">
@@ -153,64 +167,165 @@ function ModelFormModal({ model, onSave, onClose }) {
   )
 }
 
-// ── Chart Upload Zone ────────────────────────────────────────────────────────
+// ── Sidebar list item ────────────────────────────────────────────────────────
 
-function ChartUploadZone({ modelId, chartCount }) {
-  const { addChartToModel } = useModelBookStore()
-  const [uploading, setUploading] = useState(false)
-  const [error, setError]         = useState(null)
-  const fileRef = useRef(null)
+function ModelListItem({ model, selected, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left px-3 py-2.5 rounded-lg transition-all ${
+        selected
+          ? 'bg-accent-blue/10 border border-accent-blue/25'
+          : 'hover:bg-white/5 border border-transparent'
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <span className={`text-sm font-bold mono ${selected ? 'text-white' : 'text-gray-300'}`}>{model.symbol}</span>
+        <span className="text-[10px] text-gray-600">{model.charts.length} <Image size={9} className="inline" /></span>
+      </div>
+      {model.name && <p className="text-[10px] text-gray-500 mt-0.5 truncate">{model.name}</p>}
+      {model.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {model.tags.slice(0, 3).map(t => (
+            <span key={t} className="text-[8px] px-1.5 py-0.5 rounded-full bg-white/5 border border-white/8 text-gray-500">{t}</span>
+          ))}
+          {model.tags.length > 3 && <span className="text-[8px] text-gray-600">+{model.tags.length - 3}</span>}
+        </div>
+      )}
+    </button>
+  )
+}
 
-  const atLimit = chartCount >= MAX_CHARTS_PER_MODEL
+// ── Notes section (bullet point support) ─────────────────────────────────────
 
-  async function handleFiles(files) {
-    if (atLimit) return
-    setUploading(true); setError(null)
-    try {
-      for (const file of Array.from(files).slice(0, MAX_CHARTS_PER_MODEL - chartCount)) {
-        if (!file.type.startsWith('image/')) continue
-        const { base64, mimeType, sizeKB } = await compressImage(file)
-        addChartToModel(modelId, { base64, mimeType, sizeKB })
+function NotesSection({ model }) {
+  const { updateModel } = useModelBookStore()
+  const [draft, setDraft]       = useState(model.notes || '')
+  const [saved, setSaved]       = useState(false)
+  const [editMode, setEditMode] = useState(false)
+  const savedTimer              = useRef(null)
+  const taRef                   = useRef(null)
+
+  useEffect(() => {
+    setDraft(model.notes || '')
+    setSaved(false)
+    setEditMode(false)
+  }, [model.id])
+
+  function save() {
+    updateModel(model.id, { notes: draft })
+    setSaved(true)
+    clearTimeout(savedTimer.current)
+    savedTimer.current = setTimeout(() => setSaved(false), 2000)
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter') {
+      const ta   = taRef.current
+      const pos  = ta.selectionStart
+      const text = draft
+      const lineStart = text.lastIndexOf('\n', pos - 1) + 1
+      const line = text.slice(lineStart, pos)
+      const bulletMatch = line.match(/^(\s*[•\-]\s)/)
+      if (bulletMatch) {
+        e.preventDefault()
+        const prefix = bulletMatch[1]
+        if (line.trim() === bulletMatch[0].trim()) {
+          const newText = text.slice(0, lineStart) + '\n' + text.slice(pos)
+          setDraft(newText)
+          setTimeout(() => { ta.selectionStart = ta.selectionEnd = lineStart + 1 }, 0)
+        } else {
+          const newText = text.slice(0, pos) + '\n' + prefix + text.slice(pos)
+          setDraft(newText)
+          setTimeout(() => { ta.selectionStart = ta.selectionEnd = pos + 1 + prefix.length }, 0)
+        }
       }
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setUploading(false)
     }
   }
 
-  function handlePaste(e) {
-    const file = imageFromClipboard(e)
-    if (file) handleFiles([file])
+  function insertBullet() {
+    const ta = taRef.current
+    if (!ta) return
+    const pos  = ta.selectionStart
+    const text = draft
+    const atLineStart = pos === 0 || text[pos - 1] === '\n'
+    const insert = atLineStart ? '• ' : '\n• '
+    const newText = text.slice(0, pos) + insert + text.slice(pos)
+    setDraft(newText)
+    setTimeout(() => { ta.selectionStart = ta.selectionEnd = pos + insert.length; ta.focus() }, 0)
   }
 
-  function handleDrop(e) {
-    e.preventDefault()
-    handleFiles(e.dataTransfer.files)
+  const dirty = draft !== (model.notes || '')
+
+  function renderNotes(text) {
+    if (!text?.trim()) return null
+    return text.split('\n').map((line, i) => {
+      const isBullet = /^\s*[•\-]\s/.test(line)
+      const content  = isBullet ? line.replace(/^\s*[•\-]\s/, '') : line
+      if (!line.trim()) return <div key={i} className="h-2" />
+      return isBullet
+        ? <div key={i} className="flex items-start gap-2 text-sm text-gray-300 leading-relaxed">
+            <span className="text-accent-blue mt-1 shrink-0">•</span>
+            <span>{content}</span>
+          </div>
+        : <p key={i} className="text-sm text-gray-300 leading-relaxed">{line}</p>
+    })
   }
 
   return (
-    <div
-      onPaste={handlePaste}
-      onDragOver={e => e.preventDefault()}
-      onDrop={handleDrop}
-      tabIndex={0}
-      className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer
-        ${atLimit ? 'border-white/5 opacity-40 cursor-not-allowed' : 'border-white/10 hover:border-accent-blue/30'}`}
-      onClick={() => !atLimit && fileRef.current?.click()}
-    >
-      <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={e => handleFiles(e.target.files)} />
-      {uploading ? (
-        <Loader2 size={20} className="animate-spin mx-auto text-accent-blue" />
+    <div>
+      <div className="flex items-center justify-between mb-2.5">
+        <div className="flex items-center gap-2">
+          <MessageSquare size={13} className="text-gray-500" />
+          <p className="label">Notes</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {editMode && (
+            <button onClick={insertBullet} title="Insert bullet point"
+              className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-all">
+              <List size={11} /> Bullet
+            </button>
+          )}
+          {editMode && (dirty || saved) && (
+            <button onClick={save}
+              className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-all ${
+                saved
+                  ? 'bg-accent-green/15 text-accent-green border border-accent-green/25'
+                  : 'bg-accent-blue/15 text-accent-blue border border-accent-blue/25 hover:bg-accent-blue/25'
+              }`}>
+              {saved ? <><Check size={11} /> Saved</> : 'Save'}
+            </button>
+          )}
+          <button onClick={() => setEditMode(p => !p)}
+            className="text-xs px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-gray-400 hover:text-white transition-all">
+            {editMode ? 'Done' : 'Edit'}
+          </button>
+        </div>
+      </div>
+
+      {editMode ? (
+        <textarea
+          ref={taRef}
+          value={draft}
+          onChange={e => { setDraft(e.target.value); setSaved(false) }}
+          onBlur={() => { if (dirty) save() }}
+          onKeyDown={handleKeyDown}
+          placeholder="What made this trade special? Entry trigger, catalyst, volume profile…&#10;&#10;Tip: Click 'Bullet' or type • then space for a bullet list"
+          className="input text-sm leading-relaxed resize-none w-full font-mono"
+          rows={8}
+          autoFocus
+        />
       ) : (
-        <>
-          <Upload size={18} className="mx-auto text-gray-600 mb-1" />
-          <p className="text-[11px] text-gray-500">
-            {atLimit ? `Limit reached (${MAX_CHARTS_PER_MODEL})` : 'Drop charts, paste, or click to upload'}
-          </p>
-        </>
+        <div
+          className="min-h-[80px] rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5 cursor-pointer hover:border-white/20 transition-colors space-y-1"
+          onClick={() => setEditMode(true)}
+        >
+          {draft?.trim()
+            ? renderNotes(draft)
+            : <p className="text-sm text-gray-600 italic">Click to add notes…</p>
+          }
+        </div>
       )}
-      {error && <p className="text-[10px] text-accent-red mt-1">{error}</p>}
     </div>
   )
 }
@@ -218,7 +333,7 @@ function ChartUploadZone({ modelId, chartCount }) {
 // ── Market Context Chart ─────────────────────────────────────────────────────
 
 function MarketContextChart({ startDate, endDate, symbol }) {
-  const [data, setData]       = useState({})  // { SPY: [...], QQQ: [...], IWM: [...] }
+  const [data, setData]       = useState({})
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState(null)
   const [visible, setVisible] = useState({ SPY: true, QQQ: true, IWM: true })
@@ -226,26 +341,20 @@ function MarketContextChart({ startDate, endDate, symbol }) {
   useEffect(() => {
     if (!startDate || !endDate) return
     let cancelled = false
-
     async function load() {
       setLoading(true); setError(null)
       try {
-        // Add 30 days of buffer on each side for context
         const padStart = new Date(startDate)
         padStart.setDate(padStart.getDate() - 30)
         const padEnd = new Date(endDate)
         padEnd.setDate(padEnd.getDate() + 30)
-
         const results = await Promise.allSettled(
           MARKET_INDICES.map(idx => fetchHistory(idx.symbol, padStart.toISOString(), padEnd.toISOString()))
         )
-
         if (cancelled) return
         const newData = {}
         MARKET_INDICES.forEach((idx, i) => {
-          if (results[i].status === 'fulfilled' && results[i].value?.length) {
-            newData[idx.symbol] = results[i].value
-          }
+          if (results[i].status === 'fulfilled' && results[i].value?.length) newData[idx.symbol] = results[i].value
         })
         setData(newData)
       } catch (e) {
@@ -254,43 +363,29 @@ function MarketContextChart({ startDate, endDate, symbol }) {
         if (!cancelled) setLoading(false)
       }
     }
-
     load()
     return () => { cancelled = true }
   }, [startDate, endDate])
 
-  // Normalize all to growth-of-100 for comparison
   const chartData = useMemo(() => {
     const allDates = new Set()
-    for (const bars of Object.values(data)) {
-      for (const b of bars) allDates.add(b.time)
-    }
+    for (const bars of Object.values(data)) { for (const b of bars) allDates.add(b.time) }
     const dates = [...allDates].sort()
     if (dates.length === 0) return []
-
     const basePrices = {}
-    for (const [sym, bars] of Object.entries(data)) {
-      if (bars.length) basePrices[sym] = bars[0].close
-    }
-
+    for (const [sym, bars] of Object.entries(data)) { if (bars.length) basePrices[sym] = bars[0].close }
     return dates.map(date => {
       const row = { date }
       for (const [sym, bars] of Object.entries(data)) {
         const bar = bars.find(b => b.time === date)
-        if (bar && basePrices[sym]) {
-          row[sym] = +(bar.close / basePrices[sym] * 100).toFixed(2)
-        }
+        if (bar && basePrices[sym]) row[sym] = +(bar.close / basePrices[sym] * 100).toFixed(2)
       }
       return row
     })
   }, [data])
 
   if (!startDate || !endDate) {
-    return (
-      <div className="text-xs text-gray-600 text-center py-6">
-        Set trade start and end dates to see market context during this stock's run.
-      </div>
-    )
+    return <div className="text-xs text-gray-600 text-center py-6">Set trade start/end dates to see market context.</div>
   }
 
   return (
@@ -302,67 +397,272 @@ function MarketContextChart({ startDate, endDate, symbol }) {
         </div>
         <div className="flex items-center gap-2">
           {MARKET_INDICES.map(idx => (
-            <button
-              key={idx.symbol}
-              onClick={() => setVisible(v => ({ ...v, [idx.symbol]: !v[idx.symbol] }))}
+            <button key={idx.symbol} onClick={() => setVisible(v => ({ ...v, [idx.symbol]: !v[idx.symbol] }))}
               className="flex items-center gap-1 text-[10px] transition-all"
-              style={{ color: visible[idx.symbol] ? idx.color : '#4b5563', opacity: visible[idx.symbol] ? 1 : 0.5 }}
-            >
+              style={{ color: visible[idx.symbol] ? idx.color : '#4b5563', opacity: visible[idx.symbol] ? 1 : 0.5 }}>
               <span className="w-1.5 h-1.5 rounded-full" style={{ background: visible[idx.symbol] ? idx.color : '#4b5563' }} />
               {idx.label}
             </button>
           ))}
         </div>
       </div>
-
       {loading && <div className="text-xs text-gray-500 text-center py-8"><Loader2 size={16} className="animate-spin inline mr-1.5" />Loading market data…</div>}
       {error && <div className="text-xs text-accent-red text-center py-4">{error}</div>}
-
       {!loading && chartData.length > 0 && (
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 0, left: -8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis
-              dataKey="date"
-              tick={{ fontSize: 10, fill: '#6b7280' }}
-              tickFormatter={d => d?.slice(5, 10)}
-              interval="preserveStartEnd"
-              minTickGap={60}
-            />
-            <YAxis
-              tick={{ fontSize: 10, fill: '#6b7280' }}
-              tickFormatter={v => `${(v - 100) >= 0 ? '+' : ''}${(v - 100).toFixed(0)}%`}
-              width={48}
-            />
+            <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickFormatter={d => d?.slice(5, 10)} interval="preserveStartEnd" minTickGap={60} />
+            <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickFormatter={v => `${(v - 100) >= 0 ? '+' : ''}${(v - 100).toFixed(0)}%`} width={48} />
             <ReferenceLine y={100} stroke="rgba(255,255,255,0.15)" strokeDasharray="4 4" />
-            {startDate && endDate && (
-              <ReferenceArea
-                x1={startDate} x2={endDate}
-                fill="rgba(96, 165, 250, 0.06)"
-                stroke="rgba(96, 165, 250, 0.2)"
-                strokeDasharray="3 3"
-              />
-            )}
+            {startDate && endDate && <ReferenceArea x1={startDate} x2={endDate} fill="rgba(96,165,250,0.06)" stroke="rgba(96,165,250,0.2)" strokeDasharray="3 3" />}
             <Tooltip
               contentStyle={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
               labelStyle={{ color: '#9ca3af' }}
               formatter={(val, sym) => [`${(val - 100) >= 0 ? '+' : ''}${(val - 100).toFixed(1)}%`, sym]}
             />
             {MARKET_INDICES.map(idx => visible[idx.symbol] && data[idx.symbol] && (
-              <Line
-                key={idx.symbol}
-                type="monotone"
-                dataKey={idx.symbol}
-                name={idx.label}
-                stroke={idx.color}
-                strokeWidth={1.5}
-                dot={false}
-                connectNulls
-                isAnimationActive={false}
-              />
+              <Line key={idx.symbol} type="monotone" dataKey={idx.symbol} name={idx.label} stroke={idx.color} strokeWidth={1.5} dot={false} connectNulls isAnimationActive={false} />
             ))}
           </LineChart>
         </ResponsiveContainer>
+      )}
+    </div>
+  )
+}
+
+// ── Chart gallery with upload (clipboard paste, drop, click) ─────────────────
+
+function ChartGallery({ model, onOpenLightbox }) {
+  const { addChartToModel, removeChart } = useModelBookStore()
+  const { apiKey } = useSettingsStore()
+  const [uploading, setUploading]         = useState(false)
+  const [error, setError]                 = useState(null)
+  const [analyzingChart, setAnalyzingChart] = useState(null)
+  const [chartAnalyses, setChartAnalyses]   = useState({})
+  const fileRef = useRef(null)
+  const dropRef = useRef(null)
+
+  const atLimit = model.charts.length >= MAX_CHARTS_PER_MODEL
+
+  async function handleFiles(files) {
+    if (atLimit) return
+    setUploading(true); setError(null)
+    try {
+      for (const file of Array.from(files).slice(0, MAX_CHARTS_PER_MODEL - model.charts.length)) {
+        if (!file.type.startsWith('image/')) continue
+        const { base64, mimeType, sizeKB } = await compressImage(file)
+        addChartToModel(model.id, { base64, mimeType, sizeKB })
+      }
+    } catch (e) { setError(e.message) }
+    finally { setUploading(false) }
+  }
+
+  // Global paste listener for this detail view
+  useEffect(() => {
+    function handlePaste(e) {
+      const file = imageFromClipboard(e)
+      if (file) handleFiles([file])
+    }
+    window.addEventListener('paste', handlePaste)
+    return () => window.removeEventListener('paste', handlePaste)
+  }, [model.id, model.charts.length])
+
+  async function analyzeOneChart(chart) {
+    if (!apiKey) return
+    setAnalyzingChart(chart.id)
+    try {
+      const result = await analyzeChartVisionGemini(chart.base64, chart.mimeType, model.symbol, apiKey)
+      setChartAnalyses(prev => ({ ...prev, [chart.id]: result }))
+    } catch { /* silently fail */ }
+    finally { setAnalyzingChart(null) }
+  }
+
+  const charts = model.charts
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="label">Charts ({charts.length}/{MAX_CHARTS_PER_MODEL})</p>
+        <div className="flex items-center gap-2 text-[10px] text-gray-600">
+          <span>Paste from clipboard or</span>
+          <button onClick={() => fileRef.current?.click()} disabled={atLimit}
+            className="flex items-center gap-1 px-2 py-1 rounded border border-white/10 text-gray-400 hover:text-white hover:border-white/20 transition-all disabled:opacity-30">
+            <Upload size={10} /> Upload
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={e => handleFiles(e.target.files)} />
+        </div>
+      </div>
+
+      {charts.length === 0 ? (
+        <div
+          ref={dropRef}
+          onDragOver={e => e.preventDefault()}
+          onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files) }}
+          className="rounded-xl border border-dashed border-white/10 bg-surface-100/50 flex flex-col items-center justify-center py-10 text-center cursor-pointer hover:border-accent-blue/30 transition-colors"
+          onClick={() => fileRef.current?.click()}
+        >
+          {uploading
+            ? <Loader2 size={24} className="animate-spin text-accent-blue" />
+            : <>
+                <Image size={28} className="text-gray-700 mb-2" />
+                <p className="text-xs text-gray-500">No charts yet</p>
+                <p className="text-xs text-gray-600 mt-0.5">Paste (Ctrl+V), drag & drop, or click to upload</p>
+              </>
+          }
+        </div>
+      ) : (
+        <>
+          {/* Primary chart — largest */}
+          <div
+            className="relative group cursor-pointer rounded-xl overflow-hidden border border-white/10 hover:border-accent-blue/40 transition-colors mb-2"
+            onClick={() => onOpenLightbox(0)}
+          >
+            <img
+              src={toDataUrl(charts[0].base64, charts[0].mimeType)}
+              alt={charts[0].label || model.symbol}
+              className="w-full object-contain bg-black rounded-xl"
+              style={{ maxHeight: 380 }}
+            />
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors rounded-xl" />
+            {charts[0].label && (
+              <span className="absolute top-2 left-2 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-black/60 text-white border border-white/10">{charts[0].label}</span>
+            )}
+            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {apiKey && (
+                <button onClick={e => { e.stopPropagation(); analyzeOneChart(charts[0]) }} disabled={analyzingChart === charts[0].id}
+                  className="p-1.5 rounded-lg bg-black/60 border border-white/10 text-gray-400 hover:text-accent-blue transition-colors" title="AI analyze">
+                  {analyzingChart === charts[0].id ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                </button>
+              )}
+              <button onClick={e => { e.stopPropagation(); removeChart(model.id, charts[0].id) }}
+                className="p-1.5 rounded-lg bg-black/60 border border-white/10 text-gray-400 hover:text-accent-red transition-colors"><Trash2 size={12} /></button>
+            </div>
+          </div>
+
+          {/* Chart AI analysis */}
+          {chartAnalyses[charts[0].id] && (
+            <div className="mb-3 p-2.5 rounded-lg bg-white/[0.02] border border-white/5 text-xs text-gray-400 space-y-0.5">
+              <span className="text-accent-blue font-semibold">{chartAnalyses[charts[0].id].pattern}</span>
+              {chartAnalyses[charts[0].id].weinsteinStage && <span className="block text-gray-500">{chartAnalyses[charts[0].id].weinsteinStage}</span>}
+              {chartAnalyses[charts[0].id].overallAssessment && <p className="text-gray-500">{chartAnalyses[charts[0].id].overallAssessment}</p>}
+            </div>
+          )}
+
+          {/* Additional charts grid */}
+          {charts.length > 1 && (
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              {charts.slice(1).map((chart, i) => (
+                <div key={chart.id} className="relative group cursor-pointer rounded-lg overflow-hidden border border-white/10 hover:border-accent-blue/40 transition-colors"
+                  onClick={() => onOpenLightbox(i + 1)}>
+                  <div className="relative" style={{ paddingBottom: '62.5%' }}>
+                    <img src={toDataUrl(chart.base64, chart.mimeType)} alt={chart.label || model.symbol}
+                      className="absolute inset-0 w-full h-full object-contain bg-black" />
+                  </div>
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-colors" />
+                  {chart.label && (
+                    <span className="absolute top-1.5 left-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-black/60 text-white border border-white/10">{chart.label}</span>
+                  )}
+                  <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {apiKey && (
+                      <button onClick={e => { e.stopPropagation(); analyzeOneChart(chart) }} disabled={analyzingChart === chart.id}
+                        className="p-1 rounded bg-black/60 border border-white/10 text-gray-400 hover:text-accent-blue transition-colors">
+                        {analyzingChart === chart.id ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                      </button>
+                    )}
+                    <button onClick={e => { e.stopPropagation(); removeChart(model.id, chart.id) }}
+                      className="p-1 rounded bg-black/60 border border-white/10 text-gray-400 hover:text-accent-red transition-colors"><Trash2 size={10} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Drop zone for more */}
+          {!atLimit && (
+            <div
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files) }}
+              className="border border-dashed border-white/10 rounded-lg p-3 text-center cursor-pointer hover:border-accent-blue/30 transition-colors"
+              onClick={() => fileRef.current?.click()}
+            >
+              {uploading
+                ? <Loader2 size={14} className="animate-spin mx-auto text-accent-blue" />
+                : <p className="text-[10px] text-gray-600">Drop, paste, or click to add more charts</p>
+              }
+            </div>
+          )}
+        </>
+      )}
+
+      {error && <p className="text-[10px] text-accent-red mt-1">{error}</p>}
+    </div>
+  )
+}
+
+// ── Model Detail panel (right side) ──────────────────────────────────────────
+
+function ModelDetail({ model, onPrev, onNext, hasPrev, hasNext, onEdit, onDelete }) {
+  const [lightboxIndex, setLightboxIndex] = useState(null)
+
+  useEffect(() => { setLightboxIndex(null) }, [model.id])
+
+  const prevLightbox = useCallback(() => setLightboxIndex(i => (i > 0 ? i - 1 : i)), [])
+  const nextLightbox = useCallback(() => setLightboxIndex(i => (i < model.charts.length - 1 ? i + 1 : i)), [model.charts.length])
+
+  return (
+    <div className="flex-1 overflow-y-auto p-5 space-y-5">
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-xl font-bold mono text-white">{model.symbol}</h2>
+            {model.name && <span className="text-sm text-gray-500">{model.name}</span>}
+          </div>
+          <div className="flex items-center gap-3 mt-1">
+            {model.startDate && model.endDate && (
+              <span className="text-xs text-gray-500 flex items-center gap-1"><Calendar size={11} /> {model.startDate} → {model.endDate}</span>
+            )}
+            <span className="text-xs text-gray-600">Added {new Date(model.createdAt).toLocaleDateString()}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button onClick={onEdit} className="text-xs px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-gray-400 hover:text-white transition-all">Edit</button>
+          <button onClick={onDelete} className="text-xs px-2.5 py-1 rounded-lg border border-accent-red/20 text-accent-red/60 hover:text-accent-red hover:bg-accent-red/10 transition-all">Delete</button>
+          <div className="ml-2 flex items-center gap-1">
+            <button onClick={onPrev} disabled={!hasPrev}
+              className="p-1.5 rounded-lg border border-white/10 text-gray-400 hover:text-white hover:border-white/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all"><ChevronLeft size={16} /></button>
+            <button onClick={onNext} disabled={!hasNext}
+              className="p-1.5 rounded-lg border border-white/10 text-gray-400 hover:text-white hover:border-white/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all"><ChevronRight size={16} /></button>
+          </div>
+        </div>
+      </div>
+
+      {/* Tags */}
+      {model.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {model.tags.map(t => (
+            <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-accent-blue/10 border border-accent-blue/25 text-accent-blue">{t}</span>
+          ))}
+        </div>
+      )}
+
+      {/* Charts */}
+      <ChartGallery model={model} onOpenLightbox={setLightboxIndex} />
+
+      {/* Market context */}
+      <div className="pt-2 border-t border-white/5">
+        <MarketContextChart startDate={model.startDate} endDate={model.endDate} symbol={model.symbol} />
+      </div>
+
+      {/* Notes */}
+      <div className="pt-2 border-t border-white/5">
+        <NotesSection model={model} />
+      </div>
+
+      {/* Lightbox */}
+      {lightboxIndex != null && model.charts[lightboxIndex] && (
+        <Lightbox charts={model.charts} index={lightboxIndex} onClose={() => setLightboxIndex(null)} onPrev={prevLightbox} onNext={nextLightbox} />
       )}
     </div>
   )
@@ -375,45 +675,34 @@ function AIAnalysisPanel({ models }) {
   const [analysis, setAnalysis] = useState(null)
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState(null)
-
   const provider = researchAiProvider || 'gemini'
 
   async function runAnalysis() {
     if (models.length < 2) { setError('Add at least 2 model stocks for the AI to find patterns.'); return }
     setLoading(true); setError(null)
     try {
-      let result
-      if (provider === 'gemini') {
-        result = await analyzeModelsGemini(models, apiKey)
-      } else if (provider === 'openrouter') {
-        result = await analyzeModelsOpenRouter(models, openRouterApiKey, researchOpenRouterModel)
-      } else {
-        result = await analyzeModelsOllama(models)
-      }
+      const result = provider === 'gemini'
+        ? await analyzeModelsGemini(models, apiKey)
+        : provider === 'openrouter'
+        ? await analyzeModelsOpenRouter(models, openRouterApiKey, researchOpenRouterModel)
+        : await analyzeModelsOllama(models)
       setAnalysis(result)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
+    } catch (e) { setError(e.message) }
+    finally { setLoading(false) }
   }
 
   if (!analysis && !loading) {
     return (
-      <div className="card text-center py-8 space-y-3">
-        <Sparkles size={24} className="mx-auto text-accent-blue/60" />
-        <div>
-          <p className="text-sm font-semibold text-white mb-1">AI Pattern Analysis</p>
-          <p className="text-xs text-gray-500 max-w-md mx-auto mb-4">
-            Review all your model stocks together — find recurring chart patterns, setup characteristics,
-            and build a checklist for spotting the next winner.
-          </p>
-          {error && <p className="text-xs text-accent-red mb-3">{error}</p>}
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="text-center space-y-3 max-w-md">
+          <Sparkles size={28} className="mx-auto text-accent-blue/60" />
+          <p className="text-sm font-semibold text-white">AI Pattern Analysis</p>
+          <p className="text-xs text-gray-500">Review all your model stocks together — find recurring chart patterns, setup characteristics, and build a checklist for spotting the next winner.</p>
+          {error && <p className="text-xs text-accent-red">{error}</p>}
           <button onClick={runAnalysis} disabled={models.length < 2} className="btn-primary text-xs flex items-center gap-1.5 mx-auto">
-            <Sparkles size={13} />
-            Analyze {models.length} Model{models.length !== 1 ? 's' : ''} · {provider === 'gemini' ? 'Gemini' : provider === 'openrouter' ? 'OpenRouter' : 'Local'}
+            <Sparkles size={13} /> Analyze {models.length} Model{models.length !== 1 ? 's' : ''}
           </button>
-          {models.length < 2 && <p className="text-[10px] text-gray-600 mt-2">Add at least 2 model stocks to enable AI analysis</p>}
+          {models.length < 2 && <p className="text-[10px] text-gray-600">Add at least 2 model stocks to enable</p>}
         </div>
       </div>
     )
@@ -421,50 +710,44 @@ function AIAnalysisPanel({ models }) {
 
   if (loading) {
     return (
-      <div className="card text-center py-12">
-        <Loader2 size={24} className="animate-spin mx-auto text-accent-blue mb-3" />
-        <p className="text-sm text-gray-400">Analyzing {models.length} model stocks for patterns…</p>
-        <p className="text-xs text-gray-600 mt-1">This may take 15–30 seconds</p>
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 size={24} className="animate-spin mx-auto text-accent-blue mb-3" />
+          <p className="text-sm text-gray-400">Analyzing {models.length} model stocks…</p>
+          <p className="text-xs text-gray-600 mt-1">This may take 15–30 seconds</p>
+        </div>
       </div>
     )
   }
 
   const sections = [
-    { key: 'chartPatterns',         label: 'Chart Patterns',          icon: '📊', color: 'text-accent-blue' },
-    { key: 'setupCharacteristics',  label: 'Setup Characteristics',   icon: '🔍', color: 'text-accent-purple' },
-    { key: 'marketContext',         label: 'Market Context',          icon: '🌐', color: 'text-accent-green' },
-    { key: 'fundamentalTraits',     label: 'Fundamental Traits',      icon: '📈', color: 'text-accent-yellow' },
-    { key: 'timingPatterns',        label: 'Timing Patterns',         icon: '⏱️', color: 'text-gray-300' },
-    { key: 'checklist',             label: 'Screening Checklist',     icon: '✅', color: 'text-accent-green' },
-    { key: 'redFlags',              label: 'Red Flags to Avoid',      icon: '🚩', color: 'text-accent-red' },
+    { key: 'chartPatterns',        label: 'Chart Patterns',        icon: '📊', color: 'text-accent-blue' },
+    { key: 'setupCharacteristics', label: 'Setup Characteristics', icon: '🔍', color: 'text-purple-400' },
+    { key: 'marketContext',        label: 'Market Context',        icon: '🌐', color: 'text-accent-green' },
+    { key: 'fundamentalTraits',    label: 'Fundamental Traits',    icon: '📈', color: 'text-accent-yellow' },
+    { key: 'timingPatterns',       label: 'Timing Patterns',       icon: '⏱️', color: 'text-gray-300' },
+    { key: 'checklist',            label: 'Screening Checklist',   icon: '✅', color: 'text-accent-green' },
+    { key: 'redFlags',             label: 'Red Flags to Avoid',    icon: '🚩', color: 'text-accent-red' },
   ]
 
   return (
-    <div className="space-y-4">
+    <div className="flex-1 overflow-y-auto p-5 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-          <Sparkles size={14} className="text-accent-blue" /> AI Pattern Analysis
-        </h3>
-        <button onClick={runAnalysis} className="btn-ghost text-xs flex items-center gap-1">
-          <Sparkles size={11} /> Re-analyze
-        </button>
+        <h3 className="text-sm font-semibold text-white flex items-center gap-2"><Sparkles size={14} className="text-accent-blue" /> AI Pattern Analysis</h3>
+        <button onClick={runAnalysis} className="btn-ghost text-xs flex items-center gap-1"><Sparkles size={11} /> Re-analyze</button>
       </div>
-
       {analysis.summary && (
         <div className="card-sm bg-accent-blue/5 border border-accent-blue/15">
           <p className="text-xs text-gray-300 leading-relaxed whitespace-pre-line">{analysis.summary}</p>
         </div>
       )}
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {sections.map(sec => {
           const items = analysis[sec.key]
           if (!items?.length) return null
           return (
             <div key={sec.key} className="card-sm">
-              <p className={`text-xs font-semibold mb-2 ${sec.color}`}>
-                <span className="mr-1.5">{sec.icon}</span>{sec.label}
-              </p>
+              <p className={`text-xs font-semibold mb-2 ${sec.color}`}><span className="mr-1.5">{sec.icon}</span>{sec.label}</p>
               <ul className="space-y-1">
                 {items.map((item, i) => (
                   <li key={i} className="text-[11px] text-gray-400 flex items-start gap-1.5">
@@ -477,196 +760,6 @@ function AIAnalysisPanel({ models }) {
           )
         })}
       </div>
-
-      {error && <p className="text-xs text-accent-red">{error}</p>}
-    </div>
-  )
-}
-
-// ── Single Model Card ────────────────────────────────────────────────────────
-
-function ModelCard({ model, onEdit, onDelete }) {
-  const { removeChart, updateChart } = useModelBookStore()
-  const { apiKey } = useSettingsStore()
-  const [expanded, setExpanded]       = useState(false)
-  const [lightbox, setLightbox]       = useState(null)
-  const [analyzingChart, setAnalyzingChart] = useState(null)
-  const [chartAnalyses, setChartAnalyses]   = useState({})
-
-  async function analyzeOneChart(chart) {
-    if (!apiKey) return
-    setAnalyzingChart(chart.id)
-    try {
-      const result = await analyzeChartVisionGemini(chart.base64, chart.mimeType, model.symbol, apiKey)
-      setChartAnalyses(prev => ({ ...prev, [chart.id]: result }))
-    } catch {
-      // silently fail for individual chart analysis
-    } finally {
-      setAnalyzingChart(null)
-    }
-  }
-
-  return (
-    <div className="card">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-base font-bold mono text-white">{model.symbol}</h3>
-              {model.name && <span className="text-xs text-gray-500">{model.name}</span>}
-              {expanded ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
-            </div>
-            <div className="flex items-center gap-3 mt-0.5">
-              {model.startDate && model.endDate && (
-                <span className="text-[10px] text-gray-600 flex items-center gap-1">
-                  <Calendar size={10} /> {model.startDate} → {model.endDate}
-                </span>
-              )}
-              <span className="text-[10px] text-gray-600 flex items-center gap-1">
-                <Image size={10} /> {model.charts.length} chart{model.charts.length !== 1 ? 's' : ''}
-              </span>
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button onClick={() => onEdit(model)} className="btn-ghost text-[10px] px-2 py-1">Edit</button>
-          <button onClick={() => onDelete(model.id)} className="text-gray-600 hover:text-accent-red transition-colors p-1"><Trash2 size={13} /></button>
-        </div>
-      </div>
-
-      {/* Tags */}
-      {model.tags.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-3">
-          {model.tags.map(t => (
-            <span key={t} className="text-[9px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-gray-400">
-              {t}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Notes preview (collapsed) */}
-      {!expanded && model.notes && (
-        <p className="text-xs text-gray-500 line-clamp-2 mb-3">{model.notes}</p>
-      )}
-
-      {/* Chart thumbnails (collapsed) */}
-      {!expanded && model.charts.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {model.charts.slice(0, 4).map(chart => (
-            <img
-              key={chart.id}
-              src={toDataUrl(chart.base64, chart.mimeType)}
-              alt={chart.label || model.symbol}
-              className="h-16 rounded border border-white/10 cursor-pointer hover:border-accent-blue/40 transition-colors object-cover"
-              onClick={(e) => { e.stopPropagation(); setExpanded(true) }}
-            />
-          ))}
-          {model.charts.length > 4 && (
-            <div className="h-16 w-16 rounded border border-white/10 flex items-center justify-center text-xs text-gray-500 shrink-0">
-              +{model.charts.length - 4}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Expanded content */}
-      {expanded && (
-        <div className="space-y-4 mt-2">
-          {/* Full notes */}
-          {model.notes && (
-            <div>
-              <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1">
-                <StickyNote size={10} /> Notes
-              </p>
-              <p className="text-xs text-gray-300 whitespace-pre-line leading-relaxed">{model.notes}</p>
-            </div>
-          )}
-
-          {/* Chart gallery */}
-          <div>
-            <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-              <Image size={10} /> Charts ({model.charts.length}/{MAX_CHARTS_PER_MODEL})
-            </p>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {model.charts.map(chart => (
-                <div key={chart.id} className="group relative">
-                  <img
-                    src={toDataUrl(chart.base64, chart.mimeType)}
-                    alt={chart.label || model.symbol}
-                    className="w-full rounded-lg border border-white/10 cursor-pointer hover:border-accent-blue/30 transition-colors"
-                    onClick={() => setLightbox(chart)}
-                  />
-                  <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {apiKey && (
-                      <button
-                        onClick={() => analyzeOneChart(chart)}
-                        disabled={analyzingChart === chart.id}
-                        className="p-1 rounded bg-black/60 border border-white/10 text-gray-400 hover:text-accent-blue transition-colors"
-                        title="AI analyze this chart"
-                      >
-                        {analyzingChart === chart.id ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
-                      </button>
-                    )}
-                    <button
-                      onClick={() => removeChart(model.id, chart.id)}
-                      className="p-1 rounded bg-black/60 border border-white/10 text-gray-400 hover:text-accent-red transition-colors"
-                    >
-                      <Trash2 size={11} />
-                    </button>
-                  </div>
-                  {chart.label && (
-                    <p className="text-[9px] text-gray-500 mt-1 text-center">{chart.label}</p>
-                  )}
-                  {/* Chart-level AI analysis */}
-                  {chartAnalyses[chart.id] && (
-                    <div className="mt-1.5 p-2 rounded bg-white/[0.02] border border-white/5 text-[10px] text-gray-400 space-y-0.5">
-                      <span className="text-accent-blue font-semibold">{chartAnalyses[chart.id].pattern}</span>
-                      {chartAnalyses[chart.id].weinsteinStage && (
-                        <span className="block text-gray-500">{chartAnalyses[chart.id].weinsteinStage}</span>
-                      )}
-                      {chartAnalyses[chart.id].overallAssessment && (
-                        <p className="text-gray-500 mt-0.5">{chartAnalyses[chart.id].overallAssessment}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="mt-3">
-              <ChartUploadZone modelId={model.id} chartCount={model.charts.length} />
-            </div>
-          </div>
-
-          {/* Market context chart */}
-          <div className="pt-2 border-t border-white/5">
-            <MarketContextChart startDate={model.startDate} endDate={model.endDate} symbol={model.symbol} />
-          </div>
-        </div>
-      )}
-
-      {/* Lightbox */}
-      {lightbox && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-8" onClick={() => setLightbox(null)}>
-          <div className="relative max-w-[90vw] max-h-[90vh]">
-            <img
-              src={toDataUrl(lightbox.base64, lightbox.mimeType)}
-              alt={lightbox.label || model.symbol}
-              className="max-w-full max-h-[85vh] rounded-lg object-contain"
-            />
-            <button
-              onClick={() => setLightbox(null)}
-              className="absolute top-2 right-2 p-2 rounded-full bg-black/60 text-white hover:bg-black/80"
-            >
-              <X size={16} />
-            </button>
-            {lightbox.label && (
-              <p className="text-center text-sm text-gray-400 mt-2">{lightbox.label}</p>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -675,21 +768,20 @@ function ModelCard({ model, onEdit, onDelete }) {
 
 export default function ModelBook() {
   const { models, addModel, updateModel, deleteModel } = useModelBookStore()
-  const [showForm, setShowForm]   = useState(false)
-  const [editModel, setEditModel] = useState(null)
-  const [search, setSearch]       = useState('')
-  const [filterTag, setFilterTag] = useState(null)
-  const [view, setView]           = useState('gallery') // 'gallery' | 'analysis'
+  const [selectedId, setSelectedId]   = useState(null)
+  const [showForm, setShowForm]       = useState(false)
+  const [editModel, setEditModel]     = useState(null)
+  const [search, setSearch]           = useState('')
+  const [filterTag, setFilterTag]     = useState(null)
+  const [view, setView]               = useState('detail') // 'detail' | 'analysis'
   const [confirmDelete, setConfirmDelete] = useState(null)
 
-  // Collect all tags across models
   const allTags = useMemo(() => {
     const tagSet = new Set()
     for (const m of models) { for (const t of m.tags) tagSet.add(t) }
     return [...tagSet].sort()
   }, [models])
 
-  // Filter models
   const filtered = useMemo(() => {
     let list = models
     if (search) {
@@ -701,147 +793,138 @@ export default function ModelBook() {
         m.tags.some(t => t.toLowerCase().includes(q))
       )
     }
-    if (filterTag) {
-      list = list.filter(m => m.tags.includes(filterTag))
-    }
+    if (filterTag) list = list.filter(m => m.tags.includes(filterTag))
     return list
   }, [models, search, filterTag])
+
+  // Auto-select first if current selection doesn't exist
+  useMemo(() => {
+    if (filtered.length > 0 && !filtered.find(m => m.id === selectedId)) {
+      setSelectedId(filtered[0].id)
+    }
+  }, [filtered]) // eslint-disable-line
+
+  const currentIdx   = filtered.findIndex(m => m.id === selectedId)
+  const currentModel = currentIdx >= 0 ? filtered[currentIdx] : null
+
+  function goPrev() { if (currentIdx > 0) setSelectedId(filtered[currentIdx - 1].id) }
+  function goNext() { if (currentIdx < filtered.length - 1) setSelectedId(filtered[currentIdx + 1].id) }
 
   function handleSave(data) {
     if (editModel) {
       updateModel(editModel.id, data)
     } else {
-      addModel(data)
+      const id = addModel(data)
+      setSelectedId(id)
     }
     setShowForm(false)
     setEditModel(null)
   }
 
-  function handleEdit(model) {
-    setEditModel(model)
-    setShowForm(true)
+  function handleEdit() {
+    if (currentModel) { setEditModel(currentModel); setShowForm(true) }
   }
 
-  function handleDelete(id) {
-    if (confirmDelete === id) {
-      deleteModel(id)
+  function handleDelete() {
+    if (!currentModel) return
+    if (confirmDelete === currentModel.id) {
+      deleteModel(currentModel.id)
       setConfirmDelete(null)
     } else {
-      setConfirmDelete(id)
+      setConfirmDelete(currentModel.id)
       setTimeout(() => setConfirmDelete(null), 3000)
     }
   }
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <TrendingUp size={18} className="text-accent-blue" />
-            Model Book
-          </h2>
-          <p className="text-xs text-gray-500 mt-0.5">
-            {models.length} model stock{models.length !== 1 ? 's' : ''} — study your winners to spot the next one
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-0.5 bg-white/5 rounded-lg border border-white/10 p-0.5">
-            <button
-              onClick={() => setView('gallery')}
-              className={`text-[10px] px-3 py-1 rounded transition-all ${view === 'gallery' ? 'bg-accent-blue/20 text-accent-blue' : 'text-gray-500 hover:text-gray-300'}`}
-            >
-              Gallery
-            </button>
-            <button
-              onClick={() => setView('analysis')}
-              className={`text-[10px] px-3 py-1 rounded transition-all flex items-center gap-1 ${view === 'analysis' ? 'bg-accent-blue/20 text-accent-blue' : 'text-gray-500 hover:text-gray-300'}`}
-            >
-              <Sparkles size={10} /> AI Patterns
-            </button>
+    <div className="flex h-full">
+      {/* ── Left sidebar ── */}
+      <div className="w-72 shrink-0 border-r border-white/10 flex flex-col bg-surface-50">
+        <div className="p-3 border-b border-white/10 space-y-2">
+          <div className="flex items-center gap-2">
+            <TrendingUp size={15} className="text-accent-blue" />
+            <h2 className="font-semibold text-white text-sm flex-1">Model Book</h2>
+            <span className="text-xs text-gray-600 bg-surface-200 rounded px-1.5 py-0.5">{models.length}</span>
           </div>
-          <button onClick={() => { setEditModel(null); setShowForm(true) }} className="btn-primary text-xs flex items-center gap-1.5">
-            <Plus size={13} /> Add Model
-          </button>
-        </div>
-      </div>
 
-      {/* Search + tag filter */}
-      {models.length > 0 && (
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="relative flex-1 max-w-xs">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600" />
-            <input
-              value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search models…"
-              className="input w-full pl-8 text-xs"
-            />
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+            <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} className="input text-xs pl-8 py-1.5" />
           </div>
+
           {allTags.length > 0 && (
-            <div className="flex items-center gap-1 flex-wrap">
-              <Tag size={11} className="text-gray-600" />
+            <div className="flex flex-wrap gap-1">
               {allTags.map(tag => (
-                <button
-                  key={tag}
-                  onClick={() => setFilterTag(filterTag === tag ? null : tag)}
-                  className={`text-[9px] px-2 py-0.5 rounded-full border transition-all ${
-                    filterTag === tag
-                      ? 'bg-accent-blue/15 border-accent-blue/30 text-accent-blue'
-                      : 'border-white/10 text-gray-500 hover:text-gray-300'
-                  }`}
-                >
-                  {tag}
-                </button>
+                <button key={tag} onClick={() => setFilterTag(filterTag === tag ? null : tag)}
+                  className={`text-[9px] px-1.5 py-0.5 rounded-full border transition-all ${
+                    filterTag === tag ? 'bg-accent-blue/15 border-accent-blue/30 text-accent-blue' : 'border-white/10 text-gray-600 hover:text-gray-400'
+                  }`}>{tag}</button>
               ))}
             </div>
           )}
-        </div>
-      )}
 
-      {/* Content */}
-      {view === 'gallery' ? (
-        filtered.length === 0 ? (
-          <div className="card text-center py-12 space-y-3">
-            <TrendingUp size={32} className="mx-auto text-gray-700" />
-            <div>
-              <p className="text-sm font-semibold text-gray-400 mb-1">
-                {models.length === 0 ? 'Start Your Model Book' : 'No matches'}
-              </p>
-              <p className="text-xs text-gray-600 max-w-md mx-auto">
-                {models.length === 0
-                  ? 'Add your best trades as blueprints. Upload charts, write notes about what made the setup work, and let the AI find patterns across your winners.'
-                  : 'Try adjusting your search or tag filter.'}
+          <div className="flex gap-1">
+            <button onClick={() => setView('detail')}
+              className={`flex-1 text-[10px] py-1 rounded border transition-all ${view === 'detail' ? 'bg-accent-blue/15 text-accent-blue border-accent-blue/30' : 'text-gray-600 border-gray-700 hover:text-gray-400'}`}>
+              Models
+            </button>
+            <button onClick={() => setView('analysis')}
+              className={`flex-1 text-[10px] py-1 rounded border transition-all flex items-center justify-center gap-1 ${view === 'analysis' ? 'bg-accent-blue/15 text-accent-blue border-accent-blue/30' : 'text-gray-600 border-gray-700 hover:text-gray-400'}`}>
+              <Sparkles size={9} /> AI Patterns
+            </button>
+          </div>
+
+          <button onClick={() => { setEditModel(null); setShowForm(true) }}
+            className="w-full btn-primary text-xs flex items-center justify-center gap-1.5 py-1.5">
+            <Plus size={13} /> Add Model
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {filtered.length === 0 ? (
+            <div className="text-center py-12 px-4">
+              <TrendingUp size={28} className="mx-auto text-gray-700 mb-2" />
+              <p className="text-sm text-gray-500 font-medium">{models.length === 0 ? 'No models yet' : 'No matches'}</p>
+              <p className="text-xs text-gray-600 mt-1">
+                {models.length === 0 ? 'Add your best trades as blueprints for future pattern recognition.' : 'Try adjusting your search or filter.'}
               </p>
             </div>
-            {models.length === 0 && (
-              <button onClick={() => setShowForm(true)} className="btn-primary text-xs flex items-center gap-1.5 mx-auto mt-2">
-                <Plus size={13} /> Add Your First Model
-              </button>
-            )}
-          </div>
+          ) : (
+            filtered.map(m => (
+              <ModelListItem key={m.id} model={m} selected={m.id === selectedId} onClick={() => setSelectedId(m.id)} />
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* ── Right panel ── */}
+      <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+        {view === 'analysis' ? (
+          <AIAnalysisPanel models={models} />
+        ) : currentModel ? (
+          <ModelDetail
+            model={currentModel}
+            onPrev={goPrev}
+            onNext={goNext}
+            hasPrev={currentIdx > 0}
+            hasNext={currentIdx < filtered.length - 1}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+          />
         ) : (
-          <div className="space-y-4">
-            {filtered.map(m => (
-              <ModelCard
-                key={m.id}
-                model={m}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-              />
-            ))}
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center space-y-3">
+              <TrendingUp size={32} className="mx-auto text-gray-700" />
+              <p className="text-sm text-gray-500 font-medium">Select a model or add your first</p>
+              <p className="text-xs text-gray-600">Study your winners to spot the next one</p>
+            </div>
           </div>
-        )
-      ) : (
-        <AIAnalysisPanel models={models} />
-      )}
+        )}
+      </div>
 
       {/* Form modal */}
       {showForm && (
-        <ModelFormModal
-          model={editModel}
-          onSave={handleSave}
-          onClose={() => { setShowForm(false); setEditModel(null) }}
-        />
+        <ModelFormModal model={editModel} onSave={handleSave} onClose={() => { setShowForm(false); setEditModel(null) }} />
       )}
     </div>
   )
