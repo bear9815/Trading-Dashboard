@@ -24,6 +24,7 @@ export const useMorningStore = create((set, get) => ({
 
   loadFromCloud: async (userId) => {
     if (!supabase) return
+    if (get().cloudReady) return   // already loaded this session — skip to save egress
     const { data, error } = await supabase
       .from('user_morning')
       .select('data')

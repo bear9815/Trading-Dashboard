@@ -30,6 +30,7 @@ export const useHabitsStore = create((set, get) => ({
 
   loadFromCloud: async (userId) => {
     if (!supabase) { set({ cloudReady: true }); return }
+    if (get().cloudReady) return   // already loaded this session — skip to save egress
     const { data, error } = await supabase
       .from('user_habits')
       .select('data')

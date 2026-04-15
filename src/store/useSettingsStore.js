@@ -2,6 +2,9 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { supabase } from '../lib/supabase.js'
 
+// Module-level flag — prevents re-fetching settings more than once per page load
+let settingsSessionLoaded = false
+
 // Fields synced to Supabase (business data that must match across devices)
 const CLOUD_FIELDS = [
   'apiKey', 'anthropicApiKey', 'alpacaApiKey', 'alpacaApiSecret', 'finnhubApiKey',
@@ -77,6 +80,8 @@ export const useSettingsStore = create(
 
       loadFromCloud: async (userId) => {
         if (!supabase) return
+        if (settingsSessionLoaded) return   // already loaded this session — skip to save egress
+        settingsSessionLoaded = true
         const { data, error } = await supabase
           .from('user_settings')
           .select('data')
