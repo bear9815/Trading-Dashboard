@@ -927,21 +927,28 @@ export default function RiskPanel({ selectedAccount }) {
       const wStopNum      = lotsWithStop.reduce((s, l) => s + l.stopLoss * l.positionSize, 0)
       const wStopDen      = lotsWithStop.reduce((s, l) => s + l.positionSize, 0)
       const weightedStop  = wStopDen > 0 ? wStopNum / wStopDen : null
+      // Weighted original stop — same weight as current stop but uses frozen value
+      // so Cur R is always measured against the initial risk taken, not trailed stop
+      const lotsWithOrigStop = lots.filter(l => (l._originalStopLoss ?? l.stopLoss) && l.positionSize)
+      const wOrigNum = lotsWithOrigStop.reduce((s, l) => s + (l._originalStopLoss ?? l.stopLoss) * l.positionSize, 0)
+      const wOrigDen = lotsWithOrigStop.reduce((s, l) => s + l.positionSize, 0)
+      const weightedOrigStop = wOrigDen > 0 ? wOrigNum / wOrigDen : null
       const totalRisk     = lots.reduce((s, l) => s + (l.riskDollar || 0), 0)
       const totalRiskPct  = liveBalance > 0 ? (totalRisk / liveBalance) * 100 : 0
       return {
-        id:           `group-${symbol}`,
+        id:                   `group-${symbol}`,
         symbol,
         lots,
-        isGroup:      true,
-        position:     lots[0]?.position ?? 'Long',
-        positionSize: totalShares,
-        entryPrice:   avgEntry != null ? Math.round(avgEntry * 1000) / 1000 : null,
+        isGroup:              true,
+        position:             lots[0]?.position ?? 'Long',
+        positionSize:         totalShares,
+        entryPrice:           avgEntry != null ? Math.round(avgEntry * 1000) / 1000 : null,
         breakeven,
-        stopLoss:     weightedStop != null ? Math.round(weightedStop * 1000) / 1000 : null,
-        takeProfit:   lots[0]?.takeProfit ?? null,
-        riskDollar:   totalRisk,
-        riskPct:      totalRiskPct,
+        stopLoss:             weightedStop  != null ? Math.round(weightedStop  * 1000) / 1000 : null,
+        _originalStopLoss:    weightedOrigStop != null ? Math.round(weightedOrigStop * 1000) / 1000 : null,
+        takeProfit:           lots[0]?.takeProfit ?? null,
+        riskDollar:           totalRisk,
+        riskPct:              totalRiskPct,
       }
     })
   }, [positions, liveBalance])

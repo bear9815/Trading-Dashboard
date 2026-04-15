@@ -195,7 +195,15 @@ export const useTradeStore = create((set, get) => ({
     set(s => {
       const trades = s.trades.map(t => {
         if (t.id !== id) return t
-        updated = enrichTrade({ ...t, ...updates })
+        // If a stop-loss update is incoming and _originalStopLoss has never been
+        // frozen, capture the CURRENT stopLoss as the original BEFORE merging.
+        // enrichTrade sees stopLoss = new value, so we must do this here —
+        // otherwise enrichTrade would stamp the new stop as the original.
+        const safeUpdates = { ...updates }
+        if ('stopLoss' in safeUpdates && t._originalStopLoss == null && t.stopLoss != null) {
+          safeUpdates._originalStopLoss = t.stopLoss
+        }
+        updated = enrichTrade({ ...t, ...safeUpdates })
         return updated
       })
       return { trades }
