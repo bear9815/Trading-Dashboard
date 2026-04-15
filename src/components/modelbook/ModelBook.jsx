@@ -2,7 +2,7 @@ import { useMemo, useState, useCallback, useRef, useEffect } from 'react'
 import {
   Plus, Trash2, X, Image, Upload, ChevronLeft, ChevronRight,
   Sparkles, Loader2, Tag, Calendar, Search, List, Check,
-  TrendingUp, BarChart2, MessageSquare, StickyNote,
+  TrendingUp, BarChart2, MessageSquare, StickyNote, GripVertical,
 } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -434,12 +434,15 @@ function MarketContextChart({ startDate, endDate, symbol }) {
 // ── Chart gallery with upload (clipboard paste, drop, click) ─────────────────
 
 function ChartGallery({ model, onOpenLightbox }) {
-  const { addChartToModel, removeChart } = useModelBookStore()
+  const { addChartToModel, removeChart, reorderCharts } = useModelBookStore()
   const { apiKey } = useSettingsStore()
   const [uploading, setUploading]         = useState(false)
   const [error, setError]                 = useState(null)
   const [analyzingChart, setAnalyzingChart] = useState(null)
   const [chartAnalyses, setChartAnalyses]   = useState({})
+  // Drag-to-reorder state
+  const [dragIndex, setDragIndex]   = useState(null)  // index being dragged
+  const [overIndex, setOverIndex]   = useState(null)  // index being hovered during drag
   const fileRef = useRef(null)
   const dropRef = useRef(null)
 
@@ -513,76 +516,127 @@ function ChartGallery({ model, onOpenLightbox }) {
         </div>
       ) : (
         <>
-          {/* Primary chart — largest */}
-          <div
-            className="relative group cursor-pointer rounded-xl overflow-hidden border border-white/10 hover:border-accent-blue/40 transition-colors mb-2"
-            onClick={() => onOpenLightbox(0)}
-          >
-            <img
-              src={toDataUrl(charts[0].base64, charts[0].mimeType)}
-              alt={charts[0].label || model.symbol}
-              className="w-full object-contain bg-black rounded-xl"
-              style={{ maxHeight: 380 }}
-            />
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors rounded-xl" />
-            {charts[0].label && (
-              <span className="absolute top-2 left-2 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-black/60 text-white border border-white/10">{charts[0].label}</span>
-            )}
-            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {apiKey && (
-                <button onClick={e => { e.stopPropagation(); analyzeOneChart(charts[0]) }} disabled={analyzingChart === charts[0].id}
-                  className="p-1.5 rounded-lg bg-black/60 border border-white/10 text-gray-400 hover:text-accent-blue transition-colors" title="AI analyze">
-                  {analyzingChart === charts[0].id ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                </button>
-              )}
-              <button onClick={e => { e.stopPropagation(); removeChart(model.id, charts[0].id) }}
-                className="p-1.5 rounded-lg bg-black/60 border border-white/10 text-gray-400 hover:text-accent-red transition-colors"><Trash2 size={12} /></button>
-            </div>
+          {/* ── Drag-sortable chart grid ──────────────────────────────── */}
+          {/* First chart is "primary" (full-width). Drag any thumbnail to reorder. */}
+          <div className="space-y-2 mb-2">
+            {charts.map((chart, idx) => {
+              const isPrimary = idx === 0
+              const isDragging = dragIndex === idx
+              const isOver    = overIndex === idx && dragIndex !== idx
+
+              return (
+                <div key={chart.id}>
+                  <div
+                    draggable
+                    onDragStart={e => {
+                      e.dataTransfer.effectAllowed = 'move'
+                      setDragIndex(idx)
+                    }}
+                    onDragOver={e => {
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = 'move'
+                      setOverIndex(idx)
+                    }}
+                    onDragLeave={() => setOverIndex(null)}
+                    onDrop={e => {
+                      e.preventDefault()
+                      if (dragIndex !== null && dragIndex !== idx) {
+                        const ids = charts.map(c => c.id)
+                        const moved = ids.splice(dragIndex, 1)[0]
+                        ids.splice(idx, 0, moved)
+                        reorderCharts(model.id, ids)
+                      }
+                      setDragIndex(null)
+                      setOverIndex(null)
+                    }}
+                    onDragEnd={() => { setDragIndex(null); setOverIndex(null) }}
+                    className={`relative group cursor-pointer rounded-xl overflow-hidden border transition-all
+                      ${isPrimary ? 'rounded-xl' : 'rounded-lg'}
+                      ${isDragging  ? 'opacity-40 scale-[0.98] border-accent-blue/50' : ''}
+                      ${isOver      ? 'border-accent-blue/60 ring-1 ring-accent-blue/30' : 'border-white/10 hover:border-accent-blue/40'}
+                    `}
+                    onClick={() => !isDragging && onOpenLightbox(idx)}
+                    style={{ cursor: isDragging ? 'grabbing' : 'pointer' }}
+                  >
+                    {isPrimary ? (
+                      <img
+                        src={toDataUrl(chart.base64, chart.mimeType)}
+                        alt={chart.label || model.symbol}
+                        className="w-full object-contain bg-black"
+                        style={{ maxHeight: 380 }}
+                        draggable={false}
+                      />
+                    ) : (
+                      <div className="relative" style={{ paddingBottom: '62.5%' }}>
+                        <img
+                          src={toDataUrl(chart.base64, chart.mimeType)}
+                          alt={chart.label || model.symbol}
+                          className="absolute inset-0 w-full h-full object-contain bg-black"
+                          draggable={false}
+                        />
+                      </div>
+                    )}
+
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors rounded-xl" />
+
+                    {/* Drag handle — visible on hover */}
+                    <div
+                      className="absolute top-2 left-2 p-1 rounded-md bg-black/60 border border-white/10 text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing"
+                      onMouseDown={e => e.stopPropagation()}
+                      onClick={e => e.stopPropagation()}
+                      title="Drag to reorder"
+                    >
+                      <GripVertical size={12} />
+                    </div>
+
+                    {/* Label */}
+                    {chart.label && (
+                      <span className="absolute top-2 left-8 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-black/60 text-white border border-white/10">{chart.label}</span>
+                    )}
+
+                    {/* Primary badge */}
+                    {isPrimary && charts.length > 1 && (
+                      <span className="absolute bottom-2 left-2 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-black/70 text-gray-400 border border-white/10">Primary</span>
+                    )}
+
+                    {/* Action buttons */}
+                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {apiKey && (
+                        <button onClick={e => { e.stopPropagation(); analyzeOneChart(chart) }} disabled={analyzingChart === chart.id}
+                          className="p-1.5 rounded-lg bg-black/60 border border-white/10 text-gray-400 hover:text-accent-blue transition-colors" title="AI analyze">
+                          {analyzingChart === chart.id ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                        </button>
+                      )}
+                      <button onClick={e => { e.stopPropagation(); removeChart(model.id, chart.id) }}
+                        className="p-1.5 rounded-lg bg-black/60 border border-white/10 text-gray-400 hover:text-accent-red transition-colors"><Trash2 size={12} /></button>
+                    </div>
+                  </div>
+
+                  {/* Per-chart AI analysis result */}
+                  {chartAnalyses[chart.id] && (
+                    <div className="mt-1 p-2.5 rounded-lg bg-white/[0.02] border border-white/5 text-xs text-gray-400 space-y-0.5">
+                      <span className="text-accent-blue font-semibold">{chartAnalyses[chart.id].pattern}</span>
+                      {chartAnalyses[chart.id].weinsteinStage && <span className="block text-gray-500">{chartAnalyses[chart.id].weinsteinStage}</span>}
+                      {chartAnalyses[chart.id].overallAssessment && <p className="text-gray-500">{chartAnalyses[chart.id].overallAssessment}</p>}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
 
-          {/* Chart AI analysis */}
-          {chartAnalyses[charts[0].id] && (
-            <div className="mb-3 p-2.5 rounded-lg bg-white/[0.02] border border-white/5 text-xs text-gray-400 space-y-0.5">
-              <span className="text-accent-blue font-semibold">{chartAnalyses[charts[0].id].pattern}</span>
-              {chartAnalyses[charts[0].id].weinsteinStage && <span className="block text-gray-500">{chartAnalyses[charts[0].id].weinsteinStage}</span>}
-              {chartAnalyses[charts[0].id].overallAssessment && <p className="text-gray-500">{chartAnalyses[charts[0].id].overallAssessment}</p>}
-            </div>
-          )}
-
-          {/* Additional charts grid */}
-          {charts.length > 1 && (
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              {charts.slice(1).map((chart, i) => (
-                <div key={chart.id} className="relative group cursor-pointer rounded-lg overflow-hidden border border-white/10 hover:border-accent-blue/40 transition-colors"
-                  onClick={() => onOpenLightbox(i + 1)}>
-                  <div className="relative" style={{ paddingBottom: '62.5%' }}>
-                    <img src={toDataUrl(chart.base64, chart.mimeType)} alt={chart.label || model.symbol}
-                      className="absolute inset-0 w-full h-full object-contain bg-black" />
-                  </div>
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-colors" />
-                  {chart.label && (
-                    <span className="absolute top-1.5 left-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-black/60 text-white border border-white/10">{chart.label}</span>
-                  )}
-                  <div className="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {apiKey && (
-                      <button onClick={e => { e.stopPropagation(); analyzeOneChart(chart) }} disabled={analyzingChart === chart.id}
-                        className="p-1 rounded bg-black/60 border border-white/10 text-gray-400 hover:text-accent-blue transition-colors">
-                        {analyzingChart === chart.id ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
-                      </button>
-                    )}
-                    <button onClick={e => { e.stopPropagation(); removeChart(model.id, chart.id) }}
-                      className="p-1 rounded bg-black/60 border border-white/10 text-gray-400 hover:text-accent-red transition-colors"><Trash2 size={10} /></button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Drop zone for more */}
+          {/* Drop zone for adding more */}
           {!atLimit && (
             <div
-              onDragOver={e => e.preventDefault()}
-              onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files) }}
+              onDragOver={e => {
+                // Only handle file drops here (not chart reorders — those are handled per-card)
+                if (e.dataTransfer.types.includes('Files')) { e.preventDefault() }
+              }}
+              onDrop={e => {
+                if (e.dataTransfer.types.includes('Files')) {
+                  e.preventDefault(); handleFiles(e.dataTransfer.files)
+                }
+              }}
               className="border border-dashed border-white/10 rounded-lg p-3 text-center cursor-pointer hover:border-accent-blue/30 transition-colors"
               onClick={() => fileRef.current?.click()}
             >

@@ -293,7 +293,7 @@ function FieldLabel({ children, hint }) {
 
 // ── Empty blank entry ─────────────────────────────────────────────────────────
 
-function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode) {
+function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode, lastEntry) {
   return {
     date,
     fomo:               50,
@@ -301,10 +301,11 @@ function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode) {
     nasdaqNetHL:        '',
     ndxMcsi:            '',
     growthStocks:       '',
-    shortTermTrend:     '',
-    intermediateTrend:  '',
-    longTermTrend:      '',
-    creditConditions:   '',
+    // Pre-fill trend structure + credit from previous day so user only changes what shifted
+    shortTermTrend:     lastEntry?.shortTermTrend    || '',
+    intermediateTrend:  lastEntry?.intermediateTrend || '',
+    longTermTrend:      lastEntry?.longTermTrend     || '',
+    creditConditions:   lastEntry?.creditConditions  || '',
     sleepQuality:       '',
     confidence:         null,
     mentalState:        '',
@@ -1146,10 +1147,11 @@ function LogTab() {
 
   const formInitial = useMemo(() => {
     if (mode === 'edit' && editingEntry) return { ...editingEntry }
-    // Carry forward the most recent risk mode so the user doesn't have to re-select it each day
-    const lastRiskMode = sorted.find(e => e.date < TODAY)?.riskMode ?? sorted[0]?.riskMode ?? null
+    // Carry forward selected fields from the most recent prior entry
+    const lastEntry    = sorted.find(e => e.date < TODAY) ?? sorted[0] ?? null
+    const lastRiskMode = lastEntry?.riskMode ?? null
     // New entry: pre-fill cash deployed + effective exposure (if ATR already resolved)
-    return blankForm(TODAY, autoCash, autoEffective, lastRiskMode)
+    return blankForm(TODAY, autoCash, autoEffective, lastRiskMode, lastEntry)
   }, [mode, editingEntry, autoCash, autoEffective, sorted])
 
   return (
