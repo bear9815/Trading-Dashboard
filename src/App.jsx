@@ -14,6 +14,7 @@ import { useSchwabStore } from './store/useSchwabStore.js'
 import { useTradeStore } from './store/useTradeStore.js'
 import { useJournalStore } from './store/useJournalStore.js'
 import { useMorningStore } from './store/useMorningStore.js'
+import { useHabitsStore } from './store/useHabitsStore.js'
 import { supabase } from './lib/supabase.js'
 import { Loader } from 'lucide-react'
 
@@ -56,6 +57,7 @@ export default function App() {
   const { loadFromCloud, clearLocalState } = useTradeStore()
   const { loadFromCloud: loadJournal, clearLocalState: clearJournal } = useJournalStore()
   const { loadFromCloud: loadMorning, clearLocalState: clearMorning } = useMorningStore()
+  const { loadFromCloud: loadHabits, clearLocalState: clearHabits } = useHabitsStore()
 
   // Apply theme
   useEffect(() => {
@@ -119,6 +121,7 @@ export default function App() {
         loadFromCloud(session.user.id)
         loadJournal(session.user.id)
         loadMorning(session.user.id)
+        loadHabits(session.user.id)
         loadSettings(session.user.id)
         loadSchwabTokens()
       }
@@ -130,6 +133,7 @@ export default function App() {
         loadFromCloud(session.user.id)
         loadJournal(session.user.id)
         loadMorning(session.user.id)
+        loadHabits(session.user.id)
         loadSettings(session.user.id)
         loadSchwabTokens()
       }
@@ -137,6 +141,7 @@ export default function App() {
         clearLocalState()
         clearJournal()
         clearMorning()
+        clearHabits()
       }
     })
 

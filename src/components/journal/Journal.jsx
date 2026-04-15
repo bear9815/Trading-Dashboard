@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Plus, ChevronDown, Trash2, BookOpen, Target } from 'lucide-react'
+import { Plus, ChevronDown, Trash2, BookOpen, Target, Repeat } from 'lucide-react'
 import { useJournalStore } from '../../store/useJournalStore.js'
 import { formatDate } from '../../utils/formatters.js'
 import GoalsTab from './GoalsTab.jsx'
+import HabitsTab from './HabitsTab.jsx'
 
 // ── Journal Entries tab ────────────────────────────────────────────────────
 
@@ -125,8 +126,9 @@ function EntriesTab() {
 // ── Main Journal (tabbed) ──────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'entries', label: 'Journal Entries', icon: BookOpen },
-  { id: 'goals',   label: 'Goals & Priorities', icon: Target },
+  { id: 'entries', label: 'Journal Entries',    icon: BookOpen },
+  { id: 'goals',   label: 'Goals & Priorities', icon: Target   },
+  { id: 'habits',  label: 'Habits',             icon: Repeat   },
 ]
 
 export default function Journal() {
@@ -154,6 +156,7 @@ export default function Journal() {
 
       {tab === 'entries' && <EntriesTab />}
       {tab === 'goals'   && <GoalsTab />}
+      {tab === 'habits'  && <HabitsTab />}
     </div>
   )
 }
