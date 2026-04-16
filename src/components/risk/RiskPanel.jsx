@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useCallback, Fragment, useRef } from 'react'
 import { useColumnResize } from '../../hooks/useColumnResize.js'
-import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck, Settings2 } from 'lucide-react'
+import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck, Settings2, Scissors } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
@@ -775,6 +775,237 @@ function LotPickerModal({ group, onClose, onPickLot, onCloseAll }) {
           <button onClick={onClose} className="flex-1 btn-ghost text-sm">Cancel</button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Derisk Strategy Table ────────────────────────────────────────────────────
+// Systematic partial-exit planner: when a position is down a configurable R
+// trigger, plan a trim of a configurable fraction of size, and show the
+// adjusted upper target (in ATRs) required to still hit the original $ target.
+// Uses _originalStopLoss so calculations are stable under trailing stops.
+function DeriskStrategyTable({ groupedPositions, quotes, atrData, liveBalance, tpMultiplier }) {
+  const [trimTriggerR, setTrimTriggerR] = useState(-0.75) // -0.5, -0.75, -1
+  const [trimFrac,     setTrimFrac]     = useState(1/3)   // 0.25, 1/3, 0.5
+
+  const rows = useMemo(() => {
+    return groupedPositions.map(g => {
+      const entry      = g.entryPrice
+      const origStop   = g._originalStopLoss ?? g.stopLoss
+      const rPerShare  = entry && origStop ? Math.abs(entry - origStop) : 0
+      const q          = quotes.get(g.symbol)
+      const current    = q?.price ?? null
+      const isLong     = (g.position || 'Long').toLowerCase() !== 'short'
+      const pnlPerSh   = current != null && entry != null ? (isLong ? current - entry : entry - current) : 0
+      const curR       = current != null && rPerShare > 0 ? pnlPerSh / rPerShare : null
+      const atrDollar  = atrData.get(g.symbol)?.atr ?? null
+      const atrDist    = atrDollar && current != null && entry != null
+        ? ((isLong ? current - entry : entry - current) / atrDollar)
+        : null
+      const shares     = g.positionSize || 0
+      const triggered  = curR != null && curR <= trimTriggerR
+      const approaching= curR != null && curR <= trimTriggerR / 2 && !triggered
+      const trimShares = triggered ? Math.max(1, Math.round(shares * trimFrac)) : 0
+      const realized   = trimShares * pnlPerSh
+      const remShares  = shares - trimShares
+      const remRiskDol = remShares * rPerShare
+      const remRiskPct = liveBalance > 0 ? (remRiskDol / liveBalance) * 100 : 0
+
+      // Original plan target = starting risk $ × tpMultiplier.
+      // After a trim that realizes `realized` $, remaining shares must earn
+      // (origTpDollar - realized) to still hit the original $ target.
+      const origTpDollar  = shares * rPerShare * tpMultiplier
+      const neededPerSh   = remShares > 0 ? (origTpDollar - realized) / remShares : 0
+      const adjustedTp    = remShares > 0 && entry != null
+        ? entry + (isLong ? 1 : -1) * neededPerSh
+        : null
+      const adjustedTpATR = atrDollar && neededPerSh ? neededPerSh / atrDollar : null
+
+      return {
+        id:           g.id ?? g.symbol,
+        symbol:       g.symbol,
+        isLong,
+        entry,
+        origStop,
+        current,
+        curR,
+        atrDist,
+        shares,
+        trimShares,
+        realized,
+        remRiskPct,
+        adjustedTp,
+        adjustedTpATR,
+        triggered,
+        approaching,
+        hasAtr:       atrDollar != null,
+      }
+    })
+  }, [groupedPositions, quotes, atrData, liveBalance, trimTriggerR, trimFrac, tpMultiplier])
+
+  const triggeredCount = rows.filter(r => r.triggered).length
+  const totalRealized  = rows.reduce((s, r) => s + (r.triggered ? r.realized : 0), 0)
+
+  const trimFracLabel = (f) => f === 0.25 ? '1/4' : f === 0.5 ? '1/2' : '1/3'
+  const SegBtn = ({ active, onClick, children }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-3 py-1 text-xs font-medium rounded border transition-colors ${
+        active
+          ? 'border-accent-blue bg-accent-blue/15 text-accent-blue'
+          : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'
+      }`}
+    >
+      {children}
+    </button>
+  )
+
+  if (groupedPositions.length === 0) return null
+
+  return (
+    <div className="card">
+      <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Exit Strategy</p>
+          <h3 className="text-base font-semibold text-white flex items-center gap-2">
+            <Scissors size={15} className="text-accent-yellow" />
+            Derisk Strategy — Systematic Trim Plan
+          </h3>
+          <p className="text-xs text-gray-500 mt-1 max-w-2xl">
+            When a trade doesn't work out of the gate, trim part of the position to cut the negative R.
+            Remaining shares keep the original dollar target — the adjusted upper target is how far (in ATRs) they now need to travel.
+          </p>
+        </div>
+        <div className="flex items-center gap-4 text-xs">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Trim Trigger</p>
+            <div className="flex gap-1">
+              <SegBtn active={trimTriggerR === -0.5}  onClick={() => setTrimTriggerR(-0.5)}>-0.5 R</SegBtn>
+              <SegBtn active={trimTriggerR === -0.75} onClick={() => setTrimTriggerR(-0.75)}>-0.75 R</SegBtn>
+              <SegBtn active={trimTriggerR === -1}    onClick={() => setTrimTriggerR(-1)}>-1 R</SegBtn>
+            </div>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Trim Amount</p>
+            <div className="flex gap-1">
+              <SegBtn active={trimFrac === 0.25} onClick={() => setTrimFrac(0.25)}>1/4</SegBtn>
+              <SegBtn active={trimFrac === 1/3}  onClick={() => setTrimFrac(1/3)}>1/3</SegBtn>
+              <SegBtn active={trimFrac === 0.5}  onClick={() => setTrimFrac(0.5)}>1/2</SegBtn>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Summary strip */}
+      <div className="flex items-center gap-5 mb-3 text-xs">
+        <div>
+          <span className="text-gray-500">Triggered: </span>
+          <span className={`mono font-semibold ${triggeredCount > 0 ? 'text-accent-red' : 'text-gray-400'}`}>
+            {triggeredCount} / {rows.length}
+          </span>
+        </div>
+        <div>
+          <span className="text-gray-500">Realized if trimmed now: </span>
+          <span className={`mono font-semibold ${totalRealized < 0 ? 'text-accent-red' : 'text-gray-400'}`}>
+            {totalRealized !== 0 ? formatCurrency(totalRealized) : '—'}
+          </span>
+        </div>
+        <div>
+          <span className="text-gray-500">Threshold: </span>
+          <span className="mono font-semibold text-accent-yellow">
+            trim {trimFracLabel(trimFrac)} at {trimTriggerR} R
+          </span>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-800 text-[11px] text-gray-500 uppercase tracking-wider">
+              <th className="text-left  pb-2 pr-3 font-medium">Symbol</th>
+              <th className="text-right pb-2 pr-3 font-medium">Shares</th>
+              <th className="text-right pb-2 pr-3 font-medium">Entry</th>
+              <th className="text-right pb-2 pr-3 font-medium">Current</th>
+              <th className="text-right pb-2 pr-3 font-medium">Cur R</th>
+              <th className="text-right pb-2 pr-3 font-medium">ATR Dist</th>
+              <th className="text-right pb-2 pr-3 font-medium">Trim Shares</th>
+              <th className="text-right pb-2 pr-3 font-medium">Realized $</th>
+              <th className="text-right pb-2 pr-3 font-medium">Rem Risk %</th>
+              <th className="text-right pb-2 pl-3 font-medium">Adj Target</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const rowBg = r.triggered
+                ? 'bg-accent-red/5 hover:bg-accent-red/10'
+                : r.approaching
+                ? 'bg-accent-yellow/5 hover:bg-accent-yellow/10'
+                : 'hover:bg-white/[0.02]'
+              return (
+                <tr key={r.id} className={`border-b border-gray-900 ${rowBg} transition-colors`}>
+                  <td className="py-2 pr-3">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-white">
+                        <TickerTooltip symbol={r.symbol}>{r.symbol}</TickerTooltip>
+                      </span>
+                      {!r.isLong && <span className="text-[10px] px-1 rounded bg-accent-red/20 text-accent-red">SHORT</span>}
+                      {r.triggered && <span className="text-[10px] px-1 rounded bg-accent-red/20 text-accent-red font-semibold">TRIM</span>}
+                    </div>
+                  </td>
+                  <td className="py-2 pr-3 text-right mono">{r.shares.toLocaleString()}</td>
+                  <td className="py-2 pr-3 text-right mono text-gray-400">
+                    {r.entry != null ? `$${r.entry.toFixed(2)}` : '—'}
+                  </td>
+                  <td className="py-2 pr-3 text-right mono">
+                    {r.current != null ? `$${r.current.toFixed(2)}` : '—'}
+                  </td>
+                  <td className={`py-2 pr-3 text-right mono font-semibold ${
+                    r.curR == null ? 'text-gray-600'
+                    : r.curR <= trimTriggerR ? 'text-accent-red'
+                    : r.curR < 0 ? 'text-accent-yellow'
+                    : 'text-accent-green'
+                  }`}>
+                    {r.curR != null ? `${r.curR >= 0 ? '+' : ''}${r.curR.toFixed(2)}R` : '—'}
+                  </td>
+                  <td className="py-2 pr-3 text-right mono text-gray-400">
+                    {r.atrDist != null ? `${r.atrDist >= 0 ? '+' : ''}${r.atrDist.toFixed(2)}` : (r.hasAtr ? '—' : 'no ATR')}
+                  </td>
+                  <td className="py-2 pr-3 text-right mono">
+                    {r.triggered
+                      ? <span className="text-accent-red font-semibold">{r.trimShares.toLocaleString()}</span>
+                      : <span className="text-gray-600">—</span>}
+                  </td>
+                  <td className="py-2 pr-3 text-right mono">
+                    {r.triggered
+                      ? <span className={r.realized < 0 ? 'text-accent-red' : 'text-accent-green'}>{formatCurrency(r.realized)}</span>
+                      : <span className="text-gray-600">—</span>}
+                  </td>
+                  <td className="py-2 pr-3 text-right mono text-accent-yellow">
+                    {r.triggered ? `${r.remRiskPct.toFixed(2)}%` : '—'}
+                  </td>
+                  <td className="py-2 pl-3 text-right mono">
+                    {r.triggered && r.adjustedTp != null ? (
+                      <div className="flex flex-col items-end leading-tight">
+                        <span className="text-accent-blue">${r.adjustedTp.toFixed(2)}</span>
+                        {r.adjustedTpATR != null && (
+                          <span className="text-[10px] text-gray-500">{r.adjustedTpATR.toFixed(2)} ATR</span>
+                        )}
+                      </div>
+                    ) : <span className="text-gray-600">—</span>}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-[11px] text-gray-600 mt-3 leading-relaxed">
+        <span className="text-gray-500 font-medium">How to read:</span> Cur R uses the <em>original</em> stop at entry (not your trailed stop),
+        so the trigger stays honest. Adj Target is the price the remaining shares must reach to still hit your original {tpMultiplier}R dollar
+        profit after the trim — shown in dollars and ATRs so you can judge feasibility.
+      </p>
     </div>
   )
 }
@@ -1875,6 +2106,15 @@ export default function RiskPanel({ selectedAccount }) {
           </>
         )}
       </div>
+
+      {/* ── Derisk Strategy Table ────────────────────────────────────────── */}
+      <DeriskStrategyTable
+        groupedPositions={groupedPositions}
+        quotes={quotes}
+        atrData={atrData}
+        liveBalance={liveBalance}
+        tpMultiplier={tpMultiplier}
+      />
 
       {/* ── Max Pain Scenario + Portfolio Beta (2-col) ──────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
