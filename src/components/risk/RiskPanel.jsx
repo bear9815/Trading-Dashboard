@@ -791,14 +791,15 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
   const [total,     setTotal]     = useState(0)
   const [errCount,  setErrCount]  = useState(0)
 
-  // One-time cleanup: wipe bad maxAdverseR data from all closed trades.
-  // Historical MAE was computed using full daily lows (including pre-entry and
-  // post-exit moves), making those numbers invalid. We only track forward for
-  // open positions, so closed trade data is no longer needed or shown.
+  // One-time cleanup: wipe maxAdverseR/maxAdversePrice from ALL closed trades.
+  // Old data was skewed by full-day lows that included pre-entry and post-exit
+  // moves. Bump the flag version here whenever a fresh wipe is needed.
+  // Going forward, only open-trade MAE is computed; closed trades lock their
+  // value at the moment they close and are preserved for future analytics.
   useEffect(() => {
-    const FLAG = 'mae-closed-cleanup-v1'
+    const FLAG = 'mae-closed-cleanup-v2'
     if (localStorage.getItem(FLAG)) return
-    const closed = allTrades.filter(t => t.status !== 'Open' && (t.maxAdverseR != null || t.maxAdversePrice != null))
+    const closed = allTrades.filter(t => t.status !== 'Open')
     if (closed.length > 0) {
       closed.forEach(t => updateTrade(t.id, { maxAdverseR: null, maxAdversePrice: null }))
     }
