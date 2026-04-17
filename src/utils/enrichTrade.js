@@ -203,14 +203,6 @@ export function enrichTrade(trade) {
     }
   }
 
-  // ── 7. Clear MAE data for non-Open trades ────────────────────────────────
-  // Stop Proximity only tracks open positions. Once a trade closes, wipe any
-  // maxAdverseR/maxAdversePrice so it can never surface in calculations.
-  if (result.status !== 'Open') {
-    result.maxAdverseR     = null
-    result.maxAdversePrice = null
-  }
-
   return result
 }
 
