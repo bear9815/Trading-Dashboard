@@ -810,6 +810,28 @@ export async function computeTradeMAEMFE(trade) {
     }
   } catch { /* intraday unavailable for old dates — fall through to daily */ }
 
+  // ── Exit day: intraday from market open to exit time ────────────────────
+  // On the day a trade closes, only price action up to the exit moment counts.
+  // Skipped when entry and exit share the same date (entry-day intraday already
+  // covers that session, and we can't have an exit before an entry).
+  let exitDayHandled = false
+  if (exitDateStr !== entryDateStr) {
+    try {
+      const exitMs         = new Date(exitDate).getTime()
+      const exitDayStartMs = new Date(exitDateStr + 'T00:00:00Z').getTime()
+      // +5-min buffer so the final 5-min bar that straddles exitMs is included
+      const bars       = await fetchIntradayBars(trade.symbol, exitDayStartMs, exitMs + 300_000)
+      const beforeExit = bars.filter(b => b.unixMs < exitMs)
+      if (beforeExit.length > 0) {
+        for (const b of beforeExit) {
+          if (b.low  < maxLow)  maxLow  = b.low
+          if (b.high > maxHigh) maxHigh = b.high
+        }
+        exitDayHandled = true
+      }
+    } catch { /* fall through to daily candle */ }
+  }
+
   // ── Remaining days: full daily OHLCV ────────────────────────────────────
   // Start from entry date (or day after if intraday already handled it).
   const dailyFrom = new Date(entryDateStr)
@@ -832,8 +854,10 @@ export async function computeTradeMAEMFE(trade) {
       const conservativeHigh = Math.min(c.high, entry) // shorts: worst is entry itself
       if (conservativeLow  < maxLow)  maxLow  = conservativeLow
       if (conservativeHigh > maxHigh) maxHigh = conservativeHigh
+    } else if (c.time === exitDateStr && exitDayHandled) {
+      // Skip: exit-day intraday already covered this day with exact timing
     } else if (c.time !== entryDateStr) {
-      // All other days: use full daily OHLCV
+      // Middle days: use full daily OHLCV
       if (c.low  < maxLow)  maxLow  = c.low
       if (c.high > maxHigh) maxHigh = c.high
     }

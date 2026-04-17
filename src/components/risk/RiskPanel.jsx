@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useCallback, Fragment, useRef } from 'react'
 import { useColumnResize } from '../../hooks/useColumnResize.js'
-import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck, Settings2, Scissors } from 'lucide-react'
+import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck, Settings2, Scissors, Pencil, Check } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
@@ -790,14 +790,15 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
   const [done,      setDone]      = useState(0)
   const [total,     setTotal]     = useState(0)
   const [errCount,  setErrCount]  = useState(0)
+  const [sortCol,   setSortCol]   = useState('pct')
+  const [sortDir,   setSortDir]   = useState('desc')
+  const [editingId, setEditingId] = useState(null)
 
-  // One-time cleanup: wipe maxAdverseR/maxAdversePrice from ALL closed trades.
-  // Old data was skewed by full-day lows that included pre-entry and post-exit
-  // moves. Bump the flag version here whenever a fresh wipe is needed.
-  // Going forward, only open-trade MAE is computed; closed trades lock their
-  // value at the moment they close and are preserved for future analytics.
+  // One-time cleanup: wipe all closed-trade MAE data. enrichTrade now prevents
+  // new data from accumulating, but existing Supabase records need a one-time flush.
+  // Bump the flag version to force a fresh pass after any logic change.
   useEffect(() => {
-    const FLAG = 'mae-closed-cleanup-v2'
+    const FLAG = 'mae-closed-cleanup-v3'
     if (localStorage.getItem(FLAG)) return
     const closed = allTrades.filter(t => t.status !== 'Open')
     if (closed.length > 0) {
@@ -806,8 +807,25 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
     localStorage.setItem(FLAG, '1')
   }, []) // eslint-disable-line
 
+  function handleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    else { setSortCol(col); setSortDir('desc') }
+  }
+
+  function saveManualPrice(row, val) {
+    setEditingId(null)
+    const price = parseFloat(val)
+    if (isNaN(price) || price <= 0) return
+    const rawR = row.isLong
+      ? (price - row.entry) / row.riskPerSh
+      : (row.entry - price) / row.riskPerSh
+    updateTrade(row.id, {
+      maxAdverseR:     Math.round(rawR * 1000) / 1000,
+      maxAdversePrice: Math.round(price * 100) / 100,
+    })
+  }
+
   async function computeMAE(forceRecompute = false) {
-    // Only process open trades — closed trades are never computed or shown.
     const toProcess = openTrades.filter(t => {
       if (!t.entryPrice) return false
       if (!(t._originalStopLoss ?? t.stopLoss)) return false
@@ -823,8 +841,6 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
     for (let i = 0; i < toProcess.length; i++) {
       const trade = toProcess[i]
       try {
-        // Pass the current full ISO timestamp as the "through" date so the
-        // exit-day intraday fetch uses right now, not midnight.
         const tradeCopy = { ...trade, exits: [{ date: new Date().toISOString() }] }
         const result    = await computeTradeMAEMFE(tradeCopy)
         const entry     = trade.entryPrice
@@ -846,38 +862,51 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
     setComputing(false)
   }
 
-  const rows = useMemo(() => openTrades
-    .map(t => {
-      const entry    = t.entryPrice
-      const origStop = t._originalStopLoss ?? t.stopLoss
-      if (!entry || !origStop) return null
-      const riskPerSh = Math.abs(entry - origStop)
-      const isLong    = (t.position || 'Long').toLowerCase() !== 'short'
-      const cp        = quotes.get(t.symbol)?.price ?? null
-      const liveR     = cp != null && riskPerSh > 0
-        ? (isLong ? cp - entry : entry - cp) / riskPerSh
-        : null
-      // Worst R = most negative between stored MAE and live price right now
-      const stored = t.maxAdverseR ?? null
-      const worstR = stored != null && liveR != null && liveR < stored ? liveR
-        : (stored ?? (liveR != null && liveR < 0 ? liveR : null))
-      const proximityPct = worstR != null ? Math.min(100, Math.abs(worstR) * 100) : null
-      return {
-        id: t.id, symbol: t.symbol, isLong,
-        entry, origStop, riskPerSh, liveR, worstR,
-        worstPrice:   t.maxAdversePrice ?? null,
-        proximityPct,
-        hasData:      worstR != null,
-      }
-    })
-    .filter(Boolean)
-    .sort((a, b) => {
-      if (a.proximityPct == null && b.proximityPct == null) return 0
-      if (a.proximityPct == null) return 1
-      if (b.proximityPct == null) return -1
-      return b.proximityPct - a.proximityPct
-    }),
-  [openTrades, quotes])
+  const rows = useMemo(() => {
+    const mapped = openTrades
+      .map(t => {
+        const entry    = t.entryPrice
+        const origStop = t._originalStopLoss ?? t.stopLoss
+        if (!entry || !origStop) return null
+        const riskPerSh = Math.abs(entry - origStop)
+        const isLong    = (t.position || 'Long').toLowerCase() !== 'short'
+        const cp        = quotes.get(t.symbol)?.price ?? null
+        const liveR     = cp != null && riskPerSh > 0
+          ? (isLong ? cp - entry : entry - cp) / riskPerSh
+          : null
+        const stored = t.maxAdverseR ?? null
+        const worstR = stored != null && liveR != null && liveR < stored ? liveR
+          : (stored ?? (liveR != null && liveR < 0 ? liveR : null))
+        const proximityPct = worstR != null ? Math.min(100, Math.abs(worstR) * 100) : null
+        return {
+          id: t.id, symbol: t.symbol, isLong,
+          entry, origStop, riskPerSh, liveR, worstR,
+          worstPrice:   t.maxAdversePrice ?? null,
+          proximityPct,
+          hasData:      worstR != null,
+        }
+      })
+      .filter(Boolean)
+
+    const nullLast = (a, b, fn) => {
+      const av = fn(a), bv = fn(b)
+      if (av == null && bv == null) return 0
+      if (av == null) return 1
+      if (bv == null) return -1
+      return av < bv ? -1 : av > bv ? 1 : 0
+    }
+    const dir = sortDir === 'desc' ? -1 : 1
+    const comparators = {
+      symbol:     (a, b) => dir * a.symbol.localeCompare(b.symbol),
+      entry:      (a, b) => dir * nullLast(a, b, r => r.entry),
+      stop:       (a, b) => dir * nullLast(a, b, r => r.origStop),
+      risk:       (a, b) => dir * nullLast(a, b, r => r.riskPerSh),
+      worstPrice: (a, b) => dir * nullLast(a, b, r => r.worstPrice),
+      worstR:     (a, b) => dir * nullLast(a, b, r => r.worstR),
+      pct:        (a, b) => dir * nullLast(a, b, r => r.proximityPct),
+    }
+    return mapped.sort(comparators[sortCol] ?? comparators.pct)
+  }, [openTrades, quotes, sortCol, sortDir])
 
   const pendingCount = openTrades.filter(t =>
     t.entryPrice && (t._originalStopLoss ?? t.stopLoss) && t.maxAdverseR == null
@@ -885,6 +914,23 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
 
   const pctColor = p => p == null ? 'text-gray-600' : p >= 90 ? 'text-accent-red' : p >= 75 ? 'text-orange-400' : p >= 50 ? 'text-accent-yellow' : 'text-accent-green'
   const barColor = p => p == null ? 'bg-gray-700'   : p >= 90 ? 'bg-accent-red'   : p >= 75 ? 'bg-orange-400'   : p >= 50 ? 'bg-accent-yellow'   : 'bg-accent-green'
+
+  function SortTh({ col, label, align = 'right' }) {
+    const active = sortCol === col
+    return (
+      <th
+        className={`pb-2 pr-3 font-medium cursor-pointer select-none hover:text-gray-300 transition-colors text-${align}`}
+        onClick={() => handleSort(col)}
+      >
+        <span className={`inline-flex items-center gap-0.5 ${align === 'right' ? 'justify-end w-full' : ''}`}>
+          {label}
+          <span className={`text-[10px] ml-0.5 ${active ? 'text-accent-blue' : 'text-gray-700'}`}>
+            {active ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
+          </span>
+        </span>
+      </th>
+    )
+  }
 
   if (openTrades.length === 0) return null
 
@@ -899,7 +945,7 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
           </h3>
           <p className="text-xs text-gray-500 mt-1 max-w-2xl">
             How close has price gotten to your original stop on each open trade?
-            100% = stop reached. Entry day measures from your trade time onward — no pre-entry noise.
+            100% = stop reached. Click any column header to sort. Click the pencil to override worst price.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -938,19 +984,19 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800 text-[11px] text-gray-500 uppercase tracking-wider">
-                <th className="text-left  pb-2 pr-3 font-medium">Symbol</th>
-                <th className="text-right pb-2 pr-3 font-medium">Entry</th>
-                <th className="text-right pb-2 pr-3 font-medium">Orig Stop</th>
-                <th className="text-right pb-2 pr-3 font-medium">1R Dist</th>
-                <th className="text-right pb-2 pr-3 font-medium">Worst Price</th>
-                <th className="text-right pb-2 pr-3 font-medium">Max Adv R</th>
-                <th className="text-right pb-2 pr-3 font-medium">Stop Proximity</th>
-                <th className="text-left  pb-2 pl-3 font-medium">Close-Call</th>
+                <SortTh col="symbol"     label="Symbol"         align="left" />
+                <SortTh col="entry"      label="Entry" />
+                <SortTh col="stop"       label="Orig Stop" />
+                <SortTh col="risk"       label="1R Dist" />
+                <SortTh col="worstPrice" label="Worst Price" />
+                <SortTh col="worstR"     label="Max Adv R" />
+                <SortTh col="pct"        label="Stop Proximity" />
+                <th className="text-left pb-2 pl-3 font-medium">Close-Call</th>
               </tr>
             </thead>
             <tbody>
               {rows.map(r => (
-                <tr key={r.id} className="border-b border-gray-900 hover:bg-white/[0.02] transition-colors">
+                <tr key={r.id} className="border-b border-gray-900 hover:bg-white/[0.02] transition-colors group">
                   <td className="py-2 pr-3">
                     <div className="flex items-center gap-1.5">
                       <span className="font-medium text-white mono">{r.symbol}</span>
@@ -962,12 +1008,44 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
                   <td className="py-2 pr-3 text-right mono text-gray-300">${r.entry.toFixed(2)}</td>
                   <td className="py-2 pr-3 text-right mono text-gray-400">${r.origStop.toFixed(2)}</td>
                   <td className="py-2 pr-3 text-right mono text-gray-500">${r.riskPerSh.toFixed(2)}</td>
+
+                  {/* Worst Price — editable */}
                   <td className="py-2 pr-3 text-right mono">
-                    {r.worstPrice != null
-                      ? <span className={r.proximityPct >= 75 ? 'text-accent-red' : 'text-gray-300'}>${r.worstPrice.toFixed(2)}</span>
-                      : <span className="text-gray-600">—</span>
-                    }
+                    {editingId === r.id ? (
+                      <div className="flex items-center justify-end gap-1">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="w-20 bg-surface-300 text-white mono text-right text-xs px-1.5 py-0.5 rounded border border-accent-blue/50 outline-none"
+                          defaultValue={r.worstPrice != null ? r.worstPrice.toFixed(2) : ''}
+                          placeholder="price"
+                          autoFocus
+                          onKeyDown={e => {
+                            if (e.key === 'Enter')  saveManualPrice(r, e.target.value)
+                            if (e.key === 'Escape') setEditingId(null)
+                          }}
+                          onBlur={e => saveManualPrice(r, e.target.value)}
+                        />
+                        <Check size={11} className="text-accent-green shrink-0" />
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-1.5">
+                        {r.worstPrice != null
+                          ? <span className={r.proximityPct >= 75 ? 'text-accent-red' : 'text-gray-300'}>${r.worstPrice.toFixed(2)}</span>
+                          : <span className="text-gray-600">—</span>
+                        }
+                        <button
+                          onClick={() => setEditingId(r.id)}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-gray-300"
+                          title="Override worst price manually"
+                        >
+                          <Pencil size={10} />
+                        </button>
+                      </div>
+                    )}
                   </td>
+
                   <td className={`py-2 pr-3 text-right mono font-semibold ${pctColor(r.proximityPct)}`}>
                     {r.worstR != null ? `${r.worstR.toFixed(2)}R` : '—'}
                   </td>
