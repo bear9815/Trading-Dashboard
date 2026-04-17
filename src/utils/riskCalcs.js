@@ -11,7 +11,13 @@ export function calcRiskPerTrade(trade) {
   // size and should never be used for current-risk calculations on partial exits.
   const effectiveSize = trade.remainingShares ?? trade.positionSize
   if (!trade.stopLoss || !trade.entryPrice || !effectiveSize) return 0
-  const riskPerShare = Math.abs(trade.entryPrice - trade.stopLoss)
+  const isShort = (trade.position || 'Long').toLowerCase().includes('short')
+  // Directional risk: once a trailing stop passes through entry (locked profit),
+  // there is no remaining downside risk — clamp to 0 rather than growing as the
+  // stop continues to rise above entry.
+  const riskPerShare = isShort
+    ? Math.max(0, trade.stopLoss   - trade.entryPrice)   // short: stop above entry = at risk
+    : Math.max(0, trade.entryPrice - trade.stopLoss)     // long:  stop below entry = at risk
   return riskPerShare * effectiveSize
 }
 
@@ -115,7 +121,12 @@ export function buildOpenPositionRisk(openTrades, accountBalance) {
     const effectiveSize = t.remainingShares ?? t.positionSize
     const riskDollar    = calcRiskPerTrade(t)
     const riskPct       = accountBalance ? (riskDollar / accountBalance) * 100 : 0
-    const rPerShare     = t.stopLoss && t.entryPrice ? Math.abs(t.entryPrice - t.stopLoss) : 0
+    const isShort2  = (t.position || 'Long').toLowerCase().includes('short')
+    const rPerShare = t.stopLoss && t.entryPrice
+      ? (isShort2
+          ? Math.max(0, t.stopLoss   - t.entryPrice)
+          : Math.max(0, t.entryPrice - t.stopLoss))
+      : 0
     return {
       ...t,
       positionSize: effectiveSize,   // override for display + grouping math
