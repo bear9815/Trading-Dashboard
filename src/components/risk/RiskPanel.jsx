@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useCallback, Fragment, useRef } from 'react'
 import { useColumnResize } from '../../hooks/useColumnResize.js'
-import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck, Settings2, Scissors, Sparkles } from 'lucide-react'
+import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck, Settings2, Scissors } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
@@ -8,7 +8,6 @@ import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
 import { buildOpenPositionRisk, calcNEP, calcNER, calcEffectiveExposure } from '../../utils/riskCalcs.js'
 import { formatCurrency } from '../../utils/formatters.js'
 import { calcWinRate, calcAvgR } from '../../utils/metrics.js'
-import { analyzeStopPlacement } from '../../utils/ai.js'
 import { fetchQuotes, fetchATR14, fetchSectors, computeTradeMAEMFE } from '../../utils/marketData.js'
 import OpenHeatMeter from './OpenHeatMeter.jsx'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
@@ -781,24 +780,34 @@ function LotPickerModal({ group, onClose, onPickLot, onCloseAll }) {
 }
 
 // ── Stop Proximity (MAE) Table ────────────────────────────────────────────────
-// Tracks the maximum adverse excursion for every trade — how close price got to
-// the original stop. Color-coded bar from safe (green) to near stop (red).
-// Fetches daily OHLCV via Yahoo Finance to cover the full holding period;
-// also auto-updates from live quotes whenever prices are refreshed.
+// Open trades only. Tracks how close price got to the original stop as a %
+// of the 1R distance. Entry day uses Schwab intraday from entry time onward
+// so pre-trade session lows don't inflate the reading.
+// One-time cleanup on mount wipes any bad maxAdverseR stored on closed trades.
 function StopProximityTable({ allTrades, openTrades, quotes }) {
   const { updateTrade } = useTradeStore()
-  const { apiKey } = useSettingsStore()
-  const [computing,  setComputing]  = useState(false)
-  const [done,       setDone]       = useState(0)
-  const [total,      setTotal]      = useState(0)
-  const [errCount,   setErrCount]   = useState(0)
-  const [showClosed, setShowClosed] = useState(true)
-  const [aiLoading,  setAiLoading]  = useState(false)
-  const [aiResult,   setAiResult]   = useState(null)
-  const [aiError,    setAiError]    = useState(null)
+  const [computing, setComputing] = useState(false)
+  const [done,      setDone]      = useState(0)
+  const [total,     setTotal]     = useState(0)
+  const [errCount,  setErrCount]  = useState(0)
+
+  // One-time cleanup: wipe bad maxAdverseR data from all closed trades.
+  // Historical MAE was computed using full daily lows (including pre-entry and
+  // post-exit moves), making those numbers invalid. We only track forward for
+  // open positions, so closed trade data is no longer needed or shown.
+  useEffect(() => {
+    const FLAG = 'mae-closed-cleanup-v1'
+    if (localStorage.getItem(FLAG)) return
+    const closed = allTrades.filter(t => t.status !== 'Open' && (t.maxAdverseR != null || t.maxAdversePrice != null))
+    if (closed.length > 0) {
+      closed.forEach(t => updateTrade(t.id, { maxAdverseR: null, maxAdversePrice: null }))
+    }
+    localStorage.setItem(FLAG, '1')
+  }, []) // eslint-disable-line
 
   async function computeMAE(forceRecompute = false) {
-    const toProcess = allTrades.filter(t => {
+    // Only process open trades — closed trades are never computed or shown.
+    const toProcess = openTrades.filter(t => {
       if (!t.entryPrice) return false
       if (!(t._originalStopLoss ?? t.stopLoss)) return false
       return forceRecompute || t.maxAdverseR == null
@@ -813,20 +822,17 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
     for (let i = 0; i < toProcess.length; i++) {
       const trade = toProcess[i]
       try {
-        const isOpen = trade.status === 'Open'
-        // For open trades, extend the date range to today so we capture the full move
-        const tradeCopy = isOpen
-          ? { ...trade, exits: [{ date: new Date().toISOString().slice(0, 10) }] }
-          : trade
-        const result = await computeTradeMAEMFE(tradeCopy)
-        const entry       = trade.entryPrice
-        const origStop    = trade._originalStopLoss ?? trade.stopLoss
-        const riskPerSh   = Math.abs(entry - origStop)
-        const isLong      = (trade.position || 'Long').toLowerCase() !== 'short'
+        // Pass the current full ISO timestamp as the "through" date so the
+        // exit-day intraday fetch uses right now, not midnight.
+        const tradeCopy = { ...trade, exits: [{ date: new Date().toISOString() }] }
+        const result    = await computeTradeMAEMFE(tradeCopy)
+        const entry     = trade.entryPrice
+        const origStop  = trade._originalStopLoss ?? trade.stopLoss
+        const riskPerSh = Math.abs(entry - origStop)
+        const isLong    = (trade.position || 'Long').toLowerCase() !== 'short'
         if (result && riskPerSh > 0) {
-          const maeR        = Math.round((result.mae / riskPerSh) * 1000) / 1000
-          // Derive worst adverse price from the dollar MAE
-          const worstPrice  = Math.round((isLong ? entry + result.mae : entry - result.mae) * 100) / 100
+          const maeR       = Math.round((result.mae / riskPerSh) * 1000) / 1000
+          const worstPrice = Math.round((isLong ? entry + result.mae : entry - result.mae) * 100) / 100
           updateTrade(trade.id, { maxAdverseR: maeR, maxAdversePrice: worstPrice })
         }
       } catch (err) {
@@ -839,80 +845,47 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
     setComputing(false)
   }
 
-  const rows = useMemo(() => {
-    const closed = showClosed ? allTrades.filter(t => t.status !== 'Open') : []
-    const all    = [...openTrades, ...closed]
+  const rows = useMemo(() => openTrades
+    .map(t => {
+      const entry    = t.entryPrice
+      const origStop = t._originalStopLoss ?? t.stopLoss
+      if (!entry || !origStop) return null
+      const riskPerSh = Math.abs(entry - origStop)
+      const isLong    = (t.position || 'Long').toLowerCase() !== 'short'
+      const cp        = quotes.get(t.symbol)?.price ?? null
+      const liveR     = cp != null && riskPerSh > 0
+        ? (isLong ? cp - entry : entry - cp) / riskPerSh
+        : null
+      // Worst R = most negative between stored MAE and live price right now
+      const stored = t.maxAdverseR ?? null
+      const worstR = stored != null && liveR != null && liveR < stored ? liveR
+        : (stored ?? (liveR != null && liveR < 0 ? liveR : null))
+      const proximityPct = worstR != null ? Math.min(100, Math.abs(worstR) * 100) : null
+      return {
+        id: t.id, symbol: t.symbol, isLong,
+        entry, origStop, riskPerSh, liveR, worstR,
+        worstPrice:   t.maxAdversePrice ?? null,
+        proximityPct,
+        hasData:      worstR != null,
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.proximityPct == null && b.proximityPct == null) return 0
+      if (a.proximityPct == null) return 1
+      if (b.proximityPct == null) return -1
+      return b.proximityPct - a.proximityPct
+    }),
+  [openTrades, quotes])
 
-    return all
-      .map(t => {
-        const entry    = t.entryPrice
-        const origStop = t._originalStopLoss ?? t.stopLoss
-        if (!entry || !origStop) return null
-        const riskPerSh = Math.abs(entry - origStop)
-        const isLong    = (t.position || 'Long').toLowerCase() !== 'short'
-        const isOpen    = t.status === 'Open'
-        const cp        = isOpen ? (quotes.get(t.symbol)?.price ?? null) : null
-        const liveR     = cp != null && riskPerSh > 0
-          ? (isLong ? cp - entry : entry - cp) / riskPerSh
-          : null
-        // Worst R = most negative between stored historical MAE and live price
-        const stored  = t.maxAdverseR ?? null
-        const worstR  = stored != null && liveR != null && liveR < stored ? liveR
-          : (stored ?? (liveR != null && liveR < 0 ? liveR : null))
-        const proximityPct = worstR != null ? Math.min(100, Math.abs(worstR) * 100) : null
-        return {
-          id:           t.id,
-          symbol:       t.symbol,
-          isLong,
-          isOpen,
-          entry,
-          origStop,
-          riskPerSh,
-          liveR,
-          worstR,
-          worstPrice:   t.maxAdversePrice ?? null,
-          proximityPct,
-          hasData:      worstR != null,
-          status:       t.status,
-        }
-      })
-      .filter(Boolean)
-      .sort((a, b) => {
-        if (a.proximityPct == null && b.proximityPct == null) return 0
-        if (a.proximityPct == null) return 1
-        if (b.proximityPct == null) return -1
-        return b.proximityPct - a.proximityPct
-      })
-  }, [allTrades, openTrades, quotes, showClosed])
-
-  const pendingCount = allTrades.filter(t => {
-    if (!t.entryPrice) return false
-    if (!(t._originalStopLoss ?? t.stopLoss)) return false
-    return t.maxAdverseR == null
-  }).length
-
-  const closedWithMAE = allTrades.filter(t => t.status !== 'Open' && t.maxAdverseR != null).length
-  const closedCount   = allTrades.filter(t => t.status !== 'Open').length
-  const hasAnyData    = rows.some(r => r.hasData)
-  const canRunAI      = closedWithMAE >= 5
-
-  async function runAI() {
-    if (!apiKey) { setAiError('Add your Gemini API key in Settings to use AI suggestions.'); return }
-    setAiLoading(true)
-    setAiError(null)
-    setAiResult(null)
-    try {
-      const result = await analyzeStopPlacement(allTrades, apiKey)
-      setAiResult(result)
-    } catch (err) {
-      setAiError(err.message)
-    } finally {
-      setAiLoading(false)
-    }
-  }
+  const pendingCount = openTrades.filter(t =>
+    t.entryPrice && (t._originalStopLoss ?? t.stopLoss) && t.maxAdverseR == null
+  ).length
 
   const pctColor = p => p == null ? 'text-gray-600' : p >= 90 ? 'text-accent-red' : p >= 75 ? 'text-orange-400' : p >= 50 ? 'text-accent-yellow' : 'text-accent-green'
   const barColor = p => p == null ? 'bg-gray-700'   : p >= 90 ? 'bg-accent-red'   : p >= 75 ? 'bg-orange-400'   : p >= 50 ? 'bg-accent-yellow'   : 'bg-accent-green'
+
+  if (openTrades.length === 0) return null
 
   return (
     <div className="card">
@@ -924,11 +897,11 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
             Stop Proximity — Max Close Call
           </h3>
           <p className="text-xs text-gray-500 mt-1 max-w-2xl">
-            How close did price get to your original stop? 100% means price reached the stop.
-            Entry day uses intraday data (Schwab) from your trade time — not the full-day low.
+            How close has price gotten to your original stop on each open trade?
+            100% = stop reached. Entry day measures from your trade time onward — no pre-entry noise.
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
           {computing && (
             <span className="text-xs text-gray-400 mono">{done}/{total}{errCount > 0 ? ` · ${errCount} err` : ''}</span>
           )}
@@ -939,37 +912,25 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
             onClick={() => computeMAE(false)}
             disabled={computing || pendingCount === 0}
             className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-40"
-            title="Fetch OHLCV history — entry day uses Schwab intraday from trade time; fallback to Yahoo Finance"
+            title="Fetch intraday + OHLCV from Schwab/Yahoo to compute accurate MAE for open trades"
           >
             <RefreshCw size={12} className={computing ? 'animate-spin' : ''} />
             {computing ? 'Computing…' : `Fetch MAE${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
           </button>
-          {hasAnyData && !computing && (
-            <button
-              onClick={() => computeMAE(true)}
-              className="btn-ghost text-xs text-gray-500"
-              title="Recompute MAE for all trades from scratch"
-            >
-              Recompute All
-            </button>
-          )}
-          {canRunAI && (
-            <button
-              onClick={runAI}
-              disabled={aiLoading}
-              className="btn-ghost text-xs flex items-center gap-1.5 text-accent-blue hover:text-accent-blue disabled:opacity-40"
-              title={`AI analyzes your ${closedWithMAE} trades with MAE data and recommends stop & trim rules`}
-            >
-              <Sparkles size={12} className={aiLoading ? 'animate-pulse' : ''} />
-              {aiLoading ? 'Analyzing…' : 'AI Suggestion'}
-            </button>
-          )}
+          <button
+            onClick={() => computeMAE(true)}
+            disabled={computing || openTrades.length === 0}
+            className="btn-ghost text-xs text-gray-500 disabled:opacity-40"
+            title="Recompute MAE for all open trades"
+          >
+            Refresh All
+          </button>
         </div>
       </div>
 
       {rows.length === 0 ? (
         <div className="rounded-lg bg-surface-200 px-4 py-5 text-xs text-gray-500 text-center">
-          No trades with entry + stop data. Click <strong>Fetch MAE</strong> to pull historical price data.
+          No open trades with entry + stop data.
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -988,22 +949,13 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
             </thead>
             <tbody>
               {rows.map(r => (
-                <tr
-                  key={r.id}
-                  className={`border-b border-gray-900 transition-colors ${
-                    r.isOpen ? 'hover:bg-white/[0.02]' : 'opacity-70 hover:opacity-100 hover:bg-white/[0.02]'
-                  }`}
-                >
+                <tr key={r.id} className="border-b border-gray-900 hover:bg-white/[0.02] transition-colors">
                   <td className="py-2 pr-3">
                     <div className="flex items-center gap-1.5">
                       <span className="font-medium text-white mono">{r.symbol}</span>
                       {!r.isLong && (
                         <span className="text-[9px] px-1 rounded bg-accent-red/20 text-accent-red">SHORT</span>
                       )}
-                      {r.isOpen
-                        ? <span className="text-[9px] px-1 rounded bg-accent-blue/20 text-accent-blue">OPEN</span>
-                        : <span className="text-[9px] px-1 rounded bg-gray-700/60 text-gray-400">{r.status?.toUpperCase()}</span>
-                      }
                     </div>
                   </td>
                   <td className="py-2 pr-3 text-right mono text-gray-300">${r.entry.toFixed(2)}</td>
@@ -1045,129 +997,12 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
         </div>
       )}
 
-      <div className="flex items-center gap-5 mt-3 text-[11px] text-gray-600 flex-wrap">
-        <span>
-          <span className="text-accent-green">■</span> 0–50% safe ·{' '}
-          <span className="text-accent-yellow">■</span> 50–75% close ·{' '}
-          <span className="text-orange-400">■</span> 75–90% danger ·{' '}
-          <span className="text-accent-red">■</span> 90–100% near stop
-        </span>
-        {closedCount > 0 && (
-          <button
-            onClick={() => setShowClosed(s => !s)}
-            className="text-gray-500 hover:text-gray-300 transition-colors underline"
-          >
-            {showClosed ? 'Hide' : 'Show'} closed trades ({closedCount})
-          </button>
-        )}
-        <span className="text-gray-700">
-          Entry day: Schwab intraday from trade time · other days: daily OHLCV · live price auto-updates open trades
-        </span>
-      </div>
-
-      {/* ── AI Suggestion Panel ─────────────────────────────────────────────── */}
-      {aiError && (
-        <div className="mt-4 rounded-lg bg-accent-red/10 border border-accent-red/20 px-4 py-3 text-xs text-accent-red">
-          {aiError}
-        </div>
-      )}
-
-      {aiResult && (
-        <div className="mt-4 rounded-lg border border-accent-blue/20 bg-accent-blue/5 p-4 space-y-4">
-          {/* Header */}
-          <div className="flex items-center gap-2">
-            <Sparkles size={14} className="text-accent-blue" />
-            <span className="text-sm font-semibold text-white">AI Stop Placement Analysis</span>
-            <span className="text-[10px] text-gray-500 ml-auto">Based on {closedWithMAE} trades with MAE data</span>
-          </div>
-
-          {/* Verdict */}
-          {aiResult.verdict && (
-            <p className="text-xs text-gray-300 leading-relaxed border-l-2 border-accent-blue/40 pl-3">
-              {aiResult.verdict}
-            </p>
-          )}
-
-          {/* Stop + Trim in 2-col */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {/* Stop recommendation */}
-            {aiResult.stopRecommendation && (
-              <div className="rounded bg-surface-200 p-3">
-                <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 font-medium">
-                  Stop Recommendation
-                </p>
-                <p className={`text-sm font-bold mb-1 ${
-                  aiResult.stopRecommendation.action === 'Tighten' ? 'text-accent-yellow'
-                  : aiResult.stopRecommendation.action === 'Widen' ? 'text-accent-blue'
-                  : 'text-accent-green'
-                }`}>
-                  {aiResult.stopRecommendation.action}
-                </p>
-                <p className="text-xs text-gray-200 font-medium mb-1">{aiResult.stopRecommendation.suggestion}</p>
-                <p className="text-[11px] text-gray-500">{aiResult.stopRecommendation.rationale}</p>
-              </div>
-            )}
-
-            {/* Trim rule */}
-            {aiResult.trimRule && (
-              <div className="rounded bg-surface-200 p-3">
-                <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 font-medium">
-                  Trim Rule
-                </p>
-                {aiResult.trimRule.recommended ? (
-                  <>
-                    <p className="text-sm font-bold text-accent-yellow mb-1">
-                      Sell {aiResult.trimRule.fraction} at {aiResult.trimRule.triggerR}R
-                    </p>
-                    {aiResult.trimRule.expectedImpact && (
-                      <p className="text-xs text-gray-300 mb-1">{aiResult.trimRule.expectedImpact}</p>
-                    )}
-                    <p className="text-[11px] text-gray-500">{aiResult.trimRule.rationale}</p>
-                  </>
-                ) : (
-                  <p className="text-xs text-gray-400">{aiResult.trimRule.rationale || 'No trim recommended based on current data.'}</p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Insights */}
-          {aiResult.insights?.length > 0 && (
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-2 font-medium">Key Insights</p>
-              <ul className="space-y-1.5">
-                {aiResult.insights.map((insight, i) => (
-                  <li key={i} className="text-xs text-gray-300 flex gap-2">
-                    <span className="text-accent-blue mt-0.5 shrink-0">→</span>
-                    <span>{insight}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Coaching note */}
-          {aiResult.coachingNote && (
-            <p className="text-[11px] text-gray-500 italic border-t border-white/5 pt-3">
-              {aiResult.coachingNote}
-            </p>
-          )}
-
-          <button
-            onClick={runAI}
-            disabled={aiLoading}
-            className="text-[11px] text-gray-600 hover:text-gray-400 transition-colors disabled:opacity-40"
-          >
-            Regenerate
-          </button>
-        </div>
-      )}
-
-      {!canRunAI && !aiResult && (
-        <p className="text-[11px] text-gray-700 mt-3">
-          AI suggestion available after {Math.max(0, 5 - closedWithMAE)} more closed trade{5 - closedWithMAE !== 1 ? 's' : ''} have MAE data — click Fetch MAE above.
-        </p>
-      )}
+      <p className="text-[11px] text-gray-700 mt-3">
+        <span className="text-accent-green">■</span> 0–50% safe ·{' '}
+        <span className="text-accent-yellow">■</span> 50–75% close ·{' '}
+        <span className="text-orange-400">■</span> 75–90% danger ·{' '}
+        <span className="text-accent-red">■</span> 90–100% near stop · live quote auto-updates each refresh
+      </p>
     </div>
   )
 }
