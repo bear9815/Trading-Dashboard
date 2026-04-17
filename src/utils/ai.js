@@ -1050,3 +1050,118 @@ export async function callVolatilityAI(metrics, apiKey) {
     `Be specific with numbers where relevant. Write as a single flowing paragraph with no headers or bullets.`
   return callAI(apiKey, prompt)
 }
+
+/**
+ * Analyze a trader's Max Adverse Excursion (MAE) history and recommend
+ * optimal stop placement and/or partial-exit rules.
+ *
+ * @param {object[]} trades   - All trades, including maxAdverseR field
+ * @param {string}   apiKey   - Gemini API key (Claude fallback if rate-limited)
+ */
+export async function analyzeStopPlacement(trades, apiKey) {
+  if (!apiKey) throw new Error('No API key configured. Add your Gemini key in Settings.')
+
+  const withMAE = trades.filter(t => t.maxAdverseR != null && t.entryPrice && (t._originalStopLoss ?? t.stopLoss))
+  if (withMAE.length < 5) throw new Error('Need at least 5 trades with MAE data. Click "Fetch MAE" first.')
+
+  const closed = withMAE.filter(t => t.status !== 'Open')
+
+  // Build proximity distribution buckets
+  const buckets = [
+    { label: '0–25% of stop',  min: 0,   max: 0.25, trades: [] },
+    { label: '25–50% of stop', min: 0.25, max: 0.50, trades: [] },
+    { label: '50–75% of stop', min: 0.50, max: 0.75, trades: [] },
+    { label: '75–90% of stop', min: 0.75, max: 0.90, trades: [] },
+    { label: '90–100% of stop',min: 0.90, max: 1.00, trades: [] },
+    { label: 'Stopped out',    min: 1.00, max: Infinity, trades: [] },
+  ]
+  for (const t of closed) {
+    const pct = Math.abs(t.maxAdverseR)
+    const b   = buckets.find(b => pct >= b.min && pct < b.max) ?? buckets[buckets.length - 1]
+    b.trades.push(t)
+  }
+
+  const bucketStats = buckets.map(b => {
+    const n    = b.trades.length
+    const wins = b.trades.filter(t => t.status === 'Win').length
+    const avgR = n > 0 ? b.trades.reduce((s, t) => s + (t.rMultiple || 0), 0) / n : null
+    return {
+      range:   b.label,
+      count:   n,
+      winRate: n > 0 ? Math.round((wins / n) * 100) + '%' : 'N/A',
+      avgRMultiple: avgR != null ? Math.round(avgR * 100) / 100 : 'N/A',
+    }
+  })
+
+  // Per-trade detail (most recent 60)
+  const tradeDetails = [...closed]
+    .sort((a, b) => new Date(b.entryDate) - new Date(a.entryDate))
+    .slice(0, 60)
+    .map(t => ({
+      symbol:        t.symbol,
+      status:        t.status,
+      rMultiple:     t.rMultiple,
+      maxAdverseR:   t.maxAdverseR,
+      proximityPct:  Math.round(Math.abs(t.maxAdverseR) * 100),
+      stopEfficiency: t.stopEfficiency,
+    }))
+
+  const totalClosed = closed.length
+  const pctToHalf   = closed.length ? Math.round(closed.filter(t => Math.abs(t.maxAdverseR) >= 0.50).length / totalClosed * 100) : 0
+  const pctToThreeQ = closed.length ? Math.round(closed.filter(t => Math.abs(t.maxAdverseR) >= 0.75).length / totalClosed * 100) : 0
+  const pctStopped  = closed.length ? Math.round(closed.filter(t => Math.abs(t.maxAdverseR) >= 0.90).length / totalClosed * 100) : 0
+  const avgMAE      = closed.length ? closed.reduce((s, t) => s + t.maxAdverseR, 0) / closed.length : 0
+
+  const stats = {
+    totalTradesAnalyzed: totalClosed,
+    avgMaxAdverseR:      Math.round(avgMAE * 1000) / 1000,
+    pctReachingHalfStop: pctToHalf + '%',
+    pctReachingThreeQuarterStop: pctToThreeQ + '%',
+    pctStoppedOut:       pctStopped + '%',
+    bucketBreakdown:     bucketStats,
+    tradeDetail:         tradeDetails,
+  }
+
+  const prompt = `You are an elite risk management coach. A trader wants to learn from their historical stop-loss data to become a better risk manager and have the math on their side.
+
+KEY CONCEPT — "Stop Proximity": how close price got to the original stop expressed as a fraction of 1R (the stop distance).
+- 0% = price never moved against the entry
+- 75% = price got 75% of the way to the stop before reversing
+- 100%+ = trade was stopped out
+
+TRADER'S MAE DATA:
+${JSON.stringify(stats, null, 2)}
+
+Using ONLY this trader's actual data, provide specific, quantitative risk management recommendations:
+1. Optimal stop distance (tighter/wider and by how much, backed by the win rates at each proximity bucket)
+2. Whether a partial exit (trim) before full stop makes statistical sense, at what -R level, and what fraction to sell
+3. Any patterns in the data that suggest behavioral coaching points
+
+Return ONLY valid JSON (no markdown, no code fences):
+{
+  "verdict": "2-3 sentence data-backed summary of what the MAE pattern reveals about this trader's stops",
+  "stopRecommendation": {
+    "action": "Tighten | Widen | Keep Current",
+    "suggestion": "specific, concrete rule — e.g. 'Use 0.7R stops instead of 1R' or 'Widen by ~15% — current stops are too tight given the reversal rate'",
+    "rationale": "specific data point that drives this — cite actual bucket win rates"
+  },
+  "trimRule": {
+    "recommended": true,
+    "triggerR": -0.75,
+    "fraction": "1/3",
+    "expectedImpact": "estimated reduction in average loss in R terms",
+    "rationale": "cite the specific bucket data that supports this trim level"
+  },
+  "insights": [
+    "insight 1 — must cite a specific number from the data",
+    "insight 2",
+    "insight 3"
+  ],
+  "coachingNote": "one sentence on the behavioral implication — what does this pattern say about how the trader holds losing trades?"
+}`
+
+  const text = await callAI(apiKey, prompt)
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) throw new Error('AI returned unrecognised format.')
+  return JSON.parse(jsonMatch[0])
+}

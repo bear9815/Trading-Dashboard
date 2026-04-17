@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useCallback, Fragment, useRef } from 'react'
 import { useColumnResize } from '../../hooks/useColumnResize.js'
-import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck, Settings2, Scissors } from 'lucide-react'
+import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck, Settings2, Scissors, Sparkles } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
@@ -8,6 +8,7 @@ import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
 import { buildOpenPositionRisk, calcNEP, calcNER, calcEffectiveExposure } from '../../utils/riskCalcs.js'
 import { formatCurrency } from '../../utils/formatters.js'
 import { calcWinRate, calcAvgR } from '../../utils/metrics.js'
+import { analyzeStopPlacement } from '../../utils/ai.js'
 import { fetchQuotes, fetchATR14, fetchSectors, computeTradeMAEMFE } from '../../utils/marketData.js'
 import OpenHeatMeter from './OpenHeatMeter.jsx'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
@@ -786,11 +787,15 @@ function LotPickerModal({ group, onClose, onPickLot, onCloseAll }) {
 // also auto-updates from live quotes whenever prices are refreshed.
 function StopProximityTable({ allTrades, openTrades, quotes }) {
   const { updateTrade } = useTradeStore()
+  const { apiKey } = useSettingsStore()
   const [computing,  setComputing]  = useState(false)
   const [done,       setDone]       = useState(0)
   const [total,      setTotal]      = useState(0)
   const [errCount,   setErrCount]   = useState(0)
   const [showClosed, setShowClosed] = useState(true)
+  const [aiLoading,  setAiLoading]  = useState(false)
+  const [aiResult,   setAiResult]   = useState(null)
+  const [aiError,    setAiError]    = useState(null)
 
   async function computeMAE(forceRecompute = false) {
     const toProcess = allTrades.filter(t => {
@@ -886,11 +891,28 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
     return t.maxAdverseR == null
   }).length
 
-  const closedCount  = allTrades.filter(t => t.status !== 'Open').length
-  const hasAnyData   = rows.some(r => r.hasData)
+  const closedWithMAE = allTrades.filter(t => t.status !== 'Open' && t.maxAdverseR != null).length
+  const closedCount   = allTrades.filter(t => t.status !== 'Open').length
+  const hasAnyData    = rows.some(r => r.hasData)
+  const canRunAI      = closedWithMAE >= 5
 
-  const pctColor    = p => p == null ? 'text-gray-600' : p >= 90 ? 'text-accent-red' : p >= 75 ? 'text-orange-400' : p >= 50 ? 'text-accent-yellow' : 'text-accent-green'
-  const barColor    = p => p == null ? 'bg-gray-700'   : p >= 90 ? 'bg-accent-red'   : p >= 75 ? 'bg-orange-400'   : p >= 50 ? 'bg-accent-yellow'   : 'bg-accent-green'
+  async function runAI() {
+    if (!apiKey) { setAiError('Add your Gemini API key in Settings to use AI suggestions.'); return }
+    setAiLoading(true)
+    setAiError(null)
+    setAiResult(null)
+    try {
+      const result = await analyzeStopPlacement(allTrades, apiKey)
+      setAiResult(result)
+    } catch (err) {
+      setAiError(err.message)
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const pctColor = p => p == null ? 'text-gray-600' : p >= 90 ? 'text-accent-red' : p >= 75 ? 'text-orange-400' : p >= 50 ? 'text-accent-yellow' : 'text-accent-green'
+  const barColor = p => p == null ? 'bg-gray-700'   : p >= 90 ? 'bg-accent-red'   : p >= 75 ? 'bg-orange-400'   : p >= 50 ? 'bg-accent-yellow'   : 'bg-accent-green'
 
   return (
     <div className="card">
@@ -903,7 +925,7 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
           </h3>
           <p className="text-xs text-gray-500 mt-1 max-w-2xl">
             How close did price get to your original stop? 100% means price reached the stop.
-            Use this to tighten stops or plan a partial exit before a full 1R loss.
+            Entry day uses intraday data (Schwab) from your trade time — not the full-day low.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -917,7 +939,7 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
             onClick={() => computeMAE(false)}
             disabled={computing || pendingCount === 0}
             className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-40"
-            title="Fetch OHLCV history from Yahoo Finance to compute accurate MAE"
+            title="Fetch OHLCV history — entry day uses Schwab intraday from trade time; fallback to Yahoo Finance"
           >
             <RefreshCw size={12} className={computing ? 'animate-spin' : ''} />
             {computing ? 'Computing…' : `Fetch MAE${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
@@ -929,6 +951,17 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
               title="Recompute MAE for all trades from scratch"
             >
               Recompute All
+            </button>
+          )}
+          {canRunAI && (
+            <button
+              onClick={runAI}
+              disabled={aiLoading}
+              className="btn-ghost text-xs flex items-center gap-1.5 text-accent-blue hover:text-accent-blue disabled:opacity-40"
+              title={`AI analyzes your ${closedWithMAE} trades with MAE data and recommends stop & trim rules`}
+            >
+              <Sparkles size={12} className={aiLoading ? 'animate-pulse' : ''} />
+              {aiLoading ? 'Analyzing…' : 'AI Suggestion'}
             </button>
           )}
         </div>
@@ -1027,8 +1060,114 @@ function StopProximityTable({ allTrades, openTrades, quotes }) {
             {showClosed ? 'Hide' : 'Show'} closed trades ({closedCount})
           </button>
         )}
-        <span className="text-gray-700">MAE via daily OHLCV · live price auto-updates open trades</span>
+        <span className="text-gray-700">
+          Entry day: Schwab intraday from trade time · other days: daily OHLCV · live price auto-updates open trades
+        </span>
       </div>
+
+      {/* ── AI Suggestion Panel ─────────────────────────────────────────────── */}
+      {aiError && (
+        <div className="mt-4 rounded-lg bg-accent-red/10 border border-accent-red/20 px-4 py-3 text-xs text-accent-red">
+          {aiError}
+        </div>
+      )}
+
+      {aiResult && (
+        <div className="mt-4 rounded-lg border border-accent-blue/20 bg-accent-blue/5 p-4 space-y-4">
+          {/* Header */}
+          <div className="flex items-center gap-2">
+            <Sparkles size={14} className="text-accent-blue" />
+            <span className="text-sm font-semibold text-white">AI Stop Placement Analysis</span>
+            <span className="text-[10px] text-gray-500 ml-auto">Based on {closedWithMAE} trades with MAE data</span>
+          </div>
+
+          {/* Verdict */}
+          {aiResult.verdict && (
+            <p className="text-xs text-gray-300 leading-relaxed border-l-2 border-accent-blue/40 pl-3">
+              {aiResult.verdict}
+            </p>
+          )}
+
+          {/* Stop + Trim in 2-col */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Stop recommendation */}
+            {aiResult.stopRecommendation && (
+              <div className="rounded bg-surface-200 p-3">
+                <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 font-medium">
+                  Stop Recommendation
+                </p>
+                <p className={`text-sm font-bold mb-1 ${
+                  aiResult.stopRecommendation.action === 'Tighten' ? 'text-accent-yellow'
+                  : aiResult.stopRecommendation.action === 'Widen' ? 'text-accent-blue'
+                  : 'text-accent-green'
+                }`}>
+                  {aiResult.stopRecommendation.action}
+                </p>
+                <p className="text-xs text-gray-200 font-medium mb-1">{aiResult.stopRecommendation.suggestion}</p>
+                <p className="text-[11px] text-gray-500">{aiResult.stopRecommendation.rationale}</p>
+              </div>
+            )}
+
+            {/* Trim rule */}
+            {aiResult.trimRule && (
+              <div className="rounded bg-surface-200 p-3">
+                <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 font-medium">
+                  Trim Rule
+                </p>
+                {aiResult.trimRule.recommended ? (
+                  <>
+                    <p className="text-sm font-bold text-accent-yellow mb-1">
+                      Sell {aiResult.trimRule.fraction} at {aiResult.trimRule.triggerR}R
+                    </p>
+                    {aiResult.trimRule.expectedImpact && (
+                      <p className="text-xs text-gray-300 mb-1">{aiResult.trimRule.expectedImpact}</p>
+                    )}
+                    <p className="text-[11px] text-gray-500">{aiResult.trimRule.rationale}</p>
+                  </>
+                ) : (
+                  <p className="text-xs text-gray-400">{aiResult.trimRule.rationale || 'No trim recommended based on current data.'}</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Insights */}
+          {aiResult.insights?.length > 0 && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-2 font-medium">Key Insights</p>
+              <ul className="space-y-1.5">
+                {aiResult.insights.map((insight, i) => (
+                  <li key={i} className="text-xs text-gray-300 flex gap-2">
+                    <span className="text-accent-blue mt-0.5 shrink-0">→</span>
+                    <span>{insight}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Coaching note */}
+          {aiResult.coachingNote && (
+            <p className="text-[11px] text-gray-500 italic border-t border-white/5 pt-3">
+              {aiResult.coachingNote}
+            </p>
+          )}
+
+          <button
+            onClick={runAI}
+            disabled={aiLoading}
+            className="text-[11px] text-gray-600 hover:text-gray-400 transition-colors disabled:opacity-40"
+          >
+            Regenerate
+          </button>
+        </div>
+      )}
+
+      {!canRunAI && !aiResult && (
+        <p className="text-[11px] text-gray-700 mt-3">
+          AI suggestion available after {Math.max(0, 5 - closedWithMAE)} more closed trade{5 - closedWithMAE !== 1 ? 's' : ''} have MAE data — click Fetch MAE above.
+        </p>
+      )}
     </div>
   )
 }
