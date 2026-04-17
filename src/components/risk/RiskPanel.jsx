@@ -8,7 +8,7 @@ import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
 import { buildOpenPositionRisk, calcNEP, calcNER, calcEffectiveExposure } from '../../utils/riskCalcs.js'
 import { formatCurrency } from '../../utils/formatters.js'
 import { calcWinRate, calcAvgR } from '../../utils/metrics.js'
-import { fetchQuotes, fetchATR14, fetchSectors } from '../../utils/marketData.js'
+import { fetchQuotes, fetchATR14, fetchSectors, computeTradeMAEMFE } from '../../utils/marketData.js'
 import OpenHeatMeter from './OpenHeatMeter.jsx'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
 
@@ -779,6 +779,260 @@ function LotPickerModal({ group, onClose, onPickLot, onCloseAll }) {
   )
 }
 
+// ── Stop Proximity (MAE) Table ────────────────────────────────────────────────
+// Tracks the maximum adverse excursion for every trade — how close price got to
+// the original stop. Color-coded bar from safe (green) to near stop (red).
+// Fetches daily OHLCV via Yahoo Finance to cover the full holding period;
+// also auto-updates from live quotes whenever prices are refreshed.
+function StopProximityTable({ allTrades, openTrades, quotes }) {
+  const { updateTrade } = useTradeStore()
+  const [computing,  setComputing]  = useState(false)
+  const [done,       setDone]       = useState(0)
+  const [total,      setTotal]      = useState(0)
+  const [errCount,   setErrCount]   = useState(0)
+  const [showClosed, setShowClosed] = useState(true)
+
+  async function computeMAE(forceRecompute = false) {
+    const toProcess = allTrades.filter(t => {
+      if (!t.entryPrice) return false
+      if (!(t._originalStopLoss ?? t.stopLoss)) return false
+      return forceRecompute || t.maxAdverseR == null
+    })
+    if (!toProcess.length) return
+
+    setComputing(true)
+    setDone(0)
+    setErrCount(0)
+    setTotal(toProcess.length)
+
+    for (let i = 0; i < toProcess.length; i++) {
+      const trade = toProcess[i]
+      try {
+        const isOpen = trade.status === 'Open'
+        // For open trades, extend the date range to today so we capture the full move
+        const tradeCopy = isOpen
+          ? { ...trade, exits: [{ date: new Date().toISOString().slice(0, 10) }] }
+          : trade
+        const result = await computeTradeMAEMFE(tradeCopy)
+        const entry       = trade.entryPrice
+        const origStop    = trade._originalStopLoss ?? trade.stopLoss
+        const riskPerSh   = Math.abs(entry - origStop)
+        const isLong      = (trade.position || 'Long').toLowerCase() !== 'short'
+        if (result && riskPerSh > 0) {
+          const maeR        = Math.round((result.mae / riskPerSh) * 1000) / 1000
+          // Derive worst adverse price from the dollar MAE
+          const worstPrice  = Math.round((isLong ? entry + result.mae : entry - result.mae) * 100) / 100
+          updateTrade(trade.id, { maxAdverseR: maeR, maxAdversePrice: worstPrice })
+        }
+      } catch (err) {
+        console.warn(`[MAE] ${trade.symbol}:`, err.message)
+        setErrCount(e => e + 1)
+      }
+      setDone(i + 1)
+      if (i < toProcess.length - 1) await new Promise(r => setTimeout(r, 250))
+    }
+    setComputing(false)
+  }
+
+  const rows = useMemo(() => {
+    const closed = showClosed ? allTrades.filter(t => t.status !== 'Open') : []
+    const all    = [...openTrades, ...closed]
+
+    return all
+      .map(t => {
+        const entry    = t.entryPrice
+        const origStop = t._originalStopLoss ?? t.stopLoss
+        if (!entry || !origStop) return null
+        const riskPerSh = Math.abs(entry - origStop)
+        const isLong    = (t.position || 'Long').toLowerCase() !== 'short'
+        const isOpen    = t.status === 'Open'
+        const cp        = isOpen ? (quotes.get(t.symbol)?.price ?? null) : null
+        const liveR     = cp != null && riskPerSh > 0
+          ? (isLong ? cp - entry : entry - cp) / riskPerSh
+          : null
+        // Worst R = most negative between stored historical MAE and live price
+        const stored  = t.maxAdverseR ?? null
+        const worstR  = stored != null && liveR != null && liveR < stored ? liveR
+          : (stored ?? (liveR != null && liveR < 0 ? liveR : null))
+        const proximityPct = worstR != null ? Math.min(100, Math.abs(worstR) * 100) : null
+        return {
+          id:           t.id,
+          symbol:       t.symbol,
+          isLong,
+          isOpen,
+          entry,
+          origStop,
+          riskPerSh,
+          liveR,
+          worstR,
+          worstPrice:   t.maxAdversePrice ?? null,
+          proximityPct,
+          hasData:      worstR != null,
+          status:       t.status,
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (a.proximityPct == null && b.proximityPct == null) return 0
+        if (a.proximityPct == null) return 1
+        if (b.proximityPct == null) return -1
+        return b.proximityPct - a.proximityPct
+      })
+  }, [allTrades, openTrades, quotes, showClosed])
+
+  const pendingCount = allTrades.filter(t => {
+    if (!t.entryPrice) return false
+    if (!(t._originalStopLoss ?? t.stopLoss)) return false
+    return t.maxAdverseR == null
+  }).length
+
+  const closedCount  = allTrades.filter(t => t.status !== 'Open').length
+  const hasAnyData   = rows.some(r => r.hasData)
+
+  const pctColor    = p => p == null ? 'text-gray-600' : p >= 90 ? 'text-accent-red' : p >= 75 ? 'text-orange-400' : p >= 50 ? 'text-accent-yellow' : 'text-accent-green'
+  const barColor    = p => p == null ? 'bg-gray-700'   : p >= 90 ? 'bg-accent-red'   : p >= 75 ? 'bg-orange-400'   : p >= 50 ? 'bg-accent-yellow'   : 'bg-accent-green'
+
+  return (
+    <div className="card">
+      <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Risk Discipline</p>
+          <h3 className="text-base font-semibold text-white flex items-center gap-2">
+            <Target size={15} className="text-accent-blue" />
+            Stop Proximity — Max Close Call
+          </h3>
+          <p className="text-xs text-gray-500 mt-1 max-w-2xl">
+            How close did price get to your original stop? 100% means price reached the stop.
+            Use this to tighten stops or plan a partial exit before a full 1R loss.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {computing && (
+            <span className="text-xs text-gray-400 mono">{done}/{total}{errCount > 0 ? ` · ${errCount} err` : ''}</span>
+          )}
+          {!computing && pendingCount > 0 && (
+            <span className="text-xs text-gray-500">{pendingCount} without data</span>
+          )}
+          <button
+            onClick={() => computeMAE(false)}
+            disabled={computing || pendingCount === 0}
+            className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-40"
+            title="Fetch OHLCV history from Yahoo Finance to compute accurate MAE"
+          >
+            <RefreshCw size={12} className={computing ? 'animate-spin' : ''} />
+            {computing ? 'Computing…' : `Fetch MAE${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
+          </button>
+          {hasAnyData && !computing && (
+            <button
+              onClick={() => computeMAE(true)}
+              className="btn-ghost text-xs text-gray-500"
+              title="Recompute MAE for all trades from scratch"
+            >
+              Recompute All
+            </button>
+          )}
+        </div>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="rounded-lg bg-surface-200 px-4 py-5 text-xs text-gray-500 text-center">
+          No trades with entry + stop data. Click <strong>Fetch MAE</strong> to pull historical price data.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800 text-[11px] text-gray-500 uppercase tracking-wider">
+                <th className="text-left  pb-2 pr-3 font-medium">Symbol</th>
+                <th className="text-right pb-2 pr-3 font-medium">Entry</th>
+                <th className="text-right pb-2 pr-3 font-medium">Orig Stop</th>
+                <th className="text-right pb-2 pr-3 font-medium">1R Dist</th>
+                <th className="text-right pb-2 pr-3 font-medium">Worst Price</th>
+                <th className="text-right pb-2 pr-3 font-medium">Max Adv R</th>
+                <th className="text-right pb-2 pr-3 font-medium">Stop Proximity</th>
+                <th className="text-left  pb-2 pl-3 font-medium">Close-Call</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr
+                  key={r.id}
+                  className={`border-b border-gray-900 transition-colors ${
+                    r.isOpen ? 'hover:bg-white/[0.02]' : 'opacity-70 hover:opacity-100 hover:bg-white/[0.02]'
+                  }`}
+                >
+                  <td className="py-2 pr-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium text-white mono">{r.symbol}</span>
+                      {!r.isLong && (
+                        <span className="text-[9px] px-1 rounded bg-accent-red/20 text-accent-red">SHORT</span>
+                      )}
+                      {r.isOpen
+                        ? <span className="text-[9px] px-1 rounded bg-accent-blue/20 text-accent-blue">OPEN</span>
+                        : <span className="text-[9px] px-1 rounded bg-gray-700/60 text-gray-400">{r.status?.toUpperCase()}</span>
+                      }
+                    </div>
+                  </td>
+                  <td className="py-2 pr-3 text-right mono text-gray-300">${r.entry.toFixed(2)}</td>
+                  <td className="py-2 pr-3 text-right mono text-gray-400">${r.origStop.toFixed(2)}</td>
+                  <td className="py-2 pr-3 text-right mono text-gray-500">${r.riskPerSh.toFixed(2)}</td>
+                  <td className="py-2 pr-3 text-right mono">
+                    {r.worstPrice != null
+                      ? <span className={r.proximityPct >= 75 ? 'text-accent-red' : 'text-gray-300'}>${r.worstPrice.toFixed(2)}</span>
+                      : <span className="text-gray-600">—</span>
+                    }
+                  </td>
+                  <td className={`py-2 pr-3 text-right mono font-semibold ${pctColor(r.proximityPct)}`}>
+                    {r.worstR != null ? `${r.worstR.toFixed(2)}R` : '—'}
+                  </td>
+                  <td className={`py-2 pr-3 text-right mono font-bold text-base ${pctColor(r.proximityPct)}`}>
+                    {r.proximityPct != null ? `${r.proximityPct.toFixed(0)}%` : '—'}
+                  </td>
+                  <td className="py-2 pl-3">
+                    {r.proximityPct != null ? (
+                      <div className="flex items-center gap-2">
+                        <div className="w-28 h-2 bg-surface-300 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${barColor(r.proximityPct)}`}
+                            style={{ width: `${Math.min(100, r.proximityPct)}%` }}
+                          />
+                        </div>
+                        {r.proximityPct >= 90 && (
+                          <span className="text-[9px] font-bold text-accent-red">CLOSE</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-gray-600">no data</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="flex items-center gap-5 mt-3 text-[11px] text-gray-600 flex-wrap">
+        <span>
+          <span className="text-accent-green">■</span> 0–50% safe ·{' '}
+          <span className="text-accent-yellow">■</span> 50–75% close ·{' '}
+          <span className="text-orange-400">■</span> 75–90% danger ·{' '}
+          <span className="text-accent-red">■</span> 90–100% near stop
+        </span>
+        {closedCount > 0 && (
+          <button
+            onClick={() => setShowClosed(s => !s)}
+            className="text-gray-500 hover:text-gray-300 transition-colors underline"
+          >
+            {showClosed ? 'Hide' : 'Show'} closed trades ({closedCount})
+          </button>
+        )}
+        <span className="text-gray-700">MAE via daily OHLCV · live price auto-updates open trades</span>
+      </div>
+    </div>
+  )
+}
+
 // ── Derisk Strategy Table ────────────────────────────────────────────────────
 // Systematic partial-exit planner: when a position is down a configurable R
 // trigger, plan a trim of a configurable fraction of size, and show the
@@ -1294,12 +1548,30 @@ export default function RiskPanel({ selectedAccount }) {
       const result = await fetchQuotes(symbols)
       setQuotes(result)
       setLastRefresh(new Date())
+      // Track live worst-R for open trades — updates maxAdverseR if current price
+      // is further from entry toward stop than any previously recorded level.
+      for (const trade of openTrades) {
+        const cp = result.get(trade.symbol)?.price
+        if (cp == null || !trade.entryPrice) continue
+        const origStop = trade._originalStopLoss ?? trade.stopLoss
+        if (!origStop) continue
+        const riskPerShare = Math.abs(trade.entryPrice - origStop)
+        if (riskPerShare <= 0) continue
+        const isLong = (trade.position || 'Long').toLowerCase() !== 'short'
+        const curR   = (isLong ? cp - trade.entryPrice : trade.entryPrice - cp) / riskPerShare
+        if (curR < 0 && (trade.maxAdverseR == null || curR < trade.maxAdverseR)) {
+          updateTrade(trade.id, {
+            maxAdverseR:     Math.round(curR * 1000) / 1000,
+            maxAdversePrice: cp,
+          })
+        }
+      }
     } catch {
       // silently handle
     } finally {
       setFetching(false)
     }
-  }, [openTrades])
+  }, [openTrades, updateTrade])
 
   useEffect(() => {
     if (openTrades.length > 0 && quotes.size === 0) {
@@ -2114,6 +2386,13 @@ export default function RiskPanel({ selectedAccount }) {
         atrData={atrData}
         liveBalance={liveBalance}
         tpMultiplier={tpMultiplier}
+      />
+
+      {/* ── Stop Proximity (MAE) Table ───────────────────────────────────── */}
+      <StopProximityTable
+        allTrades={(!selectedAccount || selectedAccount === 'All') ? trades : trades.filter(t => t.account === selectedAccount)}
+        openTrades={openTrades}
+        quotes={quotes}
       />
 
       {/* ── Max Pain Scenario + Portfolio Beta (2-col) ──────────────────── */}
