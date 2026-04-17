@@ -705,6 +705,20 @@ export async function resolveTickerToName(symbol) {
 
 // ── MAE / MFE ─────────────────────────────────────────────────────────────────
 
+function hasTimeComponent(dateStr) {
+  return dateStr && dateStr.length > 10 && /T\d{2}:\d{2}/.test(dateStr)
+}
+
+function isRegularMarketHours(unixMs) {
+  const d = new Date(unixMs)
+  const utcH = d.getUTCHours() + d.getUTCMinutes() / 60
+  const month = d.getUTCMonth() + 1
+  const isEDT = month >= 4 && month <= 10
+  const openUTC  = isEDT ? 13.5 : 14.5
+  const closeUTC = isEDT ? 20.0 : 21.0
+  return utcH >= openUTC && utcH < closeUTC
+}
+
 /**
  * Fetch intraday (5-minute) bars for a single trading day, from a specific
  * Unix-millisecond start time through end of that trading session.
@@ -756,7 +770,7 @@ async function fetchIntradayBars(symbol, fromMs, toMs) {
       unixMs: t * 1000,
       open:   q.open[i], high: q.high[i], low: q.low[i], close: q.close[i],
     }))
-    .filter(c => c.open != null && c.low != null)
+    .filter(c => c.open != null && c.low != null && isRegularMarketHours(c.unixMs))
 }
 
 /**
@@ -782,10 +796,12 @@ export async function computeTradeMAEMFE(trade) {
   const entry   = trade.entryPrice
   const isShort = (trade.position || 'Long').toLowerCase().includes('short')
 
-  const entryDt     = new Date(trade.entryDate)
+  const entryDt      = new Date(trade.entryDate)
   const entryDateStr = entryDt.toISOString().slice(0, 10)
-  const exitDate    = trade.exits?.map(e => e.date).filter(Boolean).sort().pop() || trade.entryDate
-  const exitDateStr = new Date(exitDate).toISOString().slice(0, 10)
+  const exitDate     = trade.exits?.map(e => e.date).filter(Boolean).sort().pop()
+    || trade.exitDate
+    || trade.entryDate
+  const exitDateStr  = new Date(exitDate).toISOString().slice(0, 10)
 
   let maxLow  = Infinity
   let maxHigh = -Infinity
@@ -794,7 +810,13 @@ export async function computeTradeMAEMFE(trade) {
   // Only use price data that could realistically have occurred AFTER entry.
   let entryDayHandled = false
   try {
-    const entryMs   = entryDt.getTime()
+    // For date-only entries, start from market open (not midnight) to exclude pre-market
+    let entryMs = entryDt.getTime()
+    if (!hasTimeComponent(trade.entryDate)) {
+      const month  = entryDt.getUTCMonth() + 1
+      const isEDT  = month >= 4 && month <= 10
+      entryMs = new Date(entryDateStr + (isEDT ? 'T13:30:00Z' : 'T14:30:00Z')).getTime()
+    }
     // End of entry day: 11:59 PM UTC (covers the full US session regardless of timezone)
     const endOfDayMs = new Date(entryDateStr + 'T23:59:59Z').getTime()
     const bars = await fetchIntradayBars(trade.symbol, entryMs, endOfDayMs)
@@ -817,8 +839,14 @@ export async function computeTradeMAEMFE(trade) {
   let exitDayHandled = false
   if (exitDateStr !== entryDateStr) {
     try {
-      const exitMs         = new Date(exitDate).getTime()
-      const exitDayStartMs = new Date(exitDateStr + 'T00:00:00Z').getTime()
+      let exitMs = new Date(exitDate).getTime()
+      // For date-only exit dates, use end of regular session as the boundary
+      const exitMonth = new Date(exitDate).getUTCMonth() + 1
+      const exitIsEDT = exitMonth >= 4 && exitMonth <= 10
+      const exitDayStartMs = new Date(exitDateStr + (exitIsEDT ? 'T13:30:00Z' : 'T14:30:00Z')).getTime()
+      if (!hasTimeComponent(exitDate)) {
+        exitMs = new Date(exitDateStr + (exitIsEDT ? 'T20:00:00Z' : 'T21:00:00Z')).getTime()
+      }
       // +5-min buffer so the final 5-min bar that straddles exitMs is included
       const bars       = await fetchIntradayBars(trade.symbol, exitDayStartMs, exitMs + 300_000)
       const beforeExit = bars.filter(b => b.unixMs < exitMs)
