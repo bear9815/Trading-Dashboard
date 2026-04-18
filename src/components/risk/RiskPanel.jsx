@@ -787,6 +787,7 @@ function LotPickerModal({ group, onClose, onPickLot, onCloseAll }) {
 function DeriskStrategyTable({ groupedPositions, quotes, atrData, liveBalance, tpMultiplier }) {
   const [trimTriggerR, setTrimTriggerR] = useState(-0.75) // -0.5, -0.75, -1
   const [trimFrac,     setTrimFrac]     = useState(1/3)   // 0.25, 1/3, 0.5
+  const [viewMode,     setViewMode]     = useState('active') // 'active' | 'all'
 
   const rows = useMemo(() => {
     return groupedPositions.map(g => {
@@ -845,6 +846,8 @@ function DeriskStrategyTable({ groupedPositions, quotes, atrData, liveBalance, t
 
   const triggeredCount = rows.filter(r => r.triggered).length
   const totalRealized  = rows.reduce((s, r) => s + (r.triggered ? r.realized : 0), 0)
+  const visibleRows    = viewMode === 'active' ? rows.filter(r => !r.triggered) : rows
+  const hiddenCount    = rows.length - visibleRows.length
 
   const trimFracLabel = (f) => f === 0.25 ? '1/4' : f === 0.5 ? '1/2' : '1/3'
   const SegBtn = ({ active, onClick, children }) => (
@@ -894,6 +897,13 @@ function DeriskStrategyTable({ groupedPositions, quotes, atrData, liveBalance, t
               <SegBtn active={trimFrac === 0.5}  onClick={() => setTrimFrac(0.5)}>1/2</SegBtn>
             </div>
           </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">View</p>
+            <div className="flex gap-1">
+              <SegBtn active={viewMode === 'active'} onClick={() => setViewMode('active')}>Active</SegBtn>
+              <SegBtn active={viewMode === 'all'}    onClick={() => setViewMode('all')}>All</SegBtn>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -936,7 +946,16 @@ function DeriskStrategyTable({ groupedPositions, quotes, atrData, liveBalance, t
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => {
+            {visibleRows.length === 0 && (
+              <tr>
+                <td colSpan={10} className="py-6 text-center text-xs text-gray-500">
+                  {viewMode === 'active' && hiddenCount > 0
+                    ? `All ${hiddenCount} open position${hiddenCount === 1 ? '' : 's'} have hit the trim trigger — switch to "All" to review.`
+                    : 'No positions to display.'}
+                </td>
+              </tr>
+            )}
+            {visibleRows.map(r => {
               const rowBg = r.triggered
                 ? 'bg-accent-red/5 hover:bg-accent-red/10'
                 : r.approaching
