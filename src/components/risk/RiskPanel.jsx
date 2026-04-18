@@ -8,7 +8,7 @@ import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
 import { buildOpenPositionRisk, calcNEP, calcNER, calcEffectiveExposure } from '../../utils/riskCalcs.js'
 import { formatCurrency } from '../../utils/formatters.js'
 import { calcWinRate, calcAvgR } from '../../utils/metrics.js'
-import { fetchQuotes, fetchATR14, fetchSectors, computeTradeMAEMFE } from '../../utils/marketData.js'
+import { fetchQuotes, fetchATR14, fetchSectors, computeSchwabMAE } from '../../utils/marketData.js'
 import OpenHeatMeter from './OpenHeatMeter.jsx'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
 
@@ -535,16 +535,9 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
     for (let i = 0; i < toProcess.length; i++) {
       const trade = toProcess[i]
       try {
-        const tradeCopy = { ...trade, exits: [{ date: new Date().toISOString() }] }
-        const result    = await computeTradeMAEMFE(tradeCopy)
-        const entry     = trade.entryPrice
-        const origStop  = trade._originalStopLoss ?? trade.stopLoss
-        const riskPerSh = Math.abs(entry - origStop)
-        const isLong    = (trade.position || 'Long').toLowerCase() !== 'short'
-        if (result && riskPerSh > 0) {
-          const maeR       = Math.round((result.mae / riskPerSh) * 1000) / 1000
-          const worstPrice = Math.round((isLong ? entry + result.mae : entry - result.mae) * 100) / 100
-          updateTrade(trade.id, { maxAdverseR: maeR, maxAdversePrice: worstPrice })
+        const result = await computeSchwabMAE(trade, tpMultiplier)
+        if (result) {
+          updateTrade(trade.id, { maxAdverseR: result.maxAdverseR, maxAdversePrice: result.worstPrice })
         }
       } catch (err) {
         console.warn(`[MAE] ${trade.symbol}:`, err.message)
@@ -569,15 +562,9 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
     for (let i = 0; i < toProcess.length; i++) {
       const trade = toProcess[i]
       try {
-        const result    = await computeTradeMAEMFE(trade)
-        const entry     = trade.entryPrice
-        const origStop  = trade._originalStopLoss ?? trade.stopLoss
-        const riskPerSh = Math.abs(entry - origStop)
-        const isLong    = (trade.position || 'Long').toLowerCase() !== 'short'
-        if (result && riskPerSh > 0) {
-          const maeR       = Math.round((result.mae / riskPerSh) * 1000) / 1000
-          const worstPrice = Math.round((isLong ? entry + result.mae : entry - result.mae) * 100) / 100
-          updateTrade(trade.id, { maxAdverseR: maeR, maxAdversePrice: worstPrice })
+        const result = await computeSchwabMAE(trade, tpMultiplier)
+        if (result) {
+          updateTrade(trade.id, { maxAdverseR: result.maxAdverseR, maxAdversePrice: result.worstPrice })
         }
       } catch (err) {
         console.warn(`[MAE hist] ${trade.symbol}:`, err.message)

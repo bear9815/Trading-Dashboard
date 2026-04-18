@@ -914,6 +914,167 @@ export async function computeTradeMAEMFE(trade) {
 }
 
 
+// ── Schwab-only MAE ───────────────────────────────────────────────────────────
+
+/**
+ * Fetch candles from Schwab only. Throws if token unavailable or request fails.
+ * frequencyType: 'minute' | 'daily'
+ * frequency: number (e.g. 15 for 15-min, 1 for daily)
+ * startDate / endDate: Unix milliseconds
+ */
+async function fetchSchwabCandles(symbol, { frequencyType, frequency, startDate, endDate }) {
+  const tok = await getActiveSchwabToken()
+  if (!tok) throw new Error('No Schwab token')
+  const params = new URLSearchParams({
+    path:                  '/marketdata/v1/pricehistory',
+    token:                 tok,
+    symbol,
+    periodType:            'day',
+    frequencyType,
+    frequency:             String(frequency),
+    startDate:             String(startDate),
+    endDate:               String(endDate),
+    needExtendedHoursData: 'false',
+  })
+  const res = await fetch(`/api/schwab/proxy?${params}`, { signal: AbortSignal.timeout(15000) })
+  if (!res.ok) throw new Error(`Schwab candles HTTP ${res.status}`)
+  const data = await res.json()
+  if (!data.candles?.length) return []
+  return data.candles
+    .map(c => ({ unixMs: c.datetime, open: c.open, high: c.high, low: c.low, close: c.close }))
+    .filter(c => c.high != null && c.low != null)
+}
+
+/**
+ * Convert a CST/CDT timestamp string (no timezone designator) to UTC milliseconds.
+ * Uses month-based DST approximation: March–November = CDT (UTC-5), else CST (UTC-6).
+ */
+function cstToUtcMs(dateTimeStr) {
+  const month = parseInt(dateTimeStr.slice(5, 7), 10)
+  const offsetHours = (month >= 3 && month <= 11) ? 5 : 6
+  return new Date(dateTimeStr + 'Z').getTime() + offsetHours * 3_600_000
+}
+
+/**
+ * Compute Max Adverse Excursion using Schwab data exclusively.
+ *
+ * - Entry day:       15-min standard-session bars, starting from the bar
+ *                    containing the entry timestamp (interpreted as CST/CDT),
+ *                    through the 4 PM ET close.
+ * - Subsequent days: Daily standard-session OHLC, entry+1 day through
+ *                    today (open trade) or exit date (closed trade).
+ * - Tracking stops:  when trade closed OR intraday best R >= tpMultiplier.
+ *
+ * Returns { worstPrice, maxAdverseR } or null if Schwab unavailable / missing data.
+ * maxAdverseR is ≤ 0 (adverse move expressed in R units).
+ */
+export async function computeSchwabMAE(trade, tpMultiplier = 2) {
+  const { entryDate, entryPrice, symbol, position } = trade
+  if (!entryDate || !entryPrice || !symbol) return null
+
+  const origStop  = trade._originalStopLoss ?? trade.stopLoss
+  if (!origStop) return null
+
+  const isLong    = (position || 'Long').toLowerCase() !== 'short'
+  const riskPerSh = Math.abs(entryPrice - origStop)
+  if (riskPerSh <= 0) return null
+
+  const entryDateStr = entryDate.slice(0, 10)
+
+  // ── Convert entry timestamp to UTC ms (CST/CDT → UTC) ───────────────────
+  let entryUtcMs
+  if (hasTimeComponent(entryDate)) {
+    const hasZone = entryDate.includes('Z') || entryDate.includes('+') || entryDate.includes('-', 10)
+    entryUtcMs = hasZone ? new Date(entryDate).getTime() : cstToUtcMs(entryDate.slice(0, 19))
+  } else {
+    // No time: snap to market open (9:30 ET in UTC)
+    const month  = parseInt(entryDateStr.slice(5, 7), 10)
+    const isEDT  = month >= 4 && month <= 10
+    entryUtcMs   = new Date(entryDateStr + (isEDT ? 'T13:30:00Z' : 'T14:30:00Z')).getTime()
+  }
+
+  // 4 PM ET = end of regular session
+  const month4ET       = parseInt(entryDateStr.slice(5, 7), 10)
+  const isEDTentry     = month4ET >= 4 && month4ET <= 10
+  const entryDayEndMs  = new Date(entryDateStr + (isEDTentry ? 'T20:00:00Z' : 'T21:00:00Z')).getTime()
+
+  // ── Determine tracking end date ───────────────────────────────────────────
+  const lastExitDate = trade.exits?.map(e => e.date).filter(Boolean).sort().pop()
+    ?? trade.exitDate
+  const endDateStr   = (trade.status !== 'Open' && lastExitDate)
+    ? new Date(lastExitDate).toISOString().slice(0, 10)
+    : new Date().toISOString().slice(0, 10)
+
+  let worstPrice = entryPrice  // start neutral — only move on adverse data
+  let targetHit  = false
+
+  // ── Entry day: 15-min bars from entry bar through 4 PM ET ────────────────
+  try {
+    const bars = await fetchSchwabCandles(symbol, {
+      frequencyType: 'minute',
+      frequency:     15,
+      startDate:     entryUtcMs,
+      endDate:       entryDayEndMs,
+    })
+    for (const bar of bars) {
+      // Include bar if it starts at or after entry (the bar containing entry qualifies)
+      if (bar.unixMs < entryUtcMs) continue
+      if (isLong) {
+        if (bar.low  < worstPrice) worstPrice = bar.low
+      } else {
+        if (bar.high > worstPrice) worstPrice = bar.high
+      }
+      // Check if tpMultiplier R was reached on this bar
+      const bestR = isLong
+        ? (bar.high - entryPrice) / riskPerSh
+        : (entryPrice - bar.low)  / riskPerSh
+      if (bestR >= tpMultiplier) { targetHit = true; break }
+    }
+  } catch (err) {
+    console.warn(`[SchwabMAE] entry-day fetch failed for ${symbol}:`, err.message)
+    return null
+  }
+
+  // ── Subsequent days: daily bars ───────────────────────────────────────────
+  if (!targetHit && endDateStr > entryDateStr) {
+    const nextDayMs = new Date(entryDateStr + 'T00:00:00Z').getTime() + 86_400_000
+    const endMs     = new Date(endDateStr   + 'T23:59:59Z').getTime()
+    try {
+      const bars = await fetchSchwabCandles(symbol, {
+        frequencyType: 'daily',
+        frequency:     1,
+        startDate:     nextDayMs,
+        endDate:       endMs,
+      })
+      for (const bar of bars) {
+        const barDate = new Date(bar.unixMs).toISOString().slice(0, 10)
+        if (barDate <= entryDateStr || barDate > endDateStr) continue
+        if (isLong) {
+          if (bar.low  < worstPrice) worstPrice = bar.low
+        } else {
+          if (bar.high > worstPrice) worstPrice = bar.high
+        }
+        // Stop after this day if target was reached intraday
+        const bestR = isLong
+          ? (bar.high - entryPrice) / riskPerSh
+          : (entryPrice - bar.low)  / riskPerSh
+        if (bestR >= tpMultiplier) break
+      }
+    } catch (err) {
+      console.warn(`[SchwabMAE] daily fetch failed for ${symbol}:`, err.message)
+    }
+  }
+
+  const maxAdverseR = isLong
+    ? (worstPrice - entryPrice) / riskPerSh
+    : (entryPrice - worstPrice) / riskPerSh
+
+  return {
+    worstPrice:  Math.round(worstPrice  * 100)  / 100,
+    maxAdverseR: Math.round(maxAdverseR * 1000) / 1000,
+  }
+}
+
 // ── Earnings Calendar ─────────────────────────────────────────────────────────
 
 /**
