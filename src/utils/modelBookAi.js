@@ -5,22 +5,11 @@
  * Supports Gemini (vision), OpenRouter, and local Ollama.
  */
 
+import { parseJsonText as parseJson } from './aiHelpers.js'
+
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-
-function stripCodeFences(text) {
-  let raw = (text || '').trim()
-  if (raw.startsWith('```')) raw = raw.split('\n').slice(1).join('\n')
-  if (raw.endsWith('```')) raw = raw.slice(0, raw.lastIndexOf('```'))
-  return raw.trim()
-}
-
-function parseJson(text) {
-  const raw = stripCodeFences(text)
-  const match = raw.match(/\{[\s\S]*\}/)
-  if (!match) throw new Error('AI returned an unrecognised format.')
-  return JSON.parse(match[0])
-}
+const SYS_ANALYST = 'Expert stock market pattern analyst. Respond with valid JSON only.'
 
 // ── Prompt builders ─────────────────────────────────────────────────────────
 
@@ -175,7 +164,7 @@ export async function analyzeModelsOpenRouter(models, apiKey, model = 'openai/gp
     body: JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: 'You are an expert stock market pattern analyst. Always respond with valid JSON only.' },
+        { role: 'system', content: SYS_ANALYST },
         { role: 'user', content: buildAnalysisPrompt(models) },
       ],
       temperature: 0.3,
@@ -202,7 +191,7 @@ export async function analyzeModelsOllama(models) {
     body: JSON.stringify({
       model: 'gemma4:31b',
       messages: [
-        { role: 'system', content: 'You are an expert stock market pattern analyst. Always respond with valid JSON only.' },
+        { role: 'system', content: SYS_ANALYST },
         { role: 'user', content: buildAnalysisPrompt(models) },
       ],
       temperature: 0.3,

@@ -126,8 +126,8 @@ Focus on: R-multiple consistency, win rate vs expectancy, symbol/edge concentrat
   }
 }
 
-// ── Pre-Market Pulse system prompt (user's Gemini Gem) ───────────────────────
-const PRE_MARKET_PULSE_SYSTEM = `You ARE "Pre-Market Pulse," an expert financial analyst AI. Your mission is to provide a concise, actionable pre-market briefing specifically for an active US stock trader. Your focus MUST be on information that could materially impact US market sentiment and trading activity for the current trading day. You must always act as if you are generating this briefing before the US market opens, using the most current information available up to approximately 6:30 AM Eastern Time. You MUST source your information from reliable, major financial news outlets, economic calendars, and market data providers (Reuters, Bloomberg, CNBC, TradingEconomics). Crucially, you MUST cross-verify key data points (major indices, futures, oil, gold, 10-Yr yield) across at least two reliable sources to ensure accuracy before presenting them. Every sentence must reference a real catalyst, level, or data point — never use generic filler.`
+// ── Pre-Market Pulse system prompt ──────────────────────────────────────────
+const PRE_MARKET_PULSE_SYSTEM = `You are "Pre-Market Pulse", an expert financial analyst AI delivering concise, actionable pre-market briefings for an active US stock trader. Act as if it is before market open (use info up to ~6:30 AM ET). Source from Reuters, Bloomberg, CNBC, TradingEconomics. Cross-verify key data points across at least two sources. Every sentence must reference a real catalyst, level, or data point — no generic filler.`
 
 export async function generateMorningBrief(marketDataMap, openTrades, apiKey) {
   if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
