@@ -104,7 +104,7 @@ export async function analyzePortfolio(trades, apiKey) {
   const prompt = `You are a professional trading coach analyzing a trader's performance data. Be direct, specific, and actionable.
 
 Trading stats:
-${JSON.stringify(stats, null, 2)}
+${JSON.stringify(stats)}
 
 Provide analysis in this exact JSON format:
 {
@@ -126,8 +126,8 @@ Focus on: R-multiple consistency, win rate vs expectancy, symbol/edge concentrat
   }
 }
 
-// ── Pre-Market Pulse system prompt (user's Gemini Gem) ───────────────────────
-const PRE_MARKET_PULSE_SYSTEM = `You ARE "Pre-Market Pulse," an expert financial analyst AI. Your mission is to provide a concise, actionable pre-market briefing specifically for an active US stock trader. Your focus MUST be on information that could materially impact US market sentiment and trading activity for the current trading day. You must always act as if you are generating this briefing before the US market opens, using the most current information available up to approximately 6:30 AM Eastern Time. You MUST source your information from reliable, major financial news outlets, economic calendars, and market data providers (Reuters, Bloomberg, CNBC, TradingEconomics). Crucially, you MUST cross-verify key data points (major indices, futures, oil, gold, 10-Yr yield) across at least two reliable sources to ensure accuracy before presenting them. Every sentence must reference a real catalyst, level, or data point — never use generic filler.`
+// ── Pre-Market Pulse system prompt ──────────────────────────────────────────
+const PRE_MARKET_PULSE_SYSTEM = `You are "Pre-Market Pulse", an expert financial analyst AI delivering concise, actionable pre-market briefings for an active US stock trader. Act as if it is before market open (use info up to ~6:30 AM ET). Source from Reuters, Bloomberg, CNBC, TradingEconomics. Cross-verify key data points across at least two sources. Every sentence must reference a real catalyst, level, or data point — no generic filler.`
 
 export async function generateMorningBrief(marketDataMap, openTrades, apiKey) {
   if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
@@ -373,7 +373,7 @@ export async function chatWithPortfolio(trades, chatHistory, userMessage, apiKey
   const prompt = `You are a professional trading coach with full access to this trader's portfolio data. Be direct, specific, and reference actual numbers when possible.
 
 Portfolio context:
-${JSON.stringify(stats, null, 2)}
+${JSON.stringify(stats)}
 
 ${historyText}Trader: ${userMessage}
 Coach:`
@@ -428,7 +428,7 @@ export async function analyzeTradeDNA(trades, apiKey) {
   const prompt = `You are an elite trading performance analyst. Analyze this trader's complete trade history and extract their "Trading DNA" — the statistical fingerprints that separate their winning setups from their losing ones.
 
 Data:
-${JSON.stringify(stats, null, 2)}
+${JSON.stringify(stats)}
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
@@ -493,7 +493,7 @@ export async function buildPlaybook(trades, apiKey) {
   const prompt = `You are a trading coach building a systematic playbook from a trader's best trades. Cluster these trades into clear setup categories and document the rules that made them work.
 
 Top trades (by R-multiple):
-${JSON.stringify(topTrades, null, 2)}
+${JSON.stringify(topTrades)}
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
@@ -575,7 +575,7 @@ export async function generateWeeklyReview(trades, morningEntries, apiKey) {
   const prompt = `You are a professional trading coach delivering a structured weekly performance review. Be honest, direct, and developmental.
 
 Week data:
-${JSON.stringify(weekStats, null, 2)}
+${JSON.stringify(weekStats)}
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
@@ -643,7 +643,7 @@ export async function scorePreTrade(setup, trades, apiKey) {
   const prompt = `You are a risk-focused trading coach scoring a proposed trade setup against the trader's historical performance data.
 
 Context:
-${JSON.stringify(context, null, 2)}
+${JSON.stringify(context)}
 
 Score this setup on a 1–10 scale and provide a structured risk assessment.
 
@@ -743,7 +743,7 @@ export async function synthesizeMarketBias(chartAnalyses, apiKey) {
   const prompt = `You are an expert market technician synthesizing a morning market bias from ${chartAnalyses.length} chart analyses.
 
 Chart analyses:
-${JSON.stringify(chartAnalyses, null, 2)}
+${JSON.stringify(chartAnalyses)}
 
 Synthesize these into a unified morning market bias. Weight breadth indicators and indices most heavily, then sectors, then individual names.
 
@@ -841,7 +841,7 @@ export async function findWorstHabit(trades, apiKey) {
   const prompt = `You are an elite trading performance coach. Your job is to find the single most costly repeated mistake in a trader's recent history.
 
 Recent trades (most recent first):
-${JSON.stringify(tradeSummary, null, 2)}
+${JSON.stringify(tradeSummary)}
 
 Identify the ONE habit, pattern, or mistake that is costing this trader the most money or R — not generic advice, but a specific behavioral pattern visible in this data.
 
@@ -899,10 +899,10 @@ export async function analyzeTradingMindset(thoughts, trades, apiKey) {
   const prompt = `You are an elite trading psychologist and performance coach. Analyze this trader's mental log to identify behavioral and emotional patterns that are helping or hurting their trading.
 
 Mental Log (most recent first):
-${JSON.stringify(recentThoughts, null, 2)}
+${JSON.stringify(recentThoughts)}
 
 Recent Trade Results (for correlation):
-${JSON.stringify(recentTrades, null, 2)}
+${JSON.stringify(recentTrades)}
 
 Analyze the mindset patterns. Look specifically for: FOMO indicators, discipline moments (avoided bad trades), revenge trading urges, overconfidence, fear/hesitation, learning patterns, emotional reactions to P&L, morning vs afternoon behavior differences.
 
@@ -1049,4 +1049,119 @@ export async function callVolatilityAI(metrics, apiKey) {
     `Cover: what this volatility environment means for breakout reliability, recommended position sizing, stop-loss approach, and when/whether to be aggressive or defensive. ` +
     `Be specific with numbers where relevant. Write as a single flowing paragraph with no headers or bullets.`
   return callAI(apiKey, prompt)
+}
+
+/**
+ * Analyze a trader's Max Adverse Excursion (MAE) history and recommend
+ * optimal stop placement and/or partial-exit rules.
+ *
+ * @param {object[]} trades   - All trades, including maxAdverseR field
+ * @param {string}   apiKey   - Gemini API key (Claude fallback if rate-limited)
+ */
+export async function analyzeStopPlacement(trades, apiKey) {
+  if (!apiKey) throw new Error('No API key configured. Add your Gemini key in Settings.')
+
+  const withMAE = trades.filter(t => t.maxAdverseR != null && t.entryPrice && (t._originalStopLoss ?? t.stopLoss))
+  if (withMAE.length < 5) throw new Error('Need at least 5 trades with MAE data. Click "Fetch MAE" first.')
+
+  const closed = withMAE.filter(t => t.status !== 'Open')
+
+  // Build proximity distribution buckets
+  const buckets = [
+    { label: '0–25% of stop',  min: 0,   max: 0.25, trades: [] },
+    { label: '25–50% of stop', min: 0.25, max: 0.50, trades: [] },
+    { label: '50–75% of stop', min: 0.50, max: 0.75, trades: [] },
+    { label: '75–90% of stop', min: 0.75, max: 0.90, trades: [] },
+    { label: '90–100% of stop',min: 0.90, max: 1.00, trades: [] },
+    { label: 'Stopped out',    min: 1.00, max: Infinity, trades: [] },
+  ]
+  for (const t of closed) {
+    const pct = Math.abs(t.maxAdverseR)
+    const b   = buckets.find(b => pct >= b.min && pct < b.max) ?? buckets[buckets.length - 1]
+    b.trades.push(t)
+  }
+
+  const bucketStats = buckets.map(b => {
+    const n    = b.trades.length
+    const wins = b.trades.filter(t => t.status === 'Win').length
+    const avgR = n > 0 ? b.trades.reduce((s, t) => s + (t.rMultiple || 0), 0) / n : null
+    return {
+      range:   b.label,
+      count:   n,
+      winRate: n > 0 ? Math.round((wins / n) * 100) + '%' : 'N/A',
+      avgRMultiple: avgR != null ? Math.round(avgR * 100) / 100 : 'N/A',
+    }
+  })
+
+  // Per-trade detail (most recent 60)
+  const tradeDetails = [...closed]
+    .sort((a, b) => new Date(b.entryDate) - new Date(a.entryDate))
+    .slice(0, 60)
+    .map(t => ({
+      symbol:        t.symbol,
+      status:        t.status,
+      rMultiple:     t.rMultiple,
+      maxAdverseR:   t.maxAdverseR,
+      proximityPct:  Math.round(Math.abs(t.maxAdverseR) * 100),
+      stopEfficiency: t.stopEfficiency,
+    }))
+
+  const totalClosed = closed.length
+  const pctToHalf   = closed.length ? Math.round(closed.filter(t => Math.abs(t.maxAdverseR) >= 0.50).length / totalClosed * 100) : 0
+  const pctToThreeQ = closed.length ? Math.round(closed.filter(t => Math.abs(t.maxAdverseR) >= 0.75).length / totalClosed * 100) : 0
+  const pctStopped  = closed.length ? Math.round(closed.filter(t => Math.abs(t.maxAdverseR) >= 0.90).length / totalClosed * 100) : 0
+  const avgMAE      = closed.length ? closed.reduce((s, t) => s + t.maxAdverseR, 0) / closed.length : 0
+
+  const stats = {
+    totalTradesAnalyzed: totalClosed,
+    avgMaxAdverseR:      Math.round(avgMAE * 1000) / 1000,
+    pctReachingHalfStop: pctToHalf + '%',
+    pctReachingThreeQuarterStop: pctToThreeQ + '%',
+    pctStoppedOut:       pctStopped + '%',
+    bucketBreakdown:     bucketStats,
+    tradeDetail:         tradeDetails,
+  }
+
+  const prompt = `You are an elite risk management coach. A trader wants to learn from their historical stop-loss data to become a better risk manager and have the math on their side.
+
+KEY CONCEPT — "Stop Proximity": how close price got to the original stop expressed as a fraction of 1R (the stop distance).
+- 0% = price never moved against the entry
+- 75% = price got 75% of the way to the stop before reversing
+- 100%+ = trade was stopped out
+
+TRADER'S MAE DATA:
+${JSON.stringify(stats)}
+
+Using ONLY this trader's actual data, provide specific, quantitative risk management recommendations:
+1. Optimal stop distance (tighter/wider and by how much, backed by the win rates at each proximity bucket)
+2. Whether a partial exit (trim) before full stop makes statistical sense, at what -R level, and what fraction to sell
+3. Any patterns in the data that suggest behavioral coaching points
+
+Return ONLY valid JSON (no markdown, no code fences):
+{
+  "verdict": "2-3 sentence data-backed summary of what the MAE pattern reveals about this trader's stops",
+  "stopRecommendation": {
+    "action": "Tighten | Widen | Keep Current",
+    "suggestion": "specific, concrete rule — e.g. 'Use 0.7R stops instead of 1R' or 'Widen by ~15% — current stops are too tight given the reversal rate'",
+    "rationale": "specific data point that drives this — cite actual bucket win rates"
+  },
+  "trimRule": {
+    "recommended": true,
+    "triggerR": -0.75,
+    "fraction": "1/3",
+    "expectedImpact": "estimated reduction in average loss in R terms",
+    "rationale": "cite the specific bucket data that supports this trim level"
+  },
+  "insights": [
+    "insight 1 — must cite a specific number from the data",
+    "insight 2",
+    "insight 3"
+  ],
+  "coachingNote": "one sentence on the behavioral implication — what does this pattern say about how the trader holds losing trades?"
+}`
+
+  const text = await callAI(apiKey, prompt)
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) throw new Error('AI returned unrecognised format.')
+  return JSON.parse(jsonMatch[0])
 }

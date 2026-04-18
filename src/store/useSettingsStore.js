@@ -66,6 +66,7 @@ export const useSettingsStore = create(
       riskColumnOrder: null,
       openPositionsColumnWidths: {},
       riskColumnWidths: {},
+      healthColumnWidths: {},
       symbolThemes: {},
 
       excludedSymbols: [],
@@ -126,6 +127,7 @@ export const useSettingsStore = create(
       setRiskColumnOrder:          (order) => set({ riskColumnOrder: order }),
       setOpenPositionsColumnWidths: (w) => set({ openPositionsColumnWidths: w }),
       setRiskColumnWidths:          (w) => set({ riskColumnWidths: w }),
+      setHealthColumnWidths:        (w) => set({ healthColumnWidths: w }),
       setTpMultiplier:     (v)             => { set({ tpMultiplier: Number(v) }); saveToCloud({ ...get(), tpMultiplier: Number(v) }) },
       setDailyLossLimit:   (v)             => { set({ dailyLossLimit: Number(v) }); saveToCloud({ ...get(), dailyLossLimit: Number(v) }) },
       setMaxDrawdownLimit: (v)             => { set({ maxDrawdownLimit: Number(v) }); saveToCloud({ ...get(), maxDrawdownLimit: Number(v) }) },

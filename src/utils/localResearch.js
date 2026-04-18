@@ -5,52 +5,18 @@
 
 import { ollamaChat } from './ollama.js'
 import { extractPdfText } from './pdfText.js'
-import { buildRefreshPrompt } from './researchPrompts.js'
+import { buildExtractionPrompt, buildRefreshPrompt } from './researchPrompts.js'
+import { parseJsonText as parseJson } from './aiHelpers.js'
 
-function buildExtractionPrompt(text, sourceType, tickerHint, themeHint) {
-  const typeLabel = sourceType === 'deep_dive' ? 'deep-dive research report'
-    : sourceType === 'earnings_call' ? 'earnings call transcript or analysis'
-    : 'research document'
-  return `You are an investment analyst extracting structured intelligence from a ${typeLabel}.
-${tickerHint ? `Known ticker(s): ${tickerHint}` : ''}
-${themeHint  ? `Known theme: ${themeHint}` : ''}
-
-DOCUMENT TEXT:
-${text}
-
-Return ONLY valid JSON (no markdown fences, no explanation):
-{
-  "title": "<concise descriptive title for this document>",
-  "summary": "<2-4 sentence executive summary of the key investment takeaways>",
-  "sentiment": "bullish|bearish|neutral|mixed",
-  "tickers_mentioned": ["<TICKER>"],
-  "themes_mentioned": ["<theme name>"],
-  "key_points": ["<key investment point>"],
-  "catalyst_signals": [
-    { "catalyst": "<catalyst description>", "status": "confirmed|emerging|watch|risk", "evidence": "<1-2 sentences from the doc>" }
-  ],
-  "key_metrics": [
-    { "label": "<metric name>", "value": "<value with units>", "context": "<brief context>" }
-  ],
-  "raw_text": "<verbatim key quotes and data — up to 4000 characters>"
-}`
-}
-
-function parseJson(raw) {
-  let text = raw.trim()
-  // Strip markdown fences if model added them anyway
-  if (text.startsWith('```')) text = text.split('\n').slice(1).join('\n')
-  if (text.endsWith('```')) text = text.slice(0, text.lastIndexOf('```'))
-  return JSON.parse(text.trim())
-}
+const SYS_ANALYST = 'Investment research analyst. Respond with valid JSON only.'
 
 /** Extract structured intelligence from a PDF using local Gemma 4 */
 export async function extractWithOllama(file, sourceType, tickerHint, themeHint) {
   const text   = await extractPdfText(file)
-  const prompt = buildExtractionPrompt(text, sourceType, tickerHint, themeHint)
+  const prompt = buildExtractionPrompt(sourceType, tickerHint, themeHint, 4000, text)
   const reply  = await ollamaChat({
     messages: [
-      { role: 'system', content: 'You are a precise investment research analyst. Always respond with valid JSON only.' },
+      { role: 'system', content: SYS_ANALYST },
       { role: 'user',   content: prompt },
     ],
     temperature: 0.1,
@@ -96,7 +62,7 @@ Return ONLY valid JSON:
 
   const reply = await ollamaChat({
     messages: [
-      { role: 'system', content: 'You are a precise investment analyst. Always respond with valid JSON only.' },
+      { role: 'system', content: SYS_ANALYST },
       { role: 'user',   content: prompt },
     ],
     temperature: 0.2,
@@ -109,7 +75,7 @@ export async function refreshNewFieldsWithOllama(themeName, dossier, deep) {
   const prompt = buildRefreshPrompt(themeName, dossier, deep)
   const reply = await ollamaChat({
     messages: [
-      { role: 'system', content: 'You are a senior growth investment analyst. Always respond with valid JSON only.' },
+      { role: 'system', content: SYS_ANALYST },
       { role: 'user', content: prompt },
     ],
     temperature: 0.2,

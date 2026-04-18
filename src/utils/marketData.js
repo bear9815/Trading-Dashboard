@@ -705,44 +705,203 @@ export async function resolveTickerToName(symbol) {
 
 // ── MAE / MFE ─────────────────────────────────────────────────────────────────
 
+function hasTimeComponent(dateStr) {
+  return dateStr && dateStr.length > 10 && /T\d{2}:\d{2}/.test(dateStr)
+}
+
+function isRegularMarketHours(unixMs) {
+  const d = new Date(unixMs)
+  const utcH = d.getUTCHours() + d.getUTCMinutes() / 60
+  const month = d.getUTCMonth() + 1
+  const isEDT = month >= 4 && month <= 10
+  const openUTC  = isEDT ? 13.5 : 14.5
+  const closeUTC = isEDT ? 20.0 : 21.0
+  return utcH >= openUTC && utcH < closeUTC
+}
+
 /**
- * Compute Max Adverse Excursion and Max Favorable Excursion for a closed trade.
+ * Fetch intraday (5-minute) bars for a single trading day, from a specific
+ * Unix-millisecond start time through end of that trading session.
+ * Tries Schwab first (authenticated, unlimited); falls back to Yahoo Finance.
+ * Returns bars with a `unixMs` field so callers can filter by exact time.
+ */
+async function fetchIntradayBars(symbol, fromMs, toMs) {
+  // ── Schwab ────────────────────────────────────────────────────────────────
+  const tok = await getActiveSchwabToken()
+  if (tok) {
+    try {
+      const params = new URLSearchParams({
+        path:                  '/marketdata/v1/pricehistory',
+        token:                 tok,
+        symbol,
+        periodType:            'day',
+        frequencyType:         'minute',
+        frequency:             '5',
+        startDate:             fromMs.toString(),
+        endDate:               toMs.toString(),
+        needExtendedHoursData: 'false',
+      })
+      const res  = await fetch(`/api/schwab/proxy?${params}`, { signal: AbortSignal.timeout(10000) })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.candles?.length) {
+          return data.candles.map(c => ({
+            unixMs: c.datetime,
+            open:   c.open, high: c.high, low: c.low, close: c.close,
+          })).filter(c => c.open != null && c.low != null)
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  // ── Yahoo Finance fallback ────────────────────────────────────────────────
+  const p1  = Math.floor(fromMs / 1000)
+  const p2  = Math.floor(toMs   / 1000)
+  const url = `${BASE}/${encodeURIComponent(symbol)}?interval=5m&period1=${p1}&period2=${p2}`
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
+  if (!res.ok) throw new Error(`Yahoo intraday HTTP ${res.status}`)
+  const json   = await res.json()
+  const result = json.chart?.result?.[0]
+  if (!result?.timestamp?.length) throw new Error('No intraday data')
+  const { timestamp, indicators } = result
+  const q = indicators.quote[0]
+  return timestamp
+    .map((t, i) => ({
+      unixMs: t * 1000,
+      open:   q.open[i], high: q.high[i], low: q.low[i], close: q.close[i],
+    }))
+    .filter(c => c.open != null && c.low != null && isRegularMarketHours(c.unixMs))
+}
+
+/**
+ * Compute Max Adverse Excursion and Max Favorable Excursion for a trade.
  * Fetches daily OHLCV from Yahoo Finance for the trade period.
  *
+ * Entry-day correction: on the day the trade was placed, only price action
+ * FROM entry time onward counts. This prevents a pre-entry daily low from
+ * inflating the adverse excursion reading. Uses 5-minute intraday bars via
+ * Schwab (preferred) or Yahoo Finance for the entry session.
+ *
  * Returns {
- *   mae,     // max $ move against you  (negative for longs)
- *   mfe,     // max $ move in your favor (positive for longs)
- *   maePct,  // mae as % of entry
- *   mfePct,  // mfe as % of entry
- *   efficiency, // actual P&L / MFE  (how much of the run you captured)
+ *   mae,        // max $ move against you  (negative)
+ *   mfe,        // max $ move in your favor (positive)
+ *   maePct,     // mae as % of entry
+ *   mfePct,
+ *   efficiency, // actual P&L / MFE
  * }
  */
 export async function computeTradeMAEMFE(trade) {
   if (!trade.entryDate || !trade.entryPrice) throw new Error('Missing entry data')
 
-  const entry = trade.entryPrice
+  const entry   = trade.entryPrice
   const isShort = (trade.position || 'Long').toLowerCase().includes('short')
 
-  const exitDate = trade.exits?.map(e => e.date).filter(Boolean).sort().pop() || trade.entryDate
-  const start = new Date(trade.entryDate)
-  start.setDate(start.getDate() - 1)
-  const end = new Date(exitDate)
-  end.setDate(end.getDate() + 1)
-
-  const candles = await fetchHistory(trade.symbol, start, end)
-  if (!candles.length) throw new Error('No price data')
+  const entryDt      = new Date(trade.entryDate)
+  const entryDateStr = entryDt.toISOString().slice(0, 10)
+  const exitDate     = trade.exits?.map(e => e.date).filter(Boolean).sort().pop()
+    || trade.exitDate
+    || trade.entryDate
+  const exitDateStr  = new Date(exitDate).toISOString().slice(0, 10)
 
   let maxLow  = Infinity
   let maxHigh = -Infinity
+
+  // ── Entry day: intraday bars from entry time onward ─────────────────────
+  // Only use price data that could realistically have occurred AFTER entry.
+  let entryDayHandled = false
+  try {
+    // For date-only entries, start from market open (not midnight) to exclude pre-market
+    let entryMs = entryDt.getTime()
+    if (!hasTimeComponent(trade.entryDate)) {
+      const month  = entryDt.getUTCMonth() + 1
+      const isEDT  = month >= 4 && month <= 10
+      entryMs = new Date(entryDateStr + (isEDT ? 'T13:30:00Z' : 'T14:30:00Z')).getTime()
+    }
+    // End of entry day: 11:59 PM UTC (covers the full US session regardless of timezone)
+    const endOfDayMs = new Date(entryDateStr + 'T23:59:59Z').getTime()
+    const bars = await fetchIntradayBars(trade.symbol, entryMs, endOfDayMs)
+
+    // Filter to bars that start at or after the entry moment
+    const afterEntry = bars.filter(b => b.unixMs >= entryMs)
+    if (afterEntry.length > 0) {
+      for (const b of afterEntry) {
+        if (b.low  < maxLow)  maxLow  = b.low
+        if (b.high > maxHigh) maxHigh = b.high
+      }
+      entryDayHandled = true
+    }
+  } catch { /* intraday unavailable for old dates — fall through to daily */ }
+
+  // ── Exit day: intraday from market open to exit time ────────────────────
+  // On the day a trade closes, only price action up to the exit moment counts.
+  // Skipped when entry and exit share the same date (entry-day intraday already
+  // covers that session, and we can't have an exit before an entry).
+  let exitDayHandled = false
+  if (exitDateStr !== entryDateStr) {
+    try {
+      let exitMs = new Date(exitDate).getTime()
+      // For date-only exit dates, use end of regular session as the boundary
+      const exitMonth = new Date(exitDate).getUTCMonth() + 1
+      const exitIsEDT = exitMonth >= 4 && exitMonth <= 10
+      const exitDayStartMs = new Date(exitDateStr + (exitIsEDT ? 'T13:30:00Z' : 'T14:30:00Z')).getTime()
+      if (!hasTimeComponent(exitDate)) {
+        exitMs = new Date(exitDateStr + (exitIsEDT ? 'T20:00:00Z' : 'T21:00:00Z')).getTime()
+      }
+      // +5-min buffer so the final 5-min bar that straddles exitMs is included
+      const bars       = await fetchIntradayBars(trade.symbol, exitDayStartMs, exitMs + 300_000)
+      const beforeExit = bars.filter(b => b.unixMs < exitMs)
+      if (beforeExit.length > 0) {
+        for (const b of beforeExit) {
+          if (b.low  < maxLow)  maxLow  = b.low
+          if (b.high > maxHigh) maxHigh = b.high
+        }
+        exitDayHandled = true
+      }
+    } catch { /* fall through to daily candle */ }
+  }
+
+  // ── Remaining days: full daily OHLCV ────────────────────────────────────
+  // Start from entry date (or day after if intraday already handled it).
+  const dailyFrom = new Date(entryDateStr)
+  if (!entryDayHandled) {
+    // No intraday data: include entry day in daily fetch but cap its low at
+    // entry price (conservative: adverse move can only be from entry onward).
+    dailyFrom.setDate(dailyFrom.getDate() - 1) // one extra day for buffer
+  } else {
+    dailyFrom.setDate(dailyFrom.getDate() + 1) // day after entry
+  }
+  const dailyEnd = new Date(exitDateStr)
+  dailyEnd.setDate(dailyEnd.getDate() + 1)
+
+  const candles = await fetchHistory(trade.symbol, dailyFrom, dailyEnd)
   for (const c of candles) {
-    if (c.low  < maxLow)  maxLow  = c.low
-    if (c.high > maxHigh) maxHigh = c.high
+    if (c.time === entryDateStr && !entryDayHandled) {
+      // Conservative fallback: cap entry-day adverse at entry price (the
+      // daily low may include pre-trade moves we don't want to count).
+      const conservativeLow  = Math.max(c.low,  entry) // longs: worst is entry itself
+      const conservativeHigh = Math.min(c.high, entry) // shorts: worst is entry itself
+      if (conservativeLow  < maxLow)  maxLow  = conservativeLow
+      if (conservativeHigh > maxHigh) maxHigh = conservativeHigh
+    } else if (c.time === exitDateStr && exitDayHandled) {
+      // Skip: exit-day intraday already covered this day with exact timing
+    } else if (c.time !== entryDateStr) {
+      // Middle days: use full daily OHLCV
+      if (c.low  < maxLow)  maxLow  = c.low
+      if (c.high > maxHigh) maxHigh = c.high
+    }
+  }
+
+  if (!isFinite(maxLow) || !isFinite(maxHigh) || maxLow === Infinity) {
+    // Absolute fallback if we somehow have no data
+    if (!candles.length) throw new Error('No price data')
+    maxLow  = Math.min(...candles.map(c => c.low))
+    maxHigh = Math.max(...candles.map(c => c.high))
   }
 
   // For long: MFE = highest high - entry, MAE = lowest low - entry (negative)
   // For short: MFE = entry - lowest low (positive), MAE = entry - highest high (negative)
   const mfe = isShort ? entry - maxLow  : maxHigh - entry
-  const mae = isShort ? entry - maxHigh : maxLow  - entry  // negative
+  const mae = isShort ? entry - maxHigh : maxLow  - entry  // always negative
 
   const pl = trade.pl ?? 0
   return {
@@ -753,6 +912,7 @@ export async function computeTradeMAEMFE(trade) {
     efficiency: mfe > 0 ? Math.round((pl / (mfe * Math.abs(trade.positionSize || 1))) * 1000) / 10 : null,
   }
 }
+
 
 // ── Earnings Calendar ─────────────────────────────────────────────────────────
 

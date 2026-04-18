@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useCallback, Fragment, useRef } from 'react'
 import { useColumnResize } from '../../hooks/useColumnResize.js'
-import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck, Settings2, Scissors } from 'lucide-react'
+import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck, Settings2, Scissors, Pencil, Check } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
@@ -8,7 +8,7 @@ import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
 import { buildOpenPositionRisk, calcNEP, calcNER, calcEffectiveExposure } from '../../utils/riskCalcs.js'
 import { formatCurrency } from '../../utils/formatters.js'
 import { calcWinRate, calcAvgR } from '../../utils/metrics.js'
-import { fetchQuotes, fetchATR14, fetchSectors } from '../../utils/marketData.js'
+import { fetchQuotes, fetchATR14, fetchSectors, computeTradeMAEMFE } from '../../utils/marketData.js'
 import OpenHeatMeter from './OpenHeatMeter.jsx'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
 
@@ -40,6 +40,20 @@ const RISK_DEFAULT_WIDTHS = {
   riskPct:     80,
   heat:       100,
 }
+
+const HEALTH_DEFAULT_WIDTHS = {
+  zone:       65,
+  lot:        60,
+  symbol:    100,
+  entry:      80,
+  origStop:   85,
+  worstPrice: 90,
+  worstR:     85,
+  liveR:      75,
+  proximity: 110,
+  trimPlan:  200,
+}
+const HEALTH_RESIZE_KEYS = ['zone', 'lot', 'symbol', 'entry', 'origStop', 'worstPrice', 'worstR', 'liveR', 'proximity', 'trimPlan']
 
 // ── Image helpers ─────────────────────────────────────────────────────────────
 function readImageAsBase64(file) {
@@ -376,345 +390,6 @@ function ClosePositionModal({ position, onClose, onConfirm }) {
   )
 }
 
-// ── Progressive Exposure Position Sizer ──────────────────────────────────────
-
-const RISK_LEVELS = [
-  { id: 'cautious', label: 'Hard Times', pct: 0.25, color: 'text-accent-red',    border: 'border-accent-red/40',    desc: 'Adverse conditions — minimal exposure, 0.25% risk per trade' },
-  { id: 'normal',   label: 'Normal',     pct: 0.5,  color: 'text-accent-yellow', border: 'border-accent-yellow/40', desc: 'Standard conditions — normal size, 0.5% risk per trade'       },
-  { id: 'good',     label: 'Good',       pct: 0.75, color: 'text-accent-green',  border: 'border-accent-green/40',  desc: 'Favorable conditions — increased size, 0.75% risk per trade'  },
-  { id: 'great',    label: 'Great',      pct: 1.0,  color: 'text-accent-blue',   border: 'border-accent-blue/40',   desc: 'Optimal conditions — full size, 1% risk per trade'            },
-]
-
-const TIER_SPLITS = [
-  { pct: 40, label: 'Tier 1 — Initial Entry',       desc: 'Enter with limited size to confirm thesis'   },
-  { pct: 35, label: 'Tier 2 — Add on Confirmation', desc: 'Add as trade proves itself (break of level)' },
-  { pct: 25, label: 'Tier 3 — Full Commitment',      desc: 'Final add once momentum is clear'            },
-]
-
-function ProgressiveSizer({ accountBalance, trades, openPositions, quotes }) {
-  const todayRiskMode = useMorningStore(s => {
-    const today = new Date().toISOString().slice(0, 10)
-    return s.getEntryByDate?.(today)?.riskMode ?? null
-  })
-  const [riskLevel,  setRiskLevel]  = useState(() => todayRiskMode || 'normal')
-  const [sizingMode, setSizingMode] = useState('atr') // 'atr' | 'stop'
-  const [entry,      setEntry]      = useState('')
-  const [stop,       setStop]       = useState('')
-  const [atr,        setAtr]        = useState('')
-
-  // Half-Kelly suggestion from trade history
-  const stats = useMemo(() => {
-    const closed = (trades || []).filter(t => t.status === 'Win' || t.status === 'Loss')
-    if (closed.length < 5) return null
-    const wr = calcWinRate(trades) / 100
-    const ar = calcAvgR(trades)
-    if (!ar || ar <= 0) return null
-
-    const kelly     = wr - (1 - wr) / ar
-    const halfKelly = Math.max(0, kelly / 2)
-
-    const consec = (() => {
-      let streak = 0
-      for (let i = closed.length - 1; i >= 0; i--) {
-        if (closed[i].status === 'Loss') streak++; else break
-      }
-      return streak
-    })()
-
-    let suggested = halfKelly * 100
-    const warnings = []
-    if (consec >= 3)      { suggested *= 0.6;  warnings.push(`${consec} consecutive losses — consider sizing down`) }
-    else if (consec >= 2) { suggested *= 0.75; warnings.push(`${consec} consecutive losses — consider caution`)     }
-
-    suggested = Math.min(Math.max(suggested, 0.25), 2)
-    return { suggested: suggested.toFixed(2), consecLosses: consec, warnings, sampleSize: closed.length }
-  }, [trades])
-
-  // House money: unrealized gains in open winners (if live prices available)
-  const houseMoney = useMemo(() => {
-    if (!openPositions?.length || !quotes?.size) return null
-    let total = 0, count = 0
-    for (const p of openPositions) {
-      const q = quotes.get(p.symbol)
-      if (!q?.price || !p.entryPrice || !p.positionSize) continue
-      const unreal = (q.price - p.entryPrice) * p.positionSize
-      if (unreal > 0) { total += unreal; count++ }
-    }
-    return total > 0 ? { total, count } : null
-  }, [openPositions, quotes])
-
-  const level    = RISK_LEVELS.find(l => l.id === riskLevel) || RISK_LEVELS[1]
-  const riskPct  = level.pct
-
-  const calc = useMemo(() => {
-    const e = parseFloat(entry)
-    const a = parseFloat(atr)
-    const s = parseFloat(stop)
-    if (!e || e <= 0 || !accountBalance) return null
-
-    let riskPerShare, impliedStop
-    if (sizingMode === 'atr') {
-      if (!a || a <= 0) return null
-      riskPerShare = a
-      impliedStop  = e - a  // assumes long; negative if e < a but we floor to null
-    } else {
-      if (!s || s <= 0 || e === s) return null
-      riskPerShare = Math.abs(e - s)
-      impliedStop  = s
-    }
-
-    if (riskPerShare <= 0) return null
-    const dollarRisk  = accountBalance * (riskPct / 100)
-    const totalShares = Math.floor(dollarRisk / riskPerShare)
-    if (totalShares < 1) return null
-
-    const isLong   = impliedStop == null ? true : e > impliedStop
-    const target2R = isLong ? e + 2 * riskPerShare : e - 2 * riskPerShare
-    const target3R = isLong ? e + 3 * riskPerShare : e - 3 * riskPerShare
-
-    const tiers = TIER_SPLITS.map(t => ({
-      ...t,
-      shares: Math.floor(totalShares * t.pct / 100),
-      cost:   Math.floor(totalShares * t.pct / 100) * e,
-    }))
-
-    return { totalShares, dollarRisk, riskPerShare, impliedStop, target2R, target3R, tiers, isLong }
-  }, [entry, stop, atr, sizingMode, accountBalance, riskPct])
-
-  const houseFundedPct = houseMoney && calc
-    ? Math.min((houseMoney.total / calc.dollarRisk) * 100, 999)
-    : null
-
-  return (
-    <div className="card">
-      <div className="mb-5">
-        <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Trade Planning</p>
-        <h3 className="text-base font-semibold text-white flex items-center gap-2">
-          <Target size={15} className="text-accent-blue" />
-          Progressive Exposure — Position Sizer
-        </h3>
-      </div>
-
-      {!accountBalance && (
-        <p className="text-xs text-accent-yellow/70 mb-3">Set account balance by importing trades or deposits first.</p>
-      )}
-
-      {/* House money buffer */}
-      {houseMoney && (
-        <div className={`rounded-lg border px-3 py-2.5 mb-4 text-xs ${
-          houseFundedPct != null && houseFundedPct >= 100
-            ? 'bg-accent-green/5 border-accent-green/20'
-            : 'bg-accent-blue/5 border-accent-blue/15'
-        }`}>
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-gray-400">Open Trade Buffer ({houseMoney.count} winner{houseMoney.count !== 1 ? 's' : ''})</span>
-            <span className="mono font-bold text-accent-green">+{formatCurrency(houseMoney.total)}</span>
-          </div>
-          {calc && houseFundedPct != null && (
-            <>
-              <div className="flex items-center justify-between text-gray-500 mb-1">
-                <span>New trade risk: <span className="text-gray-300 mono">{formatCurrency(calc.dollarRisk)}</span></span>
-                <span className={`font-semibold ${houseFundedPct >= 100 ? 'text-accent-green' : 'text-accent-yellow'}`}>
-                  {houseFundedPct >= 100 ? '✓ Fully funded by open profits' : `${houseFundedPct.toFixed(0)}% funded`}
-                </span>
-              </div>
-              <div className="h-1 bg-surface-300 rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${Math.min(houseFundedPct, 100)}%`,
-                    backgroundColor: houseFundedPct >= 100 ? '#00d084' : '#ffa502',
-                  }}
-                />
-              </div>
-            </>
-          )}
-          {!calc && (
-            <p className="text-gray-500 mt-0.5">Enter trade parameters below to see funding ratio.</p>
-          )}
-          {/* Auto step-up suggestion: house money covers 2R+ → suggest moving up one tier */}
-          {calc && houseFundedPct != null && houseFundedPct >= 200 && (() => {
-            const nextLevel = RISK_LEVELS[Math.min(RISK_LEVELS.findIndex(l => l.id === riskLevel) + 1, RISK_LEVELS.length - 1)]
-            const alreadyMax = nextLevel?.id === riskLevel
-            return !alreadyMax ? (
-              <div className="mt-2 flex items-center justify-between bg-accent-green/10 border border-accent-green/20 rounded px-2 py-1.5">
-                <span className="text-accent-green text-[11px]">
-                  💡 Open profits cover {houseFundedPct.toFixed(0)}% of this risk — consider stepping up to <strong>{nextLevel.label} ({nextLevel.pct}%)</strong>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setRiskLevel(nextLevel.id)}
-                  className="text-[11px] text-accent-green border border-accent-green/40 rounded px-2 py-0.5 ml-2 hover:bg-accent-green/10 transition-colors shrink-0"
-                >
-                  Apply
-                </button>
-              </div>
-            ) : null
-          })()}
-        </div>
-      )}
-
-      {/* Kelly suggestion */}
-      {stats && (
-        <div className="rounded-xl bg-surface-200 border border-white/5 px-4 py-3 mb-5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-          <span className="text-sm text-gray-500">Kelly Suggestion ({stats.sampleSize} trades):</span>
-          <span className="mono font-bold text-base text-gray-200">{stats.suggested}%</span>
-          {stats.warnings.map((w, i) => (
-            <span key={i} className="text-sm text-accent-yellow/80 flex items-center gap-1">
-              <AlertTriangle size={12} /> {w}
-            </span>
-          ))}
-        </div>
-      )}
-      {!stats && (
-        <p className="text-sm text-gray-600 mb-5">Add 5+ closed trades to see a Kelly-based risk suggestion.</p>
-      )}
-
-      {/* Risk level selector */}
-      <div className="mb-5">
-        <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Market Conditions</p>
-        <div className="grid grid-cols-4 gap-2">
-          {RISK_LEVELS.map(l => (
-            <button
-              key={l.id}
-              onClick={() => setRiskLevel(l.id)}
-              title={l.desc}
-              className={`px-3 py-3 rounded-xl border text-sm font-semibold transition-all flex flex-col items-center gap-1 ${
-                riskLevel === l.id
-                  ? `${l.color} ${l.border} bg-white/5`
-                  : 'text-gray-600 border-gray-700/50 hover:border-gray-500 hover:text-gray-400'
-              }`}
-            >
-              <span>{l.label}</span>
-              <span className="text-xs font-normal opacity-70">{l.pct}%</span>
-            </button>
-          ))}
-        </div>
-        <p className="text-xs text-gray-600 mt-2">{level.desc}</p>
-      </div>
-
-      {/* Effective risk display */}
-      <div className="flex items-center gap-3 mb-5 p-3 rounded-xl bg-surface-200 border border-white/5">
-        <span className="text-sm text-gray-400">Risk per trade:</span>
-        <span className={`font-bold mono text-2xl ${
-          riskPct <= 0.25 ? 'text-accent-green'
-          : riskPct <= 0.5 ? 'text-accent-yellow'
-          : riskPct <= 0.75 ? 'text-orange-400'
-          : 'text-accent-red'
-        }`}>{riskPct}%</span>
-        {accountBalance > 0 && (
-          <span className="text-sm text-gray-500">= {formatCurrency(accountBalance * riskPct / 100)} at risk</span>
-        )}
-      </div>
-
-      {/* Sizing mode toggle */}
-      <div className="mb-5">
-        <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Sizing Method</p>
-        <div className="flex gap-2">
-          {[
-            ['atr',  'ATR-Based',   'size = (risk $) ÷ 14-day ATR'],
-            ['stop', 'Entry / Stop', 'size = (risk $) ÷ stop distance'],
-          ].map(([id, label, desc]) => (
-            <button
-              key={id}
-              onClick={() => setSizingMode(id)}
-              title={desc}
-              className={`flex-1 py-2.5 rounded-xl border text-sm font-semibold transition-all ${
-                sizingMode === id
-                  ? 'text-accent-blue border-accent-blue/40 bg-accent-blue/10'
-                  : 'text-gray-600 border-gray-700/50 hover:border-gray-500 hover:text-gray-400'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {sizingMode === 'atr' && (
-          <p className="text-xs text-gray-600 mt-1.5">
-            Shares = ({riskPct}% × account) ÷ ATR. Stop = Entry − ATR.
-          </p>
-        )}
-      </div>
-
-      {/* Inputs */}
-      <div className="grid grid-cols-2 gap-3 mb-5">
-        <div>
-          <label className="text-xs font-medium text-gray-400 uppercase tracking-wider block mb-1.5">Entry Price</label>
-          <input type="number" step="0.01" value={entry} onChange={e => setEntry(e.target.value)}
-            placeholder="185.00" className="input text-sm mono" />
-        </div>
-        {sizingMode === 'atr' ? (
-          <div>
-            <label className="text-xs font-medium text-gray-400 uppercase tracking-wider block mb-1.5">14-Day ATR ($)</label>
-            <input type="number" step="0.01" value={atr} onChange={e => setAtr(e.target.value)}
-              placeholder="3.50" className="input text-sm mono" />
-          </div>
-        ) : (
-          <div>
-            <label className="text-xs font-medium text-gray-400 uppercase tracking-wider block mb-1.5">Stop Loss</label>
-            <input type="number" step="0.01" value={stop} onChange={e => setStop(e.target.value)}
-              placeholder="182.00" className="input text-sm mono" />
-          </div>
-        )}
-      </div>
-
-      {/* Results */}
-      {calc ? (
-        <div className="space-y-5">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="card-sm text-center">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Total Shares</p>
-              <p className="text-2xl font-bold mono text-white">{calc.totalShares.toLocaleString()}</p>
-            </div>
-            <div className="card-sm text-center">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Risk (1R)</p>
-              <p className="text-xl font-bold mono text-accent-red">{formatCurrency(calc.dollarRisk)}</p>
-              <p className="text-xs text-gray-600">${calc.riskPerShare.toFixed(2)}/share</p>
-            </div>
-            <div className="card-sm text-center">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">{sizingMode === 'atr' ? 'Implied Stop' : 'Stop'}</p>
-              <p className="text-xl font-bold mono text-accent-yellow">
-                {calc.impliedStop != null ? `$${calc.impliedStop.toFixed(2)}` : '—'}
-              </p>
-            </div>
-            <div className="card-sm text-center">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">2R Target</p>
-              <p className="text-xl font-bold mono text-accent-green">${calc.target2R.toFixed(2)}</p>
-            </div>
-          </div>
-
-          <div>
-            <p className="text-sm font-semibold text-gray-300 mb-3">Progressive Entry Plan</p>
-            <div className="space-y-2">
-              {calc.tiers.map((t, i) => (
-                <div key={i} className="rounded-xl bg-surface-200 border border-white/5 px-4 py-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-200">{t.label}</p>
-                    <p className="text-xs text-gray-600 mt-0.5">{t.desc}</p>
-                  </div>
-                  <div className="text-right shrink-0 ml-4">
-                    <p className="text-base font-bold mono text-white">{t.shares.toLocaleString()} shares</p>
-                    <p className="text-xs text-gray-500">{formatCurrency(t.cost)} ({t.pct}%)</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-gray-600 mt-2">
-              Build position in layers — each tier only if the previous tier confirms the thesis.
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className="rounded-lg bg-surface-200 px-4 py-3 text-xs text-gray-500 text-center">
-          {sizingMode === 'atr'
-            ? 'Enter entry price and 14-day ATR to generate your plan'
-            : 'Enter entry and stop prices to generate your plan'}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Lot Picker Modal ──────────────────────────────────────────────────────────
 // For multi-lot positions: let the user choose which specific lot to close before
 // opening the regular ClosePositionModal.
@@ -779,114 +454,385 @@ function LotPickerModal({ group, onClose, onPickLot, onCloseAll }) {
   )
 }
 
-// ── Derisk Strategy Table ────────────────────────────────────────────────────
-// Systematic partial-exit planner: when a position is down a configurable R
-// trigger, plan a trim of a configurable fraction of size, and show the
-// adjusted upper target (in ATRs) required to still hit the original $ target.
-// Uses _originalStopLoss so calculations are stable under trailing stops.
-function DeriskStrategyTable({ groupedPositions, quotes, atrData, liveBalance, tpMultiplier }) {
-  const [trimTriggerR, setTrimTriggerR] = useState(-0.75) // -0.5, -0.75, -1
-  const [trimFrac,     setTrimFrac]     = useState(1/3)   // 0.25, 1/3, 0.5
+// ── Position Health & Adaptive Trim ──────────────────────────────────────────
+// Combined panel: Stop Proximity (MAE tracking) + Adaptive Trim planning.
+// Trim trigger auto-derives from winner MAE distribution (since Nov 14 2025).
+function computeWinnerMAEStats(trades) {
+  const cutoff = new Date('2025-11-14T00:00:00Z')
+  const winners = trades.filter(t =>
+    t.status === 'Win' &&
+    t.maxAdverseR != null &&
+    t.entryDate && new Date(t.entryDate) >= cutoff
+  )
+  if (winners.length === 0) return null
+  const absMAE = winners.map(t => Math.abs(t.maxAdverseR)).sort((a, b) => a - b)
+  const n   = absMAE.length
+  const avg = absMAE.reduce((s, v) => s + v, 0) / n
+  function pctile(arr, p) { return arr[Math.min(Math.floor(arr.length * p), arr.length - 1)] }
+  return {
+    n,
+    avg:    Math.round(avg                    * 1000) / 1000,
+    median: Math.round(pctile(absMAE, 0.5)   * 1000) / 1000,
+    p75:    Math.round(pctile(absMAE, 0.75)  * 1000) / 1000,
+    p90:    Math.round(pctile(absMAE, 0.9)   * 1000) / 1000,
+    p95:    Math.round(pctile(absMAE, 0.95)  * 1000) / 1000,
+  }
+}
+
+function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMultiplier, atrData }) {
+  const { updateTrade } = useTradeStore()
+  const [maeThreshold, setMaeThreshold] = useState('p90')
+  const [trimFrac,     setTrimFrac]     = useState(1/3)
+  const [computing,    setComputing]    = useState(false)
+  const [done,         setDone]         = useState(0)
+  const [total,        setTotal]        = useState(0)
+  const [errCount,     setErrCount]     = useState(0)
+  const [histComp,     setHistComp]     = useState(false)
+  const [histDone,     setHistDone]     = useState(0)
+  const [histTotal,    setHistTotal]    = useState(0)
+  const [histErr,      setHistErr]      = useState(0)
+  const [sortCol,      setSortCol]      = useState('zone')
+  const [sortDir,      setSortDir]      = useState('desc')
+  const [editingId,    setEditingId]    = useState(null)
   const [viewMode,     setViewMode]     = useState('active') // 'active' | 'all'
 
-  const rows = useMemo(() => {
-    return groupedPositions.map(g => {
-      const entry      = g.entryPrice
-      const origStop   = g._originalStopLoss ?? g.stopLoss
-      const rPerShare  = entry && origStop ? Math.abs(entry - origStop) : 0
-      const q          = quotes.get(g.symbol)
-      const current    = q?.price ?? null
-      const isLong     = (g.position || 'Long').toLowerCase() !== 'short'
-      const pnlPerSh   = current != null && entry != null ? (isLong ? current - entry : entry - current) : 0
-      const curR       = current != null && rPerShare > 0 ? pnlPerSh / rPerShare : null
-      const atrDollar  = atrData.get(g.symbol)?.atr ?? null
-      const atrDist    = atrDollar && current != null && entry != null
-        ? ((isLong ? current - entry : entry - current) / atrDollar)
-        : null
-      const shares     = g.positionSize || 0
-      const triggered  = curR != null && curR <= trimTriggerR
-      const approaching= curR != null && curR <= trimTriggerR / 2 && !triggered
-      const trimShares = triggered ? Math.max(1, Math.round(shares * trimFrac)) : 0
-      const realized   = trimShares * pnlPerSh
-      const remShares  = shares - trimShares
-      const remRiskDol = remShares * rPerShare
-      const remRiskPct = liveBalance > 0 ? (remRiskDol / liveBalance) * 100 : 0
-
-      // Original plan target = starting risk $ × tpMultiplier.
-      // After a trim that realizes `realized` $, remaining shares must earn
-      // (origTpDollar - realized) to still hit the original $ target.
-      const origTpDollar  = shares * rPerShare * tpMultiplier
-      const neededPerSh   = remShares > 0 ? (origTpDollar - realized) / remShares : 0
-      const adjustedTp    = remShares > 0 && entry != null
-        ? entry + (isLong ? 1 : -1) * neededPerSh
-        : null
-      const adjustedTpATR = atrDollar && neededPerSh ? neededPerSh / atrDollar : null
-
-      return {
-        id:           g.id ?? g.symbol,
-        symbol:       g.symbol,
-        isLong,
-        entry,
-        origStop,
-        current,
-        curR,
-        atrDist,
-        shares,
-        trimShares,
-        realized,
-        remRiskPct,
-        adjustedTp,
-        adjustedTpATR,
-        triggered,
-        approaching,
-        hasAtr:       atrDollar != null,
-      }
-    })
-  }, [groupedPositions, quotes, atrData, liveBalance, trimTriggerR, trimFrac, tpMultiplier])
-
-  const triggeredCount = rows.filter(r => r.triggered).length
-  const totalRealized  = rows.reduce((s, r) => s + (r.triggered ? r.realized : 0), 0)
-  const visibleRows    = viewMode === 'active' ? rows.filter(r => !r.triggered) : rows
-  const hiddenCount    = rows.length - visibleRows.length
-
-  const trimFracLabel = (f) => f === 0.25 ? '1/4' : f === 0.5 ? '1/2' : '1/3'
-  const SegBtn = ({ active, onClick, children }) => (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`px-3 py-1 text-xs font-medium rounded border transition-colors ${
-        active
-          ? 'border-accent-blue bg-accent-blue/15 text-accent-blue'
-          : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'
-      }`}
-    >
-      {children}
-    </button>
+  const { healthColumnWidths, setHealthColumnWidths } = useSettingsStore()
+  const { widths: healthWidths, startResize: startHealthResize } = useColumnResize(
+    HEALTH_RESIZE_KEYS,
+    healthColumnWidths,
+    HEALTH_DEFAULT_WIDTHS,
+    setHealthColumnWidths,
   )
 
-  if (groupedPositions.length === 0) return null
+  const winnerStats  = useMemo(() => computeWinnerMAEStats(allTrades), [allTrades])
+  const trimTriggerR = winnerStats ? (winnerStats[maeThreshold] ?? 0.9) : 0.9
+
+  function handleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    else { setSortCol(col); setSortDir('desc') }
+  }
+
+  function saveManualPrice(row, val) {
+    setEditingId(null)
+    const price = parseFloat(val)
+    if (isNaN(price) || price <= 0) return
+    const rawR = row.isLong
+      ? (price - row.entry) / row.riskPerSh
+      : (row.entry - price) / row.riskPerSh
+    updateTrade(row.id, {
+      maxAdverseR:     Math.round(rawR * 1000) / 1000,
+      maxAdversePrice: Math.round(price * 100) / 100,
+    })
+  }
+
+  async function computeOpenMAE(forceRecompute = false) {
+    const toProcess = openTrades.filter(t => {
+      if (!t.entryPrice || !(t._originalStopLoss ?? t.stopLoss)) return false
+      return forceRecompute || t.maxAdverseR == null
+    })
+    if (!toProcess.length) return
+    setComputing(true); setDone(0); setErrCount(0); setTotal(toProcess.length)
+    for (let i = 0; i < toProcess.length; i++) {
+      const trade = toProcess[i]
+      try {
+        const tradeCopy = { ...trade, exits: [{ date: new Date().toISOString() }] }
+        const result    = await computeTradeMAEMFE(tradeCopy)
+        const entry     = trade.entryPrice
+        const origStop  = trade._originalStopLoss ?? trade.stopLoss
+        const riskPerSh = Math.abs(entry - origStop)
+        const isLong    = (trade.position || 'Long').toLowerCase() !== 'short'
+        if (result && riskPerSh > 0) {
+          const maeR       = Math.round((result.mae / riskPerSh) * 1000) / 1000
+          const worstPrice = Math.round((isLong ? entry + result.mae : entry - result.mae) * 100) / 100
+          updateTrade(trade.id, { maxAdverseR: maeR, maxAdversePrice: worstPrice })
+        }
+      } catch (err) {
+        console.warn(`[MAE] ${trade.symbol}:`, err.message)
+        setErrCount(e => e + 1)
+      }
+      setDone(i + 1)
+      if (i < toProcess.length - 1) await new Promise(r => setTimeout(r, 250))
+    }
+    setComputing(false)
+  }
+
+  async function computeHistoricalMAE(forceRecompute = false) {
+    const cutoff = new Date('2025-11-14T00:00:00Z')
+    const toProcess = allTrades.filter(t =>
+      t.status === 'Win' &&
+      t.entryDate && new Date(t.entryDate) >= cutoff &&
+      t.entryPrice && (t._originalStopLoss ?? t.stopLoss) &&
+      (forceRecompute || t.maxAdverseR == null)
+    )
+    if (!toProcess.length) return
+    setHistComp(true); setHistDone(0); setHistErr(0); setHistTotal(toProcess.length)
+    for (let i = 0; i < toProcess.length; i++) {
+      const trade = toProcess[i]
+      try {
+        const result    = await computeTradeMAEMFE(trade)
+        const entry     = trade.entryPrice
+        const origStop  = trade._originalStopLoss ?? trade.stopLoss
+        const riskPerSh = Math.abs(entry - origStop)
+        const isLong    = (trade.position || 'Long').toLowerCase() !== 'short'
+        if (result && riskPerSh > 0) {
+          const maeR       = Math.round((result.mae / riskPerSh) * 1000) / 1000
+          const worstPrice = Math.round((isLong ? entry + result.mae : entry - result.mae) * 100) / 100
+          updateTrade(trade.id, { maxAdverseR: maeR, maxAdversePrice: worstPrice })
+        }
+      } catch (err) {
+        console.warn(`[MAE hist] ${trade.symbol}:`, err.message)
+        setHistErr(e => e + 1)
+      }
+      setHistDone(i + 1)
+      if (i < toProcess.length - 1) await new Promise(r => setTimeout(r, 400))
+    }
+    setHistComp(false)
+  }
+
+  const rows = useMemo(() => {
+    const cutoffMs = new Date('2025-11-14T00:00:00Z').getTime()
+    // Assign lot numbers: Lot 1 = earliest entry per symbol
+    const lotNums = {}
+    const lotTotals = {}
+    const sortedForLots = [...openTrades].sort((a, b) =>
+      new Date(a.entryDate || 0) - new Date(b.entryDate || 0)
+    )
+    for (const t of sortedForLots) {
+      if (!lotNums[t.symbol]) { lotNums[t.symbol] = {}; lotTotals[t.symbol] = 0 }
+      lotTotals[t.symbol]++
+      lotNums[t.symbol][t.id] = lotTotals[t.symbol]
+    }
+    const mapped = openTrades.map(t => {
+      const entry    = t.entryPrice
+      const origStop = t._originalStopLoss ?? t.stopLoss
+      if (!entry || !origStop) return null
+      const riskPerSh = Math.abs(entry - origStop)
+      const isLong    = (t.position || 'Long').toLowerCase() !== 'short'
+      const cp        = quotes.get(t.symbol)?.price ?? null
+      const liveR     = cp != null && riskPerSh > 0
+        ? (isLong ? cp - entry : entry - cp) / riskPerSh
+        : null
+      const stored    = t.maxAdverseR ?? null
+      const worstR    = stored != null && liveR != null && liveR < stored ? liveR
+        : (stored ?? (liveR != null && liveR < 0 ? liveR : null))
+      const absWorstR = worstR != null ? Math.abs(worstR) : null
+
+      let zone = 'none'
+      if (absWorstR != null) {
+        if (absWorstR > trimTriggerR)                            zone = 'alert'
+        else if (winnerStats && absWorstR > winnerStats.avg)     zone = 'watch'
+        else if (winnerStats)                                     zone = 'safe'
+        else zone = absWorstR > 0.75 ? 'alert' : absWorstR > 0.4 ? 'watch' : 'safe'
+      }
+
+      const origSize   = t._originalPositionSize ?? t.positionSize ?? 0
+      const trimShares = origSize > 0 ? Math.max(1, Math.round(origSize * trimFrac)) : 0
+      const remShares  = origSize - trimShares
+      const trimPrice  = riskPerSh > 0
+        ? (isLong ? entry - trimTriggerR * riskPerSh : entry + trimTriggerR * riskPerSh)
+        : null
+      const lockedPnL  = trimPrice != null
+        ? trimShares * (isLong ? trimPrice - entry : entry - trimPrice)
+        : null
+      const origTargetPL = origSize > 0 && riskPerSh > 0
+        ? origSize * riskPerSh * tpMultiplier
+        : null
+      const neededFromRem = origTargetPL != null && lockedPnL != null && remShares > 0
+        ? origTargetPL - lockedPnL
+        : null
+      const newTargetPrice = neededFromRem != null && remShares > 0
+        ? entry + (isLong ? 1 : -1) * (neededFromRem / remShares)
+        : null
+      const breakEvenPrice = lockedPnL != null && remShares > 0
+        ? entry + (isLong ? 1 : -1) * (-lockedPnL / remShares)
+        : null
+      const atrDollar    = atrData?.get(t.symbol)?.atr ?? null
+      const newTargetATR = atrDollar && newTargetPrice != null
+        ? Math.abs(newTargetPrice - entry) / atrDollar
+        : null
+
+      return {
+        id: t.id, symbol: t.symbol, isLong,
+        entry, origStop, riskPerSh, liveR, worstR, absWorstR,
+        worstPrice:    t.maxAdversePrice ?? null,
+        proximityPct:  absWorstR != null ? Math.min(100, absWorstR * 100) : null,
+        zone, origSize, trimShares, remShares, trimPrice,
+        lockedPnL, newTargetPrice, breakEvenPrice, newTargetATR,
+        lotNum:    lotNums[t.symbol]?.[t.id] ?? 1,
+        totalLots: lotTotals[t.symbol] ?? 1,
+      }
+    }).filter(Boolean)
+
+    const zoneOrder = { alert: 0, watch: 1, safe: 2, none: 3 }
+    const nullLast  = (a, b, fn) => {
+      const av = fn(a), bv = fn(b)
+      if (av == null && bv == null) return 0
+      if (av == null) return 1; if (bv == null) return -1
+      return av < bv ? -1 : av > bv ? 1 : 0
+    }
+    const dir = sortDir === 'desc' ? -1 : 1
+    const comparators = {
+      symbol: (a, b) => dir * a.symbol.localeCompare(b.symbol),
+      worstR: (a, b) => dir * nullLast(a, b, r => r.absWorstR),
+      liveR:  (a, b) => dir * nullLast(a, b, r => r.liveR),
+      zone:   (a, b) => {
+        const zo = zoneOrder[a.zone] - zoneOrder[b.zone]
+        if (zo !== 0) return dir * zo
+        return -dir * nullLast(a, b, r => r.absWorstR)
+      },
+    }
+    return mapped.sort(comparators[sortCol] ?? comparators.zone)
+  }, [openTrades, quotes, winnerStats, trimTriggerR, trimFrac, tpMultiplier, atrData, sortCol, sortDir])
+
+  const pendingOpen = openTrades.filter(t =>
+    t.entryPrice && (t._originalStopLoss ?? t.stopLoss) && t.maxAdverseR == null
+  ).length
+  const cutoff = new Date('2025-11-14T00:00:00Z')
+  const pendingHist = allTrades.filter(t =>
+    t.status === 'Win' && t.maxAdverseR == null &&
+    t.entryDate && new Date(t.entryDate) >= cutoff &&
+    t.entryPrice && (t._originalStopLoss ?? t.stopLoss)
+  ).length
+
+  const zoneColor = z => z === 'alert' ? 'text-accent-red' : z === 'watch' ? 'text-accent-yellow' : z === 'safe' ? 'text-accent-green' : 'text-gray-600'
+  const zoneBg    = z => z === 'alert' ? 'bg-accent-red/15 text-accent-red' : z === 'watch' ? 'bg-accent-yellow/15 text-accent-yellow' : z === 'safe' ? 'bg-accent-green/15 text-accent-green' : 'bg-gray-800 text-gray-500'
+  const barColor  = p => p == null ? 'bg-gray-700' : p >= 90 ? 'bg-accent-red' : p >= 75 ? 'bg-orange-400' : p >= 50 ? 'bg-accent-yellow' : 'bg-accent-green'
+
+  const SegBtn = ({ active, onClick, children }) => (
+    <button type="button" onClick={onClick}
+      className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors ${
+        active ? 'border-accent-blue bg-accent-blue/15 text-accent-blue'
+               : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'
+      }`}
+    >{children}</button>
+  )
+
+  function SortTh({ col, label, align = 'right', rk }) {
+    const active = sortCol === col
+    return (
+      <th className={`relative pb-2 pr-3 font-medium cursor-pointer select-none hover:text-gray-300 transition-colors text-${align}`}
+        style={rk ? { width: healthWidths[rk] } : {}}
+        onClick={() => handleSort(col)}>
+        <span className={`inline-flex items-center gap-0.5 ${align === 'right' ? 'justify-end w-full' : ''}`}>
+          {label}
+          <span className={`text-[10px] ml-0.5 ${active ? 'text-accent-blue' : 'text-gray-700'}`}>
+            {active ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
+          </span>
+        </span>
+        {rk && (
+          <div onMouseDown={e => { e.stopPropagation(); startHealthResize(rk, e) }}
+            className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent-blue/60 rounded" />
+        )}
+      </th>
+    )
+  }
+
+  function PlainTh({ label, align = 'right', rk }) {
+    return (
+      <th className={`relative pb-2 pr-3 font-medium text-${align}`}
+        style={rk ? { width: healthWidths[rk] } : {}}>
+        {label}
+        {rk && (
+          <div onMouseDown={e => { e.stopPropagation(); startHealthResize(rk, e) }}
+            className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent-blue/60 rounded" />
+        )}
+      </th>
+    )
+  }
+
+  if (openTrades.length === 0) return null
+
+  const alertCount  = rows.filter(r => r.zone === 'alert').length
+  const visibleRows = viewMode === 'active' ? rows.filter(r => r.zone !== 'alert') : rows
+  const hiddenCount = rows.length - visibleRows.length
 
   return (
     <div className="card">
+      {/* Header */}
       <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Exit Strategy</p>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Risk Discipline</p>
           <h3 className="text-base font-semibold text-white flex items-center gap-2">
-            <Scissors size={15} className="text-accent-yellow" />
-            Derisk Strategy — Systematic Trim Plan
+            <ShieldCheck size={15} className="text-accent-blue" />
+            Position Health &amp; Adaptive Trim
+            {alertCount > 0 && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-accent-red/20 text-accent-red font-semibold">
+                {alertCount} alert{alertCount !== 1 ? 's' : ''}
+              </span>
+            )}
           </h3>
           <p className="text-xs text-gray-500 mt-1 max-w-2xl">
-            When a trade doesn't work out of the gate, trim part of the position to cut the negative R.
-            Remaining shares keep the original dollar target — the adjusted upper target is how far (in ATRs) they now need to travel.
+            Tracks how far each open position has moved against you vs. your historical winner MAE distribution.
+            When a trade goes deeper than {(trimTriggerR * 100).toFixed(0)}% of your winners ever did, consider trimming.
           </p>
         </div>
-        <div className="flex items-center gap-4 text-xs">
+        <div className="flex items-center gap-2 flex-wrap">
+          {(computing || histComp) && (
+            <span className="text-xs text-gray-400 mono">
+              {computing
+                ? `${done}/${total}${errCount > 0 ? ` · ${errCount} err` : ''}`
+                : `hist ${histDone}/${histTotal}${histErr > 0 ? ` · ${histErr} err` : ''}`}
+            </span>
+          )}
+          <button
+            onClick={() => computeOpenMAE(false)}
+            disabled={computing || histComp || pendingOpen === 0}
+            className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-40"
+            title="Fetch intraday MAE for open trades missing data"
+          >
+            <RefreshCw size={12} className={computing ? 'animate-spin' : ''} />
+            {computing ? 'Computing…' : `Open MAE${pendingOpen > 0 ? ` (${pendingOpen})` : ''}`}
+          </button>
+          <button
+            onClick={() => computeOpenMAE(true)}
+            disabled={computing || histComp || openTrades.length === 0}
+            className="btn-ghost text-xs text-gray-500 disabled:opacity-40"
+            title="Recompute MAE for all open trades"
+          >
+            Refresh All
+          </button>
+          <button
+            onClick={() => computeHistoricalMAE(false)}
+            disabled={computing || histComp || pendingHist === 0}
+            className="btn-ghost text-xs text-gray-500 flex items-center gap-1.5 disabled:opacity-40"
+            title={`Compute MAE for ${pendingHist} closed winning trades since Nov 14 2025 to build stats`}
+          >
+            <Loader2 size={12} className={histComp ? 'animate-spin' : 'hidden'} />
+            {histComp ? 'Historical…' : `Hist MAE${pendingHist > 0 ? ` (${pendingHist})` : ''}`}
+          </button>
+        </div>
+      </div>
+
+      {/* Winner stats + controls */}
+      <div className="flex items-start gap-5 mb-4 flex-wrap">
+        <div className="flex items-center gap-4 bg-surface-200 rounded-lg px-4 py-2.5 text-xs flex-wrap">
+          {winnerStats ? (
+            <>
+              <span className="text-gray-500">Winner MAE <span className="text-gray-400">n={winnerStats.n}</span></span>
+              <span><span className="text-gray-500">Avg </span><span className="mono font-semibold text-gray-200">{winnerStats.avg.toFixed(2)}R</span></span>
+              <span><span className="text-gray-500">p75 </span><span className="mono font-semibold text-gray-200">{winnerStats.p75.toFixed(2)}R</span></span>
+              <span><span className="text-gray-500">p90 </span><span className="mono font-semibold text-accent-yellow">{winnerStats.p90.toFixed(2)}R</span></span>
+              <span><span className="text-gray-500">p95 </span><span className="mono font-semibold text-accent-red">{winnerStats.p95.toFixed(2)}R</span></span>
+            </>
+          ) : (
+            <span className="text-gray-500 italic">
+              No winner MAE yet — click "Hist MAE" to compute from closed wins since Nov 14, 2025
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-4 flex-wrap text-xs">
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Trim Trigger</p>
+            <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Alert Threshold</p>
             <div className="flex gap-1">
-              <SegBtn active={trimTriggerR === -0.5}  onClick={() => setTrimTriggerR(-0.5)}>-0.5 R</SegBtn>
-              <SegBtn active={trimTriggerR === -0.75} onClick={() => setTrimTriggerR(-0.75)}>-0.75 R</SegBtn>
-              <SegBtn active={trimTriggerR === -1}    onClick={() => setTrimTriggerR(-1)}>-1 R</SegBtn>
+              <SegBtn active={maeThreshold === 'avg'} onClick={() => setMaeThreshold('avg')}>
+                Avg {winnerStats ? `(${winnerStats.avg.toFixed(2)}R)` : ''}
+              </SegBtn>
+              <SegBtn active={maeThreshold === 'p75'} onClick={() => setMaeThreshold('p75')}>
+                p75 {winnerStats ? `(${winnerStats.p75.toFixed(2)}R)` : ''}
+              </SegBtn>
+              <SegBtn active={maeThreshold === 'p90'} onClick={() => setMaeThreshold('p90')}>
+                p90 {winnerStats ? `(${winnerStats.p90.toFixed(2)}R)` : ''}
+              </SegBtn>
             </div>
           </div>
           <div>
@@ -898,132 +844,196 @@ function DeriskStrategyTable({ groupedPositions, quotes, atrData, liveBalance, t
             </div>
           </div>
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">View</p>
+            <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Positions</p>
             <div className="flex gap-1">
-              <SegBtn active={viewMode === 'active'} onClick={() => setViewMode('active')}>Active</SegBtn>
-              <SegBtn active={viewMode === 'all'}    onClick={() => setViewMode('all')}>All</SegBtn>
+              <SegBtn active={viewMode === 'active'} onClick={() => setViewMode('active')}>
+                Active{hiddenCount > 0 ? ` (${visibleRows.length})` : ''}
+              </SegBtn>
+              <SegBtn active={viewMode === 'all'} onClick={() => setViewMode('all')}>
+                All{rows.length > 0 ? ` (${rows.length})` : ''}
+              </SegBtn>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Summary strip */}
-      <div className="flex items-center gap-5 mb-3 text-xs">
-        <div>
-          <span className="text-gray-500">Triggered: </span>
-          <span className={`mono font-semibold ${triggeredCount > 0 ? 'text-accent-red' : 'text-gray-400'}`}>
-            {triggeredCount} / {rows.length}
-          </span>
+      {rows.length === 0 ? (
+        <div className="rounded-lg bg-surface-200 px-4 py-5 text-xs text-gray-500 text-center">
+          No open trades with entry + stop data.
         </div>
-        <div>
-          <span className="text-gray-500">Realized if trimmed now: </span>
-          <span className={`mono font-semibold ${totalRealized < 0 ? 'text-accent-red' : 'text-gray-400'}`}>
-            {totalRealized !== 0 ? formatCurrency(totalRealized) : '—'}
-          </span>
-        </div>
-        <div>
-          <span className="text-gray-500">Threshold: </span>
-          <span className="mono font-semibold text-accent-yellow">
-            trim {trimFracLabel(trimFrac)} at {trimTriggerR} R
-          </span>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-800 text-[11px] text-gray-500 uppercase tracking-wider">
-              <th className="text-left  pb-2 pr-3 font-medium">Symbol</th>
-              <th className="text-right pb-2 pr-3 font-medium">Shares</th>
-              <th className="text-right pb-2 pr-3 font-medium">Entry</th>
-              <th className="text-right pb-2 pr-3 font-medium">Current</th>
-              <th className="text-right pb-2 pr-3 font-medium">Cur R</th>
-              <th className="text-right pb-2 pr-3 font-medium">ATR Dist</th>
-              <th className="text-right pb-2 pr-3 font-medium">Trim Shares</th>
-              <th className="text-right pb-2 pr-3 font-medium">Realized $</th>
-              <th className="text-right pb-2 pr-3 font-medium">Rem Risk %</th>
-              <th className="text-right pb-2 pl-3 font-medium">Adj Target</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleRows.length === 0 && (
-              <tr>
-                <td colSpan={10} className="py-6 text-center text-xs text-gray-500">
-                  {viewMode === 'active' && hiddenCount > 0
-                    ? `All ${hiddenCount} open position${hiddenCount === 1 ? '' : 's'} have hit the trim trigger — switch to "All" to review.`
-                    : 'No positions to display.'}
-                </td>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm table-fixed">
+            <colgroup>
+              {HEALTH_RESIZE_KEYS.map(k => <col key={k} style={{ width: healthWidths[k] }} />)}
+            </colgroup>
+            <thead>
+              <tr className="border-b border-gray-800 text-[11px] text-gray-500 uppercase tracking-wider">
+                <SortTh col="zone"   label="Zone"       align="left" rk="zone" />
+                <PlainTh             label="Lot"        align="left" rk="lot" />
+                <SortTh col="symbol" label="Symbol"     align="left" rk="symbol" />
+                <PlainTh             label="Entry"                   rk="entry" />
+                <PlainTh             label="Orig Stop"               rk="origStop" />
+                <PlainTh             label="Worst Price"             rk="worstPrice" />
+                <SortTh col="worstR" label="Max Adv R"               rk="worstR" />
+                <SortTh col="liveR"  label="Live R"                  rk="liveR" />
+                <PlainTh             label="Proximity"               rk="proximity" />
+                <PlainTh             label="Trim Plan"  align="left" rk="trimPlan" />
               </tr>
-            )}
-            {visibleRows.map(r => {
-              const rowBg = r.triggered
-                ? 'bg-accent-red/5 hover:bg-accent-red/10'
-                : r.approaching
-                ? 'bg-accent-yellow/5 hover:bg-accent-yellow/10'
-                : 'hover:bg-white/[0.02]'
-              return (
-                <tr key={r.id} className={`border-b border-gray-900 ${rowBg} transition-colors`}>
-                  <td className="py-2 pr-3">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-white">
-                        <TickerTooltip symbol={r.symbol}>{r.symbol}</TickerTooltip>
-                      </span>
-                      {!r.isLong && <span className="text-[10px] px-1 rounded bg-accent-red/20 text-accent-red">SHORT</span>}
-                      {r.triggered && <span className="text-[10px] px-1 rounded bg-accent-red/20 text-accent-red font-semibold">TRIM</span>}
-                    </div>
-                  </td>
-                  <td className="py-2 pr-3 text-right mono">{r.shares.toLocaleString()}</td>
-                  <td className="py-2 pr-3 text-right mono text-gray-400">
-                    {r.entry != null ? `$${r.entry.toFixed(2)}` : '—'}
-                  </td>
-                  <td className="py-2 pr-3 text-right mono">
-                    {r.current != null ? `$${r.current.toFixed(2)}` : '—'}
-                  </td>
-                  <td className={`py-2 pr-3 text-right mono font-semibold ${
-                    r.curR == null ? 'text-gray-600'
-                    : r.curR <= trimTriggerR ? 'text-accent-red'
-                    : r.curR < 0 ? 'text-accent-yellow'
-                    : 'text-accent-green'
-                  }`}>
-                    {r.curR != null ? `${r.curR >= 0 ? '+' : ''}${r.curR.toFixed(2)}R` : '—'}
-                  </td>
-                  <td className="py-2 pr-3 text-right mono text-gray-400">
-                    {r.atrDist != null ? `${r.atrDist >= 0 ? '+' : ''}${r.atrDist.toFixed(2)}` : (r.hasAtr ? '—' : 'no ATR')}
-                  </td>
-                  <td className="py-2 pr-3 text-right mono">
-                    {r.triggered
-                      ? <span className="text-accent-red font-semibold">{r.trimShares.toLocaleString()}</span>
-                      : <span className="text-gray-600">—</span>}
-                  </td>
-                  <td className="py-2 pr-3 text-right mono">
-                    {r.triggered
-                      ? <span className={r.realized < 0 ? 'text-accent-red' : 'text-accent-green'}>{formatCurrency(r.realized)}</span>
-                      : <span className="text-gray-600">—</span>}
-                  </td>
-                  <td className="py-2 pr-3 text-right mono text-accent-yellow">
-                    {r.triggered ? `${r.remRiskPct.toFixed(2)}%` : '—'}
-                  </td>
-                  <td className="py-2 pl-3 text-right mono">
-                    {r.triggered && r.adjustedTp != null ? (
-                      <div className="flex flex-col items-end leading-tight">
-                        <span className="text-accent-blue">${r.adjustedTp.toFixed(2)}</span>
-                        {r.adjustedTpATR != null && (
-                          <span className="text-[10px] text-gray-500">{r.adjustedTpATR.toFixed(2)} ATR</span>
-                        )}
-                      </div>
-                    ) : <span className="text-gray-600">—</span>}
+            </thead>
+            <tbody>
+              {visibleRows.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="py-6 text-center text-xs text-gray-500">
+                    {viewMode === 'active' && hiddenCount > 0
+                      ? `All ${hiddenCount} position${hiddenCount === 1 ? '' : 's'} have hit the trim threshold — switch to "All" to review.`
+                      : 'No positions to display.'}
                   </td>
                 </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+              )}
+              {visibleRows.map(r => {
+                const rowBg = r.zone === 'alert' ? 'bg-accent-red/5 hover:bg-accent-red/10'
+                            : r.zone === 'watch' ? 'bg-accent-yellow/5 hover:bg-accent-yellow/10'
+                            : 'hover:bg-white/[0.02]'
+                return (
+                  <tr key={r.id} className={`border-b border-gray-900 ${rowBg} transition-colors group`}>
+                    {/* Zone */}
+                    <td className="py-2 pr-3">
+                      {r.zone !== 'none'
+                        ? <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${zoneBg(r.zone)}`}>{r.zone}</span>
+                        : <span className="text-gray-700 text-xs">—</span>}
+                    </td>
 
-      <p className="text-[11px] text-gray-600 mt-3 leading-relaxed">
-        <span className="text-gray-500 font-medium">How to read:</span> Cur R uses the <em>original</em> stop at entry (not your trailed stop),
-        so the trigger stays honest. Adj Target is the price the remaining shares must reach to still hit your original {tpMultiplier}R dollar
-        profit after the trim — shown in dollars and ATRs so you can judge feasibility.
+                    {/* Lot */}
+                    <td className="py-2 pr-3">
+                      <span className="mono text-xs text-gray-500">
+                        {r.totalLots > 1 ? `${r.lotNum}/${r.totalLots}` : '—'}
+                      </span>
+                    </td>
+
+                    {/* Symbol */}
+                    <td className="py-2 pr-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-white mono">{r.symbol}</span>
+                        {!r.isLong && <span className="text-[9px] px-1 rounded bg-accent-red/20 text-accent-red">SHORT</span>}
+                      </div>
+                    </td>
+
+                    <td className="py-2 pr-3 text-right mono text-gray-300">${r.entry.toFixed(2)}</td>
+                    <td className="py-2 pr-3 text-right mono text-gray-400">${r.origStop.toFixed(2)}</td>
+
+                    {/* Worst Price — pencil editable */}
+                    <td className="py-2 pr-3 text-right mono">
+                      {editingId === r.id ? (
+                        <div className="flex items-center justify-end gap-1">
+                          <input
+                            type="number" step="0.01" min="0"
+                            className="w-20 bg-surface-300 text-white mono text-right text-xs px-1.5 py-0.5 rounded border border-accent-blue/50 outline-none"
+                            defaultValue={r.worstPrice != null ? r.worstPrice.toFixed(2) : ''}
+                            placeholder="price"
+                            autoFocus
+                            onKeyDown={e => {
+                              if (e.key === 'Enter')  saveManualPrice(r, e.target.value)
+                              if (e.key === 'Escape') setEditingId(null)
+                            }}
+                            onBlur={e => saveManualPrice(r, e.target.value)}
+                          />
+                          <Check size={11} className="text-accent-green shrink-0" />
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-end gap-1.5">
+                          {r.worstPrice != null
+                            ? <span className={zoneColor(r.zone)}>${r.worstPrice.toFixed(2)}</span>
+                            : <span className="text-gray-600">—</span>}
+                          <button
+                            onClick={() => setEditingId(r.id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-gray-300"
+                            title="Override worst price manually"
+                          ><Pencil size={10} /></button>
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Max Adv R */}
+                    <td className={`py-2 pr-3 text-right mono font-semibold ${zoneColor(r.zone)}`}>
+                      {r.worstR != null ? `${r.worstR.toFixed(2)}R` : '—'}
+                    </td>
+
+                    {/* Live R */}
+                    <td className={`py-2 pr-3 text-right mono ${
+                      r.liveR == null ? 'text-gray-600'
+                      : r.liveR >= 0  ? 'text-accent-green'
+                      : r.liveR <= -1 ? 'text-accent-red'
+                      : 'text-accent-yellow'
+                    }`}>
+                      {r.liveR != null ? `${r.liveR >= 0 ? '+' : ''}${r.liveR.toFixed(2)}R` : '—'}
+                    </td>
+
+                    {/* Proximity bar */}
+                    <td className="py-2 pr-3">
+                      {r.proximityPct != null ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <span className={`mono text-xs font-bold ${zoneColor(r.zone)}`}>
+                            {r.proximityPct.toFixed(0)}%
+                          </span>
+                          <div className="w-20 h-1.5 bg-surface-300 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full transition-all ${barColor(r.proximityPct)}`}
+                              style={{ width: `${Math.min(100, r.proximityPct)}%` }} />
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-600 block text-right">no data</span>
+                      )}
+                    </td>
+
+                    {/* Trim plan */}
+                    <td className="py-2 pl-3">
+                      {r.zone === 'alert' && r.trimPrice != null ? (
+                        <div className="text-xs leading-tight space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <Scissors size={10} className="text-accent-red shrink-0" />
+                            <span className="text-accent-red font-semibold">
+                              Trim {r.trimShares} @ ${r.trimPrice.toFixed(2)}
+                            </span>
+                            {r.lockedPnL != null && (
+                              <span className="text-gray-500">
+                                ({r.lockedPnL >= 0 ? '+' : ''}{formatCurrency(r.lockedPnL)})
+                              </span>
+                            )}
+                          </div>
+                          {r.newTargetPrice != null && (
+                            <div className="flex items-center gap-2 text-gray-400 pl-4">
+                              <span>New target: <span className="text-accent-blue mono">${r.newTargetPrice.toFixed(2)}</span></span>
+                              {r.newTargetATR != null && (
+                                <span className="text-gray-600">{r.newTargetATR.toFixed(2)} ATR</span>
+                              )}
+                            </div>
+                          )}
+                          {r.breakEvenPrice != null && (
+                            <div className="text-gray-500 pl-4">
+                              BE: <span className="mono text-gray-400">${r.breakEvenPrice.toFixed(2)}</span>
+                            </div>
+                          )}
+                        </div>
+                      ) : r.zone === 'watch' ? (
+                        <span className="text-xs text-accent-yellow">Approaching {(trimTriggerR * 100).toFixed(0)}% threshold</span>
+                      ) : (
+                        <span className="text-xs text-gray-700">—</span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="text-[11px] text-gray-700 mt-3 leading-relaxed">
+        <span className="text-accent-green font-medium">Safe</span> = within avg winner MAE ·{' '}
+        <span className="text-accent-yellow font-medium">Watch</span> = between avg and {maeThreshold.toUpperCase()} threshold ·{' '}
+        <span className="text-accent-red font-medium">Alert</span> = deeper than {(trimTriggerR * 100).toFixed(0)}% of your winners ever went.
+        Trim trigger uses original stop — trailing doesn't corrupt the signal.
       </p>
     </div>
   )
@@ -1155,6 +1165,10 @@ export default function RiskPanel({ selectedAccount }) {
       if (!bySymbol[p.symbol]) bySymbol[p.symbol] = []
       bySymbol[p.symbol].push(p)
     }
+    // Lot 1 = earliest purchase, Lot N = most recent
+    for (const arr of Object.values(bySymbol)) {
+      arr.sort((a, b) => new Date(a.entryDate || 0) - new Date(b.entryDate || 0))
+    }
     return Object.entries(bySymbol).map(([symbol, lots]) => {
       // Breakeven = weighted average cost of all remaining shares across lots
       const calcBreakeven = (lotsArr) => {
@@ -1233,9 +1247,23 @@ export default function RiskPanel({ selectedAccount }) {
           const uplB = cpB != null ? b.lots.reduce((s, l) => { const sz = l.remainingShares ?? l.positionSize; const lng = (l.position ?? 'Long').toLowerCase() !== 'short'; return s + ((lng ? cpB - l.entryPrice : l.entryPrice - cpB) * (sz || 0)) }, 0) : -Infinity
           av = uplA; bv = uplB; break
         }
-        case 'riskDollar': av = a.riskDollar ?? -Infinity; bv = b.riskDollar ?? -Infinity; break
-        case 'riskPct':    av = a.riskPct ?? -Infinity; bv = b.riskPct ?? -Infinity; break
-        case 'heat':       av = a.riskPct ?? -Infinity; bv = b.riskPct ?? -Infinity; break
+        case 'riskDollar': {
+          const ilA = (a.position ?? 'Long').toLowerCase() !== 'short'
+          const ilB = (b.position ?? 'Long').toLowerCase() !== 'short'
+          av = cpA != null && a.stopLoss ? Math.max(0, ilA ? cpA - a.stopLoss : a.stopLoss - cpA) * (a.positionSize || 0) : (a.riskDollar ?? -Infinity)
+          bv = cpB != null && b.stopLoss ? Math.max(0, ilB ? cpB - b.stopLoss : b.stopLoss - cpB) * (b.positionSize || 0) : (b.riskDollar ?? -Infinity)
+          break
+        }
+        case 'riskPct':
+        case 'heat': {
+          const ilA = (a.position ?? 'Long').toLowerCase() !== 'short'
+          const ilB = (b.position ?? 'Long').toLowerCase() !== 'short'
+          const rdA = cpA != null && a.stopLoss ? Math.max(0, ilA ? cpA - a.stopLoss : a.stopLoss - cpA) * (a.positionSize || 0) : (a.riskDollar ?? 0)
+          const rdB = cpB != null && b.stopLoss ? Math.max(0, ilB ? cpB - b.stopLoss : b.stopLoss - cpB) * (b.positionSize || 0) : (b.riskDollar ?? 0)
+          av = liveBalance > 0 ? rdA / liveBalance : -Infinity
+          bv = liveBalance > 0 ? rdB / liveBalance : -Infinity
+          break
+        }
         default: return 0
       }
       if (typeof av === 'string') return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av)
@@ -1313,18 +1341,57 @@ export default function RiskPanel({ selectedAccount }) {
       const result = await fetchQuotes(symbols)
       setQuotes(result)
       setLastRefresh(new Date())
+      // Track live worst-R for open trades — updates maxAdverseR if current price
+      // is further from entry toward stop than any previously recorded level.
+      for (const trade of openTrades) {
+        const cp = result.get(trade.symbol)?.price
+        if (cp == null || !trade.entryPrice) continue
+        const origStop = trade._originalStopLoss ?? trade.stopLoss
+        if (!origStop) continue
+        const riskPerShare = Math.abs(trade.entryPrice - origStop)
+        if (riskPerShare <= 0) continue
+        const isLong = (trade.position || 'Long').toLowerCase() !== 'short'
+        const curR   = (isLong ? cp - trade.entryPrice : trade.entryPrice - cp) / riskPerShare
+        if (curR < 0 && (trade.maxAdverseR == null || curR < trade.maxAdverseR)) {
+          updateTrade(trade.id, {
+            maxAdverseR:     Math.round(curR * 1000) / 1000,
+            maxAdversePrice: cp,
+          })
+        }
+      }
     } catch {
       // silently handle
     } finally {
       setFetching(false)
     }
-  }, [openTrades])
+  }, [openTrades, updateTrade])
 
+  // ── Market hours helper ─────────────────────────────────────────────────────
+  function isMarketHours() {
+    const now = new Date()
+    const et  = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }))
+    const day = et.getDay() // 0=Sun, 6=Sat
+    if (day === 0 || day === 6) return false
+    const h = et.getHours(), m = et.getMinutes()
+    const mins = h * 60 + m
+    return mins >= 570 && mins < 960 // 9:30 AM – 4:00 PM ET
+  }
+
+  // ── Initial price fetch on mount / position change ───────────────────────────
   useEffect(() => {
     if (openTrades.length > 0 && quotes.size === 0) {
       refreshPrices()
     }
   }, [openTrades.length]) // eslint-disable-line
+
+  // ── Auto-refresh every 60s during market hours ────────────────────────────
+  useEffect(() => {
+    if (openTrades.length === 0) return
+    const id = setInterval(() => {
+      if (isMarketHours()) refreshPrices()
+    }, 60_000)
+    return () => clearInterval(id)
+  }, [openTrades.length, refreshPrices])
 
   // ── ATR fetch (positions + benchmark) ──────────────────────────────────────
   const fetchAllATRs = useCallback(async () => {
@@ -1378,6 +1445,24 @@ export default function RiskPanel({ selectedAccount }) {
       setAtrFetching(false)
     }
   }, [benchmarkSymbol, setBenchmarkSymbol, atrData])
+
+  // ── Auto-load ATR on page open when positions exist and no ATR cached ────────
+  useEffect(() => {
+    if (openTrades.length > 0 && atrData.size === 0 && !atrFetching) {
+      fetchAllATRs()
+    }
+  }, [openTrades.length]) // eslint-disable-line
+
+  // ── Auto-compute open MAE in background for trades missing it ───────────────
+  useEffect(() => {
+    const missing = openTrades.filter(
+      t => t.entryPrice && (t._originalStopLoss ?? t.stopLoss) && t.maxAdverseR == null
+    )
+    if (missing.length > 0) {
+      const timer = setTimeout(() => computeOpenMAE(false), 1500)
+      return () => clearTimeout(timer)
+    }
+  }, [openTrades.length]) // eslint-disable-line
 
   // ── Sector Concentration ───────────────────────────────────────────────────
   const loadSectors = useCallback(async () => {
@@ -1568,11 +1653,20 @@ export default function RiskPanel({ selectedAccount }) {
             <h3 className="text-base font-semibold text-white">Open Positions</h3>
           </div>
           <div className="flex items-center gap-3">
-            {lastRefresh && (
-              <span className="text-xs text-gray-600">
-                Updated {lastRefresh.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            )}
+            {lastRefresh && (() => {
+              const minsAgo = Math.floor((Date.now() - lastRefresh.getTime()) / 60_000)
+              const isStale = minsAgo >= 5
+              const inMktHrs = isMarketHours()
+              return (
+                <span className={`text-xs flex items-center gap-1 ${
+                  isStale && inMktHrs ? 'text-accent-yellow' : 'text-gray-600'
+                }`} title={isStale && inMktHrs ? 'Prices may be outdated — click Refresh' : ''}>
+                  {isStale && inMktHrs && <AlertTriangle size={10} />}
+                  {minsAgo === 0 ? 'Just updated' : `Updated ${minsAgo}m ago`}
+                  {inMktHrs && !isStale && <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse ml-0.5" title="Auto-refreshing" />}
+                </span>
+              )
+            })()}
             <button
               onClick={refreshPrices}
               disabled={fetching || openTrades.length === 0}
@@ -1703,6 +1797,17 @@ export default function RiskPanel({ selectedAccount }) {
                       : null
                     const plColor = unrealizedPL == null ? '' : unrealizedPL >= 0 ? 'text-accent-green' : 'text-accent-red'
 
+                    // Risk from current price to stop (not entry to stop)
+                    const currentRiskPerSh = currentPrice != null && group.stopLoss
+                      ? Math.max(0, isLong ? currentPrice - group.stopLoss : group.stopLoss - currentPrice)
+                      : null
+                    const currentRiskDollar = currentRiskPerSh != null
+                      ? currentRiskPerSh * (group.positionSize || 0)
+                      : group.riskDollar
+                    const currentRiskPct = liveBalance > 0 && currentRiskDollar != null
+                      ? (currentRiskDollar / liveBalance) * 100
+                      : group.riskPct
+
                     // Position age (days since first lot entry)
                     const daysSinceEntry = group.entryDate
                       ? Math.floor((Date.now() - new Date(group.entryDate).getTime()) / (1000 * 60 * 60 * 24))
@@ -1729,9 +1834,9 @@ export default function RiskPanel({ selectedAccount }) {
                           onClick={isMulti ? toggleExpand : undefined}
                         >
                           <td className={`py-2 font-semibold mono text-white border-l-2 pl-2 ${
-                            group.riskPct >= 3
+                            currentRiskPct >= 3
                               ? 'border-l-accent-red'
-                              : group.riskPct >= 1.5
+                              : currentRiskPct >= 1.5
                               ? 'border-l-accent-yellow'
                               : 'border-l-accent-green/40'
                           }`}>
@@ -1836,19 +1941,19 @@ export default function RiskPanel({ selectedAccount }) {
                                 </td>
                               case 'riskDollar':
                                 return <td key={key} className="py-2 text-right mono text-accent-red font-medium">
-                                  {group.riskDollar > 0 ? formatCurrency(group.riskDollar) : <span className="text-gray-600">—</span>}
+                                  {currentRiskDollar > 0 ? formatCurrency(currentRiskDollar) : <span className="text-gray-600">—</span>}
                                 </td>
                               case 'riskPct':
                                 return <td key={key} className="py-2 text-right mono text-accent-yellow">
-                                  {group.riskPct > 0 ? `${group.riskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
+                                  {currentRiskPct > 0 ? `${currentRiskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
                                 </td>
                               case 'heat':
                                 return <td key={key} className="py-2 text-right">
                                   <div className="w-20 ml-auto">
                                     <div className="h-1.5 bg-surface-300 rounded-full overflow-hidden">
                                       <div className="h-full rounded-full transition-all" style={{
-                                        width: `${Math.min(group.riskPct / 5 * 100, 100)}%`,
-                                        backgroundColor: group.riskPct < 1 ? '#00d084' : group.riskPct < 2 ? '#ffa502' : '#ff4757',
+                                        width: `${Math.min(currentRiskPct / 5 * 100, 100)}%`,
+                                        backgroundColor: currentRiskPct < 1 ? '#00d084' : currentRiskPct < 2 ? '#ffa502' : '#ff4757',
                                       }} />
                                     </div>
                                   </div>
@@ -1985,6 +2090,15 @@ export default function RiskPanel({ selectedAccount }) {
                           const lotUPL    = currentPrice != null && lot.entryPrice && lotSz
                             ? (lotIsLong ? currentPrice - lot.entryPrice : lot.entryPrice - currentPrice) * lotSz : null
                           const lotPlClr  = lotUPL == null ? '' : lotUPL >= 0 ? 'text-accent-green' : 'text-accent-red'
+                          const lotCurrentRiskPerSh = currentPrice != null && lot.stopLoss
+                            ? Math.max(0, lotIsLong ? currentPrice - lot.stopLoss : lot.stopLoss - currentPrice)
+                            : null
+                          const lotCurrentRiskDollar = lotCurrentRiskPerSh != null
+                            ? lotCurrentRiskPerSh * (lotSz || 0)
+                            : lot.riskDollar
+                          const lotCurrentRiskPct = liveBalance > 0 && lotCurrentRiskDollar != null
+                            ? (lotCurrentRiskDollar / liveBalance) * 100
+                            : lot.riskPct
                           return (
                             <tr key={lot.id} className="bg-white/[0.02] text-xs border-l-2 border-accent-blue/20">
                               <td className="py-1.5 pl-7 mono text-gray-400">
@@ -2033,11 +2147,11 @@ export default function RiskPanel({ selectedAccount }) {
                                     </td>
                                   case 'riskDollar':
                                     return <td key={key} className="py-1.5 text-right mono text-accent-red/60">
-                                      {lot.riskDollar > 0 ? formatCurrency(lot.riskDollar) : <span className="text-gray-600">—</span>}
+                                      {lotCurrentRiskDollar > 0 ? formatCurrency(lotCurrentRiskDollar) : <span className="text-gray-600">—</span>}
                                     </td>
                                   case 'riskPct':
                                     return <td key={key} className="py-1.5 text-right mono text-accent-yellow/60">
-                                      {lot.riskPct > 0 ? `${lot.riskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
+                                      {lotCurrentRiskPct > 0 ? `${lotCurrentRiskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
                                     </td>
                                   case 'heat':
                                     return <td key={key} />
@@ -2126,13 +2240,14 @@ export default function RiskPanel({ selectedAccount }) {
         )}
       </div>
 
-      {/* ── Derisk Strategy Table ────────────────────────────────────────── */}
-      <DeriskStrategyTable
-        groupedPositions={groupedPositions}
+      {/* ── Position Health & Adaptive Trim ─────────────────────────────── */}
+      <PositionHealthPanel
+        allTrades={(!selectedAccount || selectedAccount === 'All') ? trades : trades.filter(t => t.account === selectedAccount)}
+        openTrades={openTrades}
         quotes={quotes}
-        atrData={atrData}
         liveBalance={liveBalance}
         tpMultiplier={tpMultiplier}
+        atrData={atrData}
       />
 
       {/* ── Max Pain Scenario + Portfolio Beta (2-col) ──────────────────── */}
@@ -2715,13 +2830,6 @@ export default function RiskPanel({ selectedAccount }) {
         )}
       </div>
 
-      {/* ── Progressive Exposure Position Sizer ─────────────────────────── */}
-      <ProgressiveSizer
-        accountBalance={liveBalance}
-        trades={trades}
-        openPositions={positions}
-        quotes={quotes}
-      />
 
       {/* ── Close Position Modal ──────────────────────────────────────────── */}
       {closeTarget && (
@@ -2806,26 +2914,6 @@ export default function RiskPanel({ selectedAccount }) {
         )
       })()}
 
-      {/* ── Risk Guidelines ──────────────────────────────────────────────── */}
-      <div className="card">
-        <h3 className="text-sm font-medium text-gray-300 mb-3">Risk Guidelines</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
-          {[
-            { range: '0–1%',  label: 'Low',      color: 'text-accent-green',  desc: 'Conservative — safe to add positions' },
-            { range: '1–2%',  label: 'Moderate', color: 'text-accent-yellow', desc: 'Normal operating range' },
-            { range: '2–4%',  label: 'Elevated', color: 'text-orange-400',    desc: 'Reduce size or tighten stops' },
-            { range: '4%+',   label: 'High',     color: 'text-accent-red',    desc: 'Overexposed — consider reducing' },
-          ].map(r => (
-            <div key={r.range} className="card-sm">
-              <div className="flex justify-between items-center mb-1">
-                <span className={`font-semibold ${r.color}`}>{r.label}</span>
-                <span className="mono text-gray-400">{r.range}</span>
-              </div>
-              <p className="text-gray-500">{r.desc}</p>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
