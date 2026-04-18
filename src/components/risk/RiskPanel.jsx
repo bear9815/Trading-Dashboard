@@ -2891,7 +2891,6 @@ export default function RiskPanel({ selectedAccount }) {
         )
       })()}
 
-      </div>
     </div>
   )
 }
