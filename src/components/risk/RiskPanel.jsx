@@ -2166,9 +2166,10 @@ export default function RiskPanel({ selectedAccount }) {
                   {(() => {
                     // Compute totals over grouped positions (one per symbol) with live quotes.
                     // Using groupedPositions avoids double-counting R for multi-lot symbols.
-                    let totalUnrealPL = null
-                    let totalCurrentR = null
-                    let totalMktVal   = null
+                    let totalUnrealPL    = null
+                    let totalCurrentR    = null
+                    let totalMktVal      = null
+                    let totalRiskDollar  = 0
                     for (const group of groupedPositions) {
                       const q  = quotes.get(group.symbol)
                       const cp = q?.price ?? null
@@ -2196,8 +2197,16 @@ export default function RiskPanel({ selectedAccount }) {
                             (isLong ? cp - group.entryPrice : group.entryPrice - cp) / rps
                         }
                       }
+                      // Risk $: same formula as individual rows — current price to stop × shares
+                      const grpRiskPerSh = cp != null && group.stopLoss
+                        ? Math.max(0, isLong ? cp - group.stopLoss : group.stopLoss - cp)
+                        : null
+                      totalRiskDollar += grpRiskPerSh != null
+                        ? grpRiskPerSh * (group.positionSize || 0)
+                        : (group.riskDollar || 0)
                     }
-                    const rColor = totalCurrentR == null ? '' : totalCurrentR >= 0 ? 'text-accent-green' : 'text-accent-red'
+                    const totalRiskPct = liveBalance > 0 ? (totalRiskDollar / liveBalance) * 100 : 0
+                    const rColor  = totalCurrentR == null ? '' : totalCurrentR >= 0 ? 'text-accent-green' : 'text-accent-red'
                     const plColor = totalUnrealPL == null ? '' : totalUnrealPL >= 0 ? 'text-accent-green' : 'text-accent-red'
                     return (
                       <tr className="border-t border-white/10 text-sm text-gray-400 font-semibold">
@@ -2211,9 +2220,9 @@ export default function RiskPanel({ selectedAccount }) {
                             case 'upl':
                               return <td key={key} className={`pt-2 text-right mono ${plColor}`}>{totalUnrealPL != null ? (totalUnrealPL >= 0 ? '+' : '') + formatCurrency(totalUnrealPL) : '—'}</td>
                             case 'riskDollar':
-                              return <td key={key} className="pt-2 text-right mono text-accent-red">{nep > 0 ? formatCurrency(nep) : '—'}</td>
+                              return <td key={key} className="pt-2 text-right mono text-accent-red">{totalRiskDollar > 0 ? formatCurrency(totalRiskDollar) : '—'}</td>
                             case 'riskPct':
-                              return <td key={key} className="pt-2 text-right mono text-accent-yellow">{ner > 0 ? `${ner.toFixed(2)}%` : '—'}</td>
+                              return <td key={key} className="pt-2 text-right mono text-accent-yellow">{totalRiskPct > 0 ? `${totalRiskPct.toFixed(2)}%` : '—'}</td>
                             default:
                               return <td key={key} />
                           }
