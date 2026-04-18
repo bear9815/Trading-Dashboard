@@ -41,6 +41,20 @@ const RISK_DEFAULT_WIDTHS = {
   heat:       100,
 }
 
+const HEALTH_DEFAULT_WIDTHS = {
+  zone:       65,
+  lot:        60,
+  symbol:    100,
+  entry:      80,
+  origStop:   85,
+  worstPrice: 90,
+  worstR:     85,
+  liveR:      75,
+  proximity: 110,
+  trimPlan:  200,
+}
+const HEALTH_RESIZE_KEYS = ['zone', 'lot', 'symbol', 'entry', 'origStop', 'worstPrice', 'worstR', 'liveR', 'proximity', 'trimPlan']
+
 // ── Image helpers ─────────────────────────────────────────────────────────────
 function readImageAsBase64(file) {
   return new Promise((resolve, reject) => {
@@ -820,6 +834,14 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
   const [sortDir,      setSortDir]      = useState('desc')
   const [editingId,    setEditingId]    = useState(null)
 
+  const { healthColumnWidths, setHealthColumnWidths } = useSettingsStore()
+  const { widths: healthWidths, startResize: startHealthResize } = useColumnResize(
+    HEALTH_RESIZE_KEYS,
+    healthColumnWidths,
+    HEALTH_DEFAULT_WIDTHS,
+    setHealthColumnWidths,
+  )
+
   const winnerStats  = useMemo(() => computeWinnerMAEStats(allTrades), [allTrades])
   const trimTriggerR = winnerStats ? (winnerStats[maeThreshold] ?? 0.9) : 0.9
 
@@ -907,6 +929,17 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
 
   const rows = useMemo(() => {
     const cutoffMs = new Date('2025-11-14T00:00:00Z').getTime()
+    // Assign lot numbers: Lot 1 = earliest entry per symbol
+    const lotNums = {}
+    const lotTotals = {}
+    const sortedForLots = [...openTrades].sort((a, b) =>
+      new Date(a.entryDate || 0) - new Date(b.entryDate || 0)
+    )
+    for (const t of sortedForLots) {
+      if (!lotNums[t.symbol]) { lotNums[t.symbol] = {}; lotTotals[t.symbol] = 0 }
+      lotTotals[t.symbol]++
+      lotNums[t.symbol][t.id] = lotTotals[t.symbol]
+    }
     const mapped = openTrades.map(t => {
       const entry    = t.entryPrice
       const origStop = t._originalStopLoss ?? t.stopLoss
@@ -963,6 +996,8 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
         proximityPct:  absWorstR != null ? Math.min(100, absWorstR * 100) : null,
         zone, origSize, trimShares, remShares, trimPrice,
         lockedPnL, newTargetPrice, breakEvenPrice, newTargetATR,
+        lotNum:    lotNums[t.symbol]?.[t.id] ?? 1,
+        totalLots: lotTotals[t.symbol] ?? 1,
       }
     }).filter(Boolean)
 
@@ -1010,10 +1045,11 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
     >{children}</button>
   )
 
-  function SortTh({ col, label, align = 'right' }) {
+  function SortTh({ col, label, align = 'right', rk }) {
     const active = sortCol === col
     return (
-      <th className={`pb-2 pr-3 font-medium cursor-pointer select-none hover:text-gray-300 transition-colors text-${align}`}
+      <th className={`relative pb-2 pr-3 font-medium cursor-pointer select-none hover:text-gray-300 transition-colors text-${align}`}
+        style={rk ? { width: healthWidths[rk] } : {}}
         onClick={() => handleSort(col)}>
         <span className={`inline-flex items-center gap-0.5 ${align === 'right' ? 'justify-end w-full' : ''}`}>
           {label}
@@ -1021,6 +1057,23 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
             {active ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
           </span>
         </span>
+        {rk && (
+          <div onMouseDown={e => { e.stopPropagation(); startHealthResize(rk, e) }}
+            className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent-blue/60 rounded" />
+        )}
+      </th>
+    )
+  }
+
+  function PlainTh({ label, align = 'right', rk }) {
+    return (
+      <th className={`relative pb-2 pr-3 font-medium text-${align}`}
+        style={rk ? { width: healthWidths[rk] } : {}}>
+        {label}
+        {rk && (
+          <div onMouseDown={e => { e.stopPropagation(); startHealthResize(rk, e) }}
+            className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent-blue/60 rounded" />
+        )}
       </th>
     )
   }
@@ -1135,18 +1188,22 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm table-fixed">
+            <colgroup>
+              {HEALTH_RESIZE_KEYS.map(k => <col key={k} style={{ width: healthWidths[k] }} />)}
+            </colgroup>
             <thead>
               <tr className="border-b border-gray-800 text-[11px] text-gray-500 uppercase tracking-wider">
-                <SortTh col="zone"   label="Zone"       align="left" />
-                <th    className="text-left  pb-2 pr-3 font-medium">Symbol</th>
-                <th    className="text-right pb-2 pr-3 font-medium">Entry</th>
-                <th    className="text-right pb-2 pr-3 font-medium">Orig Stop</th>
-                <th    className="text-right pb-2 pr-3 font-medium">Worst Price</th>
-                <SortTh col="worstR" label="Max Adv R" />
-                <SortTh col="liveR"  label="Live R" />
-                <th    className="text-right pb-2 pr-3 font-medium">Proximity</th>
-                <th    className="text-left  pb-2 pl-3  font-medium">Trim Plan</th>
+                <SortTh col="zone"   label="Zone"       align="left" rk="zone" />
+                <PlainTh             label="Lot"        align="left" rk="lot" />
+                <SortTh col="symbol" label="Symbol"     align="left" rk="symbol" />
+                <PlainTh             label="Entry"                   rk="entry" />
+                <PlainTh             label="Orig Stop"               rk="origStop" />
+                <PlainTh             label="Worst Price"             rk="worstPrice" />
+                <SortTh col="worstR" label="Max Adv R"               rk="worstR" />
+                <SortTh col="liveR"  label="Live R"                  rk="liveR" />
+                <PlainTh             label="Proximity"               rk="proximity" />
+                <PlainTh             label="Trim Plan"  align="left" rk="trimPlan" />
               </tr>
             </thead>
             <tbody>
@@ -1161,6 +1218,13 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
                       {r.zone !== 'none'
                         ? <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${zoneBg(r.zone)}`}>{r.zone}</span>
                         : <span className="text-gray-700 text-xs">—</span>}
+                    </td>
+
+                    {/* Lot */}
+                    <td className="py-2 pr-3">
+                      <span className="mono text-xs text-gray-500">
+                        {r.totalLots > 1 ? `${r.lotNum}/${r.totalLots}` : '—'}
+                      </span>
                     </td>
 
                     {/* Symbol */}
@@ -1417,6 +1481,10 @@ export default function RiskPanel({ selectedAccount }) {
       if (!bySymbol[p.symbol]) bySymbol[p.symbol] = []
       bySymbol[p.symbol].push(p)
     }
+    // Lot 1 = earliest purchase, Lot N = most recent
+    for (const arr of Object.values(bySymbol)) {
+      arr.sort((a, b) => new Date(a.entryDate || 0) - new Date(b.entryDate || 0))
+    }
     return Object.entries(bySymbol).map(([symbol, lots]) => {
       // Breakeven = weighted average cost of all remaining shares across lots
       const calcBreakeven = (lotsArr) => {
@@ -1495,9 +1563,23 @@ export default function RiskPanel({ selectedAccount }) {
           const uplB = cpB != null ? b.lots.reduce((s, l) => { const sz = l.remainingShares ?? l.positionSize; const lng = (l.position ?? 'Long').toLowerCase() !== 'short'; return s + ((lng ? cpB - l.entryPrice : l.entryPrice - cpB) * (sz || 0)) }, 0) : -Infinity
           av = uplA; bv = uplB; break
         }
-        case 'riskDollar': av = a.riskDollar ?? -Infinity; bv = b.riskDollar ?? -Infinity; break
-        case 'riskPct':    av = a.riskPct ?? -Infinity; bv = b.riskPct ?? -Infinity; break
-        case 'heat':       av = a.riskPct ?? -Infinity; bv = b.riskPct ?? -Infinity; break
+        case 'riskDollar': {
+          const ilA = (a.position ?? 'Long').toLowerCase() !== 'short'
+          const ilB = (b.position ?? 'Long').toLowerCase() !== 'short'
+          av = cpA != null && a.stopLoss ? Math.max(0, ilA ? cpA - a.stopLoss : a.stopLoss - cpA) * (a.positionSize || 0) : (a.riskDollar ?? -Infinity)
+          bv = cpB != null && b.stopLoss ? Math.max(0, ilB ? cpB - b.stopLoss : b.stopLoss - cpB) * (b.positionSize || 0) : (b.riskDollar ?? -Infinity)
+          break
+        }
+        case 'riskPct':
+        case 'heat': {
+          const ilA = (a.position ?? 'Long').toLowerCase() !== 'short'
+          const ilB = (b.position ?? 'Long').toLowerCase() !== 'short'
+          const rdA = cpA != null && a.stopLoss ? Math.max(0, ilA ? cpA - a.stopLoss : a.stopLoss - cpA) * (a.positionSize || 0) : (a.riskDollar ?? 0)
+          const rdB = cpB != null && b.stopLoss ? Math.max(0, ilB ? cpB - b.stopLoss : b.stopLoss - cpB) * (b.positionSize || 0) : (b.riskDollar ?? 0)
+          av = liveBalance > 0 ? rdA / liveBalance : -Infinity
+          bv = liveBalance > 0 ? rdB / liveBalance : -Infinity
+          break
+        }
         default: return 0
       }
       if (typeof av === 'string') return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av)
@@ -1983,6 +2065,17 @@ export default function RiskPanel({ selectedAccount }) {
                       : null
                     const plColor = unrealizedPL == null ? '' : unrealizedPL >= 0 ? 'text-accent-green' : 'text-accent-red'
 
+                    // Risk from current price to stop (not entry to stop)
+                    const currentRiskPerSh = currentPrice != null && group.stopLoss
+                      ? Math.max(0, isLong ? currentPrice - group.stopLoss : group.stopLoss - currentPrice)
+                      : null
+                    const currentRiskDollar = currentRiskPerSh != null
+                      ? currentRiskPerSh * (group.positionSize || 0)
+                      : group.riskDollar
+                    const currentRiskPct = liveBalance > 0 && currentRiskDollar != null
+                      ? (currentRiskDollar / liveBalance) * 100
+                      : group.riskPct
+
                     // Position age (days since first lot entry)
                     const daysSinceEntry = group.entryDate
                       ? Math.floor((Date.now() - new Date(group.entryDate).getTime()) / (1000 * 60 * 60 * 24))
@@ -2009,9 +2102,9 @@ export default function RiskPanel({ selectedAccount }) {
                           onClick={isMulti ? toggleExpand : undefined}
                         >
                           <td className={`py-2 font-semibold mono text-white border-l-2 pl-2 ${
-                            group.riskPct >= 3
+                            currentRiskPct >= 3
                               ? 'border-l-accent-red'
-                              : group.riskPct >= 1.5
+                              : currentRiskPct >= 1.5
                               ? 'border-l-accent-yellow'
                               : 'border-l-accent-green/40'
                           }`}>
@@ -2116,19 +2209,19 @@ export default function RiskPanel({ selectedAccount }) {
                                 </td>
                               case 'riskDollar':
                                 return <td key={key} className="py-2 text-right mono text-accent-red font-medium">
-                                  {group.riskDollar > 0 ? formatCurrency(group.riskDollar) : <span className="text-gray-600">—</span>}
+                                  {currentRiskDollar > 0 ? formatCurrency(currentRiskDollar) : <span className="text-gray-600">—</span>}
                                 </td>
                               case 'riskPct':
                                 return <td key={key} className="py-2 text-right mono text-accent-yellow">
-                                  {group.riskPct > 0 ? `${group.riskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
+                                  {currentRiskPct > 0 ? `${currentRiskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
                                 </td>
                               case 'heat':
                                 return <td key={key} className="py-2 text-right">
                                   <div className="w-20 ml-auto">
                                     <div className="h-1.5 bg-surface-300 rounded-full overflow-hidden">
                                       <div className="h-full rounded-full transition-all" style={{
-                                        width: `${Math.min(group.riskPct / 5 * 100, 100)}%`,
-                                        backgroundColor: group.riskPct < 1 ? '#00d084' : group.riskPct < 2 ? '#ffa502' : '#ff4757',
+                                        width: `${Math.min(currentRiskPct / 5 * 100, 100)}%`,
+                                        backgroundColor: currentRiskPct < 1 ? '#00d084' : currentRiskPct < 2 ? '#ffa502' : '#ff4757',
                                       }} />
                                     </div>
                                   </div>
@@ -2265,6 +2358,15 @@ export default function RiskPanel({ selectedAccount }) {
                           const lotUPL    = currentPrice != null && lot.entryPrice && lotSz
                             ? (lotIsLong ? currentPrice - lot.entryPrice : lot.entryPrice - currentPrice) * lotSz : null
                           const lotPlClr  = lotUPL == null ? '' : lotUPL >= 0 ? 'text-accent-green' : 'text-accent-red'
+                          const lotCurrentRiskPerSh = currentPrice != null && lot.stopLoss
+                            ? Math.max(0, lotIsLong ? currentPrice - lot.stopLoss : lot.stopLoss - currentPrice)
+                            : null
+                          const lotCurrentRiskDollar = lotCurrentRiskPerSh != null
+                            ? lotCurrentRiskPerSh * (lotSz || 0)
+                            : lot.riskDollar
+                          const lotCurrentRiskPct = liveBalance > 0 && lotCurrentRiskDollar != null
+                            ? (lotCurrentRiskDollar / liveBalance) * 100
+                            : lot.riskPct
                           return (
                             <tr key={lot.id} className="bg-white/[0.02] text-xs border-l-2 border-accent-blue/20">
                               <td className="py-1.5 pl-7 mono text-gray-400">
@@ -2313,11 +2415,11 @@ export default function RiskPanel({ selectedAccount }) {
                                     </td>
                                   case 'riskDollar':
                                     return <td key={key} className="py-1.5 text-right mono text-accent-red/60">
-                                      {lot.riskDollar > 0 ? formatCurrency(lot.riskDollar) : <span className="text-gray-600">—</span>}
+                                      {lotCurrentRiskDollar > 0 ? formatCurrency(lotCurrentRiskDollar) : <span className="text-gray-600">—</span>}
                                     </td>
                                   case 'riskPct':
                                     return <td key={key} className="py-1.5 text-right mono text-accent-yellow/60">
-                                      {lot.riskPct > 0 ? `${lot.riskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
+                                      {lotCurrentRiskPct > 0 ? `${lotCurrentRiskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
                                     </td>
                                   case 'heat':
                                     return <td key={key} />
