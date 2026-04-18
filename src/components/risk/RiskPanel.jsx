@@ -743,7 +743,9 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
   if (openTrades.length === 0) return null
 
   const alertCount  = rows.filter(r => r.zone === 'alert').length
-  const visibleRows = viewMode === 'active' ? rows.filter(r => r.zone !== 'alert') : rows
+  const visibleRows = viewMode === 'active'
+    ? rows.filter(r => r.liveR == null || r.liveR < tpMultiplier)
+    : rows
   const hiddenCount = rows.length - visibleRows.length
 
   return (
@@ -886,7 +888,7 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
                 <tr>
                   <td colSpan={10} className="py-6 text-center text-xs text-gray-500">
                     {viewMode === 'active' && hiddenCount > 0
-                      ? `All ${hiddenCount} position${hiddenCount === 1 ? '' : 's'} have hit the trim threshold — switch to "All" to review.`
+                      ? `All ${hiddenCount} lot${hiddenCount === 1 ? '' : 's'} have hit the ${tpMultiplier}R target and been derisked — switch to "All" to review.`
                       : 'No positions to display.'}
                   </td>
                 </tr>
