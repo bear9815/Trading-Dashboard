@@ -1682,11 +1682,32 @@ export default function RiskPanel({ selectedAccount }) {
     }
   }, [openTrades, updateTrade])
 
+  // ── Market hours helper ─────────────────────────────────────────────────────
+  function isMarketHours() {
+    const now = new Date()
+    const et  = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }))
+    const day = et.getDay() // 0=Sun, 6=Sat
+    if (day === 0 || day === 6) return false
+    const h = et.getHours(), m = et.getMinutes()
+    const mins = h * 60 + m
+    return mins >= 570 && mins < 960 // 9:30 AM – 4:00 PM ET
+  }
+
+  // ── Initial price fetch on mount / position change ───────────────────────────
   useEffect(() => {
     if (openTrades.length > 0 && quotes.size === 0) {
       refreshPrices()
     }
   }, [openTrades.length]) // eslint-disable-line
+
+  // ── Auto-refresh every 60s during market hours ────────────────────────────
+  useEffect(() => {
+    if (openTrades.length === 0) return
+    const id = setInterval(() => {
+      if (isMarketHours()) refreshPrices()
+    }, 60_000)
+    return () => clearInterval(id)
+  }, [openTrades.length, refreshPrices])
 
   // ── ATR fetch (positions + benchmark) ──────────────────────────────────────
   const fetchAllATRs = useCallback(async () => {
@@ -1740,6 +1761,24 @@ export default function RiskPanel({ selectedAccount }) {
       setAtrFetching(false)
     }
   }, [benchmarkSymbol, setBenchmarkSymbol, atrData])
+
+  // ── Auto-load ATR on page open when positions exist and no ATR cached ────────
+  useEffect(() => {
+    if (openTrades.length > 0 && atrData.size === 0 && !atrFetching) {
+      fetchAllATRs()
+    }
+  }, [openTrades.length]) // eslint-disable-line
+
+  // ── Auto-compute open MAE in background for trades missing it ───────────────
+  useEffect(() => {
+    const missing = openTrades.filter(
+      t => t.entryPrice && (t._originalStopLoss ?? t.stopLoss) && t.maxAdverseR == null
+    )
+    if (missing.length > 0) {
+      const timer = setTimeout(() => computeOpenMAE(false), 1500)
+      return () => clearTimeout(timer)
+    }
+  }, [openTrades.length]) // eslint-disable-line
 
   // ── Sector Concentration ───────────────────────────────────────────────────
   const loadSectors = useCallback(async () => {
@@ -1930,11 +1969,20 @@ export default function RiskPanel({ selectedAccount }) {
             <h3 className="text-base font-semibold text-white">Open Positions</h3>
           </div>
           <div className="flex items-center gap-3">
-            {lastRefresh && (
-              <span className="text-xs text-gray-600">
-                Updated {lastRefresh.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            )}
+            {lastRefresh && (() => {
+              const minsAgo = Math.floor((Date.now() - lastRefresh.getTime()) / 60_000)
+              const isStale = minsAgo >= 5
+              const inMktHrs = isMarketHours()
+              return (
+                <span className={`text-xs flex items-center gap-1 ${
+                  isStale && inMktHrs ? 'text-accent-yellow' : 'text-gray-600'
+                }`} title={isStale && inMktHrs ? 'Prices may be outdated — click Refresh' : ''}>
+                  {isStale && inMktHrs && <AlertTriangle size={10} />}
+                  {minsAgo === 0 ? 'Just updated' : `Updated ${minsAgo}m ago`}
+                  {inMktHrs && !isStale && <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse ml-0.5" title="Auto-refreshing" />}
+                </span>
+              )
+            })()}
             <button
               onClick={refreshPrices}
               disabled={fetching || openTrades.length === 0}

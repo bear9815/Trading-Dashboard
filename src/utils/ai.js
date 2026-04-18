@@ -104,7 +104,7 @@ export async function analyzePortfolio(trades, apiKey) {
   const prompt = `You are a professional trading coach analyzing a trader's performance data. Be direct, specific, and actionable.
 
 Trading stats:
-${JSON.stringify(stats, null, 2)}
+${JSON.stringify(stats)}
 
 Provide analysis in this exact JSON format:
 {
@@ -373,7 +373,7 @@ export async function chatWithPortfolio(trades, chatHistory, userMessage, apiKey
   const prompt = `You are a professional trading coach with full access to this trader's portfolio data. Be direct, specific, and reference actual numbers when possible.
 
 Portfolio context:
-${JSON.stringify(stats, null, 2)}
+${JSON.stringify(stats)}
 
 ${historyText}Trader: ${userMessage}
 Coach:`
@@ -428,7 +428,7 @@ export async function analyzeTradeDNA(trades, apiKey) {
   const prompt = `You are an elite trading performance analyst. Analyze this trader's complete trade history and extract their "Trading DNA" — the statistical fingerprints that separate their winning setups from their losing ones.
 
 Data:
-${JSON.stringify(stats, null, 2)}
+${JSON.stringify(stats)}
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
@@ -493,7 +493,7 @@ export async function buildPlaybook(trades, apiKey) {
   const prompt = `You are a trading coach building a systematic playbook from a trader's best trades. Cluster these trades into clear setup categories and document the rules that made them work.
 
 Top trades (by R-multiple):
-${JSON.stringify(topTrades, null, 2)}
+${JSON.stringify(topTrades)}
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
@@ -575,7 +575,7 @@ export async function generateWeeklyReview(trades, morningEntries, apiKey) {
   const prompt = `You are a professional trading coach delivering a structured weekly performance review. Be honest, direct, and developmental.
 
 Week data:
-${JSON.stringify(weekStats, null, 2)}
+${JSON.stringify(weekStats)}
 
 Return ONLY valid JSON (no markdown, no code fences):
 {
@@ -643,7 +643,7 @@ export async function scorePreTrade(setup, trades, apiKey) {
   const prompt = `You are a risk-focused trading coach scoring a proposed trade setup against the trader's historical performance data.
 
 Context:
-${JSON.stringify(context, null, 2)}
+${JSON.stringify(context)}
 
 Score this setup on a 1–10 scale and provide a structured risk assessment.
 
@@ -743,7 +743,7 @@ export async function synthesizeMarketBias(chartAnalyses, apiKey) {
   const prompt = `You are an expert market technician synthesizing a morning market bias from ${chartAnalyses.length} chart analyses.
 
 Chart analyses:
-${JSON.stringify(chartAnalyses, null, 2)}
+${JSON.stringify(chartAnalyses)}
 
 Synthesize these into a unified morning market bias. Weight breadth indicators and indices most heavily, then sectors, then individual names.
 
@@ -841,7 +841,7 @@ export async function findWorstHabit(trades, apiKey) {
   const prompt = `You are an elite trading performance coach. Your job is to find the single most costly repeated mistake in a trader's recent history.
 
 Recent trades (most recent first):
-${JSON.stringify(tradeSummary, null, 2)}
+${JSON.stringify(tradeSummary)}
 
 Identify the ONE habit, pattern, or mistake that is costing this trader the most money or R — not generic advice, but a specific behavioral pattern visible in this data.
 
@@ -899,10 +899,10 @@ export async function analyzeTradingMindset(thoughts, trades, apiKey) {
   const prompt = `You are an elite trading psychologist and performance coach. Analyze this trader's mental log to identify behavioral and emotional patterns that are helping or hurting their trading.
 
 Mental Log (most recent first):
-${JSON.stringify(recentThoughts, null, 2)}
+${JSON.stringify(recentThoughts)}
 
 Recent Trade Results (for correlation):
-${JSON.stringify(recentTrades, null, 2)}
+${JSON.stringify(recentTrades)}
 
 Analyze the mindset patterns. Look specifically for: FOMO indicators, discipline moments (avoided bad trades), revenge trading urges, overconfidence, fear/hesitation, learning patterns, emotional reactions to P&L, morning vs afternoon behavior differences.
 
@@ -1130,7 +1130,7 @@ KEY CONCEPT — "Stop Proximity": how close price got to the original stop expre
 - 100%+ = trade was stopped out
 
 TRADER'S MAE DATA:
-${JSON.stringify(stats, null, 2)}
+${JSON.stringify(stats)}
 
 Using ONLY this trader's actual data, provide specific, quantitative risk management recommendations:
 1. Optimal stop distance (tighter/wider and by how much, backed by the win rates at each proximity bucket)
