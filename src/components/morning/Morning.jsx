@@ -91,23 +91,23 @@ const SLEEP_QUALITY_OPTIONS = [
   { id: 'good',    label: 'Good',    cls: 'text-accent-green'  },
 ]
 const TREND_OPTIONS = [
-  { id: 'Bearish',         label: 'Bearish',   cls: 'text-accent-red'    },
-  { id: 'Neutral/Bearish', label: 'N/Bearish', cls: 'text-orange-400'    },
-  { id: 'Neutral',         label: 'Neutral',   cls: 'text-gray-300'      },
-  { id: 'Neutral/Bullish', label: 'N/Bullish', cls: 'text-accent-yellow' },
-  { id: 'Bullish',         label: 'Bullish',   cls: 'text-accent-green'  },
+  { id: 'Bearish',         label: 'Bearish',   cls: 'text-accent-red',    color: '#ff4757' },
+  { id: 'Neutral/Bearish', label: 'N/Bearish', cls: 'text-orange-400',    color: '#fb923c' },
+  { id: 'Neutral',         label: 'Neutral',   cls: 'text-gray-300',      color: '#9ca3af' },
+  { id: 'Neutral/Bullish', label: 'N/Bullish', cls: 'text-accent-yellow', color: '#ffa502' },
+  { id: 'Bullish',         label: 'Bullish',   cls: 'text-accent-green',  color: '#00d084' },
 ]
 const CREDIT_OPTIONS = [
-  { id: 'tight',      label: 'Tight',      cls: 'text-accent-red'    },
-  { id: 'tightening', label: 'Tightening', cls: 'text-orange-400'    },
-  { id: 'neutral',    label: 'Neutral',    cls: 'text-gray-300'      },
-  { id: 'easing',     label: 'Easing',     cls: 'text-accent-yellow' },
-  { id: 'loose',      label: 'Loose',      cls: 'text-accent-green'  },
+  { id: 'tight',      label: 'Tight',      cls: 'text-accent-red',    color: '#ff4757' },
+  { id: 'tightening', label: 'Tightening', cls: 'text-orange-400',    color: '#fb923c' },
+  { id: 'neutral',    label: 'Neutral',    cls: 'text-gray-300',      color: '#9ca3af' },
+  { id: 'easing',     label: 'Easing',     cls: 'text-accent-yellow', color: '#ffa502' },
+  { id: 'loose',      label: 'Loose',      cls: 'text-accent-green',  color: '#00d084' },
 ]
 const BREAKOUT_OPTIONS = [
-  { id: 'Failing', label: 'Failing', cls: 'text-accent-red'    },
-  { id: 'Mixed',   label: 'Mixed',   cls: 'text-accent-yellow' },
-  { id: 'Working', label: 'Working', cls: 'text-accent-green'  },
+  { id: 'Failing', label: 'Failing', cls: 'text-accent-red',    color: '#ff4757' },
+  { id: 'Mixed',   label: 'Mixed',   cls: 'text-accent-yellow', color: '#ffa502' },
+  { id: 'Working', label: 'Working', cls: 'text-accent-green',  color: '#00d084' },
 ]
 
 // ── Reusable pill selector ────────────────────────────────────────────────────
@@ -129,6 +129,35 @@ function PillSelect({ value, onChange, options }) {
           {opt.pct
             ? <span>{opt.label} <span className="opacity-50 text-xs">{opt.pct}</span></span>
             : opt.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Luxury pill selector (Market Internals) ──────────────────────────────────
+
+function LuxPillSelect({ value, onChange, options }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map(opt => (
+        <button
+          key={opt.id}
+          type="button"
+          onClick={() => onChange(value === opt.id ? '' : opt.id)}
+          style={value === opt.id ? {
+            color: opt.color,
+            borderColor: `${opt.color}70`,
+            backgroundColor: `${opt.color}14`,
+            boxShadow: `0 0 14px ${opt.color}1a, inset 0 1px 0 ${opt.color}18`,
+          } : {}}
+          className={`px-3 py-1 rounded-md border text-xs font-medium tracking-wide transition-all duration-150 ${
+            value === opt.id
+              ? ''
+              : 'text-gray-500 border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14] hover:text-gray-300 hover:bg-white/[0.04]'
+          }`}
+        >
+          {opt.label}
         </button>
       ))}
     </div>
@@ -411,63 +440,65 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
 
       {/* ── Market Internals ───────────────────────────────────────────── */}
       <SectionCard accentColor="#3d84ff" icon={TrendingUp} title="Market Internals">
-        <div className="space-y-5">
+        <div className="divide-y divide-white/[0.04]">
 
           {/* FOMO */}
-          <div>
-            <FieldLabel hint="0 = calm · 100 = max FOMO">FOMO Index</FieldLabel>
+          <div className="pb-5">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase">FOMO Index</span>
+              <span className="text-[10px] text-gray-600">0 = calm · 100 = max FOMO</span>
+            </div>
             <SliderInput value={form.fomo} onChange={v => set('fomo', v)} min={0} max={100} colorFn={fomoColor} placeholder="50" />
           </div>
 
-          {/* NASDAQ H/L + Growth Stocks */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <div>
-              <FieldLabel hint="e.g. −34 or +74">NASDAQ Net H/L</FieldLabel>
+          {/* NASDAQ + Growth Stocks + Breakouts */}
+          <div className="py-5 grid grid-cols-1 sm:grid-cols-3 gap-0">
+            <div className="sm:pr-6 pb-4 sm:pb-0">
+              <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-2.5">NASDAQ Net H/L</p>
               <input
                 type="number"
                 value={form.nasdaqNetHL}
                 onChange={e => set('nasdaqNetHL', e.target.value === '' ? '' : parseFloat(e.target.value))}
-                placeholder="-34 or +74"
-                className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm mono
-                           text-gray-200 focus:outline-none focus:border-accent-blue/50"
+                placeholder="−34 or +74"
+                className="w-full bg-white/[0.03] border border-white/[0.07] rounded-lg px-3 py-2 text-sm mono
+                           text-gray-200 focus:outline-none focus:border-accent-blue/40 placeholder:text-gray-700"
               />
             </div>
-            <div>
-              <FieldLabel>Growth Stocks</FieldLabel>
-              <PillSelect value={form.growthStocks} onChange={v => set('growthStocks', v)} options={TREND_OPTIONS} />
+            <div className="sm:px-6 sm:border-l sm:border-white/[0.05] pb-4 sm:pb-0">
+              <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-2.5">Growth Stocks</p>
+              <LuxPillSelect value={form.growthStocks} onChange={v => set('growthStocks', v)} options={TREND_OPTIONS} />
             </div>
-          </div>
-
-          {/* Breakouts */}
-          <div>
-            <FieldLabel>Breakouts</FieldLabel>
-            <PillSelect value={form.breakouts} onChange={v => set('breakouts', v)} options={BREAKOUT_OPTIONS} />
+            <div className="sm:pl-6 sm:border-l sm:border-white/[0.05]">
+              <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-2.5">Breakouts</p>
+              <LuxPillSelect value={form.breakouts} onChange={v => set('breakouts', v)} options={BREAKOUT_OPTIONS} />
+            </div>
           </div>
 
           {/* Trend structure */}
-          <div className="pt-1">
-            <p className="text-[11px] font-semibold text-gray-600 uppercase tracking-widest mb-3">Trend Structure</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <FieldLabel>Short-Term</FieldLabel>
-                <PillSelect value={form.shortTermTrend} onChange={v => set('shortTermTrend', v)} options={TREND_OPTIONS} />
+          <div className="py-5">
+            <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-4">Trend Structure</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-0">
+              <div className="sm:pr-6 pb-4 sm:pb-0">
+                <p className="text-[10px] text-gray-600 mb-2.5">Short-Term</p>
+                <LuxPillSelect value={form.shortTermTrend} onChange={v => set('shortTermTrend', v)} options={TREND_OPTIONS} />
               </div>
-              <div>
-                <FieldLabel>Intermediate</FieldLabel>
-                <PillSelect value={form.intermediateTrend} onChange={v => set('intermediateTrend', v)} options={TREND_OPTIONS} />
+              <div className="sm:px-6 sm:border-l sm:border-white/[0.05] pb-4 sm:pb-0">
+                <p className="text-[10px] text-gray-600 mb-2.5">Intermediate</p>
+                <LuxPillSelect value={form.intermediateTrend} onChange={v => set('intermediateTrend', v)} options={TREND_OPTIONS} />
               </div>
-              <div>
-                <FieldLabel>Long-Term</FieldLabel>
-                <PillSelect value={form.longTermTrend} onChange={v => set('longTermTrend', v)} options={TREND_OPTIONS} />
+              <div className="sm:pl-6 sm:border-l sm:border-white/[0.05]">
+                <p className="text-[10px] text-gray-600 mb-2.5">Long-Term</p>
+                <LuxPillSelect value={form.longTermTrend} onChange={v => set('longTermTrend', v)} options={TREND_OPTIONS} />
               </div>
             </div>
           </div>
 
           {/* Credit conditions */}
-          <div>
-            <FieldLabel>Credit Conditions</FieldLabel>
-            <PillSelect value={form.creditConditions} onChange={v => set('creditConditions', v)} options={CREDIT_OPTIONS} />
+          <div className="pt-5">
+            <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-3">Credit Conditions</p>
+            <LuxPillSelect value={form.creditConditions} onChange={v => set('creditConditions', v)} options={CREDIT_OPTIONS} />
           </div>
+
         </div>
       </SectionCard>
 
@@ -1164,8 +1195,11 @@ function LogTab() {
     // Carry forward selected fields from the most recent prior entry
     const lastEntry    = sorted.find(e => e.date < TODAY) ?? sorted[0] ?? null
     const lastRiskMode = lastEntry?.riskMode ?? null
-    // Pre-fill Prior Day Notes from yesterday's Trading Thoughts
-    const priorDay = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+    // Pre-fill Prior Day Notes from the last trading day's thoughts (skip weekends)
+    const prevTradingDay = new Date()
+    do { prevTradingDay.setDate(prevTradingDay.getDate() - 1) }
+    while (prevTradingDay.getDay() === 0 || prevTradingDay.getDay() === 6)
+    const priorDay = prevTradingDay.toISOString().slice(0, 10)
     const priorThoughts = tradingThoughts.filter(t =>
       t.timestamp && new Date(t.timestamp).toISOString().slice(0, 10) === priorDay
     )
