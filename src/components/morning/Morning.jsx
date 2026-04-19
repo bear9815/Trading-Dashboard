@@ -17,6 +17,7 @@ import { useMorningStore }  from '../../store/useMorningStore.js'
 import { useTradeStore }    from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
+import { useJournalStore }  from '../../store/useJournalStore.js'
 import { calcCashDeployed, calcEffectiveExposure } from '../../utils/riskCalcs.js'
 import { fetchHistory, fetchATR14 }     from '../../utils/marketData.js'
 import { formatCurrency }   from '../../utils/formatters.js'
@@ -102,6 +103,11 @@ const CREDIT_OPTIONS = [
   { id: 'neutral',    label: 'Neutral',    cls: 'text-gray-300'      },
   { id: 'easing',     label: 'Easing',     cls: 'text-accent-yellow' },
   { id: 'loose',      label: 'Loose',      cls: 'text-accent-green'  },
+]
+const BREAKOUT_OPTIONS = [
+  { id: 'Failing', label: 'Failing', cls: 'text-accent-red'    },
+  { id: 'Mixed',   label: 'Mixed',   cls: 'text-accent-yellow' },
+  { id: 'Working', label: 'Working', cls: 'text-accent-green'  },
 ]
 
 // ── Reusable pill selector ────────────────────────────────────────────────────
@@ -293,15 +299,16 @@ function FieldLabel({ children, hint }) {
 
 // ── Empty blank entry ─────────────────────────────────────────────────────────
 
-function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode, lastEntry) {
+function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode, lastEntry, priorThoughtsText) {
   return {
     date,
     fomo:               50,
     fearGreed:          0,
     nasdaqNetHL:        '',
     ndxMcsi:            '',
-    growthStocks:       '',
-    // Pre-fill trend structure + credit from previous day so user only changes what shifted
+    // Pre-fill from previous day so user only changes what shifted
+    growthStocks:       lastEntry?.growthStocks      || '',
+    breakouts:          lastEntry?.breakouts         || '',
     shortTermTrend:     lastEntry?.shortTermTrend    || '',
     intermediateTrend:  lastEntry?.intermediateTrend || '',
     longTermTrend:      lastEntry?.longTermTrend     || '',
@@ -314,7 +321,7 @@ function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode, lastEntr
     effectiveExposure:  effectiveExposure != null ? Math.round(effectiveExposure * 10) / 10 : '',
     focusList:          '',
     gameplan:           '',
-    priorDayNotes:      '',
+    priorDayNotes:      priorThoughtsText || '',
     lessons:            '',
   }
 }
@@ -429,6 +436,12 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
               <FieldLabel>Growth Stocks</FieldLabel>
               <PillSelect value={form.growthStocks} onChange={v => set('growthStocks', v)} options={TREND_OPTIONS} />
             </div>
+          </div>
+
+          {/* Breakouts */}
+          <div>
+            <FieldLabel>Breakouts</FieldLabel>
+            <PillSelect value={form.breakouts} onChange={v => set('breakouts', v)} options={BREAKOUT_OPTIONS} />
           </div>
 
           {/* Trend structure */}
@@ -1058,6 +1071,7 @@ function LogTab() {
   const { benchmarkSymbol } = useSettingsStore()
   const liveEffectivePct   = useLiveMarketStore(s => s.liveEffectivePct)
   const liveAccountBalance = useLiveMarketStore(s => s.liveAccountBalance)
+  const tradingThoughts    = useJournalStore(s => s.tradingThoughts)
 
   // Use live balance (with unrealized P&L) when RiskPanel has fetched prices
   const accountBalance = liveAccountBalance > 0 ? liveAccountBalance : getAccountBalance()
@@ -1150,9 +1164,17 @@ function LogTab() {
     // Carry forward selected fields from the most recent prior entry
     const lastEntry    = sorted.find(e => e.date < TODAY) ?? sorted[0] ?? null
     const lastRiskMode = lastEntry?.riskMode ?? null
+    // Pre-fill Prior Day Notes from yesterday's Trading Thoughts
+    const priorDay = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+    const priorThoughts = tradingThoughts.filter(t =>
+      t.timestamp && new Date(t.timestamp).toISOString().slice(0, 10) === priorDay
+    )
+    const priorThoughtsText = priorThoughts.length > 0
+      ? priorThoughts.map(t => `• ${t.text}`).join('\n')
+      : ''
     // New entry: pre-fill cash deployed + effective exposure (if ATR already resolved)
-    return blankForm(TODAY, autoCash, autoEffective, lastRiskMode, lastEntry)
-  }, [mode, editingEntry, autoCash, autoEffective, sorted])
+    return blankForm(TODAY, autoCash, autoEffective, lastRiskMode, lastEntry, priorThoughtsText)
+  }, [mode, editingEntry, autoCash, autoEffective, sorted, tradingThoughts])
 
   return (
     <div className="space-y-4">
