@@ -2,15 +2,17 @@
  * POST /api/schwab/refresh
  * Body: { refresh_token: string }
  *
- * Exchanges the refresh token for a new access token.
- * Returns: { access_token, refresh_token, expires_in, token_type }
- *
- * The client is responsible for updating Supabase with the new tokens.
+ * Exchanges the refresh token for a new access token and persists
+ * the updated tokens to Vercel KV.
  *
  * Required Vercel env vars:
  *   SCHWAB_APP_KEY    – App Key
  *   SCHWAB_APP_SECRET – App Secret
+ *   KV_REST_API_URL   – Auto-set when Vercel KV is linked to the project
+ *   KV_REST_API_TOKEN – Auto-set when Vercel KV is linked to the project
  */
+
+import { kv } from '@vercel/kv'
 
 const SCHWAB_TOKEN_URL = 'https://api.schwabapi.com/v1/oauth/token'
 
@@ -52,10 +54,17 @@ export default async function handler(req, res) {
       return res.status(tokenRes.status).json({ error: 'Token refresh failed', detail: text })
     }
 
-    const tokens = await tokenRes.json()
+    const tokens    = await tokenRes.json()
+    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString()
 
-    res.setHeader('Access-Control-Allow-Origin', '*')
-    return res.status(200).json(tokens)
+    // Persist updated tokens to KV
+    await kv.set('schwab:tokens', {
+      access_token:  tokens.access_token,
+      refresh_token: tokens.refresh_token || refresh_token,
+      expires_at:    expiresAt,
+    })
+
+    return res.status(200).json({ ...tokens, expires_at: expiresAt })
   } catch (err) {
     console.error('[schwab/refresh] Error:', err)
     return res.status(502).json({ error: 'Refresh request failed' })

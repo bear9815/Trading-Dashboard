@@ -1,33 +1,31 @@
 /**
- * GET /api/schwab/auth?user_id=xxx
+ * GET /api/schwab/auth
  *
  * Returns the Schwab OAuth authorization URL.
- * The user_id is embedded in the `state` parameter so the callback
- * knows which Supabase user to associate the tokens with.
+ * Generates a random CSRF state stored in KV with a 10-minute TTL.
  *
  * Required Vercel env vars:
  *   SCHWAB_APP_KEY        – App Key from developer.schwab.com
  *   SCHWAB_REDIRECT_URI   – Must match the registered redirect URI exactly
- *                           e.g. https://your-app.vercel.app/api/schwab/callback
+ *   KV_REST_API_URL       – Auto-set when Vercel KV is linked to the project
+ *   KV_REST_API_TOKEN     – Auto-set when Vercel KV is linked to the project
  */
+
+import { kv } from '@vercel/kv'
 
 const SCHWAB_AUTH_URL = 'https://api.schwabapi.com/v1/oauth/authorize'
 
-export default function handler(req, res) {
-  const appKey     = process.env.SCHWAB_APP_KEY
+export default async function handler(req, res) {
+  const appKey      = process.env.SCHWAB_APP_KEY
   const redirectUri = process.env.SCHWAB_REDIRECT_URI
 
   if (!appKey || !redirectUri) {
     return res.status(500).json({ error: 'Schwab env vars not configured' })
   }
 
-  const { user_id } = req.query
-  if (!user_id) {
-    return res.status(400).json({ error: 'user_id required' })
-  }
-
-  // Encode user_id in state so callback knows who to store tokens for
-  const state = Buffer.from(JSON.stringify({ uid: user_id })).toString('base64url')
+  // Random CSRF state — store in KV for 10 minutes then verify in callback
+  const state = Buffer.from(crypto.randomUUID()).toString('base64url')
+  await kv.set(`schwab:state:${state}`, '1', { ex: 600 })
 
   const params = new URLSearchParams({
     client_id:     appKey,
@@ -37,6 +35,5 @@ export default function handler(req, res) {
     state,
   })
 
-  const authUrl = `${SCHWAB_AUTH_URL}?${params.toString()}`
-  res.status(200).json({ url: authUrl })
+  res.status(200).json({ url: `${SCHWAB_AUTH_URL}?${params.toString()}` })
 }

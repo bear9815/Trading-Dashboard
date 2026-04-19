@@ -112,6 +112,7 @@ export default function App() {
   useEffect(() => {
     if (!supabase) {
       setSession(null)
+      loadSchwabTokens()
       return
     }
 
