@@ -77,6 +77,8 @@ export const useSettingsStore = create(
       researchOpenRouterModel: 'openai/gpt-4o-mini',
       useLocalLLM: false,
 
+      reminderTimes: ['10:00', '14:00'],
+
       // ── Cloud sync ─────────────────────────────────────────────────────────
 
       loadFromCloud: async (userId) => {

@@ -10,6 +10,7 @@ import { setSchwabToken, setSchwabTokenGetter } from './utils/marketData.js'
 import { useAuthStore } from './store/useAuthStore.js'
 import PageErrorBoundary from './components/PageErrorBoundary.jsx'
 import MorningCheckin from './components/shared/MorningCheckin.jsx'
+import TradingReminderPopup from './components/shared/TradingReminderPopup.jsx'
 import { useSchwabStore } from './store/useSchwabStore.js'
 import { useTradeStore } from './store/useTradeStore.js'
 import { useJournalStore } from './store/useJournalStore.js'
@@ -213,6 +214,7 @@ export default function App() {
       {showImport && <ImportModal onClose={() => setShowImport(false)} />}
       <QuickAddTrade />
       <MorningCheckin />
+      <TradingReminderPopup />
     </div>
   )
 }
