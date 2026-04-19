@@ -28,9 +28,21 @@ export const useHabitsStore = create((set, get) => ({
 
   // ── Cloud ────────────────────────────────────────────────────────────────
 
+  loadFromLocal: () => {
+    try {
+      const raw = localStorage.getItem('risk-tool-habits')
+      if (!raw) { set({ cloudReady: true }); return }
+      const parsed = JSON.parse(raw)
+      const { habits = [], completions = [], reminders = [] } = parsed?.state || {}
+      set({ habits, completions, reminders, cloudReady: true })
+    } catch {
+      set({ cloudReady: true })
+    }
+  },
+
   loadFromCloud: async (userId) => {
     if (!supabase) { set({ cloudReady: true }); return }
-    if (get().cloudReady) return   // already loaded this session — skip to save egress
+    if (get().cloudReady) return
     const { data, error } = await supabase
       .from('user_habits')
       .select('data')
@@ -46,6 +58,8 @@ export const useHabitsStore = create((set, get) => ({
     if (data?.data) {
       const { habits = [], completions = [], reminders = [] } = data.data
       set({ habits, completions, reminders, cloudReady: true })
+      // Back up locally so data survives if Supabase is removed
+      localStorage.setItem('risk-tool-habits', JSON.stringify({ state: { habits, completions, reminders } }))
     } else {
       set({ cloudReady: true })
     }

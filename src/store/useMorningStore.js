@@ -22,9 +22,21 @@ export const useMorningStore = create((set, get) => ({
 
   // ── Cloud ──────────────────────────────────────────────────────────────────
 
+  loadFromLocal: () => {
+    try {
+      const raw = localStorage.getItem('risk-tool-morning')
+      if (!raw) { set({ cloudReady: true }); return }
+      const parsed = JSON.parse(raw)
+      const { entries = [] } = parsed?.state || {}
+      set({ entries, cloudReady: true })
+    } catch {
+      set({ cloudReady: true })
+    }
+  },
+
   loadFromCloud: async (userId) => {
     if (!supabase) return
-    if (get().cloudReady) return   // already loaded this session — skip to save egress
+    if (get().cloudReady) return
     const { data, error } = await supabase
       .from('user_morning')
       .select('data')
@@ -40,8 +52,9 @@ export const useMorningStore = create((set, get) => ({
     if (data?.data) {
       const { entries = [] } = data.data
       set({ entries, cloudReady: true })
+      // Back up locally so data survives if Supabase is removed
+      localStorage.setItem('risk-tool-morning', JSON.stringify({ state: { entries } }))
     } else {
-      // First-time user — migrate from localStorage
       try {
         const raw = localStorage.getItem('risk-tool-morning')
         if (raw) {

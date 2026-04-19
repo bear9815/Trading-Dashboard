@@ -54,10 +54,10 @@ export default function App() {
   const { theme, anthropicApiKey, loadFromCloud: loadSettings } = useSettingsStore()
   const { loadTokens: loadSchwabTokens, _accessToken: schwabAccessToken } = useSchwabStore()
   const { user, loading: authLoading, setSession } = useAuthStore()
-  const { loadFromCloud, clearLocalState } = useTradeStore()
-  const { loadFromCloud: loadJournal, clearLocalState: clearJournal } = useJournalStore()
-  const { loadFromCloud: loadMorning, clearLocalState: clearMorning } = useMorningStore()
-  const { loadFromCloud: loadHabits, clearLocalState: clearHabits } = useHabitsStore()
+  const { loadFromCloud, loadFromLocal, clearLocalState } = useTradeStore()
+  const { loadFromCloud: loadJournal, loadFromLocal: loadJournalLocal, clearLocalState: clearJournal } = useJournalStore()
+  const { loadFromCloud: loadMorning, loadFromLocal: loadMorningLocal, clearLocalState: clearMorning } = useMorningStore()
+  const { loadFromCloud: loadHabits, loadFromLocal: loadHabitsLocal, clearLocalState: clearHabits } = useHabitsStore()
 
   // Apply theme
   useEffect(() => {
@@ -112,6 +112,10 @@ export default function App() {
   useEffect(() => {
     if (!supabase) {
       setSession(null)
+      loadFromLocal()
+      loadJournalLocal()
+      loadMorningLocal()
+      loadHabitsLocal()
       loadSchwabTokens()
       return
     }

@@ -27,9 +27,21 @@ export const useJournalStore = create((set, get) => ({
 
   // ── Cloud ──────────────────────────────────────────────────────────────────
 
+  loadFromLocal: () => {
+    try {
+      const raw = localStorage.getItem('risk-tool-journal')
+      if (!raw) { set({ cloudReady: true }); return }
+      const parsed = JSON.parse(raw)
+      const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [] } = parsed?.state || {}
+      set({ entries, priorities, goals, checkins, tradingThoughts, cloudReady: true })
+    } catch {
+      set({ cloudReady: true })
+    }
+  },
+
   loadFromCloud: async (userId) => {
     if (!supabase) return
-    if (get().cloudReady) return   // already loaded this session — skip to save egress
+    if (get().cloudReady) return
     const { data, error } = await supabase
       .from('user_journal')
       .select('data')
@@ -37,18 +49,17 @@ export const useJournalStore = create((set, get) => ({
       .single()
 
     if (error && error.code !== 'PGRST116') {
-      // PGRST116 = no rows found (first time user) — not a real error
       console.error('[cloud] loadJournal:', error.message)
       set({ cloudReady: true })
       return
     }
 
     if (data?.data) {
-      // Cloud data found — load it
       const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [] } = data.data
       set({ entries, priorities, goals, checkins, tradingThoughts, cloudReady: true })
+      // Back up locally so data survives if Supabase is removed
+      localStorage.setItem('risk-tool-journal', JSON.stringify({ state: { entries, priorities, goals, checkins, tradingThoughts } }))
     } else {
-      // First-time user — migrate from localStorage if anything exists
       try {
         const raw = localStorage.getItem('risk-tool-journal')
         if (raw) {

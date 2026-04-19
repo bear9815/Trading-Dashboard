@@ -64,6 +64,25 @@ export const useTradeStore = create((set, get) => ({
 
   // ── Cloud ────────────────────────────────────────────────────────────────
 
+  /** Load trades from IndexedDB — used when Supabase is not configured */
+  loadFromLocal: async () => {
+    try {
+      const raw = await idbStorage.getItem('risk-tool-trades')
+      if (!raw) { set({ cloudReady: true }); return }
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+      const { trades = [], accountActivities = [], importBatches = [] } = parsed?.state || {}
+      set({
+        trades:            trades.map(t => enrichTrade(t)),
+        accountActivities,
+        importBatches,
+        cloudReady: true,
+      })
+    } catch (err) {
+      console.error('[local] loadTrades failed:', err)
+      set({ cloudReady: true })
+    }
+  },
+
   /** Fetch all data from Supabase — called after login */
   loadFromCloud: async (userId) => {
     if (!supabase) return
@@ -80,6 +99,10 @@ export const useTradeStore = create((set, get) => ({
     const importBatches     = (bRes.data || []).map(r => r.data)
 
     set({ trades, accountActivities, importBatches, cloudLoading: false, cloudReady: true })
+
+    // Back up to IDB so data survives if Supabase is removed
+    idbStorage.setItem('risk-tool-trades', JSON.stringify({ state: { trades, accountActivities, importBatches } }))
+      .catch(console.error)
 
     // First-time: auto-migrate local IDB data if cloud is empty
     if (trades.length === 0 && accountActivities.length === 0) {
