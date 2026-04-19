@@ -17,7 +17,7 @@ import {
   calcSharpe, calcSortino, calcSQN, calcCalmar, calcAvgStopEfficiency
 } from '../../utils/metrics.js'
 import { formatCurrency, formatR, formatDate } from '../../utils/formatters.js'
-import { computeTradeMAEMFE, fetchHistory, fetchATR14 } from '../../utils/marketData.js'
+import { fetchHistory, fetchATR14 } from '../../utils/marketData.js'
 
 const COLORS = { Win: '#00d084', Loss: '#ff4757', Scratch: '#6b7280' }
 const TT_STYLE       = { backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }
@@ -167,7 +167,6 @@ const CALMAR_RATINGS = [
 ]
 function calmarRating(v) { return CALMAR_RATINGS.find(r => v >= r.min && v < r.max) ?? CALMAR_RATINGS[CALMAR_RATINGS.length - 1] }
 
-const MAE_LIMIT = 20 // max trades to fetch MAE/MFE for
 
 export default function Analytics({ selectedAccount }) {
   const { trades, accountActivities, getAccountBalance } = useTradeStore()
@@ -178,6 +177,7 @@ export default function Analytics({ selectedAccount }) {
     analyticsWinLossMode, setAnalyticsWinLossMode,
     analyticsRiskMode, setAnalyticsRiskMode,
     analyticsSqnMode,  setAnalyticsSqnMode,
+    tpMultiplier = 2,
   } = useSettingsStore()
   const { entries: morningEntries } = useMorningStore()
 
@@ -188,11 +188,8 @@ export default function Analytics({ selectedAccount }) {
   const [rBasis, setRBasis] = useState('stop')
   const rField = rBasis === 'atr' ? 'rMultipleATR' : 'rMultiple'
 
-  // MAE/MFE state
-  const [maemfeData, setMaemfeData] = useState([])
-  const [maemfeLoading, setMaemfeLoading] = useState(false)
-  const [maemfeProgress, setMaemfeProgress] = useState(0)
-  const [maemfeError, setMaemfeError] = useState(null)
+  // MAE analytics view toggle
+  const [maeView, setMaeView] = useState('trend') // 'trend' | 'distribution' | 'outcomes'
 
   // State for strength/weakness — effect placed after closedSorted (below)
   const [strengthMap,     setStrengthMap]     = useState({})
@@ -593,37 +590,90 @@ export default function Analytics({ selectedAccount }) {
     return { maxDD, maxDDPct, currentDD, currentDDPct, ddChart }
   }, [trades, accountActivities])
 
-  // ── Compute MAE/MFE ────────────────────────────────────────────────────────
-  async function computeMAEMFEForTrades() {
-    const recent = [...closed]
-      .sort((a, b) => new Date(b.entryDate) - new Date(a.entryDate))
-      .slice(0, MAE_LIMIT)
-    if (recent.length === 0) return
+  // ── MAE Analytics (reads stored maxAdverseR from computeSchwabMAE) ──────────
+  const maeAnalytics = useMemo(() => {
+    const withMAE = closed
+      .filter(t => t.maxAdverseR != null)
+      .sort((a, b) => new Date(a.entryDate) - new Date(b.entryDate))
 
-    setMaemfeLoading(true)
-    setMaemfeError(null)
-    setMaemfeProgress(0)
-    setMaemfeData([])
+    if (withMAE.length === 0) return null
 
-    const results = []
-    for (let i = 0; i < recent.length; i++) {
-      const trade = recent[i]
-      try {
-        const result = await computeTradeMAEMFE(trade)
-        results.push({
-          ...result,
-          symbol: trade.symbol,
-          entryDate: trade.entryDate,
-          pl: trade.pl ?? 0,
-        })
-      } catch {
-        // skip — no data available for this trade
-      }
-      setMaemfeProgress(i + 1)
+    const absR = t => Math.abs(t.maxAdverseR)
+
+    // Rolling N-trade average of |MAE R|
+    function rollingAvg(arr, idx, n) {
+      const start = Math.max(0, idx - n + 1)
+      const slice = arr.slice(start, idx + 1)
+      return slice.reduce((s, t) => s + absR(t), 0) / slice.length
     }
-    setMaemfeData(results)
-    setMaemfeLoading(false)
-  }
+
+    // Trend series
+    const trend = withMAE.map((t, i) => ({
+      idx:      i + 1,
+      label:    `${t.symbol} ${formatDate(t.entryDate)}`,
+      maeR:     Math.round(absR(t) * 1000) / 1000,
+      outcome:  t.status,
+      rolling10: withMAE.length >= 3 ? Math.round(rollingAvg(withMAE, i, 10) * 1000) / 1000 : null,
+    }))
+
+    // Distribution buckets
+    const BUCKETS = [
+      { range: '0–0.25R', min: 0,    max: 0.25 },
+      { range: '0.25–0.5R', min: 0.25, max: 0.5  },
+      { range: '0.5–0.75R', min: 0.5,  max: 0.75 },
+      { range: '0.75–1R',  min: 0.75, max: 1.0  },
+      { range: '>1R',      min: 1.0,  max: Infinity },
+    ]
+    const dist = BUCKETS.map(b => {
+      const inB   = withMAE.filter(t => { const v = absR(t); return v >= b.min && v < b.max })
+      const wins  = inB.filter(t => t.status === 'Win').length
+      const losses = inB.filter(t => t.status === 'Loss').length
+      return {
+        range:   b.range,
+        wins,
+        losses,
+        total:   inB.length,
+        winRate: inB.length > 0 ? Math.round((wins / inB.length) * 100) : null,
+      }
+    })
+
+    // Outcome averages
+    const wins    = withMAE.filter(t => t.status === 'Win')
+    const losses  = withMAE.filter(t => t.status === 'Loss')
+    const avg     = arr => arr.length ? arr.reduce((s, t) => s + absR(t), 0) / arr.length : null
+    const avgAll  = avg(withMAE)
+    const avgWin  = avg(wins)
+    const avgLoss = avg(losses)
+
+    const outcomes = [
+      { label: 'Wins',   avg: avgWin,  count: wins.length,   color: '#00d084' },
+      { label: 'Losses', avg: avgLoss, count: losses.length, color: '#ff4757' },
+      { label: 'All',    avg: avgAll,  count: withMAE.length, color: '#6b7280' },
+    ].filter(o => o.avg != null)
+
+    // Entry quality: % of trades where |MAE| < 0.5R
+    const tightCount = withMAE.filter(t => absR(t) < 0.5).length
+    const entryQualityPct = Math.round((tightCount / withMAE.length) * 100)
+
+    // Improvement: compare last-10 avg vs all-time avg
+    const last10 = withMAE.slice(-10)
+    const last10Avg = avg(last10)
+    const improving = last10Avg != null && avgAll != null && last10Avg < avgAll
+
+    // Optimal stop insight: p75 / p90 of winner MAE R
+    const winMAEs = wins.map(t => absR(t)).sort((a, b) => a - b)
+    const pctile = (arr, p) => arr.length ? arr[Math.min(Math.floor(arr.length * p), arr.length - 1)] : null
+    const winP75 = pctile(winMAEs, 0.75)
+    const winP90 = pctile(winMAEs, 0.9)
+
+    return {
+      withMAE, trend, dist, outcomes,
+      avgAll, avgWin, avgLoss,
+      entryQualityPct, improving, last10Avg,
+      winP75, winP90,
+      total: closed.length,
+    }
+  }, [closed])
 
   // ── Standard analytics data ────────────────────────────────────────────────
   const wins = closed.filter(t => t.status === 'Win').length
@@ -1875,113 +1925,226 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
-      {/* MAE / MFE Analysis */}
+      {/* MAE Analysis — Entry Quality Tracker */}
       <div className="card">
-        <div className="flex items-center justify-between mb-2">
-          <SectionTitle>MAE / MFE Analysis</SectionTitle>
-          <button
-            onClick={computeMAEMFEForTrades}
-            disabled={maemfeLoading || closed.length === 0}
-            className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-40 mb-3"
-          >
-            <RefreshCw size={12} className={maemfeLoading ? 'animate-spin' : ''} />
-            {maemfeLoading
-              ? `Computing… ${maemfeProgress}/${Math.min(closed.length, MAE_LIMIT)}`
-              : maemfeData.length > 0 ? 'Refresh' : 'Compute MAE/MFE'}
-          </button>
+        {/* Header */}
+        <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Position Management</p>
+            <h3 className="text-base font-semibold text-white flex items-center gap-2">
+              <TrendingDown size={15} className="text-accent-yellow" />
+              MAE Analysis — Entry Quality Tracker
+            </h3>
+          </div>
+          {maeAnalytics && (
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+              maeAnalytics.withMAE.length === maeAnalytics.total
+                ? 'bg-accent-green/15 text-accent-green'
+                : 'bg-accent-yellow/15 text-accent-yellow'
+            }`}>
+              {maeAnalytics.withMAE.length} / {maeAnalytics.total} trades have MAE data
+            </span>
+          )}
         </div>
-
-        <p className="text-xs text-gray-500 mb-3">
-          <strong className="text-gray-400">Max Adverse Excursion</strong> (worst intra-trade move against you) and{' '}
-          <strong className="text-gray-400">Max Favorable Excursion</strong> (best intra-trade move in your favor) for
-          the last {Math.min(closed.length, MAE_LIMIT)} closed trades. Fetches daily price history from Yahoo Finance.
+        <p className="text-xs text-gray-500 mb-4">
+          How far does each trade move against you before working out? Computed via Schwab 15-min + daily data.
+          Use the Risk tab → Position Health to populate MAE for missing trades.
         </p>
 
-        {maemfeError && (
-          <p className="text-xs text-accent-red mb-3">{maemfeError}</p>
-        )}
-
-        {maemfeData.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-gray-500 border-b border-white/5">
-                  <th className="text-left pb-2 font-medium">Symbol</th>
-                  <th className="text-left pb-2 font-medium">Entry Date</th>
-                  <th className="text-right pb-2 font-medium">MAE $</th>
-                  <th className="text-right pb-2 font-medium">MAE %</th>
-                  <th className="text-right pb-2 font-medium">MFE $</th>
-                  <th className="text-right pb-2 font-medium">MFE %</th>
-                  <th className="text-right pb-2 font-medium">Efficiency</th>
-                  <th className="text-right pb-2 font-medium">P&L</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {maemfeData.map((d, i) => (
-                  <tr key={i} className="hover:bg-white/3">
-                    <td className="py-1.5 font-semibold mono text-white">{d.symbol}</td>
-                    <td className="py-1.5 text-gray-400">{formatDate(d.entryDate)}</td>
-                    <td className="py-1.5 text-right mono text-accent-red">{formatCurrency(d.mae)}</td>
-                    <td className="py-1.5 text-right mono text-accent-red">{d.maePct?.toFixed(2)}%</td>
-                    <td className="py-1.5 text-right mono text-accent-green">+{formatCurrency(d.mfe)}</td>
-                    <td className="py-1.5 text-right mono text-accent-green">+{d.mfePct?.toFixed(2)}%</td>
-                    <td className={`py-1.5 text-right mono font-medium ${
-                      d.efficiency == null ? 'text-gray-600'
-                      : d.efficiency > 50 ? 'text-accent-green'
-                      : d.efficiency > 25 ? 'text-accent-yellow'
-                      : 'text-accent-red'
-                    }`}>
-                      {d.efficiency != null ? `${d.efficiency.toFixed(1)}%` : '—'}
-                    </td>
-                    <td className={`py-1.5 text-right mono font-medium ${d.pl >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
-                      {d.pl >= 0 ? '+' : ''}{formatCurrency(d.pl)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {/* Runup Capture % summary */}
-            {(() => {
-              const withEff = maemfeData.filter(d => d.efficiency != null)
-              if (!withEff.length) return null
-              const winData  = withEff.filter(d => d.pl > 0)
-              const lossData = withEff.filter(d => d.pl <= 0)
-              const avg      = v => v.length ? v.reduce((s, d) => s + d.efficiency, 0) / v.length : null
-              const avgAll   = avg(withEff)
-              const avgWin   = avg(winData)
-              const avgLoss  = avg(lossData)
-              return (
-                <div className="mt-4 pt-3 border-t border-white/5 grid grid-cols-3 gap-3">
-                  {[
-                    { label: 'Avg Runup Captured', val: avgAll, alwaysShow: true },
-                    { label: 'On Winning Trades',  val: avgWin  },
-                    { label: 'On Losing Trades',   val: avgLoss },
-                  ].map(({ label, val, alwaysShow }) => val != null || alwaysShow ? (
-                    <div key={label} className="text-center">
-                      <p className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">{label}</p>
-                      <p className={`text-lg font-bold mono ${
-                        val == null ? 'text-gray-600'
-                        : val >= 60 ? 'text-accent-green'
-                        : val >= 35 ? 'text-accent-yellow'
-                        : 'text-accent-red'
-                      }`}>
-                        {val != null ? `${val.toFixed(1)}%` : '—'}
-                      </p>
-                    </div>
-                  ) : null)}
-                </div>
-              )
-            })()}
-            <p className="text-xs text-gray-600 mt-3">
-              <strong>Runup Capture</strong> = what % of the max favorable move (MFE) you kept as actual P&L. As a swing trader, aim for &gt;50% on winners — lower values mean you're leaving gains on the table by exiting too early.
-            </p>
+        {!maeAnalytics ? (
+          <div className="rounded-lg bg-surface-200 px-4 py-6 text-xs text-gray-500 text-center">
+            No MAE data yet. Go to the <strong className="text-gray-400">Risk tab → Position Health &amp; Adaptive Trim</strong> and click <strong className="text-gray-400">Open MAE</strong> / <strong className="text-gray-400">Hist MAE</strong> to compute.
           </div>
         ) : (
-          !maemfeLoading && (
-            <div className="rounded-lg bg-surface-200 px-4 py-5 text-xs text-gray-500 text-center">
-              Click "Compute MAE/MFE" to analyze excursion data for your last {Math.min(closed.length, MAE_LIMIT)} trades.
+          <>
+            {/* Summary stat cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+              {[
+                {
+                  label: 'Avg MAE (All)',
+                  val: maeAnalytics.avgAll != null ? `${maeAnalytics.avgAll.toFixed(2)}R` : '—',
+                  color: maeAnalytics.avgAll != null && maeAnalytics.avgAll < 0.5 ? 'text-accent-green' : 'text-accent-yellow',
+                },
+                {
+                  label: 'Avg MAE (Wins)',
+                  val: maeAnalytics.avgWin != null ? `${maeAnalytics.avgWin.toFixed(2)}R` : '—',
+                  color: 'text-accent-green',
+                },
+                {
+                  label: 'Avg MAE (Losses)',
+                  val: maeAnalytics.avgLoss != null ? `${maeAnalytics.avgLoss.toFixed(2)}R` : '—',
+                  color: 'text-accent-red',
+                },
+                {
+                  label: 'Entry Quality',
+                  val: `${maeAnalytics.entryQualityPct}%`,
+                  sub: '< 0.5R adverse',
+                  color: maeAnalytics.entryQualityPct >= 60 ? 'text-accent-green' : maeAnalytics.entryQualityPct >= 40 ? 'text-accent-yellow' : 'text-accent-red',
+                },
+              ].map(s => (
+                <div key={s.label} className="bg-surface-200 rounded-lg px-3 py-2.5">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{s.label}</p>
+                  <p className={`text-xl font-bold mono ${s.color}`}>{s.val}</p>
+                  {s.sub && <p className="text-[10px] text-gray-600 mt-0.5">{s.sub}</p>}
+                </div>
+              ))}
             </div>
-          )
+
+            {/* View toggle */}
+            <div className="flex gap-1 mb-4">
+              {[
+                { key: 'trend', label: 'Trend Over Time' },
+                { key: 'distribution', label: 'Distribution' },
+                { key: 'outcomes', label: 'Win vs Loss' },
+              ].map(v => (
+                <button key={v.key} onClick={() => setMaeView(v.key)}
+                  className={`px-3 py-1 text-xs font-medium rounded border transition-colors ${
+                    maeView === v.key
+                      ? 'border-accent-blue bg-accent-blue/15 text-accent-blue'
+                      : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'
+                  }`}>
+                  {v.label}
+                </button>
+              ))}
+            </div>
+
+            {/* ── Trend chart ── */}
+            {maeView === 'trend' && (
+              <>
+                <p className="text-[11px] text-gray-500 mb-2">
+                  Each dot = one trade. The blue line is the rolling 10-trade average.
+                  {maeAnalytics.improving
+                    ? <span className="text-accent-green ml-1">↓ Last-10 avg ({maeAnalytics.last10Avg?.toFixed(2)}R) is better than all-time ({maeAnalytics.avgAll?.toFixed(2)}R) — entries improving.</span>
+                    : <span className="text-accent-yellow ml-1">Last-10 avg ({maeAnalytics.last10Avg?.toFixed(2)}R) vs all-time ({maeAnalytics.avgAll?.toFixed(2)}R).</span>}
+                </p>
+                <ResponsiveContainer width="100%" height={220}>
+                  <ComposedChart data={maeAnalytics.trend} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                    <XAxis dataKey="idx" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} tickFormatter={v => `${v}R`} />
+                    <Tooltip
+                      contentStyle={TT_STYLE}
+                      labelStyle={TT_LABEL_STYLE}
+                      itemStyle={TT_ITEM_STYLE}
+                      formatter={(val, name) => [
+                        name === 'rolling10' ? `${val}R` : `${val}R`,
+                        name === 'rolling10' ? 'Rolling 10 avg' : 'MAE',
+                      ]}
+                      labelFormatter={(_, payload) => payload?.[0]?.payload?.label ?? ''}
+                    />
+                    <ReferenceLine y={0.5}  stroke="#ffa502" strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '0.5R', fontSize: 9, fill: '#ffa502', position: 'right' }} />
+                    <ReferenceLine y={1.0}  stroke="#ff4757" strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: '1R',   fontSize: 9, fill: '#ff4757', position: 'right' }} />
+                    <Scatter
+                      dataKey="maeR"
+                      shape={props => {
+                        const { cx, cy, payload } = props
+                        const fill = payload.outcome === 'Win' ? '#00d084' : payload.outcome === 'Loss' ? '#ff4757' : '#6b7280'
+                        return <circle cx={cx} cy={cy} r={4} fill={fill} fillOpacity={0.85} stroke="none" />
+                      }}
+                    />
+                    <Line dataKey="rolling10" stroke="#3d84ff" strokeWidth={1.5} dot={false} connectNulls />
+                  </ComposedChart>
+                </ResponsiveContainer>
+                <div className="flex items-center gap-4 mt-2 text-[10px] text-gray-500">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-accent-green inline-block" />Win</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-accent-red inline-block" />Loss</span>
+                  <span className="flex items-center gap-1"><span className="w-3 border-t border-accent-blue inline-block" style={{verticalAlign:'middle'}} />Rolling 10 avg</span>
+                </div>
+              </>
+            )}
+
+            {/* ── Distribution chart ── */}
+            {maeView === 'distribution' && (
+              <>
+                <p className="text-[11px] text-gray-500 mb-2">
+                  Where your MAE clusters. Tight entries (0–0.5R) indicate good timing. High bars at &gt;0.75R suggest the position moved significantly before resolving.
+                </p>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={maeAnalytics.dist} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" vertical={false} />
+                    <XAxis dataKey="range" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={TT_STYLE}
+                      labelStyle={TT_LABEL_STYLE}
+                      formatter={(val, name) => [val, name === 'wins' ? 'Wins' : 'Losses']}
+                    />
+                    <Bar dataKey="wins"   stackId="a" fill="#00d084" fillOpacity={0.8} radius={[0,0,0,0]} />
+                    <Bar dataKey="losses" stackId="a" fill="#ff4757" fillOpacity={0.8} radius={[3,3,0,0]}
+                      label={{ position: 'top', fontSize: 9, fill: '#9ca3af',
+                        formatter: (_, entry) => {
+                          const d = entry?.payload
+                          return d?.total > 0 && d?.winRate != null ? `${d.winRate}%W` : ''
+                        }
+                      }}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="flex gap-3 mt-2 text-[10px] text-gray-500">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-accent-green inline-block" />Wins</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-accent-red inline-block" />Losses</span>
+                  <span className="text-gray-600">Labels = win rate within bucket</span>
+                </div>
+              </>
+            )}
+
+            {/* ── Win vs Loss avg MAE ── */}
+            {maeView === 'outcomes' && (
+              <>
+                <p className="text-[11px] text-gray-500 mb-2">
+                  Average MAE by outcome. Winners should show smaller adverse excursion — a large gap between win/loss MAE means clean entries correlate strongly with positive outcomes.
+                </p>
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart data={maeAnalytics.outcomes} layout="vertical" margin={{ top: 4, right: 40, left: 10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" horizontal={false} />
+                    <XAxis type="number" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} tickFormatter={v => `${v.toFixed(2)}R`} />
+                    <YAxis type="category" dataKey="label" tick={{ fontSize: 11, fill: '#9ca3af' }} tickLine={false} width={48} />
+                    <Tooltip contentStyle={TT_STYLE} formatter={v => [`${v.toFixed(3)}R`, 'Avg |MAE|']} />
+                    <Bar dataKey="avg" radius={[0, 3, 3, 0]}
+                      label={{ position: 'right', fontSize: 10, fill: '#9ca3af', formatter: v => `${v.toFixed(2)}R` }}>
+                      {maeAnalytics.outcomes.map((o, i) => (
+                        <Cell key={i} fill={o.color} fillOpacity={0.8} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+
+                {/* Gap insight */}
+                {maeAnalytics.avgWin != null && maeAnalytics.avgLoss != null && (
+                  <div className={`mt-3 rounded-lg px-3 py-2 text-xs ${
+                    maeAnalytics.avgLoss > maeAnalytics.avgWin * 1.3
+                      ? 'bg-accent-green/10 text-accent-green'
+                      : 'bg-accent-yellow/10 text-accent-yellow'
+                  }`}>
+                    {maeAnalytics.avgLoss > maeAnalytics.avgWin * 1.3
+                      ? `Strong signal: your losses go ${maeAnalytics.avgLoss.toFixed(2)}R adverse vs ${maeAnalytics.avgWin.toFixed(2)}R on wins — clean entries predict wins.`
+                      : `Weak signal: wins (${maeAnalytics.avgWin.toFixed(2)}R) and losses (${maeAnalytics.avgLoss.toFixed(2)}R) have similar MAE — outcome driven more by direction than entry timing.`}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Stop zone insight strip */}
+            {(maeAnalytics.winP75 != null || maeAnalytics.winP90 != null) && (
+              <div className="mt-4 pt-3 border-t border-white/5 flex items-start gap-6 flex-wrap text-xs">
+                <div>
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Winner MAE p75</p>
+                  <p className="mono font-semibold text-accent-green">{maeAnalytics.winP75?.toFixed(2)}R</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Winner MAE p90</p>
+                  <p className="mono font-semibold text-accent-yellow">{maeAnalytics.winP90?.toFixed(2)}R</p>
+                </div>
+                <div className="flex-1 min-w-[220px]">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Stop Zone Insight</p>
+                  <p className="text-gray-400 leading-relaxed">
+                    75% of your winners never exceeded <strong className="text-accent-green">{maeAnalytics.winP75?.toFixed(2)}R</strong> adverse and 90% stayed within <strong className="text-accent-yellow">{maeAnalytics.winP90?.toFixed(2)}R</strong>.
+                    Stops set tighter than {maeAnalytics.winP75?.toFixed(2)}R would have stopped out ~25% of eventual winners.
+                  </p>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
