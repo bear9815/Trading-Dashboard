@@ -2,16 +2,17 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import {
   Upload, FileText, Trash2, ChevronDown, ChevronUp, Loader,
   AlertTriangle, X, BookOpen, TrendingUp, TrendingDown,
-  Minus, Zap, BarChart2, RefreshCw,
+  Minus, Zap, BarChart2, RefreshCw, Mic, Download,
 } from 'lucide-react'
 import { useSettingsStore }        from '../../store/useSettingsStore.js'
-import { useAuthStore }            from '../../store/useAuthStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { useThematicStore }        from '../../store/useThematicStore.js'
-import { processWithGeminiCombined, readFileAsBase64 } from '../../utils/thematicGemini.js'
+import { processWithGeminiCombined, readFileAsBase64, processAudioWithGemini, isAudioFile } from '../../utils/thematicGemini.js'
+import { processEarningsCall } from '../../utils/earningsCallAgent.js'
 import { initGoogleDrive, requestDriveToken, openDrivePicker, downloadDriveFile } from '../../utils/googleDrive.js'
 import { extractWithOllama, autoAnalyzeWithOllama } from '../../utils/localResearch.js'
 import { extractWithOpenRouter, processWithOpenRouterCombined, autoAnalyzeWithOpenRouter } from '../../utils/researchAi.js'
+import { jsPDF } from 'jspdf'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 const GOOGLE_API_KEY   = import.meta.env.VITE_GOOGLE_API_KEY   || ''
@@ -230,10 +231,10 @@ function SourceCard({ source, onRemove }) {
   const [expanded, setExpanded] = useState(false)
   const [removing, setRemoving] = useState(false)
 
-  async function handleRemove() {
+  function handleRemove() {
     if (!confirm(`Delete "${source.title}"?`)) return
     setRemoving(true)
-    try { await onRemove(source.id) } catch { setRemoving(false) }
+    try { onRemove(source.id) } catch { setRemoving(false) }
   }
 
   return (
@@ -256,6 +257,10 @@ function SourceCard({ source, onRemove }) {
           <p className="text-sm text-gray-500 mt-1.5 leading-relaxed line-clamp-2">{source.summary}</p>
         </div>
         <div className="flex items-center gap-1 shrink-0 mt-0.5">
+          <button onClick={() => exportSourceToPDF(source)} title="Export PDF"
+            className="p-1.5 rounded-lg text-gray-600 hover:text-accent-blue hover:bg-accent-blue/10 transition-colors">
+            <Download size={15}/>
+          </button>
           <button onClick={() => setExpanded(p => !p)}
             className="p-1.5 rounded-lg text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
             {expanded ? <ChevronUp size={15}/> : <ChevronDown size={15}/>}
@@ -385,7 +390,7 @@ export function ActiveSignals() {
           : provider === 'openrouter'
           ? await autoAnalyzeWithOpenRouter(source, themes, openRouterApiKey, researchOpenRouterModel)
           : await autoAnalyzeWithGemini(source, themes, apiKey)
-        if (result) await updateSource(source.id, { insights: result })
+        if (result) updateSource(source.id, { insights: result })
       } catch (e) {
         console.warn(`[ActiveSignals] re-analysis failed for "${source.title}":`, e?.message)
       }
@@ -469,32 +474,134 @@ export function ActiveSignals() {
   )
 }
 
+// ── PDF export ────────────────────────────────────────────────────────────────
+function exportSourceToPDF(source) {
+  const doc   = new jsPDF({ unit: 'pt', format: 'letter' })
+  const lw    = 490
+  const lx    = 60
+  let   y     = 60
+
+  function addText(text, size, color, bold, maxWidth) {
+    doc.setFontSize(size)
+    doc.setTextColor(...color)
+    doc.setFont('helvetica', bold ? 'bold' : 'normal')
+    const lines = doc.splitTextToSize(String(text || ''), maxWidth || lw)
+    lines.forEach(line => {
+      if (y > 720) { doc.addPage(); y = 60 }
+      doc.text(line, lx, y)
+      y += size * 1.4
+    })
+  }
+
+  function addSection(label) {
+    y += 12
+    if (y > 700) { doc.addPage(); y = 60 }
+    doc.setFontSize(8)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(120, 120, 140)
+    doc.text(label.toUpperCase(), lx, y)
+    y += 4
+    doc.setDrawColor(60, 60, 80)
+    doc.setLineWidth(0.5)
+    doc.line(lx, y, lx + lw, y)
+    y += 12
+  }
+
+  const sentimentColor = { bullish: [52, 211, 153], bearish: [248, 113, 113], neutral: [156, 163, 175], mixed: [251, 191, 36] }
+  const sColor = sentimentColor[source.sentiment] || sentimentColor.neutral
+
+  addText(source.title, 16, [230, 230, 240], true)
+  y += 4
+  doc.setFontSize(8)
+  doc.setFont('helvetica', 'bold')
+  doc.setTextColor(...sColor)
+  const typeLabel = source.source_type === 'earnings_call' ? 'EARNINGS CALL' : source.source_type === 'deep_dive' ? 'DEEP DIVE' : 'RESEARCH'
+  doc.text(`${typeLabel}  ·  ${(source.sentiment || 'neutral').toUpperCase()}`, lx, y)
+  y += 16
+
+  if (source.summary) {
+    addText(source.summary, 10, [180, 180, 200], false)
+    y += 4
+  }
+
+  if ((source.key_points || []).length) {
+    addSection('Key Points')
+    source.key_points.forEach(pt => {
+      addText(`• ${pt}`, 9.5, [200, 200, 215], false)
+      y += 2
+    })
+  }
+
+  if ((source.catalyst_signals || []).length) {
+    addSection('Catalyst Signals')
+    source.catalyst_signals.forEach(cs => {
+      const statusColor = { confirmed: [52, 211, 153], emerging: [96, 165, 250], watch: [251, 191, 36], risk: [248, 113, 113] }
+      doc.setFontSize(9.5)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(...(statusColor[cs.status] || [156, 163, 175]))
+      if (y > 720) { doc.addPage(); y = 60 }
+      doc.text(`${cs.catalyst}  [${(cs.status || '').toUpperCase()}]`, lx, y)
+      y += 13
+      if (cs.evidence) addText(cs.evidence, 9, [150, 150, 165], false)
+      y += 4
+    })
+  }
+
+  if ((source.key_metrics || []).length) {
+    addSection('Key Metrics')
+    const cols = 3
+    const cw   = lw / cols
+    source.key_metrics.forEach((m, i) => {
+      const cx = lx + (i % cols) * cw
+      if (i % cols === 0 && i !== 0) y += 36
+      if (y > 700) { doc.addPage(); y = 60 }
+      doc.setFontSize(13)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(96, 165, 250)
+      doc.text(String(m.value || ''), cx, y)
+      doc.setFontSize(8)
+      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(150, 150, 165)
+      doc.text(String(m.label || ''), cx, y + 11)
+    })
+    y += 44
+  }
+
+  y += 16
+  doc.setFontSize(8)
+  doc.setFont('helvetica', 'normal')
+  doc.setTextColor(100, 100, 115)
+  doc.text(`${source.file_name || ''}  ·  ${new Date(source.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`, lx, y)
+
+  const slug = (source.title || 'research').replace(/[^a-z0-9]+/gi, '_').toLowerCase().slice(0, 60)
+  doc.save(`${slug}.pdf`)
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ResearchLibrary() {
   const { apiKey, openRouterApiKey, researchAiProvider, researchOpenRouterModel, useLocalLLM }  = useSettingsStore()
-  const { user }    = useAuthStore()
   const { themes }  = useThematicStore()
-  const { sources, loading: storeLoading, loadSources, addSource, removeSource, updateSource } = useResearchLibraryStore()
+  const { sources, loading: storeLoading, addSource, removeSource, updateSource } = useResearchLibraryStore()
   const provider = researchAiProvider || (useLocalLLM ? 'local' : 'gemini')
 
-  const [sourceType,    setSourceType]    = useState('deep_dive')
-  const [createDossier, setCreateDossier] = useState(true)
+  const [sourceType,    setSourceType]    = useState('earnings_call')
+  const [createDossier, setCreateDossier] = useState(false)
   const [tickerInput,  setTickerInput]  = useState('')
   const [themeInput,   setThemeInput]   = useState('')
   const [dragging,     setDragging]     = useState(false)
   const [uploading,    setUploading]    = useState(false)
   const [uploadFile,   setUploadFile]   = useState('')
+  const [uploadStatus, setUploadStatus] = useState('')
   const [uploadIndex,  setUploadIndex]  = useState(0)
   const [uploadTotal,  setUploadTotal]  = useState(0)
   const [error,        setError]        = useState(null)
   const [analysis,     setAnalysis]     = useState(null)
   const [showLibrary,  setShowLibrary]  = useState(true)
   const [driveLoading, setDriveLoading] = useState(false)
+  const [lastSaved,    setLastSaved]    = useState(null)
   const inputRef = useRef()
 
-  useEffect(() => {
-    if (user?.id) loadSources()
-  }, [user?.id])
+  useEffect(() => { setCreateDossier(sourceType === 'deep_dive') }, [sourceType])
 
   // Default dossier toggle based on source type
   useEffect(() => {
@@ -505,20 +612,47 @@ export default function ResearchLibrary() {
     if (!files.length) return
     if (provider === 'gemini' && !apiKey) { setError('No Gemini API key. Add it in Settings → API Keys.'); return }
     if (provider === 'openrouter' && !openRouterApiKey) { setError('No OpenRouter API key. Add it in Settings → OpenRouter API Key.'); return }
-    if (!user?.id) { setError('You must be signed in to save to the research library.'); return }
     setError(null)
     setAnalysis(null)
+    setLastSaved(null)
     setUploading(true)
     setUploadTotal(files.length)
 
     for (let i = 0; i < files.length; i++) {
-      const file = files[i]
+      const file   = files[i]
+      const isAudio = isAudioFile(file)
       setUploadIndex(i + 1)
       setUploadFile(file.name)
+      setUploadStatus(isAudio ? 'Preparing upload…' : (createDossier ? 'Extracting + building dossier…' : 'Extracting intelligence…'))
       try {
         let extracted, dossierThemes = null
 
-        if (provider === 'local') {
+        if (sourceType === 'earnings_call') {
+          // Always routes through the dedicated Earnings Call Agent
+          extracted = await processEarningsCall({
+            file,
+            geminiApiKey:      apiKey,
+            openRouterApiKey,
+            openRouterModel:   researchOpenRouterModel,
+            provider:          isAudio ? 'gemini' : provider,
+            tickerHint:        tickerInput.trim(),
+            themeHint:         themeInput.trim(),
+            onStatus:          (status) => setUploadStatus(status),
+          })
+        } else if (isAudio) {
+          const result = await processAudioWithGemini(
+            file, apiKey,
+            sourceType, tickerInput.trim(), themeInput.trim(),
+            createDossier,
+            (status) => setUploadStatus(status)
+          )
+          if (createDossier) {
+            extracted     = result.library || {}
+            dossierThemes = result.themes  || null
+          } else {
+            extracted = result
+          }
+        } else if (provider === 'local') {
           extracted = await extractWithOllama(file, sourceType, tickerInput.trim(), themeInput.trim())
         } else if (provider === 'openrouter' && createDossier) {
           const combined = await processWithOpenRouterCombined(file, openRouterApiKey, researchOpenRouterModel, sourceType, tickerInput.trim(), themeInput.trim())
@@ -527,12 +661,10 @@ export default function ResearchLibrary() {
         } else if (provider === 'openrouter') {
           extracted = await extractWithOpenRouter(file, openRouterApiKey, researchOpenRouterModel, sourceType, tickerInput.trim(), themeInput.trim())
         } else if (createDossier) {
-          // Single call: returns both library metadata and thematic dossier
           const combined = await processWithGeminiCombined(file, apiKey, sourceType, tickerInput.trim(), themeInput.trim())
           extracted     = combined.library || {}
           dossierThemes = combined.themes  || null
         } else {
-          // Extract-only: cheaper, no dossier
           extracted = await extractWithGemini(file, apiKey, sourceType, tickerInput.trim(), themeInput.trim())
         }
 
@@ -555,9 +687,9 @@ export default function ResearchLibrary() {
           file_name:        file.name,
         }
 
-        const saved = await addSource(payload)
+        const saved = addSource(payload)
+        setLastSaved(saved)
 
-        // Add thematic dossier if the combined call produced one
         if (dossierThemes) {
           const { addTheme } = useThematicStore.getState()
           for (const [name, data] of Object.entries(dossierThemes)) {
@@ -565,12 +697,10 @@ export default function ResearchLibrary() {
           }
         }
 
-        // Read the latest themes from the store — if the combined upload
-        // just added a new dossier via addTheme above, the `themes` closure
-        // value is stale and would miss it.
         const currentThemes = useThematicStore.getState().themes
         if (saved && Object.keys(currentThemes).length > 0) {
           try {
+            setUploadStatus('Cross-referencing with dossiers…')
             const result = provider === 'local'
               ? await autoAnalyzeWithOllama(saved, currentThemes)
               : provider === 'openrouter'
@@ -578,7 +708,7 @@ export default function ResearchLibrary() {
               : await autoAnalyzeWithGemini(saved, currentThemes, apiKey)
             if (result) {
               setAnalysis(result)
-              await updateSource(saved.id, { insights: result })
+              updateSource(saved.id, { insights: result })
             }
           } catch (ae) {
             console.warn('[ResearchLibrary] auto-analysis failed:', ae?.message)
@@ -595,13 +725,14 @@ export default function ResearchLibrary() {
     setThemeInput('')
     setUploading(false)
     setUploadFile('')
+    setUploadStatus('')
     setUploadIndex(0)
     setUploadTotal(0)
-  }, [apiKey, openRouterApiKey, researchOpenRouterModel, provider, user?.id, sourceType, tickerInput, themeInput, themes, addSource])
+  }, [apiKey, openRouterApiKey, researchOpenRouterModel, provider, sourceType, tickerInput, themeInput, themes, addSource])
 
   const handleDrop = useCallback(e => {
     e.preventDefault(); setDragging(false)
-    const files = [...e.dataTransfer.files].filter(f => f.type === 'application/pdf')
+    const files = [...e.dataTransfer.files].filter(f => f.type === 'application/pdf' || isAudioFile(f))
     if (files.length) handleFiles(files)
   }, [handleFiles])
 
@@ -706,11 +837,22 @@ export default function ResearchLibrary() {
                 {uploadTotal > 1 && (
                   <p className="text-[10px] text-gray-500 mb-1">File {uploadIndex} of {uploadTotal}</p>
                 )}
-                <p className="text-xs text-accent-blue font-medium animate-pulse truncate px-4">{uploadFile}</p>
-                <p className="text-[10px] text-gray-600 mt-1">{createDossier ? 'Extracting + building dossier…' : 'Extracting intelligence…'}</p>
+                <p className="text-xs text-accent-blue font-medium truncate px-4">{uploadFile}</p>
+                <p className="text-[10px] text-gray-600 mt-1 animate-pulse">{uploadStatus}</p>
               </div>
             ) : (
               <div className="space-y-2">
+                {lastSaved && (
+                  <div className="flex items-center justify-between bg-accent-green/5 border border-accent-green/20 rounded-lg px-3 py-2">
+                    <p className="text-xs text-accent-green truncate flex-1 mr-2">Saved: {lastSaved.title}</p>
+                    <button
+                      onClick={() => exportSourceToPDF(lastSaved)}
+                      className="flex items-center gap-1 text-[10px] font-semibold text-accent-green hover:text-white border border-accent-green/30 hover:border-accent-green rounded-lg px-2 py-1 transition-all shrink-0"
+                    >
+                      <Download size={10}/> Export PDF
+                    </button>
+                  </div>
+                )}
                 <div
                   onDragOver={e => { e.preventDefault(); setDragging(true) }}
                   onDragLeave={() => setDragging(false)}
@@ -722,13 +864,18 @@ export default function ResearchLibrary() {
                       : 'border-white/10 bg-white/[0.01] hover:border-white/25 hover:bg-white/[0.03]'
                   }`}
                 >
-                  <input ref={inputRef} type="file" accept="application/pdf" multiple className="hidden"
-                    onChange={e => { const f=[...e.target.files].filter(f=>f.type==='application/pdf'); if(f.length) handleFiles(f); e.target.value='' }}/>
-                  <Upload size={16} className={`mx-auto mb-1.5 ${dragging ? 'text-accent-blue' : 'text-gray-600'}`}/>
+                  <input ref={inputRef} type="file"
+                    accept="application/pdf,audio/mpeg,audio/mp4,audio/x-m4a,audio/wav,audio/ogg,video/mp4,.mp3,.m4a,.wav"
+                    multiple className="hidden"
+                    onChange={e => { const f=[...e.target.files].filter(f=>f.type==='application/pdf'||isAudioFile(f)); if(f.length) handleFiles(f); e.target.value='' }}/>
+                  <div className={`flex items-center justify-center gap-2 mb-1.5 ${dragging ? 'text-accent-blue' : 'text-gray-600'}`}>
+                    <Upload size={14}/>
+                    <Mic size={14}/>
+                  </div>
                   <p className={`text-xs font-medium ${dragging ? 'text-accent-blue' : 'text-gray-400'}`}>
-                    {dragging ? 'Drop to analyze' : 'Drop PDFs here or click to browse'}
+                    {dragging ? 'Drop to analyze' : 'Drop PDFs or audio files here'}
                   </p>
-                  <p className="text-[10px] text-gray-600 mt-0.5">multiple files supported</p>
+                  <p className="text-[10px] text-gray-600 mt-0.5">PDF, MP3, M4A, WAV · multiple files supported</p>
                 </div>
                 <button
                   onClick={handleGoogleDrive}

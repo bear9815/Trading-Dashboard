@@ -4,6 +4,164 @@
 import { buildCombinedPrompt, buildRefreshPrompt } from './researchPrompts.js'
 import { parseJsonText } from './aiHelpers.js'
 
+const AUDIO_MIME_TYPES = {
+  'audio/mpeg': 'audio/mpeg',
+  'audio/mp4':  'audio/mp4',
+  'audio/x-m4a': 'audio/mp4',
+  'audio/wav':  'audio/wav',
+  'audio/x-wav': 'audio/wav',
+  'audio/ogg':  'audio/ogg',
+  'video/mp4':  'video/mp4',
+}
+
+export function isAudioFile(file) {
+  return !!(AUDIO_MIME_TYPES[file.type] || /\.(mp3|m4a|wav|ogg|mp4)$/i.test(file.name))
+}
+
+export function resolvedMimeType(file) {
+  return AUDIO_MIME_TYPES[file.type] || 'audio/mpeg'
+}
+
+export async function uploadToGeminiFiles(file, apiKey) {
+  const mimeType = resolvedMimeType(file)
+  const metadata = JSON.stringify({ file: { display_name: file.name, mime_type: mimeType } })
+  const boundary = '-------gem_upload_boundary'
+
+  const bodyParts = [
+    `--${boundary}\r\nContent-Type: application/json; charset=utf-8\r\n\r\n${metadata}\r\n`,
+    `--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
+  ]
+  const textEncoder  = new TextEncoder()
+  const part1        = textEncoder.encode(bodyParts[0])
+  const part2        = textEncoder.encode(bodyParts[1])
+  const fileBuffer   = await file.arrayBuffer()
+  const closing      = textEncoder.encode(`\r\n--${boundary}--`)
+
+  const combined = new Uint8Array(part1.byteLength + part2.byteLength + fileBuffer.byteLength + closing.byteLength)
+  combined.set(part1, 0)
+  combined.set(part2, part1.byteLength)
+  combined.set(new Uint8Array(fileBuffer), part1.byteLength + part2.byteLength)
+  combined.set(closing, part1.byteLength + part2.byteLength + fileBuffer.byteLength)
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
+    {
+      method:  'POST',
+      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body:    combined,
+    }
+  )
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.error?.message || `Gemini file upload failed (${res.status})`)
+  }
+  const data = await res.json()
+  return data.file
+}
+
+export async function waitForFileActive(fileResource, apiKey, maxWaitMs = 120_000) {
+  const start = Date.now()
+  let resource = fileResource
+
+  while (resource.state !== 'ACTIVE') {
+    if (resource.state === 'FAILED') throw new Error('Gemini file processing failed — try re-uploading.')
+    if (Date.now() - start > maxWaitMs) throw new Error('Timed out waiting for Gemini to process the audio file.')
+    await new Promise(r => setTimeout(r, 3000))
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/${resource.name}?key=${apiKey}`
+    )
+    if (!res.ok) throw new Error(`Gemini file status check failed (${res.status})`)
+    const data = await res.json()
+    resource = data
+  }
+  return resource
+}
+
+// ── processAudioWithGemini ─────────────────────────────────────────────────────
+// Uploads an earnings call audio file via the Files API, waits for processing,
+// then runs extraction + optional dossier in a single generateContent call.
+export async function processAudioWithGemini(file, apiKey, sourceType, tickerHint, themeHint, createDossier = false, onStatus) {
+  onStatus?.('Uploading audio to Gemini…')
+  const uploaded = await uploadToGeminiFiles(file, apiKey)
+
+  onStatus?.('Processing audio…')
+  const active = await waitForFileActive(uploaded, apiKey)
+
+  onStatus?.(createDossier ? 'Transcribing & building dossier…' : 'Transcribing & extracting intelligence…')
+
+  const prompt = createDossier
+    ? buildCombinedPrompt(sourceType, tickerHint, themeHint)
+    : buildAudioExtractionPrompt(sourceType, tickerHint, themeHint)
+
+  let lastError
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * attempt))
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            role:  'user',
+            parts: [
+              { fileData: { mimeType: resolvedMimeType(file), fileUri: active.uri } },
+              { text: prompt },
+            ],
+          }],
+          generationConfig: { maxOutputTokens: createDossier ? 65536 : 8192, temperature: 0.2 },
+        }),
+      }
+    )
+
+    if (res.ok) {
+      const data = await res.json()
+      if (data.candidates?.[0]?.finishReason === 'MAX_TOKENS') {
+        throw new Error('Response truncated — audio may be too long. Try a shorter clip.')
+      }
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
+      try {
+        return parseJsonText(raw)
+      } catch (e) {
+        throw new Error(`Failed to parse Gemini response: ${e.message}`)
+      }
+    }
+
+    const err = await res.json().catch(() => ({}))
+    const msg = err?.error?.message || `Gemini API error ${res.status}`
+    if (res.status !== 429 && res.status !== 503) throw new Error(msg)
+    lastError = new Error(msg)
+  }
+  throw lastError
+}
+
+function buildAudioExtractionPrompt(sourceType, tickerHint, themeHint) {
+  const typeLabel = sourceType === 'earnings_call' ? 'earnings call' : 'research audio'
+  return `You are an investment analyst listening to a ${typeLabel} recording.
+${tickerHint ? `Known ticker(s): ${tickerHint}` : ''}
+${themeHint  ? `Known theme: ${themeHint}` : ''}
+
+Listen carefully to the audio. Capture voice inflection — note where management sounds confident, hesitant, evasive, or enthusiastic as it affects your analysis.
+
+Return ONLY valid JSON (no markdown, no explanation):
+{
+  "title": "<concise descriptive title, e.g. 'CRDO Q4 2025 Earnings Call Analysis'>",
+  "summary": "<2-4 sentence executive summary of key investment takeaways, note any significant tone shifts>",
+  "sentiment": "bullish|bearish|neutral|mixed",
+  "tickers_mentioned": ["<TICKER>"],
+  "themes_mentioned": ["<theme name>"],
+  "key_points": ["<key investment point — include management tone cues where notable>"],
+  "catalyst_signals": [
+    { "catalyst": "<catalyst>", "status": "confirmed|emerging|watch|risk", "evidence": "<quote or paraphrase with tone note if relevant>" }
+  ],
+  "key_metrics": [
+    { "label": "<metric name>", "value": "<value with units>", "context": "<brief context>" }
+  ],
+  "raw_text": "<verbatim transcript of the most important quotes and data points — up to 8000 characters>"
+}`
+}
+
 export { buildCombinedPrompt }
 
 export function readFileAsBase64(file) {

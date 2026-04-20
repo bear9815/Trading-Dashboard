@@ -1,13 +1,11 @@
 import { useState, useEffect, lazy, Suspense } from 'react'
 import Sidebar from './components/layout/Sidebar.jsx'
 import TopBar from './components/layout/TopBar.jsx'
-import LoginPage from './components/auth/LoginPage.jsx'
 import ImportModal from './components/import/ImportModal.jsx'
 import QuickAddTrade from './components/quicktrade/QuickAddTrade.jsx'
 import { useSettingsStore } from './store/useSettingsStore.js'
 import { setAnthropicFallbackKey } from './utils/ai.js'
 import { setSchwabToken, setSchwabTokenGetter } from './utils/marketData.js'
-import { useAuthStore } from './store/useAuthStore.js'
 import PageErrorBoundary from './components/PageErrorBoundary.jsx'
 import MorningCheckin from './components/shared/MorningCheckin.jsx'
 import TradingReminderPopup from './components/shared/TradingReminderPopup.jsx'
@@ -16,7 +14,6 @@ import { useTradeStore } from './store/useTradeStore.js'
 import { useJournalStore } from './store/useJournalStore.js'
 import { useMorningStore } from './store/useMorningStore.js'
 import { useHabitsStore } from './store/useHabitsStore.js'
-import { supabase } from './lib/supabase.js'
 import { Loader } from 'lucide-react'
 
 // ── Lazy-loaded pages (each splits into its own chunk) ────────────────────────
@@ -52,13 +49,12 @@ export default function App() {
   const [page, setPage] = useState('dashboard')
   const [showImport, setShowImport] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState('All')
-  const { theme, anthropicApiKey, loadFromCloud: loadSettings } = useSettingsStore()
+  const { theme, anthropicApiKey } = useSettingsStore()
   const { loadTokens: loadSchwabTokens, _accessToken: schwabAccessToken } = useSchwabStore()
-  const { user, loading: authLoading, setSession } = useAuthStore()
-  const { loadFromCloud, loadFromLocal, clearLocalState } = useTradeStore()
-  const { loadFromCloud: loadJournal, loadFromLocal: loadJournalLocal, clearLocalState: clearJournal } = useJournalStore()
-  const { loadFromCloud: loadMorning, loadFromLocal: loadMorningLocal, clearLocalState: clearMorning } = useMorningStore()
-  const { loadFromCloud: loadHabits, loadFromLocal: loadHabitsLocal, clearLocalState: clearHabits } = useHabitsStore()
+  const { loadFromLocal } = useTradeStore()
+  const { loadFromLocal: loadJournalLocal } = useJournalStore()
+  const { loadFromLocal: loadMorningLocal } = useMorningStore()
+  const { loadFromLocal: loadHabitsLocal } = useHabitsStore()
 
   // Apply theme
   useEffect(() => {
@@ -109,67 +105,14 @@ export default function App() {
     setSchwabTokenGetter(() => useSchwabStore.getState().getValidToken())
   }, [])
 
-  // Bootstrap Supabase auth session on mount
+  // Load all local stores on mount
   useEffect(() => {
-    if (!supabase) {
-      setSession(null)
-      loadFromLocal()
-      loadJournalLocal()
-      loadMorningLocal()
-      loadHabitsLocal()
-      loadSchwabTokens()
-      return
-    }
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      if (session?.user) {
-        loadFromCloud(session.user.id)
-        loadJournal(session.user.id)
-        loadMorning(session.user.id)
-        loadHabits(session.user.id)
-        loadSettings(session.user.id)
-        loadSchwabTokens()
-      }
-    })
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setSession(session)
-      if (event === 'SIGNED_IN' && session?.user) {
-        loadFromCloud(session.user.id)
-        loadJournal(session.user.id)
-        loadMorning(session.user.id)
-        loadHabits(session.user.id)
-        loadSettings(session.user.id)
-        loadSchwabTokens()
-      }
-      if (event === 'SIGNED_OUT') {
-        clearLocalState()
-        clearJournal()
-        clearMorning()
-        clearHabits()
-      }
-    })
-
-    return () => subscription.unsubscribe()
+    loadFromLocal()
+    loadJournalLocal()
+    loadMorningLocal()
+    loadHabitsLocal()
+    loadSchwabTokens()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Loading spinner while checking for existing session ───────────────────
-  if (supabase && authLoading) {
-    return (
-      <div className="flex h-screen bg-surface items-center justify-center">
-        <div className="flex flex-col items-center gap-3 text-gray-500">
-          <Loader size={28} className="animate-spin text-accent-blue" />
-          <span className="text-sm">Loading…</span>
-        </div>
-      </div>
-    )
-  }
-
-  // ── Login gate (only when Supabase is configured) ─────────────────────────
-  if (supabase && !user) {
-    return <LoginPage />
-  }
 
   // ── Main app ──────────────────────────────────────────────────────────────
   const pageProps = { selectedAccount }
