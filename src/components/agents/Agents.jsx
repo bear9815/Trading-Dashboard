@@ -1,0 +1,443 @@
+import { useState, useEffect } from 'react'
+import {
+  Bot, Plus, Pencil, Trash2, Copy, Mic, FileText, TrendingUp,
+  BarChart2, Search, Zap, Target, BookOpen, Sparkles, FlaskConical,
+  X, Save, AlertTriangle, ChevronRight,
+} from 'lucide-react'
+import {
+  useAgentsStore,
+  AGENT_COLORS, AGENT_ICON_NAMES,
+  GEMINI_MODELS, OPENROUTER_MODELS, LOCAL_MODELS,
+  TRIGGER_AREAS,
+} from '../../store/useAgentsStore.js'
+
+// ── Icon registry ─────────────────────────────────────────────────────────────
+const ICON_MAP = { Mic, FileText, TrendingUp, Bot, BarChart2, Search, Zap, Target, BookOpen, Sparkles, FlaskConical }
+
+function AgentIcon({ name, size = 18, className = '' }) {
+  const Icon = ICON_MAP[name] || Bot
+  return <Icon size={size} className={className} />
+}
+
+const PROVIDER_LABELS = { gemini: 'Gemini', openrouter: 'OpenRouter', local: 'Local (Ollama)' }
+const COLOR_KEYS      = Object.keys(AGENT_COLORS)
+
+// ── Agent Card ────────────────────────────────────────────────────────────────
+function AgentCard({ agent, onEdit, onDuplicate, onDelete }) {
+  const colors = AGENT_COLORS[agent.color] || AGENT_COLORS.blue
+
+  const triggerLabels = Object.entries(agent.triggers || {}).flatMap(([area, vals]) =>
+    (vals || []).map(v => {
+      const areaConfig = TRIGGER_AREAS.find(a => a.area === area)
+      return areaConfig?.options.find(o => o.value === v)?.label || v
+    })
+  )
+
+  const modelShort = (agent.model || '').split('/').pop().replace(/:free$/, '')
+
+  return (
+    <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-all group flex flex-col">
+      <div className={`h-0.5 w-full ${colors.dot}`} />
+
+      <div className="p-5 flex flex-col flex-1">
+        {/* Icon + actions */}
+        <div className="flex items-start justify-between mb-4">
+          <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${colors.bg} border ${colors.border}`}>
+            <AgentIcon name={agent.icon} size={19} className={colors.text} />
+          </div>
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button onClick={() => onDuplicate(agent.id)} title="Duplicate"
+              className="p-1.5 rounded-lg text-gray-600 hover:text-gray-300 hover:bg-white/5 transition-colors">
+              <Copy size={13} />
+            </button>
+            {!agent.isBuiltIn && (
+              <button onClick={() => onDelete(agent.id)} title="Delete"
+                className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-400/10 transition-colors">
+                <Trash2 size={13} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Name + description */}
+        <h3 className="text-sm font-semibold text-white mb-1.5">{agent.name}</h3>
+        <p className="text-xs text-gray-500 leading-relaxed line-clamp-3 flex-1 mb-4">{agent.description}</p>
+
+        {/* Badges */}
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          <span className="text-[10px] font-medium text-gray-500 bg-white/[0.04] border border-white/10 rounded-full px-2 py-0.5">
+            {PROVIDER_LABELS[agent.provider] || agent.provider} · {modelShort}
+          </span>
+          {triggerLabels.map(label => (
+            <span key={label} className={`text-[10px] font-medium rounded-full px-2 py-0.5 border ${colors.bg} ${colors.border} ${colors.text}`}>
+              {label}
+            </span>
+          ))}
+          {triggerLabels.length === 0 && (
+            <span className="text-[10px] text-gray-700 bg-white/[0.02] border border-white/8 rounded-full px-2 py-0.5">
+              no triggers
+            </span>
+          )}
+          {agent.isBuiltIn && (
+            <span className="text-[10px] text-gray-600 bg-white/[0.02] border border-white/8 rounded-full px-2 py-0.5">
+              built-in
+            </span>
+          )}
+        </div>
+
+        <button onClick={() => onEdit(agent)}
+          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-white/10 text-xs text-gray-400 hover:text-white hover:border-white/25 hover:bg-white/[0.03] transition-all">
+          <Pencil size={12} />
+          Edit Agent
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Agent Editor Drawer ───────────────────────────────────────────────────────
+function AgentEditor({ agent, onSave, onClose }) {
+  const isNew = !agent.id
+
+  const [form, setForm] = useState({
+    name:         agent.name         || '',
+    description:  agent.description  || '',
+    icon:         agent.icon         || 'Bot',
+    color:        agent.color        || 'blue',
+    instructions: agent.instructions || '',
+    provider:     agent.provider     || 'gemini',
+    model:        agent.model        || 'gemini-2.5-flash',
+    triggers:     agent.triggers     || {},
+  })
+  const [savedFlash, setSavedFlash] = useState(false)
+
+  const models = form.provider === 'gemini'
+    ? GEMINI_MODELS
+    : form.provider === 'openrouter'
+    ? OPENROUTER_MODELS
+    : LOCAL_MODELS
+
+  useEffect(() => {
+    const first = models[0]?.id
+    if (first && !models.find(m => m.id === form.model)) {
+      setForm(f => ({ ...f, model: first }))
+    }
+  }, [form.provider]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function patch(key, val) { setForm(f => ({ ...f, [key]: val })) }
+
+  function patchTrigger(area, value, checked) {
+    setForm(f => {
+      const current = f.triggers[area] || []
+      const updated = checked ? [...current, value] : current.filter(v => v !== value)
+      return { ...f, triggers: { ...f.triggers, [area]: updated } }
+    })
+  }
+
+  function handleSave() {
+    if (!form.name.trim()) return
+    onSave({ ...agent, ...form })
+    setSavedFlash(true)
+    setTimeout(() => { setSavedFlash(false); if (!isNew) onClose() }, 800)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-stretch justify-end">
+      <div className="flex-1 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+
+      <div className="w-full max-w-2xl bg-surface border-l border-white/10 flex flex-col h-full shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
+          <div>
+            <h2 className="text-base font-semibold text-white">{isNew ? 'New Agent' : 'Edit Agent'}</h2>
+            <p className="text-xs text-gray-500 mt-0.5">{isNew ? 'Configure a new AI analysis agent' : agent.name}</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg text-gray-500 hover:text-white hover:bg-white/5 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-8">
+
+          {/* Identity */}
+          <section>
+            <SectionLabel>Identity</SectionLabel>
+            <div className="space-y-3">
+              <Field label="Name">
+                <input value={form.name} onChange={e => patch('name', e.target.value)}
+                  placeholder="e.g. Earnings Call Analyst"
+                  className="w-full bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors" />
+              </Field>
+              <Field label="Description">
+                <input value={form.description} onChange={e => patch('description', e.target.value)}
+                  placeholder="What does this agent do?"
+                  className="w-full bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors" />
+              </Field>
+
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Icon">
+                  <div className="flex flex-wrap gap-1.5">
+                    {AGENT_ICON_NAMES.map(key => {
+                      const Icon = ICON_MAP[key]
+                      if (!Icon) return null
+                      return (
+                        <button key={key} onClick={() => patch('icon', key)}
+                          className={`p-2 rounded-lg border transition-all ${form.icon === key ? 'bg-accent-blue/20 border-accent-blue/40 text-accent-blue' : 'bg-white/[0.03] border-white/10 text-gray-500 hover:border-white/20 hover:text-gray-300'}`}>
+                          <Icon size={14} />
+                        </button>
+                      )
+                    })}
+                  </div>
+                </Field>
+                <Field label="Color">
+                  <div className="flex flex-wrap gap-2.5 pt-1">
+                    {COLOR_KEYS.map(key => {
+                      const c = AGENT_COLORS[key]
+                      return (
+                        <button key={key} onClick={() => patch('color', key)}
+                          className={`w-7 h-7 rounded-full border-2 transition-all ${c.dot} ${form.color === key ? 'border-white scale-110' : 'border-transparent opacity-50 hover:opacity-90'}`} />
+                      )
+                    })}
+                  </div>
+                </Field>
+              </div>
+            </div>
+          </section>
+
+          {/* Model */}
+          <section>
+            <SectionLabel>Model</SectionLabel>
+            <div className="space-y-3">
+              <div className="flex gap-1 bg-white/[0.03] border border-white/10 rounded-lg p-1">
+                {[['gemini', 'Gemini Cloud'], ['openrouter', 'OpenRouter'], ['local', 'Local (Ollama)']].map(([val, label]) => (
+                  <button key={val} onClick={() => patch('provider', val)}
+                    className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-all ${form.provider === val ? 'bg-accent-blue/20 text-accent-blue' : 'text-gray-500 hover:text-gray-300'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <select value={form.model} onChange={e => patch('model', e.target.value)}
+                className="w-full bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-accent-blue/50 transition-colors">
+                {models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+              {form.provider === 'openrouter' && (
+                <p className="text-xs text-gray-600 bg-white/[0.02] border border-white/8 rounded-lg px-3 py-2">
+                  Audio files always use Gemini regardless — OpenRouter has no audio API.
+                </p>
+              )}
+            </div>
+          </section>
+
+          {/* Instructions */}
+          <section>
+            <SectionLabel hint="The system prompt that defines how this agent thinks — like a Gemini Gem's instructions.">
+              Instructions
+            </SectionLabel>
+            <textarea
+              value={form.instructions}
+              onChange={e => patch('instructions', e.target.value)}
+              rows={20}
+              placeholder="You are an expert analyst who specializes in..."
+              className="w-full bg-white/[0.03] border border-white/10 rounded-lg px-4 py-3 text-xs text-gray-300 font-mono placeholder-gray-700 focus:outline-none focus:border-accent-blue/40 transition-colors resize-y leading-relaxed"
+            />
+            <p className="text-[10px] text-gray-600 mt-1.5">
+              {form.instructions.length.toLocaleString()} characters
+            </p>
+          </section>
+
+          {/* Triggers */}
+          <section>
+            <SectionLabel hint="Where in the dashboard this agent activates automatically.">
+              Triggers
+            </SectionLabel>
+            <div className="space-y-2">
+              {TRIGGER_AREAS.map(({ area, label, options, comingSoon }) => (
+                <div key={area} className={`border border-white/10 rounded-xl p-4 transition-opacity ${comingSoon ? 'opacity-40' : ''}`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-semibold text-gray-300">{label}</span>
+                    {comingSoon
+                      ? <span className="text-[10px] text-gray-600 border border-white/10 rounded-full px-2 py-0.5">Coming soon</span>
+                      : <ChevronRight size={13} className="text-gray-700" />
+                    }
+                  </div>
+                  {!comingSoon && options.length > 0 && (
+                    <div className="flex flex-wrap gap-3">
+                      {options.map(opt => {
+                        const checked = (form.triggers[area] || []).includes(opt.value)
+                        return (
+                          <label key={opt.value} className="flex items-center gap-2 cursor-pointer select-none">
+                            <div onClick={() => patchTrigger(area, opt.value, !checked)}
+                              className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${checked ? 'bg-accent-blue border-accent-blue' : 'border-white/20 hover:border-white/40'}`}>
+                              {checked && <span className="text-white text-[9px] font-bold leading-none">✓</span>}
+                            </div>
+                            <span className="text-xs text-gray-400">{opt.label}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-white/10 flex items-center justify-between shrink-0 bg-surface">
+          <div>
+            {agent.isBuiltIn && (
+              <p className="text-xs text-gray-600 flex items-center gap-1.5">
+                <AlertTriangle size={11} /> Built-in agents can be edited but not deleted.
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onClose}
+              className="px-4 py-2 rounded-lg text-xs text-gray-400 hover:text-white border border-white/10 hover:border-white/20 transition-all">
+              Cancel
+            </button>
+            <button onClick={handleSave} disabled={!form.name.trim()}
+              className="px-4 py-2 rounded-lg text-xs font-semibold bg-accent-blue/20 text-accent-blue border border-accent-blue/30 hover:bg-accent-blue/30 transition-all disabled:opacity-40 flex items-center gap-1.5 min-w-[110px] justify-center">
+              <Save size={12} />
+              {savedFlash ? 'Saved!' : isNew ? 'Create Agent' : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SectionLabel({ children, hint }) {
+  return (
+    <div className="mb-3">
+      <h3 className="text-xs font-semibold uppercase tracking-widest text-gray-500">{children}</h3>
+      {hint && <p className="text-xs text-gray-600 mt-0.5">{hint}</p>}
+    </div>
+  )
+}
+
+function Field({ label, children }) {
+  return (
+    <div>
+      <label className="text-xs text-gray-400 mb-1.5 block">{label}</label>
+      {children}
+    </div>
+  )
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+export default function Agents() {
+  const { agents, addAgent, updateAgent, removeAgent, duplicateAgent } = useAgentsStore()
+  const [editing,   setEditing]   = useState(null)
+  const [filter,    setFilter]    = useState('all')
+
+  function handleEdit(agent)    { setEditing(agent) }
+  function handleNew()          { setEditing({ triggers: {} }) }
+
+  function handleDuplicate(id) {
+    const copy = duplicateAgent(id)
+    if (copy) setEditing(copy)
+  }
+
+  function handleDelete(id) {
+    if (!confirm('Delete this agent? This cannot be undone.')) return
+    removeAgent(id)
+  }
+
+  function handleSave(data) {
+    if (data.id) updateAgent(data.id, data)
+    else         addAgent(data)
+    setEditing(null)
+  }
+
+  const filtered = filter === 'all' ? agents : agents.filter(a => a.provider === filter)
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto">
+
+      {/* Page header */}
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-white mb-1">Agent Studio</h1>
+          <p className="text-sm text-gray-500">Build and manage AI analysis agents — your personal Gem Studio</p>
+        </div>
+        <button onClick={handleNew}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/20 text-accent-blue border border-accent-blue/30 hover:bg-accent-blue/30 text-sm font-medium transition-all">
+          <Plus size={15} />
+          New Agent
+        </button>
+      </div>
+
+      {/* Filter tabs */}
+      <div className="flex items-center gap-1.5 mb-6">
+        {[
+          ['all',          `All (${agents.length})`],
+          ['gemini',       `Gemini (${agents.filter(a => a.provider === 'gemini').length})`],
+          ['openrouter',   `OpenRouter (${agents.filter(a => a.provider === 'openrouter').length})`],
+          ['local',        `Local (${agents.filter(a => a.provider === 'local').length})`],
+        ].map(([val, label]) => (
+          <button key={val} onClick={() => setFilter(val)}
+            className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${filter === val ? 'bg-accent-blue/20 border-accent-blue/40 text-accent-blue' : 'bg-white/[0.03] border-white/10 text-gray-500 hover:border-white/20 hover:text-gray-300'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Agent grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+        {filtered.map(agent => (
+          <AgentCard key={agent.id} agent={agent}
+            onEdit={handleEdit}
+            onDuplicate={handleDuplicate}
+            onDelete={handleDelete} />
+        ))}
+
+        <button onClick={handleNew}
+          className="bg-surface-50 border-2 border-dashed border-white/10 rounded-xl p-5 flex flex-col items-center justify-center gap-2.5 text-gray-600 hover:text-gray-400 hover:border-white/20 transition-all min-h-[200px]">
+          <Plus size={20} />
+          <span className="text-xs font-medium">New Agent</span>
+        </button>
+      </div>
+
+      {/* How it works */}
+      <div className="bg-surface-50 border border-white/10 rounded-xl p-5">
+        <h3 className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-4">How Agents Work</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[
+            {
+              step: '1',
+              title: 'Write Instructions',
+              desc: 'The system prompt defines the agent\'s persona, expertise, and analysis framework — exactly like a Gemini Gem. You own the prompt.',
+            },
+            {
+              step: '2',
+              title: 'Pick a Model',
+              desc: 'Choose Gemini, any OpenRouter model (100+ providers), or run fully local with Ollama. Audio files always use Gemini\'s Files API.',
+            },
+            {
+              step: '3',
+              title: 'Assign Triggers',
+              desc: 'Set where in the dashboard this agent activates — Research Library source types now, with Morning Briefing, Journal, and Trade Analysis coming soon.',
+            },
+          ].map(({ step, title, desc }) => (
+            <div key={step} className="flex gap-3">
+              <span className="w-6 h-6 rounded-full bg-accent-blue/15 text-accent-blue text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                {step}
+              </span>
+              <div>
+                <p className="text-xs font-semibold text-gray-300 mb-1">{title}</p>
+                <p className="text-xs text-gray-600 leading-relaxed">{desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {editing && (
+        <AgentEditor agent={editing} onSave={handleSave} onClose={() => setEditing(null)} />
+      )}
+    </div>
+  )
+}

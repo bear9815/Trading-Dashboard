@@ -1,4 +1,4 @@
-import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, Sparkles, ScanLine, Sun, GitCompare, FlaskConical, Layers, Globe, Trophy } from 'lucide-react'
+import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, Sparkles, ScanLine, Sun, GitCompare, FlaskConical, Layers, Globe, Trophy, Bot } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import AppLogo from './AppLogo.jsx'
 
@@ -16,7 +16,8 @@ const NAV = [
   { id: 'regime',      label: 'Factor Regime',  icon: Layers },
   { id: 'thematic',    label: 'Growth Research',   icon: Globe    },
   { id: 'modelbook',   label: 'Model Book',        icon: Trophy   },
-  { id: 'settings',    label: 'Settings',         icon: Settings },
+  { id: 'agents',      label: 'Agent Studio',      icon: Bot      },
+  { id: 'settings',    label: 'Settings',          icon: Settings },
 ]
 
 const ACCOUNT_COLORS = [

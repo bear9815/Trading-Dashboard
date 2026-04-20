@@ -8,10 +8,11 @@ import { useSettingsStore }        from '../../store/useSettingsStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { useThematicStore }        from '../../store/useThematicStore.js'
 import { processWithGeminiCombined, readFileAsBase64, processAudioWithGemini, isAudioFile } from '../../utils/thematicGemini.js'
-import { processEarningsCall } from '../../utils/earningsCallAgent.js'
 import { initGoogleDrive, requestDriveToken, openDrivePicker, downloadDriveFile } from '../../utils/googleDrive.js'
 import { extractWithOllama, autoAnalyzeWithOllama } from '../../utils/localResearch.js'
 import { extractWithOpenRouter, processWithOpenRouterCombined, autoAnalyzeWithOpenRouter } from '../../utils/researchAi.js'
+import { runAgent } from '../../utils/agentRunner.js'
+import { useAgentsStore } from '../../store/useAgentsStore.js'
 import { jsPDF } from 'jspdf'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
@@ -582,6 +583,7 @@ export default function ResearchLibrary() {
   const { apiKey, openRouterApiKey, researchAiProvider, researchOpenRouterModel, useLocalLLM }  = useSettingsStore()
   const { themes }  = useThematicStore()
   const { sources, loading: storeLoading, addSource, removeSource, updateSource } = useResearchLibraryStore()
+  const { getAgentForTrigger } = useAgentsStore()
   const provider = researchAiProvider || (useLocalLLM ? 'local' : 'gemini')
 
   const [sourceType,    setSourceType]    = useState('earnings_call')
@@ -627,17 +629,16 @@ export default function ResearchLibrary() {
       try {
         let extracted, dossierThemes = null
 
-        if (sourceType === 'earnings_call') {
-          // Always routes through the dedicated Earnings Call Agent
-          extracted = await processEarningsCall({
+        const agentForType = getAgentForTrigger('researchLibrary', sourceType)
+        if (agentForType) {
+          extracted = await runAgent({
+            agent:            agentForType,
             file,
-            geminiApiKey:      apiKey,
+            geminiApiKey:     apiKey,
             openRouterApiKey,
-            openRouterModel:   researchOpenRouterModel,
-            provider:          isAudio ? 'gemini' : provider,
-            tickerHint:        tickerInput.trim(),
-            themeHint:         themeInput.trim(),
-            onStatus:          (status) => setUploadStatus(status),
+            tickerHint:       tickerInput.trim(),
+            themeHint:        themeInput.trim(),
+            onStatus:         (status) => setUploadStatus(status),
           })
         } else if (isAudio) {
           const result = await processAudioWithGemini(

@@ -32,6 +32,7 @@ const EdgeLab            = lazy(() => import('./components/edgelab/EdgeLab.jsx')
 const FactorRegime       = lazy(() => import('./components/regime/FactorRegime.jsx'))
 const ThematicResearch    = lazy(() => import('./components/thematic/ThematicResearch.jsx'))
 const ModelBook           = lazy(() => import('./components/modelbook/ModelBook.jsx'))
+const Agents              = lazy(() => import('./components/agents/Agents.jsx'))
 
 // ── Page-transition loading fallback ─────────────────────────────────────────
 function PageLoader() {
@@ -149,6 +150,7 @@ export default function App() {
             {page === 'rrg'         && <div className="h-full"><RRGPage /></div>}
             {page === 'thematic'    && <ThematicResearch />}
             {page === 'modelbook'   && <ModelBook />}
+            {page === 'agents'      && <Agents />}
           </Suspense>
           </PageErrorBoundary>
         </main>
