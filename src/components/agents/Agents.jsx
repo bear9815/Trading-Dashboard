@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import {
   Bot, Plus, Pencil, Trash2, Copy, Mic, FileText, TrendingUp,
   BarChart2, Search, Zap, Target, BookOpen, Sparkles, FlaskConical,
-  X, Save, AlertTriangle, ChevronRight,
+  X, Save, AlertTriangle, ChevronRight, Database, MessageSquare,
+  Globe, Building2,
 } from 'lucide-react'
 import {
   useAgentsStore,
@@ -10,6 +11,9 @@ import {
   GEMINI_MODELS, OPENROUTER_MODELS, LOCAL_MODELS,
   TRIGGER_AREAS,
 } from '../../store/useAgentsStore.js'
+import { useKnowledgeBaseStore } from '../../store/useKnowledgeBaseStore.js'
+import KnowledgeBases from './KnowledgeBases.jsx'
+import AgentChat      from './AgentChat.jsx'
 
 // ── Icon registry ─────────────────────────────────────────────────────────────
 const ICON_MAP = { Mic, FileText, TrendingUp, Bot, BarChart2, Search, Zap, Target, BookOpen, Sparkles, FlaskConical }
@@ -23,7 +27,7 @@ const PROVIDER_LABELS = { gemini: 'Gemini', openrouter: 'OpenRouter', local: 'Lo
 const COLOR_KEYS      = Object.keys(AGENT_COLORS)
 
 // ── Agent Card ────────────────────────────────────────────────────────────────
-function AgentCard({ agent, onEdit, onDuplicate, onDelete }) {
+function AgentCard({ agent, onEdit, onDuplicate, onDelete, onChat }) {
   const colors = AGENT_COLORS[agent.color] || AGENT_COLORS.blue
 
   const triggerLabels = Object.entries(agent.triggers || {}).flatMap(([area, vals]) =>
@@ -85,11 +89,18 @@ function AgentCard({ agent, onEdit, onDuplicate, onDelete }) {
           )}
         </div>
 
-        <button onClick={() => onEdit(agent)}
-          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-white/10 text-xs text-gray-400 hover:text-white hover:border-white/25 hover:bg-white/[0.03] transition-all">
-          <Pencil size={12} />
-          Edit Agent
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => onChat(agent)}
+            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border border-accent-blue/30 bg-accent-blue/10 text-xs text-accent-blue hover:bg-accent-blue/20 transition-all font-medium">
+            <MessageSquare size={12} />
+            Chat
+          </button>
+          <button onClick={() => onEdit(agent)}
+            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border border-white/10 text-xs text-gray-400 hover:text-white hover:border-white/25 hover:bg-white/[0.03] transition-all">
+            <Pencil size={12} />
+            Edit
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -99,15 +110,19 @@ function AgentCard({ agent, onEdit, onDuplicate, onDelete }) {
 function AgentEditor({ agent, onSave, onClose }) {
   const isNew = !agent.id
 
+  const { knowledgeBases } = useKnowledgeBaseStore()
+
   const [form, setForm] = useState({
-    name:         agent.name         || '',
-    description:  agent.description  || '',
-    icon:         agent.icon         || 'Bot',
-    color:        agent.color        || 'blue',
-    instructions: agent.instructions || '',
-    provider:     agent.provider     || 'gemini',
-    model:        agent.model        || 'gemini-2.5-flash',
-    triggers:     agent.triggers     || {},
+    name:            agent.name            || '',
+    description:     agent.description     || '',
+    icon:            agent.icon            || 'Bot',
+    color:           agent.color           || 'blue',
+    instructions:    agent.instructions    || '',
+    provider:        agent.provider        || 'gemini',
+    model:           agent.model           || 'gemini-2.5-flash',
+    triggers:        agent.triggers        || {},
+    knowledgeBaseId: agent.knowledgeBaseId ?? null,
+    tools:           agent.tools          ?? { webSearch: false, secEdgar: false },
   })
   const [savedFlash, setSavedFlash] = useState(false)
 
@@ -281,6 +296,86 @@ function AgentEditor({ agent, onSave, onClose }) {
               ))}
             </div>
           </section>
+
+          {/* Tools */}
+          <section>
+            <SectionLabel hint="Tools run automatically before each response, injecting real-time data into the agent's context.">
+              Tools
+            </SectionLabel>
+            <div className="space-y-2">
+              {/* Web Search */}
+              <div className="flex items-start gap-3 border border-white/10 rounded-xl p-4">
+                <div className="w-8 h-8 rounded-lg bg-accent-blue/10 border border-accent-blue/20 flex items-center justify-center shrink-0">
+                  <Globe size={14} className="text-accent-blue" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <p className="text-xs font-semibold text-gray-300">Web Search</p>
+                    <button
+                      onClick={() => patch('tools', { ...form.tools, webSearch: !form.tools.webSearch })}
+                      className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${form.tools.webSearch ? 'bg-accent-blue' : 'bg-white/[0.12]'}`}
+                    >
+                      <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${form.tools.webSearch ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-600">Brave Search API — fetches live web results for each message. Add your Brave Search key in Settings.</p>
+                </div>
+              </div>
+
+              {/* SEC EDGAR */}
+              <div className="flex items-start gap-3 border border-white/10 rounded-xl p-4">
+                <div className="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0">
+                  <Building2 size={14} className="text-purple-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <p className="text-xs font-semibold text-gray-300">SEC EDGAR</p>
+                    <button
+                      onClick={() => patch('tools', { ...form.tools, secEdgar: !form.tools.secEdgar })}
+                      className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${form.tools.secEdgar ? 'bg-purple-500' : 'bg-white/[0.12]'}`}
+                    >
+                      <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${form.tools.secEdgar ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-600">Free SEC filing search — auto-fetches 10-K, 10-Q, and 8-K filings based on tickers in your message. No key needed.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Knowledge Base */}
+          <section>
+            <SectionLabel hint="Attach a Knowledge Base so this agent automatically retrieves relevant context from your indexed documents.">
+              Knowledge Base
+            </SectionLabel>
+            {knowledgeBases.length === 0 ? (
+              <div className="border border-dashed border-white/10 rounded-xl p-4 text-center">
+                <Database size={16} className="text-gray-700 mx-auto mb-2" />
+                <p className="text-xs text-gray-600">No knowledge bases yet.</p>
+                <p className="text-[11px] text-gray-700 mt-0.5">Create one in the Knowledge Bases tab, then come back to attach it.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <select
+                  value={form.knowledgeBaseId ?? ''}
+                  onChange={e => patch('knowledgeBaseId', e.target.value || null)}
+                  className="w-full bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-accent-blue/50 transition-colors"
+                >
+                  <option value="">None — no knowledge base</option>
+                  {knowledgeBases.map(kb => (
+                    <option key={kb.id} value={kb.id}>
+                      {kb.name} ({kb.docs?.length ?? 0} docs)
+                    </option>
+                  ))}
+                </select>
+                {form.knowledgeBaseId && (
+                  <p className="text-[11px] text-gray-600 bg-white/[0.02] border border-white/8 rounded-lg px-3 py-2">
+                    When this agent runs, the top relevant chunks from your KB will be injected into its prompt automatically.
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
         </div>
 
         {/* Footer */}
@@ -330,11 +425,16 @@ function Field({ label, children }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function Agents() {
   const { agents, addAgent, updateAgent, removeAgent, duplicateAgent } = useAgentsStore()
-  const [editing,   setEditing]   = useState(null)
-  const [filter,    setFilter]    = useState('all')
+  const { knowledgeBases } = useKnowledgeBaseStore()
+
+  const [tab,        setTab]       = useState('agents')   // 'agents' | 'knowledge-bases'
+  const [editing,    setEditing]   = useState(null)
+  const [filter,     setFilter]    = useState('all')
+  const [chatAgent,  setChatAgent] = useState(null)
 
   function handleEdit(agent)    { setEditing(agent) }
   function handleNew()          { setEditing({ triggers: {} }) }
+  function handleChat(agent)    { setChatAgent(agent) }
 
   function handleDuplicate(id) {
     const copy = duplicateAgent(id)
@@ -354,6 +454,15 @@ export default function Agents() {
 
   const filtered = filter === 'all' ? agents : agents.filter(a => a.provider === filter)
 
+  // Chat view takes over the full page
+  if (chatAgent) {
+    return (
+      <div className="h-full flex flex-col">
+        <AgentChat agent={chatAgent} onBack={() => setChatAgent(null)} />
+      </div>
+    )
+  }
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
 
@@ -363,77 +472,112 @@ export default function Agents() {
           <h1 className="text-2xl font-bold text-white mb-1">Agent Studio</h1>
           <p className="text-sm text-gray-500">Build and manage AI analysis agents — your personal Gem Studio</p>
         </div>
-        <button onClick={handleNew}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/20 text-accent-blue border border-accent-blue/30 hover:bg-accent-blue/30 text-sm font-medium transition-all">
-          <Plus size={15} />
-          New Agent
-        </button>
+        {tab === 'agents' && (
+          <button onClick={handleNew}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/20 text-accent-blue border border-accent-blue/30 hover:bg-accent-blue/30 text-sm font-medium transition-all">
+            <Plus size={15} />
+            New Agent
+          </button>
+        )}
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex items-center gap-1.5 mb-6">
+      {/* Top-level tabs */}
+      <div className="flex items-center gap-1 border-b border-white/[0.08] mb-7">
         {[
-          ['all',          `All (${agents.length})`],
-          ['gemini',       `Gemini (${agents.filter(a => a.provider === 'gemini').length})`],
-          ['openrouter',   `OpenRouter (${agents.filter(a => a.provider === 'openrouter').length})`],
-          ['local',        `Local (${agents.filter(a => a.provider === 'local').length})`],
-        ].map(([val, label]) => (
-          <button key={val} onClick={() => setFilter(val)}
-            className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${filter === val ? 'bg-accent-blue/20 border-accent-blue/40 text-accent-blue' : 'bg-white/[0.03] border-white/10 text-gray-500 hover:border-white/20 hover:text-gray-300'}`}>
+          { id: 'agents',          label: 'Agents',          icon: Bot,      count: agents.length },
+          { id: 'knowledge-bases', label: 'Knowledge Bases', icon: Database, count: knowledgeBases.length },
+        ].map(({ id, label, icon: Icon, count }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 -mb-px transition-all ${
+              tab === id
+                ? 'border-accent-blue text-accent-blue'
+                : 'border-transparent text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            <Icon size={13} />
             {label}
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${tab === id ? 'bg-accent-blue/20' : 'bg-white/[0.06]'}`}>
+              {count}
+            </span>
           </button>
         ))}
       </div>
 
-      {/* Agent grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-        {filtered.map(agent => (
-          <AgentCard key={agent.id} agent={agent}
-            onEdit={handleEdit}
-            onDuplicate={handleDuplicate}
-            onDelete={handleDelete} />
-        ))}
+      {/* ── Agents tab ── */}
+      {tab === 'agents' && (
+        <>
+          {/* Filter tabs */}
+          <div className="flex items-center gap-1.5 mb-6">
+            {[
+              ['all',          `All (${agents.length})`],
+              ['gemini',       `Gemini (${agents.filter(a => a.provider === 'gemini').length})`],
+              ['openrouter',   `OpenRouter (${agents.filter(a => a.provider === 'openrouter').length})`],
+              ['local',        `Local (${agents.filter(a => a.provider === 'local').length})`],
+            ].map(([val, label]) => (
+              <button key={val} onClick={() => setFilter(val)}
+                className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${filter === val ? 'bg-accent-blue/20 border-accent-blue/40 text-accent-blue' : 'bg-white/[0.03] border-white/10 text-gray-500 hover:border-white/20 hover:text-gray-300'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
 
-        <button onClick={handleNew}
-          className="bg-surface-50 border-2 border-dashed border-white/10 rounded-xl p-5 flex flex-col items-center justify-center gap-2.5 text-gray-600 hover:text-gray-400 hover:border-white/20 transition-all min-h-[200px]">
-          <Plus size={20} />
-          <span className="text-xs font-medium">New Agent</span>
-        </button>
-      </div>
+          {/* Agent grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+            {filtered.map(agent => (
+              <AgentCard key={agent.id} agent={agent}
+                onEdit={handleEdit}
+                onDuplicate={handleDuplicate}
+                onDelete={handleDelete}
+                onChat={handleChat} />
+            ))}
 
-      {/* How it works */}
-      <div className="bg-surface-50 border border-white/10 rounded-xl p-5">
-        <h3 className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-4">How Agents Work</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {[
-            {
-              step: '1',
-              title: 'Write Instructions',
-              desc: 'The system prompt defines the agent\'s persona, expertise, and analysis framework — exactly like a Gemini Gem. You own the prompt.',
-            },
-            {
-              step: '2',
-              title: 'Pick a Model',
-              desc: 'Choose Gemini, any OpenRouter model (100+ providers), or run fully local with Ollama. Audio files always use Gemini\'s Files API.',
-            },
-            {
-              step: '3',
-              title: 'Assign Triggers',
-              desc: 'Set where in the dashboard this agent activates — Research Library source types now, with Morning Briefing, Journal, and Trade Analysis coming soon.',
-            },
-          ].map(({ step, title, desc }) => (
-            <div key={step} className="flex gap-3">
-              <span className="w-6 h-6 rounded-full bg-accent-blue/15 text-accent-blue text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
-                {step}
-              </span>
-              <div>
-                <p className="text-xs font-semibold text-gray-300 mb-1">{title}</p>
-                <p className="text-xs text-gray-600 leading-relaxed">{desc}</p>
-              </div>
+            <button onClick={handleNew}
+              className="bg-surface-50 border-2 border-dashed border-white/10 rounded-xl p-5 flex flex-col items-center justify-center gap-2.5 text-gray-600 hover:text-gray-400 hover:border-white/20 transition-all min-h-[200px]">
+              <Plus size={20} />
+              <span className="text-xs font-medium">New Agent</span>
+            </button>
+          </div>
+
+          {/* How it works */}
+          <div className="bg-surface-50 border border-white/10 rounded-xl p-5">
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-4">How Agents Work</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {[
+                {
+                  step: '1',
+                  title: 'Write Instructions',
+                  desc: 'The system prompt defines the agent\'s persona, expertise, and analysis framework — exactly like a Gemini Gem. You own the prompt.',
+                },
+                {
+                  step: '2',
+                  title: 'Pick a Model',
+                  desc: 'Choose Gemini, any OpenRouter model (100+ providers), or run fully local with Ollama. Audio files always use Gemini\'s Files API.',
+                },
+                {
+                  step: '3',
+                  title: 'Assign Triggers',
+                  desc: 'Set where in the dashboard this agent activates — Research Library source types now, with Morning Briefing, Journal, and Trade Analysis coming soon.',
+                },
+              ].map(({ step, title, desc }) => (
+                <div key={step} className="flex gap-3">
+                  <span className="w-6 h-6 rounded-full bg-accent-blue/15 text-accent-blue text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                    {step}
+                  </span>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-300 mb-1">{title}</p>
+                    <p className="text-xs text-gray-600 leading-relaxed">{desc}</p>
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Knowledge Bases tab ── */}
+      {tab === 'knowledge-bases' && <KnowledgeBases />}
 
       {editing && (
         <AgentEditor agent={editing} onSave={handleSave} onClose={() => setEditing(null)} />

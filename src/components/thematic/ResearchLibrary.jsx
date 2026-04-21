@@ -638,6 +638,7 @@ export default function ResearchLibrary() {
             openRouterApiKey,
             tickerHint:       tickerInput.trim(),
             themeHint:        themeInput.trim(),
+            sourceType,
             onStatus:         (status) => setUploadStatus(status),
           })
         } else if (isAudio) {

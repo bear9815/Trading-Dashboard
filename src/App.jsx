@@ -14,6 +14,7 @@ import { useTradeStore } from './store/useTradeStore.js'
 import { useJournalStore } from './store/useJournalStore.js'
 import { useMorningStore } from './store/useMorningStore.js'
 import { useHabitsStore } from './store/useHabitsStore.js'
+import { useAgentsStore } from './store/useAgentsStore.js'
 import { Loader } from 'lucide-react'
 
 // ── Lazy-loaded pages (each splits into its own chunk) ────────────────────────
@@ -56,6 +57,7 @@ export default function App() {
   const { loadFromLocal: loadJournalLocal } = useJournalStore()
   const { loadFromLocal: loadMorningLocal } = useMorningStore()
   const { loadFromLocal: loadHabitsLocal } = useHabitsStore()
+  const { migrateDeprecatedModels } = useAgentsStore()
 
   // Apply theme
   useEffect(() => {
@@ -113,6 +115,7 @@ export default function App() {
     loadMorningLocal()
     loadHabitsLocal()
     loadSchwabTokens()
+    migrateDeprecatedModels()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Main app ──────────────────────────────────────────────────────────────

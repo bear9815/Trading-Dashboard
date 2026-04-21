@@ -5,11 +5,13 @@
 
 import { uploadToGeminiFiles, waitForFileActive, resolvedMimeType, isAudioFile, readFileAsBase64 } from './thematicGemini.js'
 import { parseJsonText } from './aiHelpers.js'
+import { searchKnowledgeBase, buildContextBlock } from './knowledgeBaseSearch.js'
+import { useKnowledgeBaseStore } from '../store/useKnowledgeBaseStore.js'
 
-// Standard output schema — all agents return this so library cards render correctly
+// Standard output schema — all agents return this so library cards render correctly.
+// Kept intentionally compact — the system instruction handles the analysis depth.
 function buildOutputPrompt(tickerHint, themeHint) {
-  return `${tickerHint ? `Known ticker(s): ${tickerHint}\n` : ''}${themeHint ? `Known theme/sector: ${themeHint}\n` : ''}
-Apply your full analysis framework to the content. Return ONLY valid JSON (no markdown, no explanation):
+  return `${tickerHint ? `Known ticker(s): ${tickerHint}\n` : ''}${themeHint ? `Known theme/sector: ${themeHint}\n` : ''}Apply your full analysis framework to the content. Return ONLY valid JSON (no markdown fences, no explanation text):
 
 {
   "title": "<concise descriptive title>",
@@ -24,11 +26,19 @@ Apply your full analysis framework to the content. Return ONLY valid JSON (no ma
   "key_metrics": [
     { "label": "<metric name>", "value": "<value with units>", "context": "<brief context>" }
   ],
-  "raw_text": "<verbatim quotes and key data points — up to 8000 characters>"
+  "raw_text": "<the most important verbatim quotes — 1500 characters max>"
 }`
 }
 
-async function callGeminiParts(apiKey, model, parts, onStatus) {
+// ── Gemini call ───────────────────────────────────────────────────────────────
+// systemInstruction is kept separate so the model treats it as a persona/role,
+// not as part of the document being analyzed.
+//
+// Response parsing: Gemini 2.5 models return multiple parts — a "thought" part
+// (internal reasoning, flagged with thought:true) and a text part. We skip
+// thought parts and join the remaining text. This handles both thinking and
+// non-thinking models safely.
+async function callGemini(apiKey, model, systemInstruction, parts, onStatus) {
   onStatus?.(`Analyzing with ${model}…`)
   let lastError
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -40,6 +50,7 @@ async function callGeminiParts(apiKey, model, parts, onStatus) {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemInstruction }] },
           contents: [{ role: 'user', parts }],
           generationConfig: { maxOutputTokens: 8192, temperature: 0.15 },
         }),
@@ -47,13 +58,27 @@ async function callGeminiParts(apiKey, model, parts, onStatus) {
     )
 
     if (res.ok) {
-      const data = await res.json()
+      const data    = await res.json()
+      const allParts = data.candidates?.[0]?.content?.parts || []
+
+      // Skip internal "thought" parts — only keep actual text output
+      const raw = allParts
+        .filter(p => !p.thought)
+        .map(p => p.text || '')
+        .join('')
+        .trim()
+
       if (data.candidates?.[0]?.finishReason === 'MAX_TOKENS') {
-        throw new Error('Response was truncated — content may be too long. Try a shorter file.')
+        // Try to salvage a partial JSON before giving up
+        try { return parseJsonText(raw) } catch {
+          throw new Error('Analysis was cut off before completing. Try a shorter file or use gemini-2.5-pro.')
+        }
       }
-      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
+
+      if (!raw) throw new Error('Gemini returned an empty response. Check your API key and try again.')
+
       try { return parseJsonText(raw) } catch (e) {
-        throw new Error(`Failed to parse response: ${e.message}`)
+        throw new Error(`Failed to parse Gemini response: ${e.message}`)
       }
     }
 
@@ -65,16 +90,18 @@ async function callGeminiParts(apiKey, model, parts, onStatus) {
   throw lastError
 }
 
+// ── OpenRouter call ───────────────────────────────────────────────────────────
 async function callOpenRouter(apiKey, model, systemPrompt, userContent, onStatus) {
   onStatus?.(`Analyzing with ${model.split('/').pop()}…`)
 
+  const safeKey = (apiKey || '').replace(/[^\x20-\x7E]/g, '').trim()
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method:  'POST',
     headers: {
       'Content-Type':  'application/json',
-      'Authorization': `Bearer ${apiKey}`,
+      'Authorization': `Bearer ${safeKey}`,
       'HTTP-Referer':  window.location.origin,
-      'X-Title':       'Trading Dashboard — Agent Runner',
+      'X-Title':       'Trading Dashboard - Agent Runner',
     },
     body: JSON.stringify({
       model,
@@ -99,6 +126,7 @@ async function callOpenRouter(apiKey, model, systemPrompt, userContent, onStatus
   }
 }
 
+// ── PDF text extraction (for OpenRouter path) ─────────────────────────────────
 async function extractPDFText(file, geminiApiKey) {
   const base64 = await readFileAsBase64(file)
   const res = await fetch(
@@ -120,6 +148,21 @@ async function extractPDFText(file, geminiApiKey) {
   return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
 }
 
+// ── Knowledge base context injection ─────────────────────────────────────────
+async function buildKBContext(agent, geminiApiKey, tickerHint, themeHint, sourceType) {
+  if (!agent.knowledgeBaseId || !geminiApiKey) return ''
+  const kb = useKnowledgeBaseStore.getState().getById(agent.knowledgeBaseId)
+  if (!kb?.docs?.length) return ''
+  try {
+    const query   = [tickerHint, themeHint, sourceType].filter(Boolean).join(' ')
+    const results = await searchKnowledgeBase(query || 'earnings analysis investment', kb, geminiApiKey)
+    return buildContextBlock(results)
+  } catch (e) {
+    console.warn('[agentRunner] KB search failed:', e.message)
+    return ''
+  }
+}
+
 // ── Main entry point ──────────────────────────────────────────────────────────
 export async function runAgent({
   agent,
@@ -128,16 +171,32 @@ export async function runAgent({
   openRouterApiKey,
   tickerHint = '',
   themeHint  = '',
+  sourceType = '',
   onStatus,
 }) {
-  const isAudio     = isAudioFile(file)
-  const outputPrompt = buildOutputPrompt(tickerHint, themeHint)
-  const fullPrompt   = `${agent.instructions}\n\n${outputPrompt}`
+  const isAudio = isAudioFile(file)
+
+  // Inject KB context if agent has one assigned
+  let kbContext = ''
+  if (agent.knowledgeBaseId) {
+    onStatus?.('Searching knowledge base…')
+    kbContext = await buildKBContext(agent, geminiApiKey, tickerHint, themeHint, sourceType)
+  }
+
   const model        = agent.model || 'gemini-2.5-flash'
+  const systemPrompt = agent.instructions
+  const userPrompt   = `${kbContext ? kbContext + '\n\n' : ''}${buildOutputPrompt(tickerHint, themeHint)}`
 
   // ── Audio: always Gemini Files API regardless of agent provider ───────────
+  // OpenRouter has no audio API. For OpenRouter agents we must also use a valid
+  // Gemini model ID — the agent's configured model may be an OpenRouter ID like
+  // 'anthropic/claude-sonnet-4-5' which Gemini would reject.
   if (isAudio) {
-    if (!geminiApiKey) throw new Error('Gemini API key required for audio transcription. Add it in Settings → API Keys.')
+    if (!geminiApiKey) throw new Error('Gemini API key required for audio files. Add it in Settings → API Keys.')
+
+    const geminiModel = agent.provider === 'openrouter'
+      ? 'gemini-2.5-flash'   // fall back to Gemini Flash — OR model IDs are invalid here
+      : model
 
     onStatus?.('Uploading audio…')
     const uploaded = await uploadToGeminiFiles(file, geminiApiKey)
@@ -146,9 +205,9 @@ export async function runAgent({
     const active = await waitForFileActive(uploaded, geminiApiKey)
 
     onStatus?.('Analyzing…')
-    return callGeminiParts(geminiApiKey, model, [
+    return callGemini(geminiApiKey, geminiModel, systemPrompt, [
       { fileData: { mimeType: resolvedMimeType(file), fileUri: active.uri } },
-      { text: fullPrompt },
+      { text: userPrompt },
     ], onStatus)
   }
 
@@ -163,8 +222,8 @@ export async function runAgent({
     return callOpenRouter(
       openRouterApiKey,
       model,
-      agent.instructions,
-      `${outputPrompt}\n\nDOCUMENT CONTENT:\n${transcript}`,
+      systemPrompt,
+      `${userPrompt}\n\nDOCUMENT CONTENT:\n${transcript}`,
       onStatus
     )
   }
@@ -175,8 +234,8 @@ export async function runAgent({
   onStatus?.('Reading document…')
   const base64 = await readFileAsBase64(file)
 
-  return callGeminiParts(geminiApiKey, model, [
+  return callGemini(geminiApiKey, model, systemPrompt, [
     { inlineData: { mimeType: 'application/pdf', data: base64 } },
-    { text: fullPrompt },
+    { text: userPrompt },
   ], onStatus)
 }

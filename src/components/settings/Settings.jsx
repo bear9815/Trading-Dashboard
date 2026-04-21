@@ -27,6 +27,7 @@ export default function Settings() {
     apiKey, setApiKey,
     anthropicApiKey, setAnthropicApiKey,
     openRouterApiKey, setOpenRouterApiKey,
+    braveSearchApiKey, setBraveSearchApiKey,
     theme, setTheme,
     alpacaApiKey, alpacaApiSecret, setAlpacaKeys,
     finnhubApiKey, setFinnhubApiKey,
@@ -100,6 +101,17 @@ export default function Settings() {
   const [openRouterInput, setOpenRouterInput] = useState(openRouterApiKey)
   const [showOpenRouter,  setShowOpenRouter]  = useState(false)
   const [openRouterSaved, setOpenRouterSaved] = useState(false)
+
+  // Brave Search key
+  const [braveInput, setBraveInput] = useState(braveSearchApiKey)
+  const [showBrave,  setShowBrave]  = useState(false)
+  const [braveSaved, setBraveSaved] = useState(false)
+
+  function saveBrave() {
+    setBraveSearchApiKey(braveInput.trim())
+    setBraveSaved(true)
+    setTimeout(() => setBraveSaved(false), 2000)
+  }
 
   const [newAcct, setNewAcct]   = useState({ name: '', broker: BROKERS[0], balance: '' })
 
@@ -414,6 +426,36 @@ export default function Settings() {
         </div>
         {openRouterApiKey && (
           <p className="text-xs text-accent-green">✓ OpenRouter key configured — select a model in Growth Research</p>
+        )}
+      </div>
+
+      {/* Brave Search Key */}
+      <div className="card space-y-3">
+        <SectionTitle>Brave Search API Key</SectionTitle>
+        <p className="text-xs text-gray-400">
+          Powers the Web Search tool in Agent Studio. Free tier: 2,000 queries/month.
+          Get a key at <span className="text-accent-blue">api.search.brave.com</span>.
+        </p>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <input
+              type={showBrave ? 'text' : 'password'}
+              value={braveInput}
+              onChange={e => setBraveInput(e.target.value)}
+              placeholder="BSA..."
+              className="input pr-10 font-mono text-xs"
+            />
+            <button onClick={() => setShowBrave(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300">
+              {showBrave ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+          <button onClick={saveBrave} className="btn-primary flex items-center gap-1.5 shrink-0">
+            <Save size={14} />
+            {braveSaved ? 'Saved!' : 'Save'}
+          </button>
+        </div>
+        {braveSearchApiKey && (
+          <p className="text-xs text-accent-green">✓ Brave Search key configured — enable Web Search on any agent</p>
         )}
       </div>
 

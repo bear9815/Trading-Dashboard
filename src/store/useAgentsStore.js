@@ -15,8 +15,8 @@ export const AGENT_COLORS = {
 
 export const GEMINI_MODELS = [
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (recommended)' },
-  { id: 'gemini-2.5-pro',   label: 'Gemini 2.5 Pro' },
-  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+  { id: 'gemini-2.5-pro',   label: 'Gemini 2.5 Pro (best quality)' },
+  { id: 'gemini-2.5-flash-lite-preview-06-17', label: 'Gemini 2.5 Flash Lite (fastest)' },
 ]
 
 export const OPENROUTER_MODELS = [
@@ -93,8 +93,10 @@ const DEFAULT_AGENTS = [
     instructions: EARNINGS_CALL_INSTRUCTIONS,
     provider:     'gemini',
     model:        'gemini-2.5-flash',
-    triggers:     { researchLibrary: ['earnings_call'] },
-    isBuiltIn:    true,
+    triggers:        { researchLibrary: ['earnings_call'] },
+    knowledgeBaseId: null,
+    tools:           { webSearch: false, secEdgar: false },
+    isBuiltIn:       true,
     createdAt:    '2026-04-20T00:00:00.000Z',
     updatedAt:    '2026-04-20T00:00:00.000Z',
   },
@@ -102,10 +104,25 @@ const DEFAULT_AGENTS = [
 
 // ── Store ─────────────────────────────────────────────────────────────────────
 
+const DEPRECATED_MODELS = {
+  'gemini-2.0-flash': 'gemini-2.5-flash',
+  'gemini-2.0-flash-001': 'gemini-2.5-flash',
+}
+
 export const useAgentsStore = create(
   persist(
     (set, get) => ({
       agents: DEFAULT_AGENTS,
+
+      // Migrate any agent pointing at a deprecated model
+      migrateDeprecatedModels: () => {
+        const updated = get().agents.map(a =>
+          DEPRECATED_MODELS[a.model]
+            ? { ...a, model: DEPRECATED_MODELS[a.model], updatedAt: new Date().toISOString() }
+            : a
+        )
+        set({ agents: updated })
+      },
 
       getAgentForTrigger: (area, value) =>
         get().agents.find(a => (a.triggers?.[area] || []).includes(value)) || null,

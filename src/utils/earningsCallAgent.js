@@ -192,7 +192,7 @@ async function runWithOpenRouter(transcriptText, apiKey, model, tickerHint, them
       'Content-Type':  'application/json',
       'Authorization': `Bearer ${apiKey}`,
       'HTTP-Referer':  window.location.origin,
-      'X-Title':       'Trading Dashboard — Earnings Call Agent',
+      'X-Title':       'Trading Dashboard - Earnings Call Agent',
     },
     body: JSON.stringify({
       model: model || 'google/gemini-2.5-flash-preview',

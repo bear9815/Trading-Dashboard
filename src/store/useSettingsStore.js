@@ -5,6 +5,12 @@ import { supabase } from '../lib/supabase.js'
 // Module-level flag — prevents re-fetching settings more than once per page load
 let settingsSessionLoaded = false
 
+// Strip any character outside ISO-8859-1 (e.g. zero-width spaces, curly quotes
+// from copy-paste) that would crash fetch() when used in an Authorization header.
+function cleanKey(key) {
+  return (key || '').replace(/[^\x20-\x7E]/g, '').trim()
+}
+
 // Fields synced to Supabase (business data that must match across devices)
 const CLOUD_FIELDS = [
   'apiKey', 'anthropicApiKey', 'alpacaApiKey', 'alpacaApiSecret', 'finnhubApiKey',
@@ -50,6 +56,7 @@ export const useSettingsStore = create(
       alpacaApiKey: '',
       alpacaApiSecret: '',
       finnhubApiKey: '',
+      braveSearchApiKey: '',
 
       // Note: liveAccountBalance and liveEffectivePct moved to useLiveMarketStore
       // so transient quote updates don't cascade re-renders across every settings
@@ -112,10 +119,11 @@ export const useSettingsStore = create(
 
       // ── Setters ────────────────────────────────────────────────────────────
 
-      setApiKey:           (key)           => { set({ apiKey: key });            saveToCloud({ ...get(), apiKey: key })            },
-      setAnthropicApiKey:  (key)           => { set({ anthropicApiKey: key });  saveToCloud({ ...get(), anthropicApiKey: key })  },
+      setApiKey:           (key)           => { set({ apiKey: cleanKey(key) });            saveToCloud({ ...get(), apiKey: cleanKey(key) })            },
+      setAnthropicApiKey:  (key)           => { set({ anthropicApiKey: cleanKey(key) });  saveToCloud({ ...get(), anthropicApiKey: cleanKey(key) })  },
       setAlpacaKeys:       (key, secret)   => { set({ alpacaApiKey: key, alpacaApiSecret: secret }); saveToCloud({ ...get(), alpacaApiKey: key, alpacaApiSecret: secret }) },
       setFinnhubApiKey:    (key)           => { set({ finnhubApiKey: key });    saveToCloud({ ...get(), finnhubApiKey: key })    },
+      setBraveSearchApiKey: (key)          => { set({ braveSearchApiKey: cleanKey(key) }) },  // not synced to cloud — local only
       setTheme:            (theme)         => { set({ theme });                 saveToCloud({ ...get(), theme })                 },
       setAccounts:         (accounts)      => { set({ accounts });              saveToCloud({ ...get(), accounts })              },
       setEquityCurveRange: (v)             => { set({ equityCurveRange: v });   saveToCloud({ ...get(), equityCurveRange: v })   },
@@ -148,7 +156,7 @@ export const useSettingsStore = create(
         get()._sync()
       },
 
-      setOpenRouterApiKey: (key) => { set({ openRouterApiKey: key }); saveToCloud({ ...get(), openRouterApiKey: key }) },
+      setOpenRouterApiKey: (key) => { set({ openRouterApiKey: cleanKey(key) }); saveToCloud({ ...get(), openRouterApiKey: cleanKey(key) }) },
       setResearchAiProvider: (provider) => {
         const nextProvider = provider || 'gemini'
         set({ researchAiProvider: nextProvider, useLocalLLM: nextProvider === 'local' })

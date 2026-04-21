@@ -24,18 +24,15 @@ export function resolvedMimeType(file) {
 
 export async function uploadToGeminiFiles(file, apiKey) {
   const mimeType = resolvedMimeType(file)
-  const metadata = JSON.stringify({ file: { display_name: file.name, mime_type: mimeType } })
-  const boundary = '-------gem_upload_boundary'
+  // Gemini Files API expects camelCase field names in metadata
+  const metadata = JSON.stringify({ file: { display_name: file.name, mimeType } })
+  const boundary = 'gem_upload_boundary'
 
-  const bodyParts = [
-    `--${boundary}\r\nContent-Type: application/json; charset=utf-8\r\n\r\n${metadata}\r\n`,
-    `--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
-  ]
-  const textEncoder  = new TextEncoder()
-  const part1        = textEncoder.encode(bodyParts[0])
-  const part2        = textEncoder.encode(bodyParts[1])
-  const fileBuffer   = await file.arrayBuffer()
-  const closing      = textEncoder.encode(`\r\n--${boundary}--`)
+  const textEncoder = new TextEncoder()
+  const part1       = textEncoder.encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`)
+  const part2       = textEncoder.encode(`--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`)
+  const fileBuffer  = await file.arrayBuffer()
+  const closing     = textEncoder.encode(`\r\n--${boundary}--`)
 
   const combined = new Uint8Array(part1.byteLength + part2.byteLength + fileBuffer.byteLength + closing.byteLength)
   combined.set(part1, 0)
@@ -47,8 +44,11 @@ export async function uploadToGeminiFiles(file, apiKey) {
     `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
     {
       method:  'POST',
-      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
-      body:    combined,
+      headers: {
+        'Content-Type':            `multipart/related; boundary=${boundary}`,
+        'X-Goog-Upload-Protocol':  'multipart',
+      },
+      body: combined,
     }
   )
   if (!res.ok) {
