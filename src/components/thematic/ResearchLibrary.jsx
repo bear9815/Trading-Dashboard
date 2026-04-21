@@ -812,7 +812,41 @@ export default function ResearchLibrary() {
       </button>
 
       {showLibrary && (
-        <div className="border-t border-white/10 p-4 space-y-4">
+        <div className="border-t border-white/10">
+
+          {/* ── Top-level tabs: Library | Companies ── */}
+          <div className="flex items-center gap-1 px-4 pt-3 border-b border-white/[0.07]">
+            {[
+              { id: 'library',   label: 'Library',   count: sources.length },
+              { id: 'companies', label: 'Companies',  count: [...new Set(sources.map(s => s.primary_ticker || s.tickers?.[0]).filter(Boolean))].length },
+            ].map(({ id, label, count }) => (
+              <button
+                key={id}
+                onClick={() => setViewMode(id)}
+                className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium border-b-2 -mb-px transition-all ${
+                  viewMode === id
+                    ? 'border-accent-blue text-accent-blue'
+                    : 'border-transparent text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {label}
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${viewMode === id ? 'bg-accent-blue/20 text-accent-blue' : 'bg-white/[0.06] text-gray-600'}`}>
+                  {count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="p-4 space-y-4">
+
+          {/* ── Companies tab ── */}
+          {viewMode === 'companies' && (
+            <CompaniesView sources={sources} onViewReport={setOpenReport} />
+          )}
+
+          {/* ── Library tab ── */}
+          {viewMode === 'library' && (<>
+
           {/* Upload controls */}
           <div className="space-y-2">
             <div className="flex flex-wrap gap-2">
@@ -942,38 +976,10 @@ export default function ResearchLibrary() {
           )}
 
           {!storeLoading && sources.length > 0 && (
-            <div>
-              {/* View mode tabs */}
-              <div className="flex items-center gap-1 border-b border-white/[0.07] mb-4">
-                {[
-                  { id: 'library',   label: `Library (${sources.length})` },
-                  { id: 'companies', label: `Companies (${[...new Set(sources.map(s => s.primary_ticker || s.tickers?.[0]).filter(Boolean))].length})` },
-                ].map(({ id, label }) => (
-                  <button
-                    key={id}
-                    onClick={() => setViewMode(id)}
-                    className={`px-4 py-2 text-xs font-medium border-b-2 -mb-px transition-all ${
-                      viewMode === id
-                        ? 'border-accent-blue text-accent-blue'
-                        : 'border-transparent text-gray-500 hover:text-gray-300'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {viewMode === 'library' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  {sources.map(source => (
-                    <SourceCard key={source.id} source={source} onRemove={removeSource} onView={setOpenReport}/>
-                  ))}
-                </div>
-              )}
-
-              {viewMode === 'companies' && (
-                <CompaniesView sources={sources} onViewReport={setOpenReport} />
-              )}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {sources.map(source => (
+                <SourceCard key={source.id} source={source} onRemove={removeSource} onView={setOpenReport}/>
+              ))}
             </div>
           )}
 
@@ -983,6 +989,13 @@ export default function ResearchLibrary() {
               <p className="text-xs">No sources yet — upload your first deep dive or earnings call above</p>
             </div>
           )}
+
+          </>)}
+          {/* end library tab */}
+
+          </div>
+          {/* end tab content */}
+
         </div>
       )}
 
