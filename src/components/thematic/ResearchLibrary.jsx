@@ -14,9 +14,18 @@ import { extractWithOpenRouter, processWithOpenRouterCombined, autoAnalyzeWithOp
 import { runAgent } from '../../utils/agentRunner.js'
 import { useAgentsStore } from '../../store/useAgentsStore.js'
 import { jsPDF } from 'jspdf'
+import EarningsReport from './EarningsReport.jsx'
+import CompaniesView  from './CompaniesView.jsx'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 const GOOGLE_API_KEY   = import.meta.env.VITE_GOOGLE_API_KEY   || ''
+
+// ── Extract quarter/year period from a report title ───────────────────────────
+// Handles: "NVDA Q1 2026 Earnings Call Analysis" → "Q1 2026"
+function extractPeriod(title) {
+  const m = (title || '').match(/Q[1-4]\s*20\d{2}/i)
+  return m ? m[0].replace(/\s+/, ' ').toUpperCase() : null
+}
 
 // ── Gemini: extraction ────────────────────────────────────────────────────────
 function buildExtractionPrompt(sourceType, tickerHint, themeHint) {
@@ -228,7 +237,7 @@ function InsightsCard({ analysis, onDismiss }) {
 }
 
 // ── Source card ───────────────────────────────────────────────────────────────
-function SourceCard({ source, onRemove }) {
+function SourceCard({ source, onRemove, onView }) {
   const [expanded, setExpanded] = useState(false)
   const [removing, setRemoving] = useState(false)
 
@@ -258,6 +267,12 @@ function SourceCard({ source, onRemove }) {
           <p className="text-sm text-gray-500 mt-1.5 leading-relaxed line-clamp-2">{source.summary}</p>
         </div>
         <div className="flex items-center gap-1 shrink-0 mt-0.5">
+          {onView && (
+            <button onClick={() => onView(source)}
+              className="px-2.5 py-1 rounded-lg text-xs font-medium text-accent-blue bg-accent-blue/10 border border-accent-blue/20 hover:bg-accent-blue/20 transition-all mr-1">
+              View Report
+            </button>
+          )}
           <button onClick={() => exportSourceToPDF(source)} title="Export PDF"
             className="p-1.5 rounded-lg text-gray-600 hover:text-accent-blue hover:bg-accent-blue/10 transition-colors">
             <Download size={15}/>
@@ -601,6 +616,8 @@ export default function ResearchLibrary() {
   const [showLibrary,  setShowLibrary]  = useState(true)
   const [driveLoading, setDriveLoading] = useState(false)
   const [lastSaved,    setLastSaved]    = useState(null)
+  const [viewMode,     setViewMode]     = useState('library')  // 'library' | 'companies'
+  const [openReport,   setOpenReport]   = useState(null)       // source object or null
   const inputRef = useRef()
 
   useEffect(() => { setCreateDossier(sourceType === 'deep_dive') }, [sourceType])
@@ -674,10 +691,16 @@ export default function ResearchLibrary() {
         const docTickers  = (extracted.tickers_mentioned || []).map(t => t.toUpperCase())
         const tickers     = [...new Set([...hintTickers, ...docTickers])]
 
+        const resolvedTitle  = extracted.title || file.name.replace(/\.pdf$/i, '')
+        const primaryTicker  = tickerInput.split(',')[0].trim().toUpperCase() || tickers[0] || null
+        const period         = extractPeriod(resolvedTitle)
+
         const payload = {
-          title:            extracted.title    || file.name.replace(/\.pdf$/i, ''),
+          title:            resolvedTitle,
           source_type:      sourceType,
           tickers,
+          primary_ticker:   primaryTicker,
+          period,
           theme:            themeInput.trim()  || (extracted.themes_mentioned || [])[0] || '',
           raw_text:         (typeof extracted.raw_text === 'string' ? extracted.raw_text : '').substring(0, 8000),
           summary:          typeof extracted.summary === 'string' ? extracted.summary : '',
@@ -920,14 +943,37 @@ export default function ResearchLibrary() {
 
           {!storeLoading && sources.length > 0 && (
             <div>
-              <div className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-3">
-                {sources.length} source{sources.length !== 1 ? 's' : ''} in library
-              </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {sources.map(source => (
-                  <SourceCard key={source.id} source={source} onRemove={removeSource}/>
+              {/* View mode tabs */}
+              <div className="flex items-center gap-1 border-b border-white/[0.07] mb-4">
+                {[
+                  { id: 'library',   label: `Library (${sources.length})` },
+                  { id: 'companies', label: `Companies (${[...new Set(sources.map(s => s.primary_ticker || s.tickers?.[0]).filter(Boolean))].length})` },
+                ].map(({ id, label }) => (
+                  <button
+                    key={id}
+                    onClick={() => setViewMode(id)}
+                    className={`px-4 py-2 text-xs font-medium border-b-2 -mb-px transition-all ${
+                      viewMode === id
+                        ? 'border-accent-blue text-accent-blue'
+                        : 'border-transparent text-gray-500 hover:text-gray-300'
+                    }`}
+                  >
+                    {label}
+                  </button>
                 ))}
               </div>
+
+              {viewMode === 'library' && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  {sources.map(source => (
+                    <SourceCard key={source.id} source={source} onRemove={removeSource} onView={setOpenReport}/>
+                  ))}
+                </div>
+              )}
+
+              {viewMode === 'companies' && (
+                <CompaniesView sources={sources} onViewReport={setOpenReport} />
+              )}
             </div>
           )}
 
@@ -938,6 +984,11 @@ export default function ResearchLibrary() {
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Full-page report overlay ── */}
+      {openReport && (
+        <EarningsReport source={openReport} onBack={() => setOpenReport(null)} />
       )}
     </div>
   )
