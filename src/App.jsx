@@ -39,10 +39,10 @@ const Agents              = lazy(() => import('./components/agents/Agents.jsx'))
 // ── Page-transition loading fallback ─────────────────────────────────────────
 function PageLoader() {
   return (
-    <div className="flex h-full items-center justify-center text-gray-500">
-      <div className="flex flex-col items-center gap-3">
-        <Loader size={24} className="animate-spin text-accent-blue" />
-        <span className="text-xs">Loading…</span>
+    <div className="flex h-full items-center justify-center text-muted">
+      <div className="luxury-panel flex flex-col items-center gap-3 rounded-2xl px-8 py-7">
+        <Loader size={28} className="animate-spin text-accent-blue" />
+        <span className="text-sm font-medium tracking-wide">Loading…</span>
       </div>
     </div>
   )
@@ -151,7 +151,7 @@ export default function App() {
   const pageProps = { selectedAccount }
 
   return (
-    <div className="flex h-screen bg-surface overflow-hidden">
+    <div className="app-shell flex h-screen bg-surface overflow-hidden">
       <Sidebar
         page={page}
         setPage={setPage}
@@ -168,23 +168,23 @@ export default function App() {
 
         <main className={`flex-1 ${page === 'rrg' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
           <PageErrorBoundary key={page}>
-          <Suspense fallback={<PageLoader />}>
-            {page === 'dashboard'   && <Dashboard    {...pageProps} />}
-            {page === 'trades'      && <TradeLog      {...pageProps} />}
-            {page === 'risk'        && <RiskPanel     {...pageProps} />}
-            {page === 'analytics'   && <Analytics     {...pageProps} />}
-            {page === 'chartreview' && <TradeReview   {...pageProps} />}
-            {page === 'morning'     && <Morning />}
-            {page === 'journal'     && <Journal       {...pageProps} />}
-            {page === 'ai'          && <AIFeedback    {...pageProps} />}
-            {page === 'edgelab'     && <EdgeLab       {...pageProps} />}
-            {page === 'regime'      && <FactorRegime />}
-            {page === 'settings'      && <Settings />}
-            {page === 'rrg'         && <div className="h-full"><RRGPage /></div>}
-            {page === 'thematic'    && <ThematicResearch />}
-            {page === 'modelbook'   && <ModelBook />}
-            {page === 'agents'      && <Agents />}
-          </Suspense>
+            <Suspense fallback={<PageLoader />}>
+              {page === 'dashboard'   && <Dashboard    {...pageProps} />}
+              {page === 'trades'      && <TradeLog      {...pageProps} />}
+              {page === 'risk'        && <RiskPanel     {...pageProps} />}
+              {page === 'analytics'   && <Analytics     {...pageProps} />}
+              {page === 'chartreview' && <TradeReview   {...pageProps} />}
+              {page === 'morning'     && <Morning />}
+              {page === 'journal'     && <Journal       {...pageProps} />}
+              {page === 'ai'          && <AIFeedback    {...pageProps} />}
+              {page === 'edgelab'     && <EdgeLab       {...pageProps} />}
+              {page === 'regime'      && <FactorRegime />}
+              {page === 'settings'    && <Settings />}
+              {page === 'rrg'         && <div className="h-full"><RRGPage /></div>}
+              {page === 'thematic'    && <ThematicResearch />}
+              {page === 'modelbook'   && <ModelBook />}
+              {page === 'agents'      && <Agents />}
+            </Suspense>
           </PageErrorBoundary>
         </main>
       </div>

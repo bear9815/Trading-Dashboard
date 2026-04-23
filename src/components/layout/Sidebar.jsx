@@ -39,26 +39,26 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
   }
 
   return (
-    <aside className="w-16 md:w-56 bg-surface-50 border-r border-white/10 flex flex-col shrink-0 h-screen sticky top-0">
+    <aside className="luxury-panel w-16 md:w-60 flex flex-col shrink-0 h-screen sticky top-0 border-r border-white/10 bg-surface-50/80">
 
       {/* Logo */}
-      <div className="px-4 py-4 border-b border-white/10">
+      <div className="px-4 py-5 border-b border-white/10">
         <AppLogo size="md" showWordmark />
       </div>
 
       {/* ── Account Selector — desktop ── */}
       {realAccounts.length > 0 && (
-        <div className="hidden md:block px-3 pt-3 pb-2 border-b border-white/10">
-          <p className="text-[10px] text-gray-600 uppercase tracking-widest mb-1.5 px-1 font-medium">Account</p>
+        <div className="hidden md:block px-3 pt-4 pb-3 border-b border-white/10">
+          <p className="text-[10px] text-gray-500 uppercase tracking-[0.28em] mb-2 px-1 font-semibold">Account</p>
           <div className="space-y-0.5">
 
             {/* All Accounts */}
             <button
               onClick={() => setSelectedAccount('All')}
-              className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-[13px] font-medium transition-all
                 ${selectedAccount === 'All'
-                  ? 'bg-white/10 text-white'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  ? 'bg-white/10 text-white shadow-lg shadow-black/10'
+                  : 'text-gray-300 hover:text-white hover:bg-white/5'
                 }`}
             >
               <span className={`w-2 h-2 rounded-full shrink-0 ${selectedAccount === 'All' ? 'bg-white' : 'bg-gray-600'}`} />
@@ -73,10 +73,10 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
                 <button
                   key={acct}
                   onClick={() => setSelectedAccount(acct)}
-                  className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-[13px] font-medium transition-all
                     ${active
-                      ? `${colors.activeBg} ${colors.text}`
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      ? `${colors.activeBg} ${colors.text} shadow-lg shadow-black/10`
+                      : 'text-gray-300 hover:text-white hover:bg-white/5'
                     }`}
                 >
                   <span className={`w-2 h-2 rounded-full shrink-0 ${active ? colors.dot : 'bg-gray-600'}`} />
@@ -102,20 +102,20 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
       )}
 
       {/* ── Nav ── */}
-      <nav className="flex-1 py-4 px-2 space-y-0.5">
+      <nav className="flex-1 py-5 px-2.5 space-y-1">
         {NAV.map(({ id, label, icon: Icon }) => {
           const active = page === id
           return (
             <button
               key={id}
               onClick={() => setPage(id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all
+              className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium transition-all
                 ${active
-                  ? 'bg-accent-blue/15 text-accent-blue'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  ? 'bg-gradient-to-r from-accent-blue/18 to-accent-purple/12 text-white border border-accent-blue/20 shadow-lg shadow-accent-blue/10'
+                  : 'text-gray-300 hover:text-white hover:bg-white/5'
                 }`}
             >
-              <Icon size={18} className="shrink-0" />
+              <Icon size={18} className={`shrink-0 ${active ? 'text-accent-blue' : ''}`} />
               <span className="hidden md:block">{label}</span>
             </button>
           )
@@ -128,7 +128,7 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
           <select
             value={selectedAccount}
             onChange={e => setSelectedAccount(e.target.value)}
-            className="w-full bg-surface-200 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none cursor-pointer"
+            className="w-full bg-surface-200 border border-white/10 rounded-xl px-2 py-2 text-xs text-gray-200 focus:outline-none cursor-pointer"
           >
             {accounts.map(a => (
               <option key={a} value={a}>{a}</option>
@@ -138,17 +138,17 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
       )}
 
       {/* ── Footer ── */}
-      <div className="px-3 py-3 border-t border-white/10 hidden md:block">
+      <div className="px-3 py-4 border-t border-white/10 hidden md:block">
         {selectedAccount !== 'All' && realAccounts.includes(selectedAccount) && (() => {
           const colors = getColor(selectedAccount)
           return (
-            <div className={`flex items-center gap-1.5 mb-2 px-2 py-1.5 rounded-lg ${colors.activeBg}`}>
+            <div className={`flex items-center gap-1.5 mb-3 px-2.5 py-2 rounded-xl ${colors.activeBg}`}>
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${colors.dot}`} />
-              <span className={`text-xs font-medium truncate ${colors.text}`}>{selectedAccount}</span>
+              <span className={`text-xs font-semibold uppercase tracking-[0.2em] truncate ${colors.text}`}>{selectedAccount}</span>
             </div>
           )
         })()}
-        <p className="text-xs text-gray-600 px-1">v0.1.0 · Local</p>
+        <p className="text-xs text-gray-500 px-1 uppercase tracking-[0.2em]">v0.1.0 · Local</p>
       </div>
 
     </aside>

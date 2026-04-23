@@ -99,18 +99,20 @@ export default function Dashboard({ selectedAccount }) {
   }, [closedTrades])
 
   return (
-    <div className="flex flex-col gap-5 p-5">
+    <div className="flex flex-col gap-6 p-5 md:p-7">
 
       {/* ── Page header ───────────────────────────────────────────────────── */}
-      <div className="flex items-end justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-5xl font-bold text-white">Dashboard</h1>
-          <p className="text-xl text-gray-500 mt-0.5">{today}</p>
+      <div className="luxury-panel rounded-[28px] px-6 py-6 md:px-8 md:py-7 flex items-end justify-between flex-wrap gap-4 overflow-hidden relative">
+        <div className="absolute inset-y-0 right-0 w-1/2 bg-gradient-to-l from-accent-blue/10 via-accent-purple/5 to-transparent pointer-events-none" />
+        <div className="relative">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-[#9ab3d1] mb-2">Trading Command Center</p>
+          <h1 className="text-4xl md:text-[3.6rem] font-semibold tracking-[-0.05em] text-white">Dashboard</h1>
+          <p className="text-lg md:text-xl text-muted mt-1">{today}</p>
         </div>
         {accountBalance > 0 && (
-          <div className="text-right">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Account Balance</p>
-            <p className="text-4xl font-bold text-white mono tabular-nums">{formatCurrency(accountBalance)}</p>
+          <div className="text-left md:text-right relative">
+            <p className="text-[11px] font-semibold text-[#9ab3d1] uppercase tracking-[0.32em] mb-2">Account Balance</p>
+            <p className="text-3xl md:text-5xl font-semibold text-white mono tabular-nums tracking-[-0.05em]">{formatCurrency(accountBalance)}</p>
           </div>
         )}
       </div>
@@ -154,16 +156,16 @@ export default function Dashboard({ selectedAccount }) {
         </div>
       )}
       {excludedSymbols.length > 0 && (
-        <div className="rounded-xl px-3 py-2 flex items-center gap-2 bg-surface-200 border border-white/5 text-base text-gray-500">
+        <div className="rounded-2xl px-4 py-3 flex items-center gap-2 bg-surface-200/80 border border-white/10 text-base text-muted">
           <span>Stats exclude:</span>
           {excludedSymbols.map(s => (
-            <span key={s} className="mono text-gray-400 bg-surface-300 rounded px-1.5 py-0.5">{s}</span>
+            <span key={s} className="mono text-gray-200 bg-surface-300/80 rounded-lg px-2 py-0.5">{s}</span>
           ))}
         </div>
       )}
 
       {/* ── Metrics grid ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-4">
         <MetricCard
           label="Net P&L"
           value={formatCurrency(netPL, true)}
@@ -218,7 +220,7 @@ export default function Dashboard({ selectedAccount }) {
       </div>
 
       {/* ── Equity + Heatmap ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-stretch">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
         <div className="lg:col-span-2 flex flex-col">
           <EquityCurve data={equityCurve} />
         </div>

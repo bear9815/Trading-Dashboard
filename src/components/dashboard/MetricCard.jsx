@@ -9,27 +9,28 @@ export default function MetricCard({ label, value, sub, valueClass = '', icon: I
   const ac = accentMap[accent] || accentMap.blue
 
   return (
-    <div className={`relative flex flex-col gap-3 p-5 rounded-xl bg-surface-50 border border-white/8 border-t-2 ${ac.border} overflow-hidden min-w-0`}>
+    <div className={`relative flex flex-col gap-4 p-5 rounded-2xl border border-white/10 border-t ${ac.border} overflow-hidden min-w-0 luxury-panel`}>
       {/* Subtle radial glow in top-right corner */}
-      <div className={`absolute -top-4 -right-4 w-16 h-16 rounded-full opacity-[0.08] ${ac.glow} blur-xl pointer-events-none`} />
+      <div className={`absolute -top-5 -right-5 w-24 h-24 rounded-full opacity-[0.12] ${ac.glow} blur-2xl pointer-events-none`} />
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent pointer-events-none" />
 
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-gray-500 uppercase tracking-wider truncate">{label}</span>
+        <span className="text-[11px] font-semibold text-muted uppercase tracking-[0.24em] truncate">{label}</span>
         {Icon && (
-          <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${ac.icon}`}>
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${ac.icon}`}>
             <Icon size={18} />
           </div>
         )}
       </div>
 
-      <div className={`text-4xl font-bold tracking-tight mono tabular-nums truncate leading-none ${valueClass}`}>
+      <div className={`text-[2.2rem] md:text-[2.45rem] font-semibold tracking-[-0.04em] mono tabular-nums truncate leading-none ${valueClass}`}>
         {value ?? '—'}
       </div>
 
-      {sub && <div className="text-sm text-gray-600 truncate">{sub}</div>}
+      {sub && <div className="text-sm text-muted truncate">{sub}</div>}
 
       {progress != null && (
-        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/5">
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/5">
           <div
             className={`h-full transition-all duration-500 rounded-full ${ac.progressBar}`}
             style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}

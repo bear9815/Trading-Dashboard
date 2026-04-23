@@ -71,8 +71,8 @@ export default function AppLogo({ size = 'md', showWordmark = true }) {
       {/* ── Wordmark ── */}
       {showWordmark && (
         <div className="hidden md:flex flex-col leading-none">
-          <span className="text-[13px] font-bold text-white tracking-wide">Trading</span>
-          <span className="text-[11px] font-medium text-blue-400 tracking-widest uppercase">Dashboard</span>
+          <span className="text-[14px] font-semibold text-white tracking-[0.14em] uppercase">Trading</span>
+          <span className="text-[11px] font-semibold text-[#9bc5ff] tracking-[0.34em] uppercase">Dashboard</span>
         </div>
       )}
     </div>

@@ -66,14 +66,14 @@ function QuotesModal({ onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="bg-surface-50 border border-white/10 rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
+        className="luxury-panel w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
           <div>
-            <h2 className="font-semibold text-white text-sm">Quote Playlist</h2>
-            <p className="text-xs text-gray-500 mt-0.5">{activeCount} of {quotes.length} quotes active</p>
+            <h2 className="font-semibold text-white text-base">Quote Playlist</h2>
+            <p className="text-sm text-muted mt-0.5">{activeCount} of {quotes.length} quotes active</p>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
             <X size={16} />
@@ -84,13 +84,13 @@ function QuotesModal({ onClose }) {
         <div className="flex border-b border-white/10">
           <button
             onClick={() => setTab('playlist')}
-            className={`px-5 py-2.5 text-xs font-medium transition-colors ${tab === 'playlist' ? 'text-accent-blue border-b-2 border-accent-blue' : 'text-gray-500 hover:text-white'}`}
+            className={`px-5 py-3 text-sm font-medium transition-colors ${tab === 'playlist' ? 'text-accent-blue border-b-2 border-accent-blue' : 'text-muted hover:text-white'}`}
           >
             Manage Playlist
           </button>
           <button
             onClick={() => setTab('add')}
-            className={`px-5 py-2.5 text-xs font-medium transition-colors ${tab === 'add' ? 'text-accent-blue border-b-2 border-accent-blue' : 'text-gray-500 hover:text-white'}`}
+            className={`px-5 py-3 text-sm font-medium transition-colors ${tab === 'add' ? 'text-accent-blue border-b-2 border-accent-blue' : 'text-muted hover:text-white'}`}
           >
             Add Custom Quote
           </button>
@@ -129,7 +129,7 @@ function QuotesModal({ onClose }) {
 
                       {/* Author name + count */}
                       <span className="flex-1 text-sm text-gray-200 font-medium">{author}</span>
-                      <span className="text-xs text-gray-500">{qs.filter(q => q.active).length}/{qs.length}</span>
+                      <span className="text-xs text-muted">{qs.filter(q => q.active).length}/{qs.length}</span>
 
                       {/* Expand toggle */}
                       <button
@@ -151,7 +151,7 @@ function QuotesModal({ onClose }) {
                             >
                               {q.active && <Check size={9} />}
                             </button>
-                            <p className="flex-1 text-xs text-gray-400 leading-relaxed">&ldquo;{q.text}&rdquo;</p>
+                            <p className="flex-1 text-sm text-gray-300 leading-relaxed">&ldquo;{q.text}&rdquo;</p>
                             {q.custom && (
                               <button
                                 onClick={() => removeQuote(q.id)}
@@ -173,7 +173,7 @@ function QuotesModal({ onClose }) {
 
         {tab === 'add' && (
           <div className="flex-1 p-5 flex flex-col gap-4">
-            <p className="text-xs text-gray-500">Add a personal quote or one from another trader to your playlist.</p>
+            <p className="text-sm text-muted">Add a personal quote or one from another trader to your playlist.</p>
 
             <div>
               <label className="label">Quote Text</label>
@@ -214,7 +214,7 @@ function QuotesModal({ onClose }) {
                     <div key={q.id} className="bg-surface-200 rounded-lg px-3 py-2.5 flex items-start gap-2">
                       <div className="flex-1">
                         <p className="text-xs text-gray-300 leading-relaxed">&ldquo;{q.text}&rdquo;</p>
-                        <p className="text-xs text-gray-500 mt-1">— {q.author}</p>
+                        <p className="text-xs text-muted mt-1">— {q.author}</p>
                       </div>
                       <button onClick={() => removeQuote(q.id)} className="text-gray-600 hover:text-accent-red transition-colors flex-shrink-0">
                         <X size={12} />
@@ -243,7 +243,7 @@ function QuotesTicker() {
         <button
           onClick={() => setModalOpen(true)}
           title="Manage quote playlist"
-          className="flex items-center gap-1 text-gray-600 hover:text-gray-400 transition-colors px-2"
+          className="flex items-center gap-1 text-gray-500 hover:text-gray-300 transition-colors px-2"
         >
           <Settings2 size={13} />
         </button>
@@ -264,7 +264,7 @@ function QuotesTicker() {
         {/* Scrolling ticker */}
         <div className="flex-1 overflow-hidden relative" style={{ maskImage: 'linear-gradient(to right, transparent, black 5%, black 95%, transparent)' }}>
           <div
-            className="whitespace-nowrap text-sm text-gray-400 italic inline-block"
+            className="whitespace-nowrap text-sm text-gray-300 italic inline-block"
             style={{
               animation: `marquee ${duration}s linear infinite`,
             }}
@@ -277,7 +277,7 @@ function QuotesTicker() {
         <button
           onClick={() => setModalOpen(true)}
           title="Manage quote playlist"
-          className="flex-shrink-0 text-gray-600 hover:text-gray-300 transition-colors p-1 rounded hover:bg-white/5"
+          className="flex-shrink-0 text-gray-500 hover:text-gray-200 transition-colors p-1.5 rounded-lg hover:bg-white/5"
         >
           <Settings2 size={13} />
         </button>
@@ -294,8 +294,8 @@ export default function TopBar({ page, onImport, onOpenReminder }) {
   const { connected } = useSchwabStore()
 
   return (
-    <header className="h-14 bg-surface-50/80 backdrop-blur border-b border-white/10 flex items-center px-4 shrink-0 sticky top-0 z-10 gap-3">
-      <h1 className="text-base font-semibold text-white flex-shrink-0">{PAGE_TITLES[page] || 'Trading Dashboard'}</h1>
+    <header className="h-16 bg-surface-50/72 backdrop-blur-xl border-b border-white/10 flex items-center px-5 shrink-0 sticky top-0 z-10 gap-3">
+      <h1 className="text-lg font-semibold tracking-[0.08em] text-white flex-shrink-0 uppercase">{PAGE_TITLES[page] || 'Trading Dashboard'}</h1>
 
       {/* Quotes ticker — fills remaining space between title and import button */}
       <QuotesTicker />
@@ -304,7 +304,7 @@ export default function TopBar({ page, onImport, onOpenReminder }) {
         {connected && (
           <div
             title="Schwab connected — price history sourced from Schwab API"
-            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent-green/10 border border-accent-green/25 text-accent-green text-[11px] font-medium"
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-accent-green/10 border border-accent-green/25 text-accent-green text-xs font-semibold"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse" />
             Schwab
@@ -313,14 +313,14 @@ export default function TopBar({ page, onImport, onOpenReminder }) {
         <button
           onClick={onOpenReminder}
           title="Open trading reminder popup"
-          className="btn-ghost flex items-center gap-1.5 text-xs"
+          className="btn-ghost flex items-center gap-1.5 text-sm"
         >
           <Bell size={14} />
           <span className="hidden sm:inline">Reminder</span>
         </button>
         <button
           onClick={onImport}
-          className="btn-primary flex items-center gap-1.5 text-xs"
+          className="btn-primary flex items-center gap-1.5 text-sm"
         >
           <Upload size={14} />
           <span className="hidden sm:inline">Import</span>
@@ -329,7 +329,7 @@ export default function TopBar({ page, onImport, onOpenReminder }) {
           <button
             onClick={() => signOut()}
             title={`Sign out (${user.email})`}
-            className="btn-ghost flex items-center gap-1.5 text-xs text-gray-400 hover:text-accent-red"
+            className="btn-ghost flex items-center gap-1.5 text-sm text-gray-300 hover:text-accent-red"
           >
             <LogOut size={14} />
             <span className="hidden sm:inline">Sign Out</span>
