@@ -266,6 +266,17 @@ function SourceCard({ source, onRemove, onView }) {
             </div>
           )}
           <p className="text-sm text-gray-500 mt-1.5 leading-relaxed line-clamp-2">{source.summary}</p>
+          {source.source_url && (
+            <a
+              href={source.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 mt-2 text-xs text-accent-blue hover:underline"
+            >
+              Source Link
+              <ExternalLink size={11} />
+            </a>
+          )}
         </div>
         <div className="flex items-center gap-1 shrink-0 mt-0.5">
           {onView && (
@@ -761,6 +772,7 @@ export default function ResearchLibrary({ earningsMode = false }) {
   const [createDossier, setCreateDossier] = useState(false)
   const [tickerInput,  setTickerInput]  = useState('')
   const [themeInput,   setThemeInput]   = useState('')
+  const [transcriptUrl, setTranscriptUrl] = useState('')
   const [dragging,     setDragging]     = useState(false)
   const [uploading,    setUploading]    = useState(false)
   const [uploadFile,   setUploadFile]   = useState('')
@@ -772,7 +784,7 @@ export default function ResearchLibrary({ earningsMode = false }) {
   const [showLibrary,  setShowLibrary]  = useState(true)
   const [driveLoading, setDriveLoading] = useState(false)
   const [lastSaved,    setLastSaved]    = useState(null)
-  const [viewMode,     setViewMode]     = useState(earningsMode ? 'companies' : 'library')  // 'library' | 'companies'
+  const [viewMode,     setViewMode]     = useState(earningsMode ? 'companies' : 'library')  // 'library' | 'companies' | 'upload'
   const [openReport,   setOpenReport]   = useState(null)       // source object or null
   const [selectedAgentId, setSelectedAgentId] = useState(null) // explicit agent override
   const inputRef = useRef()
@@ -783,6 +795,66 @@ export default function ResearchLibrary({ earningsMode = false }) {
   useEffect(() => {
     setCreateDossier(sourceType === 'deep_dive')
   }, [sourceType])
+
+  const persistExtractedSource = useCallback(async ({ extracted, fileName, sourceUrl = '', fallbackTitle = '' }) => {
+    const hintTickers = tickerInput.split(',').map(t => t.trim().toUpperCase()).filter(Boolean)
+    const docTickers  = (extracted.tickers_mentioned || []).map(t => t.toUpperCase())
+    const tickers     = [...new Set([...hintTickers, ...docTickers])]
+
+    const resolvedTitle  = extracted.title || fallbackTitle || fileName.replace(/\.pdf$/i, '')
+    const primaryTicker  = tickerInput.split(',')[0].trim().toUpperCase() || tickers[0] || null
+    const period         = extractPeriod(resolvedTitle)
+
+    const payload = {
+      title:            resolvedTitle,
+      source_type:      sourceType,
+      tickers,
+      primary_ticker:   primaryTicker,
+      period,
+      theme:            themeInput.trim()  || (extracted.themes_mentioned || [])[0] || '',
+      raw_text:         (typeof extracted.raw_text === 'string' ? extracted.raw_text : '').substring(0, 8000),
+      summary:          typeof extracted.summary === 'string' ? extracted.summary : '',
+      key_points:       Array.isArray(extracted.key_points)       ? extracted.key_points       : [],
+      key_takeaways:    Array.isArray(extracted.key_takeaways)    ? extracted.key_takeaways    : [],
+      strengths:        Array.isArray(extracted.strengths)        ? extracted.strengths        : [],
+      weaknesses:       Array.isArray(extracted.weaknesses)       ? extracted.weaknesses       : [],
+      explosive_growth: extracted.explosive_growth && typeof extracted.explosive_growth === 'object'
+        ? extracted.explosive_growth
+        : null,
+      growth_confidence: extracted.growth_confidence && typeof extracted.growth_confidence === 'object'
+        ? extracted.growth_confidence
+        : null,
+      catalyst_signals: Array.isArray(extracted.catalyst_signals) ? extracted.catalyst_signals : [],
+      key_metrics:      Array.isArray(extracted.key_metrics)      ? extracted.key_metrics      : [],
+      themes_mentioned: Array.isArray(extracted.themes_mentioned) ? extracted.themes_mentioned : [],
+      sentiment:        typeof extracted.sentiment === 'string'   ? extracted.sentiment        : 'neutral',
+      file_name:        fileName,
+      source_url:       sourceUrl,
+    }
+
+    const saved = addSource(payload)
+    setLastSaved(saved)
+
+    const currentThemes = useThematicStore.getState().themes
+    if (saved && Object.keys(currentThemes).length > 0) {
+      try {
+        setUploadStatus('Cross-referencing with dossiers…')
+        const result = provider === 'local'
+          ? await autoAnalyzeWithOllama(saved, currentThemes)
+          : provider === 'openrouter'
+          ? await autoAnalyzeWithOpenRouter(saved, currentThemes, openRouterApiKey, researchOpenRouterModel)
+          : await autoAnalyzeWithGemini(saved, currentThemes, apiKey)
+        if (result) {
+          setAnalysis(result)
+          updateSource(saved.id, { insights: result })
+        }
+      } catch (ae) {
+        console.warn('[ResearchLibrary] auto-analysis failed:', ae?.message)
+      }
+    }
+
+    return saved
+  }, [addSource, apiKey, openRouterApiKey, provider, researchOpenRouterModel, sourceType, themeInput, tickerInput, updateSource])
 
   const handleFiles = useCallback(async (files) => {
     if (!files.length) return
@@ -855,45 +927,6 @@ export default function ResearchLibrary({ earningsMode = false }) {
           extracted = await extractWithGemini(file, apiKey, sourceType, tickerInput.trim(), themeInput.trim())
         }
 
-        const hintTickers = tickerInput.split(',').map(t => t.trim().toUpperCase()).filter(Boolean)
-        const docTickers  = (extracted.tickers_mentioned || []).map(t => t.toUpperCase())
-        const tickers     = [...new Set([...hintTickers, ...docTickers])]
-
-        const resolvedTitle  = extracted.title || file.name.replace(/\.pdf$/i, '')
-        const primaryTicker  = tickerInput.split(',')[0].trim().toUpperCase() || tickers[0] || null
-        const period         = extractPeriod(resolvedTitle)
-
-        const payload = {
-          title:            resolvedTitle,
-          source_type:      sourceType,
-          tickers,
-          primary_ticker:   primaryTicker,
-          period,
-          theme:            themeInput.trim()  || (extracted.themes_mentioned || [])[0] || '',
-          raw_text:         (typeof extracted.raw_text === 'string' ? extracted.raw_text : '').substring(0, 8000),
-          summary:          typeof extracted.summary === 'string' ? extracted.summary : '',
-          // Legacy flat format (old schema)
-          key_points:       Array.isArray(extracted.key_points)       ? extracted.key_points       : [],
-          // New structured format (matches DELL Gem report structure)
-          key_takeaways:    Array.isArray(extracted.key_takeaways)    ? extracted.key_takeaways    : [],
-          strengths:        Array.isArray(extracted.strengths)        ? extracted.strengths        : [],
-          weaknesses:       Array.isArray(extracted.weaknesses)       ? extracted.weaknesses       : [],
-          explosive_growth: extracted.explosive_growth && typeof extracted.explosive_growth === 'object'
-            ? extracted.explosive_growth
-            : null,
-          growth_confidence: extracted.growth_confidence && typeof extracted.growth_confidence === 'object'
-            ? extracted.growth_confidence
-            : null,
-          catalyst_signals: Array.isArray(extracted.catalyst_signals) ? extracted.catalyst_signals : [],
-          key_metrics:      Array.isArray(extracted.key_metrics)      ? extracted.key_metrics      : [],
-          themes_mentioned: Array.isArray(extracted.themes_mentioned) ? extracted.themes_mentioned : [],
-          sentiment:        typeof extracted.sentiment === 'string'   ? extracted.sentiment        : 'neutral',
-          file_name:        file.name,
-        }
-
-        const saved = addSource(payload)
-        setLastSaved(saved)
-
         if (dossierThemes) {
           const { addTheme } = useThematicStore.getState()
           for (const [name, data] of Object.entries(dossierThemes)) {
@@ -901,23 +934,11 @@ export default function ResearchLibrary({ earningsMode = false }) {
           }
         }
 
-        const currentThemes = useThematicStore.getState().themes
-        if (saved && Object.keys(currentThemes).length > 0) {
-          try {
-            setUploadStatus('Cross-referencing with dossiers…')
-            const result = provider === 'local'
-              ? await autoAnalyzeWithOllama(saved, currentThemes)
-              : provider === 'openrouter'
-              ? await autoAnalyzeWithOpenRouter(saved, currentThemes, openRouterApiKey, researchOpenRouterModel)
-              : await autoAnalyzeWithGemini(saved, currentThemes, apiKey)
-            if (result) {
-              setAnalysis(result)
-              updateSource(saved.id, { insights: result })
-            }
-          } catch (ae) {
-            console.warn('[ResearchLibrary] auto-analysis failed:', ae?.message)
-          }
-        }
+        await persistExtractedSource({
+          extracted,
+          fileName: file.name,
+        })
+
       } catch (err) {
         console.error(err)
         const msg = err?.message || (typeof err === 'string' ? err : null) || 'Unknown error — check console for details'
@@ -932,13 +953,80 @@ export default function ResearchLibrary({ earningsMode = false }) {
     setUploadStatus('')
     setUploadIndex(0)
     setUploadTotal(0)
-  }, [apiKey, openRouterApiKey, researchOpenRouterModel, provider, sourceType, tickerInput, themeInput, addSource, createDossier, getAgentsForTrigger, selectedAgentId, updateSource])
+  }, [apiKey, openRouterApiKey, researchOpenRouterModel, provider, sourceType, createDossier, getAgentsForTrigger, persistExtractedSource, selectedAgentId])
 
   const handleDrop = useCallback(e => {
     e.preventDefault(); setDragging(false)
     const files = [...e.dataTransfer.files].filter(f => f.type === 'application/pdf' || isAudioFile(f))
     if (files.length) handleFiles(files)
   }, [handleFiles])
+
+  const handleTranscriptImport = useCallback(async () => {
+    const url = transcriptUrl.trim()
+    if (!url) {
+      setError('Paste a transcript page URL first.')
+      return
+    }
+
+    const allAgentsForType = getAgentsForTrigger('researchLibrary', 'earnings_call')
+    const agentForType = selectedAgentId
+      ? allAgentsForType.find(a => a.id === selectedAgentId) || allAgentsForType[0]
+      : allAgentsForType[0] || null
+
+    if (!agentForType) {
+      setError('No earnings transcript agent is configured in Agent Studio.')
+      return
+    }
+
+    setError(null)
+    setAnalysis(null)
+    setLastSaved(null)
+    setUploading(true)
+    setUploadTotal(1)
+    setUploadIndex(1)
+    setUploadFile('Transcript link')
+
+    try {
+      setUploadStatus('Fetching transcript page…')
+      const res = await fetch('/api/transcript', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error || 'Transcript import failed.')
+
+      const extracted = await runAgent({
+        agent: agentForType,
+        textContent: data.text,
+        sourceLabel: data.title,
+        geminiApiKey: apiKey,
+        openRouterApiKey,
+        tickerHint: tickerInput.trim(),
+        themeHint: themeInput.trim(),
+        sourceType: 'earnings_call',
+        onStatus: status => setUploadStatus(status),
+      })
+
+      await persistExtractedSource({
+        extracted,
+        fileName: data.title || 'Transcript Import',
+        sourceUrl: data.sourceUrl || url,
+        fallbackTitle: data.title || 'Transcript Import',
+      })
+
+      setTranscriptUrl('')
+    } catch (err) {
+      console.error(err)
+      setError(err?.message || 'Transcript import failed.')
+    } finally {
+      setUploading(false)
+      setUploadFile('')
+      setUploadStatus('')
+      setUploadIndex(0)
+      setUploadTotal(0)
+    }
+  }, [apiKey, getAgentsForTrigger, openRouterApiKey, persistExtractedSource, selectedAgentId, themeInput, tickerInput, transcriptUrl])
 
   const handleGoogleDrive = useCallback(async () => {
     if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) {
@@ -1057,6 +1145,29 @@ export default function ResearchLibrary({ earningsMode = false }) {
 
             {/* ── earningscall.biz quick-access panel ── */}
             <EarningsCallBizPanel tickerHint={tickerInput} />
+
+            <div className="bg-white/[0.02] border border-white/10 rounded-xl p-4 space-y-3">
+              <div>
+                <p className="text-sm font-semibold text-white">Import From Transcript Link</p>
+                <p className="text-xs text-gray-600 mt-1">Paste a CapEdge transcript page URL and let your selected earnings agent analyze it directly.</p>
+              </div>
+              <div className="flex flex-col lg:flex-row gap-2">
+                <input
+                  type="url"
+                  value={transcriptUrl}
+                  onChange={e => setTranscriptUrl(e.target.value)}
+                  placeholder="https://capedge.com/company/1674101/transcripts/2026/q1"
+                  className="flex-1 bg-white/[0.04] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors"
+                />
+                <button
+                  onClick={handleTranscriptImport}
+                  disabled={uploading}
+                  className="px-4 py-2.5 rounded-xl bg-accent-blue/15 border border-accent-blue/25 text-sm font-medium text-accent-blue hover:bg-accent-blue/20 transition-all disabled:opacity-40"
+                >
+                  Import Link
+                </button>
+              </div>
+            </div>
 
             <div className="space-y-2">
               <div className="flex flex-wrap gap-2">

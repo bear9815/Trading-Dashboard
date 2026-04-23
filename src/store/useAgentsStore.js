@@ -89,6 +89,40 @@ Constraints:
 - Every point must contribute to an investor's understanding and decision-making.
 - Base analysis strictly on the provided content — no outside speculation.`
 
+const EARNINGS_GUIDANCE_INSTRUCTIONS = `You are a sell-side quality earnings revisions analyst focused on what changed, how believable it is, and what matters next.
+
+Your job:
+- Identify the 3-5 biggest revisions in guidance, demand commentary, margins, backlog, bookings, or capital allocation.
+- Separate durable demand signals from one-time tailwinds.
+- Highlight where management sounds confident, where they hedge, and where answers feel incomplete.
+- Focus on forward-looking catalysts, estimate-risk, and the setup for the next 1-3 quarters.
+- Be concise, evidence-based, and useful to an active growth investor.`
+
+const DEEP_DIVE_COMPOUNDER_INSTRUCTIONS = `You are a high-conviction growth research analyst building a compounder case from deep-dive research.
+
+Your job:
+- Distill the core thesis, moat, TAM, adoption curve, and management quality.
+- Identify what would make this company a multi-year compounder versus a temporary story stock.
+- Separate mission-critical evidence from marketing language.
+- Emphasize durable advantages, reinvestment runway, margin structure, and what the market may still be missing.
+- Write like an institutional analyst preparing a focused research memo.`
+
+const COMPETITIVE_INTELLIGENCE_INSTRUCTIONS = `You are a strategic competitive intelligence analyst.
+
+Your job:
+- Map the competitive landscape, value chain, bottlenecks, substitutes, and second-order beneficiaries.
+- Identify who captures value, who gets squeezed, and where pricing power actually sits.
+- Clarify ecosystem relationships, supplier dependence, customer concentration, and strategic chokepoints.
+- Turn dense documents into a clean picture of industry structure and strategic leverage points.`
+
+const RISK_SENTINEL_INSTRUCTIONS = `You are a skeptical risk analyst hired to find what can break the thesis.
+
+Your job:
+- Surface hidden fragility: slowing demand, margin pressure, weak unit economics, concentration risk, financing risk, execution risk, and narrative mismatch.
+- Pay special attention to vague language, selective framing, and questions management does not answer directly.
+- Stress test the thesis with concrete invalidation points and near-term watch items.
+- Be balanced but demanding: if the evidence is strong, say so; if it is weak, explain exactly why.`
+
 const DEFAULT_AGENTS = [
   {
     id:           'earnings-call-v1',
@@ -106,6 +140,70 @@ const DEFAULT_AGENTS = [
     createdAt:    '2026-04-20T00:00:00.000Z',
     updatedAt:    '2026-04-20T00:00:00.000Z',
   },
+  {
+    id:           'earnings-guidance-v1',
+    name:         'Guidance & Revision Scout',
+    description:  'Tracks what changed in guidance, segment commentary, backlog, and estimate risk across the next 1-3 quarters.',
+    icon:         'TrendingUp',
+    color:        'blue',
+    instructions: EARNINGS_GUIDANCE_INSTRUCTIONS,
+    provider:     'gemini',
+    model:        'gemini-2.5-flash',
+    triggers:        { researchLibrary: ['earnings_call'] },
+    knowledgeBaseId: null,
+    tools:           { webSearch: false, secEdgar: false },
+    isBuiltIn:       true,
+    createdAt:    '2026-04-23T00:00:00.000Z',
+    updatedAt:    '2026-04-23T00:00:00.000Z',
+  },
+  {
+    id:           'compounder-deep-dive-v1',
+    name:         'Compounder Deep Dive',
+    description:  'Builds a high-conviction growth thesis around moat, TAM, reinvestment runway, and multi-year compounding potential.',
+    icon:         'BookOpen',
+    color:        'green',
+    instructions: DEEP_DIVE_COMPOUNDER_INSTRUCTIONS,
+    provider:     'gemini',
+    model:        'gemini-2.5-flash',
+    triggers:        { researchLibrary: ['deep_dive'] },
+    knowledgeBaseId: null,
+    tools:           { webSearch: false, secEdgar: false },
+    isBuiltIn:       true,
+    createdAt:    '2026-04-23T00:00:00.000Z',
+    updatedAt:    '2026-04-23T00:00:00.000Z',
+  },
+  {
+    id:           'competitive-intel-v1',
+    name:         'Competitive Intelligence Mapper',
+    description:  'Maps industry structure, suppliers, bottlenecks, substitutes, and value capture across deep dives and other documents.',
+    icon:         'Search',
+    color:        'yellow',
+    instructions: COMPETITIVE_INTELLIGENCE_INSTRUCTIONS,
+    provider:     'gemini',
+    model:        'gemini-2.5-flash',
+    triggers:        { researchLibrary: ['deep_dive', 'other'] },
+    knowledgeBaseId: null,
+    tools:           { webSearch: false, secEdgar: false },
+    isBuiltIn:       true,
+    createdAt:    '2026-04-23T00:00:00.000Z',
+    updatedAt:    '2026-04-23T00:00:00.000Z',
+  },
+  {
+    id:           'risk-sentinel-v1',
+    name:         'Risk Sentinel',
+    description:  'Pressure-tests the thesis for fragility, weak answers, execution risk, and concrete invalidation signals.',
+    icon:         'Target',
+    color:        'pink',
+    instructions: RISK_SENTINEL_INSTRUCTIONS,
+    provider:     'gemini',
+    model:        'gemini-2.5-flash',
+    triggers:        { researchLibrary: ['earnings_call', 'deep_dive'] },
+    knowledgeBaseId: null,
+    tools:           { webSearch: false, secEdgar: false },
+    isBuiltIn:       true,
+    createdAt:    '2026-04-23T00:00:00.000Z',
+    updatedAt:    '2026-04-23T00:00:00.000Z',
+  },
 ]
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -120,6 +218,21 @@ export const useAgentsStore = create(
   persist(
     (set, get) => ({
       agents: DEFAULT_AGENTS,
+
+      seedDefaultAgents: () => {
+        const existing = get().agents || []
+        const byId = new Map(existing.map(agent => [agent.id, agent]))
+        let changed = false
+
+        for (const builtin of DEFAULT_AGENTS) {
+          if (!byId.has(builtin.id)) {
+            byId.set(builtin.id, builtin)
+            changed = true
+          }
+        }
+
+        if (changed) set({ agents: [...byId.values()] })
+      },
 
       // Migrate any agent pointing at a deprecated model.
       // Only updates state if something actually changed — avoids a no-op write
@@ -198,7 +311,10 @@ export const useAgentsStore = create(
       // read only DEFAULT_AGENTS, then set() would overwrite IDB with the defaults
       // — erasing any custom agents the user created.
       onRehydrateStorage: () => (state, error) => {
-        if (!error && state) state.migrateDeprecatedModels()
+        if (!error && state) {
+          state.seedDefaultAgents()
+          state.migrateDeprecatedModels()
+        }
       },
     }
   )

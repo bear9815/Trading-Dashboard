@@ -40,10 +40,10 @@ function AgentCard({ agent, onEdit, onDuplicate, onDelete, onChat }) {
   const modelShort = (agent.model || '').split('/').pop().replace(/:free$/, '')
 
   return (
-    <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-all group flex flex-col">
+    <div className="bg-surface-50 border border-white/10 rounded-2xl overflow-hidden hover:border-white/20 transition-all group flex flex-col min-h-[290px]">
       <div className={`h-0.5 w-full ${colors.dot}`} />
 
-      <div className="p-5 flex flex-col flex-1">
+      <div className="p-6 flex flex-col flex-1">
         {/* Icon + actions */}
         <div className="flex items-start justify-between mb-4">
           <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${colors.bg} border ${colors.border}`}>
@@ -64,8 +64,8 @@ function AgentCard({ agent, onEdit, onDuplicate, onDelete, onChat }) {
         </div>
 
         {/* Name + description */}
-        <h3 className="text-sm font-semibold text-white mb-1.5">{agent.name}</h3>
-        <p className="text-xs text-gray-500 leading-relaxed line-clamp-3 flex-1 mb-4">{agent.description}</p>
+        <h3 className="text-base font-semibold text-white mb-1.5">{agent.name}</h3>
+        <p className="text-sm text-gray-500 leading-relaxed line-clamp-4 flex-1 mb-5">{agent.description}</p>
 
         {/* Badges */}
         <div className="flex flex-wrap gap-1.5 mb-4">
@@ -91,12 +91,12 @@ function AgentCard({ agent, onEdit, onDuplicate, onDelete, onChat }) {
 
         <div className="flex gap-2">
           <button onClick={() => onChat(agent)}
-            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border border-accent-blue/30 bg-accent-blue/10 text-xs text-accent-blue hover:bg-accent-blue/20 transition-all font-medium">
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-accent-blue/30 bg-accent-blue/10 text-sm text-accent-blue hover:bg-accent-blue/20 transition-all font-medium">
             <MessageSquare size={12} />
             Chat
           </button>
           <button onClick={() => onEdit(agent)}
-            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border border-white/10 text-xs text-gray-400 hover:text-white hover:border-white/25 hover:bg-white/[0.03] transition-all">
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border border-white/10 text-sm text-gray-400 hover:text-white hover:border-white/25 hover:bg-white/[0.03] transition-all">
             <Pencil size={12} />
             Edit
           </button>
@@ -167,7 +167,7 @@ function AgentEditor({ agent, onSave, onClose }) {
     <div className="fixed inset-0 z-50 flex items-stretch justify-end">
       <div className="flex-1 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="w-full max-w-2xl bg-surface border-l border-white/10 flex flex-col h-full shadow-2xl">
+      <div className="w-full max-w-4xl bg-surface border-l border-white/10 flex flex-col h-full shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
           <div>
@@ -448,6 +448,25 @@ export default function Agents() {
   const [filter,     setFilter]    = useState('all')
   const [chatAgent,  setChatAgent] = useState(null)
 
+  const providerCounts = {
+    gemini: agents.filter(a => a.provider === 'gemini').length,
+    openrouter: agents.filter(a => a.provider === 'openrouter').length,
+    local: agents.filter(a => a.provider === 'local').length,
+  }
+  const triggerCoverage = {
+    earnings: agents.filter(a => (a.triggers?.researchLibrary || []).includes('earnings_call')).length,
+    deepDive: agents.filter(a => (a.triggers?.researchLibrary || []).includes('deep_dive')).length,
+    other: agents.filter(a => (a.triggers?.researchLibrary || []).includes('other')).length,
+  }
+  const builtInCount = agents.filter(a => a.isBuiltIn).length
+  const starterAgents = [
+    'Earnings Call Analyst',
+    'Guidance & Revision Scout',
+    'Compounder Deep Dive',
+    'Competitive Intelligence Mapper',
+    'Risk Sentinel',
+  ]
+
   function handleEdit(agent)    { setEditing(agent) }
   function handleNew()          { setEditing({ triggers: {} }) }
   function handleChat(agent)    { setChatAgent(agent) }
@@ -485,22 +504,39 @@ export default function Agents() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6 xl:p-8 max-w-[1600px] mx-auto">
 
       {/* Page header */}
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex items-start justify-between mb-7 gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white mb-1">Agent Studio</h1>
-          <p className="text-sm text-gray-500">Build and manage AI analysis agents — your personal Gem Studio</p>
+          <h1 className="text-3xl font-bold text-white mb-1">Agent Studio</h1>
+          <p className="text-base text-gray-500">Build, chat with, and route specialized research agents across your dashboard.</p>
         </div>
         {tab === 'agents' && (
           <button onClick={handleNew}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/20 text-accent-blue border border-accent-blue/30 hover:bg-accent-blue/30 text-sm font-medium transition-all">
+            className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-accent-blue/20 text-accent-blue border border-accent-blue/30 hover:bg-accent-blue/30 text-sm font-medium transition-all shrink-0">
             <Plus size={15} />
             New Agent
           </button>
         )}
       </div>
+
+      {tab === 'agents' && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
+          {[
+            { label: 'Total Agents', value: agents.length, meta: `${builtInCount} built-in starter agents` },
+            { label: 'Earnings Coverage', value: triggerCoverage.earnings, meta: 'Agents that auto-fit transcript work' },
+            { label: 'Deep Dive Coverage', value: triggerCoverage.deepDive, meta: 'Agents ready for long-form research' },
+            { label: 'Knowledge Bases', value: knowledgeBases.length, meta: 'Attach indexed context to any agent' },
+          ].map(card => (
+            <div key={card.label} className="bg-surface-50 border border-white/10 rounded-2xl p-5">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-gray-600 mb-2">{card.label}</p>
+              <p className="text-3xl font-semibold text-white">{card.value}</p>
+              <p className="text-sm text-gray-500 mt-2">{card.meta}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Top-level tabs */}
       <div className="flex items-center gap-1 border-b border-white/[0.08] mb-7">
@@ -529,70 +565,103 @@ export default function Agents() {
       {/* ── Agents tab ── */}
       {tab === 'agents' && (
         <>
-          {/* Filter tabs */}
-          <div className="flex items-center gap-1.5 mb-6">
-            {[
-              ['all',          `All (${agents.length})`],
-              ['gemini',       `Gemini (${agents.filter(a => a.provider === 'gemini').length})`],
-              ['openrouter',   `OpenRouter (${agents.filter(a => a.provider === 'openrouter').length})`],
-              ['local',        `Local (${agents.filter(a => a.provider === 'local').length})`],
-            ].map(([val, label]) => (
-              <button key={val} onClick={() => setFilter(val)}
-                className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${filter === val ? 'bg-accent-blue/20 border-accent-blue/40 text-accent-blue' : 'bg-white/[0.03] border-white/10 text-gray-500 hover:border-white/20 hover:text-gray-300'}`}>
-                {label}
-              </button>
-            ))}
-          </div>
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-6">
+            <div>
+              {/* Filter tabs */}
+              <div className="flex items-center gap-1.5 mb-6 flex-wrap">
+                {[
+                  ['all', `All (${agents.length})`],
+                  ['gemini', `Gemini (${providerCounts.gemini})`],
+                  ['openrouter', `OpenRouter (${providerCounts.openrouter})`],
+                  ['local', `Local (${providerCounts.local})`],
+                ].map(([val, label]) => (
+                  <button key={val} onClick={() => setFilter(val)}
+                    className={`text-sm px-4 py-2 rounded-xl border transition-all ${filter === val ? 'bg-accent-blue/20 border-accent-blue/40 text-accent-blue' : 'bg-white/[0.03] border-white/10 text-gray-500 hover:border-white/20 hover:text-gray-300'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
 
-          {/* Agent grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-            {filtered.map(agent => (
-              <AgentCard key={agent.id} agent={agent}
-                onEdit={handleEdit}
-                onDuplicate={handleDuplicate}
-                onDelete={handleDelete}
-                onChat={handleChat} />
-            ))}
+              {/* Agent grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-5 mb-8">
+                {filtered.map(agent => (
+                  <AgentCard key={agent.id} agent={agent}
+                    onEdit={handleEdit}
+                    onDuplicate={handleDuplicate}
+                    onDelete={handleDelete}
+                    onChat={handleChat} />
+                ))}
 
-            <button onClick={handleNew}
-              className="bg-surface-50 border-2 border-dashed border-white/10 rounded-xl p-5 flex flex-col items-center justify-center gap-2.5 text-gray-600 hover:text-gray-400 hover:border-white/20 transition-all min-h-[200px]">
-              <Plus size={20} />
-              <span className="text-xs font-medium">New Agent</span>
-            </button>
-          </div>
+                <button onClick={handleNew}
+                  className="bg-surface-50 border-2 border-dashed border-white/10 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 text-gray-600 hover:text-gray-400 hover:border-white/20 transition-all min-h-[290px]">
+                  <Plus size={22} />
+                  <span className="text-sm font-medium">Create New Agent</span>
+                </button>
+              </div>
 
-          {/* How it works */}
-          <div className="bg-surface-50 border border-white/10 rounded-xl p-5">
-            <h3 className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-4">How Agents Work</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {[
-                {
-                  step: '1',
-                  title: 'Write Instructions',
-                  desc: 'The system prompt defines the agent\'s persona, expertise, and analysis framework — exactly like a Gemini Gem. You own the prompt.',
-                },
-                {
-                  step: '2',
-                  title: 'Pick a Model',
-                  desc: 'Choose Gemini, any OpenRouter model (100+ providers), or run fully local with Ollama. Audio files always use Gemini\'s Files API.',
-                },
-                {
-                  step: '3',
-                  title: 'Assign Triggers',
-                  desc: 'Set where in the dashboard this agent activates — Research Library source types now, with Morning Briefing, Journal, and Trade Analysis coming soon.',
-                },
-              ].map(({ step, title, desc }) => (
-                <div key={step} className="flex gap-3">
-                  <span className="w-6 h-6 rounded-full bg-accent-blue/15 text-accent-blue text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
-                    {step}
-                  </span>
-                  <div>
-                    <p className="text-xs font-semibold text-gray-300 mb-1">{title}</p>
-                    <p className="text-xs text-gray-600 leading-relaxed">{desc}</p>
-                  </div>
+              {/* How it works */}
+              <div className="bg-surface-50 border border-white/10 rounded-2xl p-6">
+                <h3 className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-4">How Agents Work</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {[
+                    {
+                      step: '1',
+                      title: 'Write Instructions',
+                      desc: 'The system prompt defines the agent persona, expertise, and analysis framework. You own the thinking style.',
+                    },
+                    {
+                      step: '2',
+                      title: 'Pick a Model',
+                      desc: 'Use Gemini, OpenRouter, or Ollama depending on speed, cost, and depth. Audio still routes through Gemini.',
+                    },
+                    {
+                      step: '3',
+                      title: 'Assign Triggers',
+                      desc: 'Attach agents to research-library workflows now, with broader dashboard triggers ready to expand later.',
+                    },
+                  ].map(({ step, title, desc }) => (
+                    <div key={step} className="flex gap-3">
+                      <span className="w-7 h-7 rounded-full bg-accent-blue/15 text-accent-blue text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                        {step}
+                      </span>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-300 mb-1">{title}</p>
+                        <p className="text-sm text-gray-600 leading-relaxed">{desc}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
             </div>
+
+            <aside className="space-y-5">
+              <div className="bg-surface-50 border border-white/10 rounded-2xl p-5">
+                <h3 className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-4">Starter Stack</h3>
+                <div className="space-y-3">
+                  {starterAgents.map(name => (
+                    <div key={name} className="rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3">
+                      <p className="text-sm font-semibold text-white">{name}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-surface-50 border border-white/10 rounded-2xl p-5">
+                <h3 className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-4">Coverage</h3>
+                <div className="space-y-3 text-sm text-gray-500">
+                  <p>Earnings workflows: {triggerCoverage.earnings} agents</p>
+                  <p>Deep-dive workflows: {triggerCoverage.deepDive} agents</p>
+                  <p>Other document workflows: {triggerCoverage.other} agents</p>
+                </div>
+              </div>
+
+              <div className="bg-surface-50 border border-white/10 rounded-2xl p-5">
+                <h3 className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-4">Recommendation</h3>
+                <p className="text-sm text-gray-500 leading-relaxed">
+                  Keep the built-in starter stack for ingestion, then create one or two personal agents for your exact style: position-sizing discipline, secular-growth filters, or catalyst tracking.
+                </p>
+              </div>
+            </aside>
           </div>
         </>
       )}

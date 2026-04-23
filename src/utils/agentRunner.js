@@ -251,6 +251,8 @@ async function buildKBContext(agent, geminiApiKey, tickerHint, themeHint, source
 export async function runAgent({
   agent,
   file,
+  textContent = '',
+  sourceLabel = '',
   geminiApiKey,
   openRouterApiKey,
   tickerHint = '',
@@ -258,7 +260,8 @@ export async function runAgent({
   sourceType = '',
   onStatus,
 }) {
-  const isAudio = isAudioFile(file)
+  const isTextOnly = !file && !!textContent
+  const isAudio = file ? isAudioFile(file) : false
 
   // Inject KB context if agent has one assigned
   let kbContext = ''
@@ -270,6 +273,41 @@ export async function runAgent({
   const model        = agent.model || 'gemini-2.5-flash'
   const systemPrompt = agent.instructions
   const userPrompt   = `${kbContext ? kbContext + '\n\n' : ''}${buildOutputPrompt(tickerHint, themeHint)}`
+
+  if (isTextOnly) {
+    const labeledContent = sourceLabel
+      ? `[SOURCE: ${sourceLabel}]\n\n${textContent}`
+      : textContent
+
+    if (agent.provider === 'openrouter') {
+      if (!openRouterApiKey) throw new Error('OpenRouter API key required. Add it in Settings.')
+      return callOpenRouter(
+        openRouterApiKey,
+        model,
+        systemPrompt,
+        `${userPrompt}\n\nDOCUMENT CONTENT:\n${labeledContent}`,
+        onStatus
+      )
+    }
+
+    if (agent.provider === 'local') {
+      return callLocal(
+        model,
+        systemPrompt,
+        `${userPrompt}\n\nDOCUMENT CONTENT:\n${labeledContent}`,
+        onStatus
+      )
+    }
+
+    if (!geminiApiKey) throw new Error('Gemini API key required. Add it in Settings → API Keys.')
+    return callGemini(
+      geminiApiKey,
+      model,
+      systemPrompt,
+      [{ text: `${userPrompt}\n\nDOCUMENT CONTENT:\n${labeledContent}` }],
+      onStatus
+    )
+  }
 
   // ── Audio: always Gemini Files API regardless of agent provider ───────────
   // OpenRouter has no audio API. For OpenRouter agents we must also use a valid
