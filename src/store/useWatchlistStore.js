@@ -35,6 +35,12 @@ export function parseChartMeta(raw) {
     return { label: host, type: 'other' }
   }
 
+  // TradingView plain symbol fallback (e.g. NASDAQ:NVDA)
+  const tvPlain = s.replace(/\s+/g, '').toUpperCase()
+  if (/^[A-Z]+:[A-Z0-9.$-]{1,15}$/.test(tvPlain)) {
+    return { label: tvPlain.split(':').pop(), type: 'tradingview' }
+  }
+
   // Plain ticker fallback (1–12 uppercase chars/digits/$.)
   const plain = s.replace(/\s+/g, '').toUpperCase()
   if (/^[A-Z0-9.$]{1,12}$/.test(plain)) {

@@ -4,6 +4,7 @@ import { useThematicStore }        from '../../store/useThematicStore.js'
 import { useAuthStore }            from '../../store/useAuthStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import ResearchLibrary, { ActiveSignals } from './ResearchLibrary.jsx'
+import ThemeWatchlist from './ThemeWatchlist.jsx'
 import { refreshNewFields } from '../../utils/thematicGemini.js'
 import { refreshNewFieldsWithOpenRouter } from '../../utils/researchAi.js'
 import { refreshNewFieldsWithOllama } from '../../utils/localResearch.js'
@@ -1490,6 +1491,13 @@ export default function ThematicResearch() {
       ════════════════════════════════════ */}
       {growthTab === 'themes' && (
         <>
+          <ThemeWatchlist
+            provider={provider}
+            apiKey={apiKey}
+            openRouterApiKey={openRouterApiKey}
+            researchOpenRouterModel={researchOpenRouterModel}
+          />
+
           {/* Research Library (deep dives + other — not earnings) */}
           <ResearchLibrary />
 
