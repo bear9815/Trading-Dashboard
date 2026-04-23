@@ -20,6 +20,9 @@ function normalizeRow(row = {}) {
     majorCustomers: cleanArray(row.majorCustomers),
     dependencies: cleanArray(row.dependencies),
     relatedDriver: row.relatedDriver || '—',
+    customerOf: cleanArray(row.customerOf),
+    supplierTo: cleanArray(row.supplierTo),
+    competesWith: cleanArray(row.competesWith),
   }
 }
 
@@ -36,6 +39,9 @@ For each US-listed stock symbol below, return a concise primer-style row with:
 - majorCustomers: 0-3 important customer/end-market labels
 - dependencies: 0-3 important suppliers / dependencies / ecosystem links
 - relatedDriver: one short phrase describing the main thematic driver that connects the name to others
+- customerOf: 0-3 public companies or customer groups this company sells into
+- supplierTo: 0-3 public companies or ecosystem nodes this company supplies into
+- competesWith: 0-3 public companies it most directly competes with
 
 Be concise and practical for a growth-stock watchlist. If something is uncertain, use the most likely high-level answer rather than overexplaining.
 
@@ -51,7 +57,10 @@ Return ONLY valid JSON:
       "whatTheyDo": "Designs GPUs and AI compute platforms",
       "majorCustomers": ["Hyperscalers", "Enterprises"],
       "dependencies": ["TSMC", "HBM memory", "Server OEMs"],
-      "relatedDriver": "AI training and inference demand"
+      "relatedDriver": "AI training and inference demand",
+      "customerOf": ["Hyperscalers"],
+      "supplierTo": ["Server OEMs"],
+      "competesWith": ["AMD"]
     }
   ]
 }
