@@ -599,7 +599,7 @@ export default function ThemeWatchlist({
   }
 
   return (
-    <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden">
+    <div className="research-elevated bg-surface-50 border border-white/10 rounded-xl overflow-hidden">
       <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3">
         <Table2 size={14} className="text-accent-blue" />
         <div className="flex-1 min-w-0">

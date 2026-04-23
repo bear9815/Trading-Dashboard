@@ -152,13 +152,20 @@
 [data-theme="dusk"] ::-webkit-scrollbar-thumb { background: rgba(80,50,20,0.25); }
 [data-theme="dusk"] ::-webkit-scrollbar-thumb:hover { background: rgba(80,50,20,0.4); }
 
+[data-theme="dark"] .text-gray-400,
+[data-theme="slate"] .text-gray-400 { color: #d5dfef !important; }
+[data-theme="dark"] .text-gray-500,
+[data-theme="slate"] .text-gray-500 { color: #b4c2d8 !important; }
+[data-theme="dark"] .text-gray-600,
+[data-theme="slate"] .text-gray-600 { color: #8fa1bd !important; }
+
 /* ═══════════════════════════════════════════════════════════════
    BASE STYLES
    ═══════════════════════════════════════════════════════════════ */
 
 @layer base {
   html {
-    font-size: 16px;
+    font-size: 17px;
   }
 
   body {
@@ -290,5 +297,42 @@
 
   .text-muted {
     color: rgb(154 167 186);
+  }
+
+  .research-elevated {
+    color: rgb(220 230 244);
+  }
+
+  .research-elevated .text-xs {
+    font-size: 0.84rem !important;
+    line-height: 1.4rem !important;
+  }
+
+  .research-elevated .text-\[10px\] {
+    font-size: 0.78rem !important;
+    line-height: 1.25rem !important;
+  }
+
+  .research-elevated .text-\[11px\] {
+    font-size: 0.82rem !important;
+    line-height: 1.3rem !important;
+  }
+
+  .research-elevated .text-sm {
+    font-size: 0.98rem !important;
+    line-height: 1.5rem !important;
+  }
+
+  .research-elevated .text-gray-400 {
+    color: #dce6f5 !important;
+  }
+
+  .research-elevated .text-gray-500 {
+    color: #c5d1e6 !important;
+  }
+
+  .research-elevated .text-gray-600,
+  .research-elevated .text-gray-700 {
+    color: #9eb0ca !important;
   }
 }

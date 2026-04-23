@@ -1388,7 +1388,7 @@ export default function ThematicResearch() {
   const deepDiveCount = librarySources.filter(s => s.source_type !== 'earnings_call').length
 
   return (
-    <div className="p-5 space-y-5">
+    <div className="research-elevated p-5 space-y-5">
 
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">

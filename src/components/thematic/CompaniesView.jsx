@@ -272,7 +272,7 @@ export default function CompaniesView({ sources, onViewReport, onUpdateSource })
   }
 
   return (
-    <div className="flex gap-5">
+    <div className="research-elevated flex gap-5">
 
       {/* ── Left: Ticker index ── */}
       <div className="w-52 shrink-0 space-y-1.5">

@@ -249,7 +249,7 @@ function SourceCard({ source, onRemove, onView }) {
   }
 
   return (
-    <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-colors">
+    <div className="research-elevated bg-surface-50 border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition-colors">
       <div className="flex items-start gap-3 px-4 py-4">
         <FileText size={16} className="text-gray-500 mt-0.5 shrink-0"/>
         <div className="flex-1 min-w-0">
@@ -429,7 +429,7 @@ export function ActiveSignals() {
   if (sources.length === 0) return null
 
   return (
-    <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden">
+    <div className="research-elevated bg-surface-50 border border-white/10 rounded-xl overflow-hidden">
       <button onClick={() => setShow(p => !p)}
         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-colors">
         <Zap size={14} className="text-accent-yellow"/>
