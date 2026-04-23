@@ -71,6 +71,10 @@ function arrayText(value) {
   return Array.isArray(value) ? value.join(', ') : String(value || '')
 }
 
+function safeList(value) {
+  return Array.isArray(value) ? value.filter(Boolean) : []
+}
+
 function splitList(value) {
   return String(value || '')
     .split(/[,;|]/)
@@ -157,10 +161,13 @@ function RelationshipExplorer({ row, rowsBySymbol }) {
     )
   }
 
+  const customerOf = safeList(row.customerOf)
+  const supplierTo = safeList(row.supplierTo)
+  const competesWith = safeList(row.competesWith)
   const relatedSymbols = [...new Set([
-    ...row.customerOf,
-    ...row.supplierTo,
-    ...row.competesWith,
+    ...customerOf,
+    ...supplierTo,
+    ...competesWith,
   ])].map(sym => ({
     symbol: sym,
     row: rowsBySymbol[sym?.toUpperCase?.() || sym] || null,
@@ -178,9 +185,9 @@ function RelationshipExplorer({ row, rowsBySymbol }) {
       </div>
       <div className="space-y-2">
         {[
-          ['Customer Of', row.customerOf],
-          ['Supplier To', row.supplierTo],
-          ['Competes With', row.competesWith],
+          ['Customer Of', customerOf],
+          ['Supplier To', supplierTo],
+          ['Competes With', competesWith],
         ].map(([label, list]) => (
           <div key={label}>
             <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-1">{label}</p>
@@ -415,9 +422,9 @@ export default function ThemeWatchlist({
 
   const relationshipGroups = useMemo(() => {
     const buckets = [
-      ...rows.flatMap(row => row.customerOf.map(v => ({ type: 'Customer Of', value: v, symbol: row.symbol }))),
-      ...rows.flatMap(row => row.supplierTo.map(v => ({ type: 'Supplier To', value: v, symbol: row.symbol }))),
-      ...rows.flatMap(row => row.competesWith.map(v => ({ type: 'Competes With', value: v, symbol: row.symbol }))),
+      ...rows.flatMap(row => safeList(row.customerOf).map(v => ({ type: 'Customer Of', value: v, symbol: row.symbol }))),
+      ...rows.flatMap(row => safeList(row.supplierTo).map(v => ({ type: 'Supplier To', value: v, symbol: row.symbol }))),
+      ...rows.flatMap(row => safeList(row.competesWith).map(v => ({ type: 'Competes With', value: v, symbol: row.symbol }))),
     ]
     const map = new Map()
     for (const item of buckets) {
