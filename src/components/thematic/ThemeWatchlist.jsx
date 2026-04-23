@@ -75,6 +75,10 @@ function safeList(value) {
   return Array.isArray(value) ? value.filter(Boolean) : []
 }
 
+function normalizeKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
 function splitList(value) {
   return String(value || '')
     .split(/[,;|]/)
@@ -113,6 +117,42 @@ function normalizeEditableRow(form) {
   }
 }
 
+function getFallbackCompetitors(row, rows) {
+  const themeKey = normalizeKey(row?.theme)
+  const ecosystemKey = normalizeKey(row?.ecosystem)
+  if (!themeKey && !ecosystemKey) return []
+  return rows
+    .filter(other => other?.symbol && other.symbol !== row?.symbol)
+    .filter(other => {
+      const otherTheme = normalizeKey(other.theme)
+      const otherEcosystem = normalizeKey(other.ecosystem)
+      return (themeKey && otherTheme === themeKey) || (ecosystemKey && otherEcosystem === ecosystemKey)
+    })
+    .slice(0, 4)
+    .map(other => other.symbol)
+}
+
+function buildRelationshipLayer(row, rows) {
+  const customerLinks = safeList(row?.customerOf)
+  const supplierLinks = safeList(row?.supplierTo)
+  const competitorLinks = safeList(row?.competesWith)
+
+  const derivedCustomers = customerLinks.length ? customerLinks : safeList(row?.majorCustomers)
+  const derivedSuppliers = supplierLinks.length ? supplierLinks : safeList(row?.dependencies)
+  const derivedCompetitors = competitorLinks.length ? competitorLinks : getFallbackCompetitors(row, rows)
+
+  return {
+    customerLinks: [...new Set(derivedCustomers)].slice(0, 5),
+    supplierLinks: [...new Set(derivedSuppliers)].slice(0, 5),
+    competitorLinks: [...new Set(derivedCompetitors)].slice(0, 5),
+    explicitCounts: {
+      customer: customerLinks.length,
+      supplier: supplierLinks.length,
+      competitor: competitorLinks.length,
+    },
+  }
+}
+
 function StatPill({ label, value }) {
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
@@ -148,7 +188,7 @@ function GroupList({ title, items, empty }) {
   )
 }
 
-function RelationshipExplorer({ row, rowsBySymbol }) {
+function RelationshipExplorer({ row, rows, rowsBySymbol }) {
   if (!row) {
     return (
       <div className="bg-white/[0.02] border border-white/10 rounded-xl p-4">
@@ -161,13 +201,11 @@ function RelationshipExplorer({ row, rowsBySymbol }) {
     )
   }
 
-  const customerOf = safeList(row.customerOf)
-  const supplierTo = safeList(row.supplierTo)
-  const competesWith = safeList(row.competesWith)
+  const { customerLinks, supplierLinks, competitorLinks } = buildRelationshipLayer(row, rows)
   const relatedSymbols = [...new Set([
-    ...customerOf,
-    ...supplierTo,
-    ...competesWith,
+    ...customerLinks,
+    ...supplierLinks,
+    ...competitorLinks,
   ])].map(sym => ({
     symbol: sym,
     row: rowsBySymbol[sym?.toUpperCase?.() || sym] || null,
@@ -185,9 +223,9 @@ function RelationshipExplorer({ row, rowsBySymbol }) {
       </div>
       <div className="space-y-2">
         {[
-          ['Customer Of', customerOf],
-          ['Supplier To', supplierTo],
-          ['Competes With', competesWith],
+          ['Customer Links', customerLinks],
+          ['Dependency Links', supplierLinks],
+          ['Competitive Set', competitorLinks],
         ].map(([label, list]) => (
           <div key={label}>
             <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-1">{label}</p>
@@ -422,9 +460,9 @@ export default function ThemeWatchlist({
 
   const relationshipGroups = useMemo(() => {
     const buckets = [
-      ...rows.flatMap(row => safeList(row.customerOf).map(v => ({ type: 'Customer Of', value: v, symbol: row.symbol }))),
-      ...rows.flatMap(row => safeList(row.supplierTo).map(v => ({ type: 'Supplier To', value: v, symbol: row.symbol }))),
-      ...rows.flatMap(row => safeList(row.competesWith).map(v => ({ type: 'Competes With', value: v, symbol: row.symbol }))),
+      ...rows.flatMap(row => buildRelationshipLayer(row, rows).customerLinks.map(v => ({ type: 'Customer Links', value: v, symbol: row.symbol }))),
+      ...rows.flatMap(row => buildRelationshipLayer(row, rows).supplierLinks.map(v => ({ type: 'Dependency Links', value: v, symbol: row.symbol }))),
+      ...rows.flatMap(row => buildRelationshipLayer(row, rows).competitorLinks.map(v => ({ type: 'Competitive Set', value: v, symbol: row.symbol }))),
     ]
     const map = new Map()
     for (const item of buckets) {
@@ -533,8 +571,8 @@ export default function ThemeWatchlist({
       <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3">
         <Table2 size={14} className="text-accent-blue" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white">Watchlist Relationship Map V2</p>
-          <p className="text-xs text-gray-600">Editable, sortable ecosystem workspace for understanding company relationships</p>
+          <p className="text-sm font-semibold text-white">Watchlist Relationship Map V3</p>
+          <p className="text-xs text-gray-600">Dedicated ecosystem workspace for large watchlists, relationship mapping, and manual research views</p>
         </div>
         {status && <p className="text-xs text-gray-500 truncate">{status}</p>}
       </div>
@@ -654,7 +692,7 @@ export default function ThemeWatchlist({
               )) : <p className="text-xs text-gray-600">Save custom views for large watchlists.</p>}
             </div>
           </div>
-          <RelationshipExplorer row={selectedRow} rowsBySymbol={rowsBySymbol} />
+          <RelationshipExplorer row={selectedRow} rows={rows} rowsBySymbol={rowsBySymbol} />
         </div>
 
         <div className="space-y-3">
@@ -711,7 +749,9 @@ export default function ThemeWatchlist({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.05]">
-                  {pagedRows.map(row => (
+                  {pagedRows.map(row => {
+                    const layer = buildRelationshipLayer(row, rows)
+                    return (
                     <tr key={row.symbol} className={`align-top hover:bg-white/[0.02] cursor-pointer ${selectedSymbol === row.symbol ? 'bg-accent-blue/5' : ''}`} onClick={() => setSelectedSymbol(row.symbol)}>
                       <td className="px-3 py-2.5 font-semibold text-accent-blue">{row.symbol}</td>
                       <td className="px-3 py-2.5">
@@ -726,9 +766,9 @@ export default function ThemeWatchlist({
                       <td className="px-3 py-2.5 text-gray-400">{arrayText(row.dependencies) || '—'}</td>
                       <td className="px-3 py-2.5 text-accent-yellow">{row.relatedDriver}</td>
                       <td className="px-3 py-2.5 text-gray-400 min-w-[220px]">
-                        <p><span className="text-gray-600">Customer of:</span> {arrayText(row.customerOf) || '—'}</p>
-                        <p className="mt-1"><span className="text-gray-600">Supplier to:</span> {arrayText(row.supplierTo) || '—'}</p>
-                        <p className="mt-1"><span className="text-gray-600">Competes with:</span> {arrayText(row.competesWith) || '—'}</p>
+                        <p><span className="text-gray-600">Customer links:</span> {arrayText(layer.customerLinks) || '—'}</p>
+                        <p className="mt-1"><span className="text-gray-600">Dependency links:</span> {arrayText(layer.supplierLinks) || '—'}</p>
+                        <p className="mt-1"><span className="text-gray-600">Competitive set:</span> {arrayText(layer.competitorLinks) || '—'}</p>
                       </td>
                       <td className="px-3 py-2.5 min-w-[220px]">
                         <MatchChips row={row} themes={themes} sources={sources} onFilter={setQuery} />
@@ -761,7 +801,7 @@ export default function ThemeWatchlist({
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table>
             </div>

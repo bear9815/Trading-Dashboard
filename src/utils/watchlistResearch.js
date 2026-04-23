@@ -10,6 +10,11 @@ function cleanArray(value) {
 }
 
 function normalizeRow(row = {}) {
+  const majorCustomers = cleanArray(row.majorCustomers)
+  const dependencies = cleanArray(row.dependencies)
+  const customerOf = cleanArray(row.customerOf)
+  const supplierTo = cleanArray(row.supplierTo)
+
   return {
     symbol: (row.symbol || '').trim().toUpperCase(),
     companyName: row.companyName || '—',
@@ -17,11 +22,11 @@ function normalizeRow(row = {}) {
     ecosystem: row.ecosystem || row.theme || '—',
     theme: row.theme || '—',
     whatTheyDo: row.whatTheyDo || '—',
-    majorCustomers: cleanArray(row.majorCustomers),
-    dependencies: cleanArray(row.dependencies),
+    majorCustomers,
+    dependencies,
     relatedDriver: row.relatedDriver || '—',
-    customerOf: cleanArray(row.customerOf),
-    supplierTo: cleanArray(row.supplierTo),
+    customerOf: customerOf.length ? customerOf : majorCustomers.slice(0, 3),
+    supplierTo: supplierTo.length ? supplierTo : dependencies.slice(0, 3),
     competesWith: cleanArray(row.competesWith),
   }
 }
@@ -39,9 +44,11 @@ For each US-listed stock symbol below, return a concise primer-style row with:
 - majorCustomers: 0-3 important customer/end-market labels
 - dependencies: 0-3 important suppliers / dependencies / ecosystem links
 - relatedDriver: one short phrase describing the main thematic driver that connects the name to others
-- customerOf: 0-3 public companies or customer groups this company sells into
-- supplierTo: 0-3 public companies or ecosystem nodes this company supplies into
-- competesWith: 0-3 public companies it most directly competes with
+- customerOf: 0-3 public company tickers or named customer groups this company sells into
+- supplierTo: 0-3 public company tickers or named ecosystem nodes this company supplies into
+- competesWith: 0-3 public company tickers it most directly competes with
+
+Prefer stock tickers when the relationship is with a public company. Avoid leaving these three fields blank if there is a reasonable high-level answer.
 
 Be concise and practical for a growth-stock watchlist. If something is uncertain, use the most likely high-level answer rather than overexplaining.
 

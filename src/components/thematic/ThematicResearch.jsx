@@ -2,6 +2,7 @@ import { useState, useRef, useMemo, useEffect } from 'react'
 import { useSettingsStore }        from '../../store/useSettingsStore.js'
 import { useThematicStore }        from '../../store/useThematicStore.js'
 import { useAuthStore }            from '../../store/useAuthStore.js'
+import { useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import ResearchLibrary, { ActiveSignals } from './ResearchLibrary.jsx'
 import ThemeWatchlist from './ThemeWatchlist.jsx'
@@ -1347,6 +1348,7 @@ export default function ThematicResearch() {
   const { themes, removeTheme, convictions, setConviction, patchThemeDossier } = useThematicStore()
   const { user }   = useAuthStore()
   const { sources: librarySources, loadSources } = useResearchLibraryStore()
+  const watchlistCount = useResearchWatchlistStore(state => state.symbols.length)
   const provider = researchAiProvider || (useLocalLLM ? 'local' : 'gemini')
   const [modelInput, setModelInput] = useState(researchOpenRouterModel || 'openai/gpt-4o-mini')
 
@@ -1354,7 +1356,7 @@ export default function ThematicResearch() {
     if (user?.id) loadSources()
   }, [user?.id])
 
-  const [growthTab,  setGrowthTab]  = useState('themes') // 'themes' | 'earnings'
+  const [growthTab,  setGrowthTab]  = useState('watchlist') // 'watchlist' | 'themes' | 'earnings'
   const [expanded,   setExpanded]   = useState(null)
   const [tabs,       setTabs]       = useState({})
   const [showChat,   setShowChat]   = useState(false)
@@ -1444,9 +1446,10 @@ export default function ThematicResearch() {
         )}
       </div>
 
-      {/* ── Top-level tab switcher: Themes | Earnings ── */}
+      {/* ── Top-level tab switcher: Watchlist | Themes | Earnings ── */}
       <div className="flex items-center gap-1 border-b border-white/[0.08] -mb-1">
         {[
+          { id: 'watchlist', label: 'Watchlist', count: watchlistCount, desc: 'Relationship map for imported watchlists' },
           { id: 'themes',   label: 'Themes',   count: themeCount,    desc: 'Thematic dossiers & deep dives' },
           { id: 'earnings', label: 'Earnings', count: earningsCount, desc: 'Earnings calls & company timelines' },
         ].map(({ id, label, count, desc }) => (
@@ -1486,18 +1489,20 @@ export default function ThematicResearch() {
         </div>
       )}
 
+      {growthTab === 'watchlist' && (
+        <ThemeWatchlist
+          provider={provider}
+          apiKey={apiKey}
+          openRouterApiKey={openRouterApiKey}
+          researchOpenRouterModel={researchOpenRouterModel}
+        />
+      )}
+
       {/* ════════════════════════════════════
           THEMES TAB
       ════════════════════════════════════ */}
       {growthTab === 'themes' && (
         <>
-          <ThemeWatchlist
-            provider={provider}
-            apiKey={apiKey}
-            openRouterApiKey={openRouterApiKey}
-            researchOpenRouterModel={researchOpenRouterModel}
-          />
-
           {/* Research Library (deep dives + other — not earnings) */}
           <ResearchLibrary />
 
