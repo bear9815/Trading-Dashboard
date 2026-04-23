@@ -1,13 +1,14 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   Sparkles, AlertCircle, ChevronDown, ChevronUp,
-  Send, Search, MessageSquare, TrendingUp, X, Zap, Building2, BookOpen, Copy, Check,
+  Send, Search, MessageSquare, TrendingUp, X, Zap, Building2, BookOpen, Copy, Check, MoonStar,
 } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { analyzePortfolio, chatWithPortfolio, analyzeSingleTradeDeep, findWorstHabit, analyzeStockBrief, getSymbolProfile } from '../../utils/ai.js'
 import { resolveTickerToName } from '../../utils/marketData.js'
 import { formatCurrency } from '../../utils/formatters.js'
+import HypnosisStudio from './HypnosisStudio.jsx'
 
 // ── Grade badge ──────────────────────────────────────────────────────────────
 function GradeBadge({ grade }) {
@@ -284,7 +285,7 @@ export default function AIFeedback({ selectedAccount }) {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="p-4 flex flex-col gap-4 max-w-3xl">
+    <div className={`p-4 flex flex-col gap-4 ${activeTab === 'hypnosis' ? 'max-w-6xl' : 'max-w-3xl'}`}>
 
       {/* Header row */}
       <div className="flex items-center justify-between gap-3">
@@ -299,6 +300,7 @@ export default function AIFeedback({ selectedAccount }) {
             { id: 'trade',     label: 'Trade Dive',  Icon: Search      },
             { id: 'stock',     label: 'Stock Brief', Icon: Building2   },
             { id: 'profile',   label: 'Symbol Profile', Icon: BookOpen },
+            { id: 'hypnosis',  label: 'Hypnosis', Icon: MoonStar },
           ].map(({ id, label, Icon }) => (
             <button
               key={id}
@@ -316,7 +318,7 @@ export default function AIFeedback({ selectedAccount }) {
       </div>
 
       {/* API key warning */}
-      {!apiKey && (
+      {!apiKey && activeTab !== 'hypnosis' && (
         <div className="card border-accent-yellow/30 bg-accent-yellow/5">
           <div className="flex items-start gap-2 text-accent-yellow text-sm">
             <AlertCircle size={16} className="shrink-0 mt-0.5" />
@@ -965,6 +967,10 @@ export default function AIFeedback({ selectedAccount }) {
             </div>
           )}
         </>
+      )}
+
+      {activeTab === 'hypnosis' && (
+        <HypnosisStudio trades={filteredTrades} />
       )}
     </div>
   )

@@ -2,6 +2,14 @@ import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
 import { supabase } from '../lib/supabase.js'
 
+function persistLocal(state) {
+  try {
+    localStorage.setItem('risk-tool-journal', JSON.stringify({ state }))
+  } catch (error) {
+    console.error('[local] saveJournal:', error)
+  }
+}
+
 async function getUid() {
   const { useAuthStore } = await import('./useAuthStore.js')
   return useAuthStore.getState().user?.id
@@ -59,7 +67,7 @@ export const useJournalStore = create((set, get) => ({
       const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [] } = data.data
       set({ entries, priorities, goals, checkins, tradingThoughts, cloudReady: true })
       // Back up locally so data survives if Supabase is removed
-      localStorage.setItem('risk-tool-journal', JSON.stringify({ state: { entries, priorities, goals, checkins, tradingThoughts } }))
+      persistLocal({ entries, priorities, goals, checkins, tradingThoughts })
     } else {
       try {
         const raw = localStorage.getItem('risk-tool-journal')
@@ -88,6 +96,7 @@ export const useJournalStore = create((set, get) => ({
   // ── Internal sync helper ───────────────────────────────────────────────────
   _sync: () => {
     const { entries, priorities, goals, checkins, tradingThoughts } = get()
+    persistLocal({ entries, priorities, goals, checkins, tradingThoughts })
     saveToCloud({ entries, priorities, goals, checkins, tradingThoughts })
   },
 

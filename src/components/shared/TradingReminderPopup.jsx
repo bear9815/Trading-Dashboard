@@ -356,6 +356,11 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
                 Skip typing
               </button>
             </div>
+            {loggedNow && (
+              <p className="mt-2 text-[11px] text-accent-green">
+                Saved to Dashboard → Trading Thoughts.
+              </p>
+            )}
           </div>
 
           {/* Daily habits */}
