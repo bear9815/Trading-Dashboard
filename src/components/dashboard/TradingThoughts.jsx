@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import { Brain, Send, Trash2, Loader2, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { useJournalStore }  from '../../store/useJournalStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
