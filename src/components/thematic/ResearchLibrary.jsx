@@ -773,6 +773,7 @@ export default function ResearchLibrary({ earningsMode = false }) {
   const [tickerInput,  setTickerInput]  = useState('')
   const [themeInput,   setThemeInput]   = useState('')
   const [transcriptUrl, setTranscriptUrl] = useState('')
+  const [transcriptText, setTranscriptText] = useState('')
   const [dragging,     setDragging]     = useState(false)
   const [uploading,    setUploading]    = useState(false)
   const [uploadFile,   setUploadFile]   = useState('')
@@ -1028,6 +1029,63 @@ export default function ResearchLibrary({ earningsMode = false }) {
     }
   }, [apiKey, getAgentsForTrigger, openRouterApiKey, persistExtractedSource, selectedAgentId, themeInput, tickerInput, transcriptUrl])
 
+  const handleTranscriptTextImport = useCallback(async () => {
+    const text = transcriptText.trim()
+    if (!text || text.length < 500) {
+      setError('Paste more of the transcript text first.')
+      return
+    }
+
+    const allAgentsForType = getAgentsForTrigger('researchLibrary', 'earnings_call')
+    const agentForType = selectedAgentId
+      ? allAgentsForType.find(a => a.id === selectedAgentId) || allAgentsForType[0]
+      : allAgentsForType[0] || null
+
+    if (!agentForType) {
+      setError('No earnings transcript agent is configured in Agent Studio.')
+      return
+    }
+
+    setError(null)
+    setAnalysis(null)
+    setLastSaved(null)
+    setUploading(true)
+    setUploadTotal(1)
+    setUploadIndex(1)
+    setUploadFile('Pasted transcript')
+
+    try {
+      const extracted = await runAgent({
+        agent: agentForType,
+        textContent: text,
+        sourceLabel: tickerInput.trim() ? `${tickerInput.trim()} transcript paste` : 'Transcript Paste',
+        geminiApiKey: apiKey,
+        openRouterApiKey,
+        tickerHint: tickerInput.trim(),
+        themeHint: themeInput.trim(),
+        sourceType: 'earnings_call',
+        onStatus: status => setUploadStatus(status),
+      })
+
+      await persistExtractedSource({
+        extracted,
+        fileName: tickerInput.trim() ? `${tickerInput.trim()} Transcript Paste` : 'Transcript Paste',
+        fallbackTitle: tickerInput.trim() ? `${tickerInput.trim()} Transcript Paste` : 'Transcript Paste',
+      })
+
+      setTranscriptText('')
+    } catch (err) {
+      console.error(err)
+      setError(err?.message || 'Transcript text import failed.')
+    } finally {
+      setUploading(false)
+      setUploadFile('')
+      setUploadStatus('')
+      setUploadIndex(0)
+      setUploadTotal(0)
+    }
+  }, [apiKey, getAgentsForTrigger, openRouterApiKey, persistExtractedSource, selectedAgentId, themeInput, tickerInput, transcriptText])
+
   const handleGoogleDrive = useCallback(async () => {
     if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) {
       setError('Google Drive is not configured. Add VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to your .env.local file.')
@@ -1165,6 +1223,30 @@ export default function ResearchLibrary({ earningsMode = false }) {
                   className="px-4 py-2.5 rounded-xl bg-accent-blue/15 border border-accent-blue/25 text-sm font-medium text-accent-blue hover:bg-accent-blue/20 transition-all disabled:opacity-40"
                 >
                   Import Link
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white/[0.02] border border-white/10 rounded-xl p-4 space-y-3">
+              <div>
+                <p className="text-sm font-semibold text-white">Paste Transcript Text</p>
+                <p className="text-xs text-gray-600 mt-1">If a site blocks link extraction, paste the transcript text here and run the same earnings analysis flow manually.</p>
+              </div>
+              <textarea
+                value={transcriptText}
+                onChange={e => setTranscriptText(e.target.value)}
+                rows={8}
+                placeholder="Paste the full or partial earnings transcript text here..."
+                className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3.5 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors resize-y"
+              />
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-gray-600">{transcriptText.trim().length.toLocaleString()} characters</p>
+                <button
+                  onClick={handleTranscriptTextImport}
+                  disabled={uploading}
+                  className="px-4 py-2.5 rounded-xl bg-accent-green/15 border border-accent-green/25 text-sm font-medium text-accent-green hover:bg-accent-green/20 transition-all disabled:opacity-40"
+                >
+                  Analyze Pasted Text
                 </button>
               </div>
             </div>
