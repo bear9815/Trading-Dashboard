@@ -13,6 +13,12 @@ export const useResearchWatchlistStore = create(
         symbols: [...new Set((symbols || []).map(s => (s || '').trim().toUpperCase()).filter(Boolean))],
       }),
 
+      replaceWatchlist: (symbols) => set({
+        symbols: [...new Set((symbols || []).map(s => (s || '').trim().toUpperCase()).filter(Boolean))],
+        rowsBySymbol: {},
+        lastUpdated: null,
+      }),
+
       addSymbols: (symbols) => set(state => ({
         symbols: [...new Set([...state.symbols, ...(symbols || []).map(s => (s || '').trim().toUpperCase())].filter(Boolean))],
       })),

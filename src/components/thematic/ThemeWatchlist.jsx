@@ -10,6 +10,7 @@ import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 
 const SORT_OPTIONS = [
+  ['momentum', 'Momentum Rank'],
   ['symbol', 'Symbol'],
   ['ecosystem', 'Ecosystem'],
   ['theme', 'Theme'],
@@ -153,6 +154,38 @@ function buildRelationshipLayer(row, rows) {
   }
 }
 
+function buildMomentumGroups(rows, getItems, rankBySymbol, limit = 8) {
+  const groups = new Map()
+
+  for (const row of rows) {
+    const rowRank = rankBySymbol[row.symbol] ?? Number.MAX_SAFE_INTEGER
+    for (const rawLabel of getItems(row)) {
+      const label = String(rawLabel || '').trim()
+      if (!label || label === '—') continue
+      const existing = groups.get(label) || { label, symbols: [], ranks: [] }
+      existing.symbols.push(row.symbol)
+      existing.ranks.push(rowRank)
+      groups.set(label, existing)
+    }
+  }
+
+  return [...groups.values()]
+    .map(group => {
+      const bestRank = Math.min(...group.ranks)
+      const avgRank = group.ranks.reduce((sum, rank) => sum + rank, 0) / group.ranks.length
+      return {
+        label: group.label,
+        symbols: [...new Set(group.symbols)],
+        count: group.symbols.length,
+        bestRank,
+        avgRank,
+        metric: `best #${bestRank + 1} · avg #${avgRank.toFixed(1)}`,
+      }
+    })
+    .sort((a, b) => a.bestRank - b.bestRank || a.avgRank - b.avgRank || b.count - a.count)
+    .slice(0, limit)
+}
+
 function StatPill({ label, value }) {
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
@@ -177,7 +210,7 @@ function GroupList({ title, items, empty }) {
             <div key={item.label} className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-medium text-gray-300">{item.label}</p>
-                <p className="text-xs text-gray-600 truncate">{item.symbols.join(', ')}</p>
+                <p className="text-xs text-gray-600 truncate">{item.metric ? `${item.metric} · ` : ''}{item.symbols.join(', ')}</p>
               </div>
               <span className="text-xs text-accent-blue font-semibold shrink-0">{item.count}</span>
             </div>
@@ -384,13 +417,13 @@ export default function ThemeWatchlist({
 }) {
   const { themes } = useThematicStore()
   const { sources } = useResearchLibraryStore()
-  const { symbols, rowsBySymbol, savedViews, setSymbols, upsertRows, updateRow, removeSymbol, saveView, removeView, clear } = useResearchWatchlistStore()
+  const { symbols, rowsBySymbol, savedViews, replaceWatchlist, upsertRows, updateRow, removeSymbol, saveView, removeView, clear } = useResearchWatchlistStore()
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
-  const [sortKey, setSortKey] = useState('symbol')
+  const [sortKey, setSortKey] = useState('momentum')
   const [sortDir, setSortDir] = useState('asc')
   const [editingSymbol, setEditingSymbol] = useState(null)
   const [selectedSymbol, setSelectedSymbol] = useState(null)
@@ -402,6 +435,11 @@ export default function ThemeWatchlist({
   const rows = useMemo(
     () => symbols.map(symbol => rowsBySymbol[symbol]).filter(Boolean),
     [symbols, rowsBySymbol]
+  )
+
+  const rankBySymbol = useMemo(
+    () => Object.fromEntries(symbols.map((symbol, index) => [symbol, index])),
+    [symbols]
   )
 
   const filteredRows = useMemo(() => {
@@ -416,12 +454,17 @@ export default function ThemeWatchlist({
     )
 
     return [...base].sort((a, b) => {
+      if (sortKey === 'momentum') {
+        const av = rankBySymbol[a.symbol] ?? Number.MAX_SAFE_INTEGER
+        const bv = rankBySymbol[b.symbol] ?? Number.MAX_SAFE_INTEGER
+        return sortDir === 'asc' ? av - bv : bv - av
+      }
       const av = arrayText(a[sortKey]).toLowerCase()
       const bv = arrayText(b[sortKey]).toLowerCase()
       const result = av.localeCompare(bv)
       return sortDir === 'asc' ? result : -result
     })
-  }, [rows, query, sortKey, sortDir])
+  }, [rows, query, sortKey, sortDir, rankBySymbol])
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize))
   const pagedRows = useMemo(
@@ -429,53 +472,31 @@ export default function ThemeWatchlist({
     [filteredRows, page]
   )
 
-  const themeGroups = useMemo(() => {
-    const map = new Map()
-    for (const row of rows) {
-      const key = row.ecosystem || row.theme || 'Other'
-      const existing = map.get(key) || []
-      existing.push(row.symbol)
-      map.set(key, existing)
-    }
-    return [...map.entries()]
-      .map(([label, syms]) => ({ label, symbols: syms, count: syms.length }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 8)
-  }, [rows])
+  const themeGroups = useMemo(
+    () => buildMomentumGroups(rows, row => [row.ecosystem || row.theme || 'Other'], rankBySymbol),
+    [rows, rankBySymbol]
+  )
 
-  const driverGroups = useMemo(() => {
-    const map = new Map()
-    for (const row of rows) {
-      const key = row.relatedDriver || 'Other'
-      const existing = map.get(key) || []
-      existing.push(row.symbol)
-      map.set(key, existing)
-    }
-    return [...map.entries()]
-      .map(([label, syms]) => ({ label, symbols: syms, count: syms.length }))
-      .filter(item => item.label && item.label !== '—')
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 8)
-  }, [rows])
+  const driverGroups = useMemo(
+    () => buildMomentumGroups(rows, row => [row.relatedDriver || 'Other'], rankBySymbol),
+    [rows, rankBySymbol]
+  )
 
-  const relationshipGroups = useMemo(() => {
-    const buckets = [
-      ...rows.flatMap(row => buildRelationshipLayer(row, rows).customerLinks.map(v => ({ type: 'Customer Links', value: v, symbol: row.symbol }))),
-      ...rows.flatMap(row => buildRelationshipLayer(row, rows).supplierLinks.map(v => ({ type: 'Dependency Links', value: v, symbol: row.symbol }))),
-      ...rows.flatMap(row => buildRelationshipLayer(row, rows).competitorLinks.map(v => ({ type: 'Competitive Set', value: v, symbol: row.symbol }))),
-    ]
-    const map = new Map()
-    for (const item of buckets) {
-      const key = `${item.type}: ${item.value}`
-      const existing = map.get(key) || []
-      existing.push(item.symbol)
-      map.set(key, existing)
-    }
-    return [...map.entries()]
-      .map(([label, syms]) => ({ label, symbols: syms, count: syms.length }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 8)
-  }, [rows])
+  const relationshipGroups = useMemo(
+    () => buildMomentumGroups(
+      rows,
+      row => {
+        const layer = buildRelationshipLayer(row, rows)
+        return [
+          ...layer.customerLinks.map(v => `Customer Links: ${v}`),
+          ...layer.supplierLinks.map(v => `Dependency Links: ${v}`),
+          ...layer.competitorLinks.map(v => `Competitive Set: ${v}`),
+        ]
+      },
+      rankBySymbol
+    ),
+    [rows, rankBySymbol]
+  )
 
   const editingRow = editingSymbol ? rowsBySymbol[editingSymbol] : null
   const selectedRow = selectedSymbol ? rowsBySymbol[selectedSymbol] : null
@@ -495,9 +516,14 @@ export default function ThemeWatchlist({
       setError('Paste TradingView symbols, URLs, or plain tickers to import your watchlist.')
       return
     }
-    setSymbols(parsed)
+    replaceWatchlist(parsed)
+    setSelectedSymbol(null)
+    setEditingSymbol(null)
+    setQuery('')
+    setSortKey('momentum')
+    setSortDir('asc')
     setError('')
-    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''}.`)
+    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''}. Prior watchlist map cleared.`)
     setPage(1)
   }
 
@@ -508,9 +534,15 @@ export default function ThemeWatchlist({
       setError('Could not find symbols in that CSV file.')
       return
     }
-    setSymbols(parsed)
+    replaceWatchlist(parsed)
+    setSelectedSymbol(null)
+    setEditingSymbol(null)
+    setQuery('')
+    setSortKey('momentum')
+    setSortDir('asc')
     setError('')
-    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} from CSV.`)
+    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} from CSV. Prior watchlist map cleared.`)
+    setPage(1)
   }
 
   async function handleAnalyze() {
@@ -561,7 +593,7 @@ export default function ThemeWatchlist({
 
   function applyView(view) {
     setQuery(view.query || '')
-    setSortKey(view.sortKey || 'symbol')
+    setSortKey(view.sortKey || 'momentum')
     setSortDir(view.sortDir || 'asc')
     setPage(1)
   }
@@ -644,17 +676,18 @@ export default function ThemeWatchlist({
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <StatPill label="Imported Symbols" value={symbols.length} />
           <StatPill label="Mapped Rows" value={rows.length} />
           <StatPill label="Theme Buckets" value={themeGroups.length} />
+          <StatPill label="Top Ranked" value={symbols[0] || '—'} />
           <StatPill label="Library Themes" value={Object.keys(themes).length} />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-          <GroupList title="Ecosystem Buckets" items={themeGroups} empty="Map your watchlist to see theme buckets." />
-          <GroupList title="Relationship Drivers" items={driverGroups} empty="Drivers appear after the watchlist is mapped." />
-          <GroupList title="Relationship Links" items={relationshipGroups} empty="Customer/supplier/competition links will show up here." />
+          <GroupList title="Momentum Buckets" items={themeGroups} empty="Map your watchlist to see which buckets are strongest." />
+          <GroupList title="Momentum Drivers" items={driverGroups} empty="Drivers appear after the watchlist is mapped." />
+          <GroupList title="Momentum Relationships" items={relationshipGroups} empty="Customer/supplier/competition links will show up here." />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-4">
