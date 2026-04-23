@@ -87,6 +87,21 @@ function parseCatalystDate(line) {
   return null
 }
 
+const PROVIDER_PILL_STYLES = {
+  gemini: {
+    active: 'bg-accent-blue/15 border-accent-blue/30 text-accent-blue',
+    dot: 'bg-accent-blue',
+  },
+  openrouter: {
+    active: 'bg-accent-yellow/15 border-accent-yellow/30 text-accent-yellow',
+    dot: 'bg-accent-yellow',
+  },
+  local: {
+    active: 'bg-accent-green/15 border-accent-green/30 text-accent-green',
+    dot: 'bg-accent-green',
+  },
+}
+
 // ── Sub-components: existing data renderers ───────────────────────────────────
 function ValueChain({ text }) {
   const safe = toStr(text)
@@ -1338,6 +1353,7 @@ export default function ThematicResearch() {
     if (user?.id) loadSources()
   }, [user?.id])
 
+  const [growthTab,  setGrowthTab]  = useState('themes') // 'themes' | 'earnings'
   const [expanded,   setExpanded]   = useState(null)
   const [tabs,       setTabs]       = useState({})
   const [showChat,   setShowChat]   = useState(false)
@@ -1365,6 +1381,9 @@ export default function ThematicResearch() {
 
   const themeCount = Object.keys(themes).length
 
+  const earningsCount = librarySources.filter(s => s.source_type === 'earnings_call').length
+  const deepDiveCount = librarySources.filter(s => s.source_type !== 'earnings_call').length
+
   return (
     <div className="p-5 space-y-5">
 
@@ -1382,21 +1401,21 @@ export default function ThematicResearch() {
           {/* AI Provider Selector */}
           <div className="flex items-center gap-1.5">
             {[
-              { id: 'gemini',     label: 'Gemini · Cloud',  color: 'accent-blue',   dot: 'bg-accent-blue' },
-              { id: 'openrouter', label: 'OpenRouter',       color: 'accent-yellow', dot: 'bg-accent-yellow' },
-              { id: 'local',      label: 'Gemma 4 · Local', color: 'accent-green',  dot: 'bg-accent-green' },
+              { id: 'gemini',     label: 'Gemini · Cloud' },
+              { id: 'openrouter', label: 'OpenRouter' },
+              { id: 'local',      label: 'Gemma 4 · Local' },
             ].map(p => (
               <button
                 key={p.id}
                 onClick={() => setResearchAiProvider(p.id)}
                 className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border font-medium transition-all ${
                   provider === p.id
-                    ? `bg-${p.color}/15 border-${p.color}/30 text-${p.color}`
+                    ? PROVIDER_PILL_STYLES[p.id]?.active
                     : 'bg-white/5 border-white/15 text-gray-500 hover:text-gray-300'
                 }`}
                 title={`Use ${p.label} for Growth Research AI`}
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${provider === p.id ? p.dot : 'bg-gray-600'}`}/>
+                <span className={`w-1.5 h-1.5 rounded-full ${provider === p.id ? PROVIDER_PILL_STYLES[p.id]?.dot : 'bg-gray-600'}`}/>
                 {p.label}
               </button>
             ))}
@@ -1424,7 +1443,35 @@ export default function ThematicResearch() {
         )}
       </div>
 
-      {/* Banners */}
+      {/* ── Top-level tab switcher: Themes | Earnings ── */}
+      <div className="flex items-center gap-1 border-b border-white/[0.08] -mb-1">
+        {[
+          { id: 'themes',   label: 'Themes',   count: themeCount,    desc: 'Thematic dossiers & deep dives' },
+          { id: 'earnings', label: 'Earnings', count: earningsCount, desc: 'Earnings calls & company timelines' },
+        ].map(({ id, label, count, desc }) => (
+          <button
+            key={id}
+            onClick={() => setGrowthTab(id)}
+            title={desc}
+            className={`flex items-center gap-2 px-5 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-all ${
+              growthTab === id
+                ? 'border-accent-blue text-white'
+                : 'border-transparent text-gray-500 hover:text-gray-300 hover:border-white/20'
+            }`}
+          >
+            {label}
+            {count > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                growthTab === id ? 'bg-accent-blue/20 text-accent-blue' : 'bg-white/[0.06] text-gray-600'
+              }`}>
+                {count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ── API key banners (both tabs) ── */}
       {provider === 'gemini' && !apiKey && (
         <div className="flex items-start gap-3 bg-accent-yellow/8 border border-accent-yellow/25 rounded-xl px-4 py-3">
           <AlertTriangle size={16} className="text-accent-yellow mt-0.5 shrink-0"/>
@@ -1438,65 +1485,80 @@ export default function ThematicResearch() {
         </div>
       )}
 
-      {/* Research Library — primary upload point */}
-      <ResearchLibrary />
-
-      {/* Active Signals */}
-      <ActiveSignals />
-
-      {themeCount > 0 && (
+      {/* ════════════════════════════════════
+          THEMES TAB
+      ════════════════════════════════════ */}
+      {growthTab === 'themes' && (
         <>
-          {/* Intelligence Row: Timeline + Macro Matrix */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-            <CatalystTimeline themes={themes} />
-            <MacroMatrix themes={themes} />
-          </div>
+          {/* Research Library (deep dives + other — not earnings) */}
+          <ResearchLibrary />
 
-          {/* Fundamental Momentum Board */}
-          <FundamentalMomentumBoard themes={themes} convictions={convictions} librarySources={librarySources} />
+          {/* Active Signals */}
+          <ActiveSignals />
 
-          {/* AI Research Assistant */}
-          <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden">
-            <button onClick={() => setShowChat(p => !p)}
-              className="w-full flex items-center gap-3 px-5 py-4 hover:bg-white/[0.02] transition-colors">
-              <Bot size={16} className="text-accent-blue"/>
-              <span className="text-base font-semibold text-white flex-1 text-left">AI Research Assistant</span>
-              <span className="text-sm text-gray-500 mr-2">Ask questions across all your research</span>
-              <ChevronDown size={18} className={`text-gray-500 transition-transform ${showChat?'rotate-180':''}`}/>
-            </button>
-            {showChat && (
-              <div className="border-t border-white/10">
-                <ThematicChat themes={themes} apiKey={apiKey} useLocalLLM={useLocalLLM} provider={provider} openRouterApiKey={openRouterApiKey} researchOpenRouterModel={researchOpenRouterModel} librarySources={librarySources} />
+          {themeCount > 0 && (
+            <>
+              {/* Intelligence Row: Timeline + Macro Matrix */}
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                <CatalystTimeline themes={themes} />
+                <MacroMatrix themes={themes} />
               </div>
-            )}
-          </div>
 
-          {/* Dossier Cards */}
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-3">
-              Thematic Dossiers — {themeCount} theme{themeCount!==1?'s':''} distilled
-            </div>
-            <div className="space-y-2">
-              {Object.entries(themes).map(([name, data]) => (
-                <DossierCard
-                  key={name}
-                  name={name}
-                  data={data}
-                  expanded={expanded === name}
-                  onToggle={() => setExpanded(p => p===name ? null : name)}
-                  activeTab={tabs[name] || 'overview'}
-                  onTabChange={tab => setTabs(p => ({...p,[name]:tab}))}
-                  conviction={convictions?.[name] || 0}
-                  onConvictionChange={val => setConviction(name, val)}
-                  onRemove={() => { removeTheme(name); if (expanded===name) setExpanded(null) }}
-                  onRefresh={() => handleRefresh(name)}
-                  refreshing={!!refreshing[name]}
-                />
-              ))}
-            </div>
-          </div>
+              {/* Fundamental Momentum Board */}
+              <FundamentalMomentumBoard themes={themes} convictions={convictions} librarySources={librarySources} />
+
+              {/* AI Research Assistant */}
+              <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden">
+                <button onClick={() => setShowChat(p => !p)}
+                  className="w-full flex items-center gap-3 px-5 py-4 hover:bg-white/[0.02] transition-colors">
+                  <Bot size={16} className="text-accent-blue"/>
+                  <span className="text-base font-semibold text-white flex-1 text-left">AI Research Assistant</span>
+                  <span className="text-sm text-gray-500 mr-2">Ask questions across all your research</span>
+                  <ChevronDown size={18} className={`text-gray-500 transition-transform ${showChat?'rotate-180':''}`}/>
+                </button>
+                {showChat && (
+                  <div className="border-t border-white/10">
+                    <ThematicChat themes={themes} apiKey={apiKey} useLocalLLM={useLocalLLM} provider={provider} openRouterApiKey={openRouterApiKey} researchOpenRouterModel={researchOpenRouterModel} librarySources={librarySources} />
+                  </div>
+                )}
+              </div>
+
+              {/* Dossier Cards */}
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-3">
+                  Thematic Dossiers — {themeCount} theme{themeCount!==1?'s':''} distilled
+                </div>
+                <div className="space-y-2">
+                  {Object.entries(themes).map(([name, data]) => (
+                    <DossierCard
+                      key={name}
+                      name={name}
+                      data={data}
+                      expanded={expanded === name}
+                      onToggle={() => setExpanded(p => p===name ? null : name)}
+                      activeTab={tabs[name] || 'overview'}
+                      onTabChange={tab => setTabs(p => ({...p,[name]:tab}))}
+                      conviction={convictions?.[name] || 0}
+                      onConvictionChange={val => setConviction(name, val)}
+                      onRemove={() => { removeTheme(name); if (expanded===name) setExpanded(null) }}
+                      onRefresh={() => handleRefresh(name)}
+                      refreshing={!!refreshing[name]}
+                    />
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
+
+      {/* ════════════════════════════════════
+          EARNINGS TAB
+      ════════════════════════════════════ */}
+      {growthTab === 'earnings' && (
+        <ResearchLibrary earningsMode />
+      )}
+
     </div>
   )
 }

@@ -25,6 +25,20 @@ import { formatCurrency }   from '../../utils/formatters.js'
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 const TODAY = new Date().toISOString().slice(0, 10)
+function localDateString(date = new Date()) {
+  const year  = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day   = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function priorTradingDayString(dateStr) {
+  const [year, month, day] = dateStr.split('-').map(Number)
+  const d = new Date(year, month - 1, day)
+  do { d.setDate(d.getDate() - 1) }
+  while (d.getDay() === 0 || d.getDay() === 6)
+  return localDateString(d)
+}
 
 function normDate(d) {
   if (!d) return ''
@@ -1192,23 +1206,21 @@ function LogTab() {
 
   const formInitial = useMemo(() => {
     if (mode === 'edit' && editingEntry) return { ...editingEntry }
+    const targetDate = editDate || TODAY
     // Carry forward selected fields from the most recent prior entry
-    const lastEntry    = sorted.find(e => e.date < TODAY) ?? sorted[0] ?? null
+    const lastEntry    = sorted.find(e => e.date < targetDate) ?? sorted[0] ?? null
     const lastRiskMode = lastEntry?.riskMode ?? null
     // Pre-fill Prior Day Notes from the last trading day's thoughts (skip weekends)
-    const prevTradingDay = new Date()
-    do { prevTradingDay.setDate(prevTradingDay.getDate() - 1) }
-    while (prevTradingDay.getDay() === 0 || prevTradingDay.getDay() === 6)
-    const priorDay = prevTradingDay.toISOString().slice(0, 10)
+    const priorDay = priorTradingDayString(targetDate)
     const priorThoughts = tradingThoughts.filter(t =>
-      t.timestamp && new Date(t.timestamp).toISOString().slice(0, 10) === priorDay
+      t.timestamp && localDateString(new Date(t.timestamp)) === priorDay
     )
     const priorThoughtsText = priorThoughts.length > 0
       ? priorThoughts.map(t => `• ${t.text}`).join('\n')
       : ''
     // New entry: pre-fill cash deployed + effective exposure (if ATR already resolved)
-    return blankForm(TODAY, autoCash, autoEffective, lastRiskMode, lastEntry, priorThoughtsText)
-  }, [mode, editingEntry, autoCash, autoEffective, sorted, tradingThoughts])
+    return blankForm(targetDate, autoCash, autoEffective, lastRiskMode, lastEntry, priorThoughtsText)
+  }, [mode, editingEntry, editDate, autoCash, autoEffective, sorted, tradingThoughts])
 
   return (
     <div className="space-y-4">

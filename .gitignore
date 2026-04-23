@@ -32,3 +32,4 @@ yarn-error.log*
 .vite
 
 .vscode/cline_mcp_settings.json
+.vercel

@@ -14,7 +14,8 @@ import { useTradeStore } from './store/useTradeStore.js'
 import { useJournalStore } from './store/useJournalStore.js'
 import { useMorningStore } from './store/useMorningStore.js'
 import { useHabitsStore } from './store/useHabitsStore.js'
-import { useAgentsStore } from './store/useAgentsStore.js'
+import { useAuthStore } from './store/useAuthStore.js'
+import { supabase } from './lib/supabase.js'
 import { Loader } from 'lucide-react'
 
 // ── Lazy-loaded pages (each splits into its own chunk) ────────────────────────
@@ -50,6 +51,7 @@ function PageLoader() {
 export default function App() {
   const [page, setPage] = useState('dashboard')
   const [showImport, setShowImport] = useState(false)
+  const [reminderOpenSignal, setReminderOpenSignal] = useState(0)
   const [selectedAccount, setSelectedAccount] = useState('All')
   const { theme, anthropicApiKey } = useSettingsStore()
   const { loadTokens: loadSchwabTokens, _accessToken: schwabAccessToken } = useSchwabStore()
@@ -57,7 +59,8 @@ export default function App() {
   const { loadFromLocal: loadJournalLocal } = useJournalStore()
   const { loadFromLocal: loadMorningLocal } = useMorningStore()
   const { loadFromLocal: loadHabitsLocal } = useHabitsStore()
-  const { migrateDeprecatedModels } = useAgentsStore()
+  // Note: migrateDeprecatedModels runs inside useAgentsStore's onRehydrateStorage —
+  // calling it here raced with IDB hydration and silently wiped custom agents.
 
   // Apply theme
   useEffect(() => {
@@ -115,7 +118,33 @@ export default function App() {
     loadMorningLocal()
     loadHabitsLocal()
     loadSchwabTokens()
-    migrateDeprecatedModels()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Wire up Supabase auth — syncs all stores to cloud when user is logged in
+  useEffect(() => {
+    if (!supabase) return
+
+    const triggerCloudLoad = (uid) => {
+      useTradeStore.getState().loadFromCloud(uid)
+      useJournalStore.getState().loadFromCloud(uid)
+      useMorningStore.getState().loadFromCloud(uid)
+      useHabitsStore.getState().loadFromCloud(uid)
+      useSettingsStore.getState().loadFromCloud(uid)
+    }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      useAuthStore.getState().setSession(session)
+      if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
+        triggerCloudLoad(session.user.id)
+      } else if (event === 'SIGNED_OUT') {
+        useTradeStore.getState().clearLocalState()
+        useJournalStore.getState().clearLocalState()
+        useMorningStore.getState().clearLocalState()
+        useHabitsStore.getState().clearLocalState()
+      }
+    })
+
+    return () => subscription.unsubscribe()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Main app ──────────────────────────────────────────────────────────────
@@ -134,6 +163,7 @@ export default function App() {
         <TopBar
           page={page}
           onImport={() => setShowImport(true)}
+          onOpenReminder={() => setReminderOpenSignal(v => v + 1)}
         />
 
         <main className={`flex-1 ${page === 'rrg' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
@@ -162,7 +192,7 @@ export default function App() {
       {showImport && <ImportModal onClose={() => setShowImport(false)} />}
       <QuickAddTrade />
       <MorningCheckin />
-      <TradingReminderPopup />
+      <TradingReminderPopup openSignal={reminderOpenSignal} />
     </div>
   )
 }

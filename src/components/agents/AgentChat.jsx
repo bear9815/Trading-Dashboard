@@ -16,6 +16,8 @@ import {
   uploadToGeminiFiles, waitForFileActive,
   readFileAsBase64,
 } from '../../utils/thematicGemini.js'
+import { extractPdfText } from '../../utils/pdfText.js'
+import { ollamaChatStream } from '../../utils/ollama.js'
 import { braveSearch, formatSearchResults }     from '../../utils/webSearch.js'
 import { searchEdgarFilings, formatEdgarResults, extractTickers } from '../../utils/secEdgar.js'
 
@@ -127,7 +129,13 @@ async function callOpenRouterChat(apiKey, model, systemInstruction, orMessages) 
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err?.error?.message || `OpenRouter error ${res.status}`)
+    const msg = err?.error?.message || `OpenRouter error ${res.status}`
+    // Google models routed through OpenRouter hit Google's capacity limits, not OpenRouter's.
+    // Paying OpenRouter doesn't guarantee Google-side capacity.
+    if (model?.startsWith('google/') && (msg.toLowerCase().includes('overload') || msg.toLowerCase().includes('capacity') || msg.toLowerCase().includes('high demand') || res.status === 529)) {
+      throw new Error(`Google's servers are at capacity right now. This isn't an OpenRouter billing issue — you're paying OpenRouter but Google controls the quota. Fix: switch to Gemini Cloud provider in Agent Studio (uses your Gemini API key directly).`)
+    }
+    throw new Error(msg)
   }
 
   const data = await res.json()
@@ -135,8 +143,15 @@ async function callOpenRouterChat(apiKey, model, systemInstruction, orMessages) 
 }
 
 // ── Prepare file parts for a user message ────────────────────────────────────
-async function prepareFileParts(file, geminiApiKey, onStatus) {
+// For Gemini agents  → returns inlineData / fileData parts (Gemini-native format)
+// For OpenRouter     → extracts text from PDFs via Gemini so OR models can read it
+async function prepareFileParts(file, geminiApiKey, onStatus, agentProvider = 'gemini') {
   if (isAudioFile(file)) {
+    if (agentProvider === 'local') {
+      throw new Error('Local agents do not support audio files yet. Use Gemini for audio/transcript analysis.')
+    }
+    // Audio always uses Gemini Files API regardless of agent provider
+    if (!geminiApiKey) throw new Error('Gemini API key required for audio files. Add it in Settings → API Keys.')
     onStatus('Uploading audio…')
     const uploaded = await uploadToGeminiFiles(file, geminiApiKey)
     onStatus('Processing audio…')
@@ -144,7 +159,48 @@ async function prepareFileParts(file, geminiApiKey, onStatus) {
     return [{ fileData: { mimeType: resolvedMimeType(file), fileUri: active.uri } }]
   }
 
-  // PDF or other document — inline base64
+  // OpenRouter has no native PDF API — extract text via Gemini and return as text part
+  if (agentProvider === 'openrouter') {
+    if (!geminiApiKey) throw new Error('A Gemini API key is needed to read PDF content for OpenRouter agents. Add it in Settings → API Keys.')
+    onStatus('Reading document…')
+    const base64 = await readFileAsBase64(file)
+    const extractBody = JSON.stringify({
+      contents: [{ role: 'user', parts: [
+        { inlineData: { mimeType: 'application/pdf', data: base64 } },
+        { text: 'Return the full verbatim text of this document. Return only the text, no commentary.' },
+      ]}],
+      generationConfig: { maxOutputTokens: 16384, temperature: 0 },
+    })
+    let lastErr
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * attempt))
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: extractBody }
+      )
+      if (res.ok) {
+        const data = await res.json()
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
+        if (!text) throw new Error('Could not extract text from this PDF.')
+        return [{ text: `[DOCUMENT: ${file.name}]\n\n${text}` }]
+      }
+      const err = await res.json().catch(() => ({}))
+      const msg = err?.error?.message || `PDF text extraction failed (${res.status})`
+      if (res.status !== 429 && res.status !== 503) throw new Error(msg)
+      onStatus(`Gemini busy, retrying… (${attempt + 1}/3)`)
+      lastErr = new Error(msg)
+    }
+    throw lastErr
+  }
+
+  if (agentProvider === 'local') {
+    onStatus('Reading document…')
+    const text = await extractPdfText(file, 30000)
+    if (!text) throw new Error('Could not extract text from this PDF.')
+    return [{ text: `[DOCUMENT: ${file.name}]\n\n${text}` }]
+  }
+
+  // Gemini — inline base64 (Gemini reads PDFs natively)
   onStatus('Reading file…')
   const base64   = await readFileAsBase64(file)
   const mimeType = file.type || 'application/pdf'
@@ -350,7 +406,7 @@ export default function AgentChat({ agent, onBack }) {
     if (fileSnapshot) {
       fileInfo = { name: fileSnapshot.name, size: fileSnapshot.size, type: fileSnapshot.type }
       try {
-        fileParts = await prepareFileParts(fileSnapshot, apiKey, setStatusText)
+        fileParts = await prepareFileParts(fileSnapshot, apiKey, setStatusText, agent.provider)
       } catch (e) {
         setMessages(prev => [...prev, {
           id: crypto.randomUUID(), role: 'assistant',
@@ -395,8 +451,6 @@ export default function AgentChat({ agent, onBack }) {
 
       setStatusText('Thinking…')
 
-      const history = buildGeminiHistory([...messages, userMsg])
-
       if (agent.provider === 'openrouter') {
         if (!openRouterApiKey) throw new Error('OpenRouter API key required. Add it in Settings.')
         const orHistory = buildORHistory([...messages, userMsg])
@@ -408,8 +462,31 @@ export default function AgentChat({ agent, onBack }) {
           timestamp: new Date().toISOString(),
         }
         setMessages(prev => prev.map(m => m.id === assistantId ? assistantMsg : m))
+      } else if (agent.provider === 'local') {
+        const localHistory = buildORHistory([...messages, userMsg])
+        await ollamaChatStream({
+          model: agent.model || 'gemma2',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...localHistory,
+          ],
+          temperature: 0.2,
+          onChunk: (fullText) => {
+            setMessages(prev => prev.map(m =>
+              m.id === assistantId
+                ? { ...m, parts: [{ text: fullText }], displayText: fullText }
+                : m
+            ))
+          },
+        })
+        setMessages(prev => prev.map(m =>
+          m.id === assistantId
+            ? { ...m, streaming: false, timestamp: new Date().toISOString() }
+            : m
+        ))
       } else {
         // Gemini streaming
+        const history = buildGeminiHistory([...messages, userMsg])
         if (!apiKey) throw new Error('Gemini API key required. Add it in Settings → API Keys.')
         let accumulated = ''
         await callGeminiStream(apiKey, agent.model || 'gemini-2.5-flash', systemPrompt, history,

@@ -53,6 +53,31 @@ async function cloudDeleteBatch(id) {
   await supabase.from('import_batches').delete().eq('id', id).eq('user_id', uid)
 }
 
+// ─── Local IDB snapshot ───────────────────────────────────────────────────────
+// Written after every mutation so trades survive page reloads even if Supabase
+// sync failed silently. loadFromCloud overwrites this with the authoritative
+// cloud copy; migrateFromLocal pushes any orphaned local trades up to Supabase.
+
+const IDB_KEY = 'risk-tool-trades'
+const LS_BACKUP_KEY = 'risk-tool-trades-ls'
+
+function saveLocalBackup({ trades, accountActivities, importBatches }) {
+  try {
+    // Strip screenshots so we stay well within localStorage quota
+    const light = trades.map(({ screenshotEntry, screenshotExit, screenshotsAdditional, ...t }) => t)
+    localStorage.setItem(LS_BACKUP_KEY, JSON.stringify({ state: { trades: light, accountActivities, importBatches } }))
+  } catch (e) {
+    console.warn('[localStorage] trade backup write failed:', e)
+  }
+}
+
+function saveSnapshot(state) {
+  const { trades, accountActivities, importBatches } = state
+  idbStorage.setItem(IDB_KEY, JSON.stringify({ state: { trades, accountActivities, importBatches } }))
+    .catch(e => console.warn('[idb] snapshot write failed:', e))
+  saveLocalBackup(state)
+}
+
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 export const useTradeStore = create((set, get) => ({
@@ -64,10 +89,14 @@ export const useTradeStore = create((set, get) => ({
 
   // ── Cloud ────────────────────────────────────────────────────────────────
 
-  /** Load trades from IndexedDB — used when Supabase is not configured */
+  /** Load trades from IndexedDB, falling back to localStorage backup if IDB is empty */
   loadFromLocal: async () => {
     try {
-      const raw = await idbStorage.getItem('risk-tool-trades')
+      let raw = await idbStorage.getItem(IDB_KEY)
+      if (!raw) {
+        raw = localStorage.getItem(LS_BACKUP_KEY)
+        if (raw) console.info('[trades] IDB empty — restoring from localStorage backup')
+      }
       if (!raw) { set({ cloudReady: true }); return }
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
       const { trades = [], accountActivities = [], importBatches = [] } = parsed?.state || {}
@@ -100,14 +129,14 @@ export const useTradeStore = create((set, get) => ({
 
     set({ trades, accountActivities, importBatches, cloudLoading: false, cloudReady: true })
 
-    // Back up to IDB so data survives if Supabase is removed
-    idbStorage.setItem('risk-tool-trades', JSON.stringify({ state: { trades, accountActivities, importBatches } }))
+    // Back up to IDB and localStorage so data survives if Supabase is removed
+    idbStorage.setItem(IDB_KEY, JSON.stringify({ state: { trades, accountActivities, importBatches } }))
       .catch(console.error)
+    saveLocalBackup({ trades, accountActivities, importBatches })
 
-    // First-time: auto-migrate local IDB data if cloud is empty
-    if (trades.length === 0 && accountActivities.length === 0) {
-      get().migrateFromLocal(userId).catch(console.error)
-    }
+    // Merge any trades that were saved locally but never reached Supabase
+    // (e.g. added while offline or during a sync failure)
+    get().mergeLocalSnapshot(userId, trades).catch(console.error)
   },
 
   /** Clear in-memory state on sign-out */
@@ -115,6 +144,39 @@ export const useTradeStore = create((set, get) => ({
     trades: [], accountActivities: [], importBatches: [],
     cloudReady: false, cloudLoading: false,
   }),
+
+  /**
+   * On every login: find trades in the local IDB snapshot that are NOT in
+   * Supabase (added while offline or during a sync failure) and push them up.
+   */
+  mergeLocalSnapshot: async (userId, cloudTrades) => {
+    if (!supabase || !userId) return
+    try {
+      const raw = await idbStorage.getItem(IDB_KEY)
+      if (!raw) return
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+      const { trades: localTrades = [], accountActivities: localActs = [] } = parsed?.state || {}
+
+      const cloudIds = new Set(cloudTrades.map(t => t.id))
+      const orphaned = localTrades.filter(t => !cloudIds.has(t.id))
+
+      if (orphaned.length === 0) return
+
+      console.info(`[cloud] Recovering ${orphaned.length} unsynced trade(s) from local snapshot…`)
+
+      const chunk = (arr, n) =>
+        Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n))
+
+      for (const batch of chunk(orphaned, 200))
+        await supabase.from('trades').upsert(batch.map(t => ({ id: t.id, user_id: userId, data: t })))
+
+      // Reload from cloud so UI reflects the recovered trades
+      await get().loadFromCloud(userId)
+      console.info(`[cloud] Recovery complete — ${orphaned.length} trade(s) restored ✓`)
+    } catch (err) {
+      console.warn('[cloud] mergeLocalSnapshot failed:', err)
+    }
+  },
 
   /**
    * One-time migration: read IndexedDB → upload to Supabase.
@@ -154,6 +216,7 @@ export const useTradeStore = create((set, get) => ({
   addTrade: (trade) => {
     const t = { ...trade, id: trade.id || uuidv4() }
     set(s => ({ trades: [...s.trades, t] }))
+    saveSnapshot(get())
     syncTrade(t)
   },
 
@@ -164,6 +227,7 @@ export const useTradeStore = create((set, get) => ({
       added = newTrades.map(t => ({ ...t, id: t.id || uuidv4() })).filter(t => !existing.has(t.id))
       return { trades: [...s.trades, ...added] }
     })
+    saveSnapshot(get())
     added.forEach(syncTrade)
   },
 
@@ -193,6 +257,7 @@ export const useTradeStore = create((set, get) => ({
     toAdd.forEach(syncTrade)
     actToAdd.forEach(syncActivity)
     if (batch) syncBatch(batch)
+    saveSnapshot(get())
   },
 
   rollbackBatch: (batchId) => {
@@ -231,11 +296,12 @@ export const useTradeStore = create((set, get) => ({
       })
       return { trades }
     })
-    if (updated) syncTrade(updated)
+    if (updated) { syncTrade(updated); saveSnapshot(get()) }
   },
 
   deleteTrade: (id) => {
     set(s => ({ trades: s.trades.filter(t => t.id !== id) }))
+    saveSnapshot(get())
     cloudDeleteTrade(id)
   },
 
@@ -302,17 +368,20 @@ export const useTradeStore = create((set, get) => ({
   addActivity: (activity) => {
     const a = { ...activity, id: uuidv4() }
     set(s => ({ accountActivities: [...s.accountActivities, a] }))
+    saveSnapshot(get())
     syncActivity(a)
   },
 
   addActivities: (activities) => {
     const toAdd = activities.map(a => ({ ...a, id: a.id || uuidv4() }))
     set(s => ({ accountActivities: [...s.accountActivities, ...toAdd] }))
+    saveSnapshot(get())
     toAdd.forEach(syncActivity)
   },
 
   deleteActivity: (id) => {
     set(s => ({ accountActivities: s.accountActivities.filter(a => a.id !== id) }))
+    saveSnapshot(get())
     cloudDeleteActivity(id)
   },
 

@@ -15,15 +15,57 @@ const TAG_COLORS = {
   fomo:       '#ffa502',
 }
 
-function getToday() {
-  return new Date().toISOString().slice(0, 10)
+const QUICK_STATES = {
+  morning: [
+    { label: 'Focused', text: 'Feeling focused and aligned with the plan.', tag: 'discipline' },
+    { label: 'Hesitant', text: 'Feeling hesitant and need to stay selective.', tag: 'warning' },
+    { label: 'FOMO Urge', text: 'Feeling a FOMO urge and need to wait for clean setups.', tag: 'fomo' },
+    { label: 'Clear Read', text: 'I have a clear market read right now.', tag: 'insight' },
+  ],
+  afternoon: [
+    { label: 'On Plan', text: 'Still following the plan and staying disciplined.', tag: 'discipline' },
+    { label: 'Drifting', text: 'Starting to drift from the plan and need to reset.', tag: 'warning' },
+    { label: 'Overtrading Urge', text: 'Feeling an urge to overtrade into mediocre setups.', tag: 'fomo' },
+    { label: 'Market Insight', text: 'Noticed a useful market tell worth remembering.', tag: 'insight' },
+  ],
+}
+
+const MICRO_PROMPTS = {
+  morning: [
+    'What is the biggest risk to your plan right now?',
+    'What would disciplined execution look like this morning?',
+    'What are you most likely to chase if you get sloppy?',
+  ],
+  afternoon: [
+    'Are you still trading your plan or your emotions?',
+    'What changed since the open that matters?',
+    'What mistake are you most at risk of making this afternoon?',
+  ],
+}
+
+function localDateString(date = new Date()) {
+  const year  = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day   = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function timeToMinutes(value) {
+  const [hours, minutes] = value.split(':').map(Number)
+  return hours * 60 + minutes
+}
+
+function pickDailyPrompt(mode) {
+  const prompts = MICRO_PROMPTS[mode] || MICRO_PROMPTS.morning
+  const daySeed = new Date().getDate()
+  return prompts[daySeed % prompts.length]
 }
 
 function computeStreak(completions, habitId) {
   let streak = 0
   const d = new Date()
   while (true) {
-    const dateStr = d.toISOString().slice(0, 10)
+    const dateStr = localDateString(d)
     if (completions.some(c => c.habitId === habitId && c.date === dateStr)) {
       streak++
       d.setDate(d.getDate() - 1)
@@ -34,13 +76,14 @@ function computeStreak(completions, habitId) {
   return streak
 }
 
-export default function TradingReminderPopup() {
+export default function TradingReminderPopup({ openSignal = 0 }) {
   const [visible,     setVisible]     = useState(false)
   const [mode,        setMode]        = useState('morning')
   const [thought,     setThought]     = useState('')
   const [thoughtTag,  setThoughtTag]  = useState('note')
   const [loggedNow,   setLoggedNow]   = useState(false)
   const snoozeUntilRef = useRef(null)
+  const activeReminderRef = useRef(null)
   const textareaRef    = useRef(null)
 
   const { habits, completions, logCompletion, removeCompletion, isCompleted } = useHabitsStore()
@@ -48,7 +91,7 @@ export default function TradingReminderPopup() {
   const { getEntryByDate }    = useMorningStore()
   const { reminderTimes = ['10:00', '14:00'] } = useSettingsStore()
 
-  const todayEntry  = getEntryByDate(getToday())
+  const todayEntry  = getEntryByDate(localDateString())
   const activeGoals = goals.filter(g => g.status === 'active').slice(0, 4)
   const dailyHabits = habits.filter(h => h.active !== false && (h.frequency === 'daily' || !h.frequency))
 
@@ -58,6 +101,16 @@ export default function TradingReminderPopup() {
     return map
   }, [dailyHabits, completions])
 
+  useEffect(() => {
+    if (!openSignal) return
+    const hour = new Date().getHours()
+    activeReminderRef.current = null
+    snoozeUntilRef.current = null
+    setMode(hour < 13 ? 'morning' : 'afternoon')
+    setVisible(true)
+    setLoggedNow(false)
+  }, [openSignal])
+
   // ── Time-check loop ──────────────────────────────────────────────────────────
   useEffect(() => {
     const check = () => {
@@ -65,14 +118,17 @@ export default function TradingReminderPopup() {
       if (snoozeUntilRef.current && Date.now() < snoozeUntilRef.current) return
 
       const now     = new Date()
-      const current = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-      const today   = getToday()
+      const currentMinutes = now.getHours() * 60 + now.getMinutes()
+      const today   = localDateString(now)
       const firedKey = `trading-reminder-fired-${today}`
       const fired    = JSON.parse(localStorage.getItem(firedKey) || '[]')
 
       for (const t of reminderTimes) {
-        if (current === t && !fired.includes(t)) {
+        const reminderMinutes = timeToMinutes(t)
+        const minutesLate = currentMinutes - reminderMinutes
+        if (minutesLate >= 0 && minutesLate <= 2 && !fired.includes(t)) {
           const hour = parseInt(t.split(':')[0], 10)
+          activeReminderRef.current = t
           setMode(hour < 13 ? 'morning' : 'afternoon')
           setVisible(true)
           setLoggedNow(false)
@@ -99,27 +155,28 @@ export default function TradingReminderPopup() {
   }, [visible, reminderTimes])
 
   const dismiss = () => {
-    // Mark this time as fired so it won't re-trigger today
-    const now     = new Date()
-    const current = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-    const today   = getToday()
+    // Mark this reminder as fired so it won't re-trigger today
+    const today   = localDateString()
     const firedKey = `trading-reminder-fired-${today}`
     const fired    = JSON.parse(localStorage.getItem(firedKey) || '[]')
-    const matchedTime = reminderTimes.find(t => {
-      const [h, m] = t.split(':').map(Number)
-      const [ch, cm] = current.split(':').map(Number)
-      return Math.abs(h * 60 + m - (ch * 60 + cm)) <= 2
-    })
-    if (matchedTime && !fired.includes(matchedTime)) {
-      localStorage.setItem(firedKey, JSON.stringify([...fired, matchedTime]))
+    const reminderTime = activeReminderRef.current
+    if (reminderTime && !fired.includes(reminderTime)) {
+      localStorage.setItem(firedKey, JSON.stringify([...fired, reminderTime]))
     }
+    activeReminderRef.current = null
     setVisible(false)
     setThought('')
     setLoggedNow(false)
   }
 
+  const flashSaved = () => {
+    setLoggedNow(true)
+    window.setTimeout(() => setLoggedNow(false), 2500)
+  }
+
   const snooze = () => {
     snoozeUntilRef.current = Date.now() + 30 * 60 * 1000
+    activeReminderRef.current = null
     setVisible(false)
     setThought('')
   }
@@ -128,13 +185,29 @@ export default function TradingReminderPopup() {
     if (!thought.trim()) return
     addThought(thought.trim(), thoughtTag)
     setThought('')
-    setLoggedNow(true)
-    setTimeout(() => setLoggedNow(false), 2500)
+    flashSaved()
     textareaRef.current?.focus()
   }
 
+  const handleQuickState = (item) => {
+    setThoughtTag(item.tag)
+    addThought(item.text, item.tag)
+    setThought('')
+    flashSaved()
+  }
+
+  const handleSkipTyping = () => {
+    const quickText = mode === 'morning'
+      ? 'Morning pulse complete — still aligned with the plan.'
+      : 'Afternoon check-in complete — no major drift from the plan.'
+    addThought(quickText, 'note')
+    setThought('')
+    setThoughtTag('note')
+    flashSaved()
+  }
+
   const toggleHabit = (habit) => {
-    const today = getToday()
+    const today = localDateString()
     if (isCompleted(habit.id, today)) removeCompletion(habit.id, today)
     else logCompletion(habit.id, today)
   }
@@ -143,7 +216,9 @@ export default function TradingReminderPopup() {
 
   const isMorning   = mode === 'morning'
   const accentColor = isMorning ? '#ffa502' : '#3d84ff'
-  const completedToday = dailyHabits.filter(h => isCompleted(h.id, getToday())).length
+  const completedToday = dailyHabits.filter(h => isCompleted(h.id, localDateString())).length
+  const quickStates = QUICK_STATES[mode] || QUICK_STATES.morning
+  const promptText = pickDailyPrompt(mode)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -212,6 +287,26 @@ export default function TradingReminderPopup() {
               <Brain size={10} />
               Log a Trading Thought
             </p>
+            <button
+              onClick={() => {
+                setThought(promptText)
+                textareaRef.current?.focus()
+              }}
+              className="text-left w-full mb-2.5 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-gray-500 hover:text-gray-300 hover:border-white/[0.12] transition-all"
+            >
+              Prompt: {promptText}
+            </button>
+            <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
+              {quickStates.map(item => (
+                <button
+                  key={item.label}
+                  onClick={() => handleQuickState(item)}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all border text-gray-400 border-white/[0.06] bg-white/[0.02] hover:text-white hover:border-white/[0.12]"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
             <textarea
               ref={textareaRef}
               value={thought}
@@ -254,6 +349,12 @@ export default function TradingReminderPopup() {
               >
                 {loggedNow ? '✓ Saved' : 'Save'}
               </button>
+              <button
+                onClick={handleSkipTyping}
+                className="px-3 py-1 rounded-lg text-[11px] font-medium transition-all text-gray-500 hover:text-gray-300 border border-white/[0.06] hover:border-white/[0.12]"
+              >
+                Skip typing
+              </button>
             </div>
           </div>
 
@@ -263,7 +364,7 @@ export default function TradingReminderPopup() {
               <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-3">Today's Habits</p>
               <div className="space-y-1.5">
                 {dailyHabits.slice(0, 6).map(h => {
-                  const done   = isCompleted(h.id, getToday())
+                  const done   = isCompleted(h.id, localDateString())
                   const streak = streaks[h.id] || 0
                   return (
                     <button

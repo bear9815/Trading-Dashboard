@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Upload, Settings2, X, Plus, Check, ChevronDown, ChevronUp, LogOut } from 'lucide-react'
+import { Upload, Settings2, X, Plus, Check, ChevronDown, ChevronUp, LogOut, Bell } from 'lucide-react'
 import { useQuotesStore } from '../../store/useQuotesStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useSchwabStore } from '../../store/useSchwabStore'
@@ -289,7 +289,7 @@ function QuotesTicker() {
 }
 
 /* ─── TopBar ──────────────────────────────────────────────────────── */
-export default function TopBar({ page, onImport }) {
+export default function TopBar({ page, onImport, onOpenReminder }) {
   const { user, signOut } = useAuthStore()
   const { connected } = useSchwabStore()
 
@@ -310,6 +310,14 @@ export default function TopBar({ page, onImport }) {
             Schwab
           </div>
         )}
+        <button
+          onClick={onOpenReminder}
+          title="Open trading reminder popup"
+          className="btn-ghost flex items-center gap-1.5 text-xs"
+        >
+          <Bell size={14} />
+          <span className="hidden sm:inline">Reminder</span>
+        </button>
         <button
           onClick={onImport}
           className="btn-primary flex items-center gap-1.5 text-xs"

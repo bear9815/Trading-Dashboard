@@ -20,11 +20,17 @@ export const GEMINI_MODELS = [
 ]
 
 export const OPENROUTER_MODELS = [
-  { id: 'google/gemini-2.5-flash-preview',       label: 'Gemini 2.5 Flash' },
-  { id: 'anthropic/claude-3.5-haiku',            label: 'Claude 3.5 Haiku' },
+  // Anthropic — most reliable through OpenRouter
+  { id: 'anthropic/claude-3.5-haiku',            label: 'Claude 3.5 Haiku (recommended)' },
   { id: 'anthropic/claude-sonnet-4-5',           label: 'Claude Sonnet 4.5' },
+  { id: 'anthropic/claude-opus-4-5',             label: 'Claude Opus 4.5 (most capable)' },
+  // OpenAI
   { id: 'openai/gpt-4o-mini',                    label: 'GPT-4o Mini' },
   { id: 'openai/gpt-4o',                         label: 'GPT-4o' },
+  // Google — routes through OpenRouter to Google's API; can hit capacity limits
+  { id: 'google/gemini-2.5-flash',               label: 'Gemini 2.5 Flash (via OpenRouter — may hit capacity)' },
+  { id: 'google/gemini-2.5-pro',                 label: 'Gemini 2.5 Pro (via OpenRouter — may hit capacity)' },
+  // Open source
   { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (free)' },
   { id: 'deepseek/deepseek-chat',                label: 'DeepSeek Chat' },
   { id: 'mistralai/mistral-7b-instruct:free',    label: 'Mistral 7B (free)' },
@@ -105,8 +111,9 @@ const DEFAULT_AGENTS = [
 // ── Store ─────────────────────────────────────────────────────────────────────
 
 const DEPRECATED_MODELS = {
-  'gemini-2.0-flash': 'gemini-2.5-flash',
-  'gemini-2.0-flash-001': 'gemini-2.5-flash',
+  'gemini-2.0-flash':             'gemini-2.5-flash',
+  'gemini-2.0-flash-001':         'gemini-2.5-flash',
+  'google/gemini-2.5-flash-preview': 'google/gemini-2.5-flash',
 }
 
 export const useAgentsStore = create(
@@ -114,18 +121,34 @@ export const useAgentsStore = create(
     (set, get) => ({
       agents: DEFAULT_AGENTS,
 
-      // Migrate any agent pointing at a deprecated model
+      // Migrate any agent pointing at a deprecated model.
+      // Only updates state if something actually changed — avoids a no-op write
+      // that would race with IDB hydration and overwrite custom agents.
       migrateDeprecatedModels: () => {
-        const updated = get().agents.map(a =>
+        const agents  = get().agents
+        const updated = agents.map(a =>
           DEPRECATED_MODELS[a.model]
             ? { ...a, model: DEPRECATED_MODELS[a.model], updatedAt: new Date().toISOString() }
             : a
         )
-        set({ agents: updated })
+        if (updated.some((a, i) => a !== agents[i])) set({ agents: updated })
       },
 
-      getAgentForTrigger: (area, value) =>
-        get().agents.find(a => (a.triggers?.[area] || []).includes(value)) || null,
+      // Returns ALL agents that match a trigger area+value, custom agents first
+      getAgentsForTrigger: (area, value) => {
+        const matches = get().agents.filter(a => (a.triggers?.[area] || []).includes(value))
+        const custom  = matches.filter(a => !a.isBuiltIn).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+        const builtin = matches.filter(a =>  a.isBuiltIn)
+        return [...custom, ...builtin]
+      },
+
+      // Returns the single best match — custom agents take priority over built-in
+      getAgentForTrigger: (area, value) => {
+        const matches = get().agents.filter(a => (a.triggers?.[area] || []).includes(value))
+        if (!matches.length) return null
+        const custom = matches.filter(a => !a.isBuiltIn).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+        return custom[0] || matches[0]
+      },
 
       addAgent: (agent) => {
         const record = {
@@ -170,6 +193,13 @@ export const useAgentsStore = create(
     {
       name:    'agents-store-v1',
       storage: createJSONStorage(() => idbStorage),
+      // Run model migration AFTER IDB has fully hydrated so custom agents are
+      // present in state before we call set(). Calling it before hydration would
+      // read only DEFAULT_AGENTS, then set() would overwrite IDB with the defaults
+      // — erasing any custom agents the user created.
+      onRehydrateStorage: () => (state, error) => {
+        if (!error && state) state.migrateDeprecatedModels()
+      },
     }
   )
 )

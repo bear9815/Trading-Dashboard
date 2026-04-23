@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
-  Bot, Plus, Pencil, Trash2, Copy, Mic, FileText, TrendingUp,
+  Bot, Plus, Pencil, Trash2, Copy, Mic, FileText, TrendingUp, Brain,
   BarChart2, Search, Zap, Target, BookOpen, Sparkles, FlaskConical,
   X, Save, AlertTriangle, ChevronRight, Database, MessageSquare,
   Globe, Building2,
@@ -16,7 +16,7 @@ import KnowledgeBases from './KnowledgeBases.jsx'
 import AgentChat      from './AgentChat.jsx'
 
 // ── Icon registry ─────────────────────────────────────────────────────────────
-const ICON_MAP = { Mic, FileText, TrendingUp, Bot, BarChart2, Search, Zap, Target, BookOpen, Sparkles, FlaskConical }
+const ICON_MAP = { Mic, FileText, TrendingUp, Brain, Bot, BarChart2, Search, Zap, Target, BookOpen, Sparkles, FlaskConical }
 
 function AgentIcon({ name, size = 18, className = '' }) {
   const Icon = ICON_MAP[name] || Bot
@@ -132,7 +132,14 @@ function AgentEditor({ agent, onSave, onClose }) {
     ? OPENROUTER_MODELS
     : LOCAL_MODELS
 
+  // When provider changes, reset model only if the current model isn't valid for that provider.
+  // We track the PREVIOUS provider so this doesn't fire on mount — we never want to
+  // silently clobber a saved model just because the editor opened.
+  const prevProviderRef = useRef(form.provider)
   useEffect(() => {
+    const prev = prevProviderRef.current
+    prevProviderRef.current = form.provider
+    if (prev === form.provider) return   // initial mount — don't reset
     const first = models[0]?.id
     if (first && !models.find(m => m.id === form.model)) {
       setForm(f => ({ ...f, model: first }))
@@ -153,7 +160,7 @@ function AgentEditor({ agent, onSave, onClose }) {
     if (!form.name.trim()) return
     onSave({ ...agent, ...form })
     setSavedFlash(true)
-    setTimeout(() => { setSavedFlash(false); if (!isNew) onClose() }, 800)
+    setTimeout(() => { setSavedFlash(false); onClose() }, 900)
   }
 
   return (
@@ -234,11 +241,20 @@ function AgentEditor({ agent, onSave, onClose }) {
               </div>
               <select value={form.model} onChange={e => patch('model', e.target.value)}
                 className="w-full bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-accent-blue/50 transition-colors">
+                {/* If saved model isn't in the list, show it as a custom option so it isn't silently dropped */}
+                {!models.find(m => m.id === form.model) && form.model && (
+                  <option value={form.model}>{form.model} (custom)</option>
+                )}
                 {models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
               </select>
-              {form.provider === 'openrouter' && (
-                <p className="text-xs text-gray-600 bg-white/[0.02] border border-white/8 rounded-lg px-3 py-2">
-                  Audio files always use Gemini regardless — OpenRouter has no audio API.
+              {form.provider === 'openrouter' && form.model?.startsWith('google/') && (
+                <p className="text-xs text-amber-500/80 bg-amber-500/[0.06] border border-amber-500/20 rounded-lg px-3 py-2 leading-relaxed">
+                  ⚠ Gemini models routed through OpenRouter can hit Google's capacity limits ("high demand" errors) even when you're paying OpenRouter. For reliable Gemini access, switch to the <strong className="text-amber-400">Gemini Cloud</strong> provider above and use your Gemini API key directly.
+                </p>
+              )}
+              {form.provider === 'openrouter' && !form.model?.startsWith('google/') && (
+                <p className="text-xs text-gray-600 bg-white/[0.02] border border-white/[0.06] rounded-lg px-3 py-2">
+                  Audio files always use Gemini regardless of this setting — OpenRouter has no audio API.
                 </p>
               )}
             </div>
@@ -449,7 +465,12 @@ export default function Agents() {
   function handleSave(data) {
     if (data.id) updateAgent(data.id, data)
     else         addAgent(data)
-    setEditing(null)
+    // Keep chatAgent in sync if the user edited the agent currently open in chat
+    if (chatAgent && data.id === chatAgent.id) {
+      setChatAgent(prev => ({ ...prev, ...data }))
+    }
+    // Don't close immediately — let the editor show its "Saved!" flash first.
+    // The editor calls onClose() after the flash timeout.
   }
 
   const filtered = filter === 'all' ? agents : agents.filter(a => a.provider === filter)

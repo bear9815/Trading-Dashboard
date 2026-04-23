@@ -8,13 +8,14 @@ async function getUid() {
 }
 
 async function saveToCloud(state) {
-  if (!supabase) return
+  if (!supabase) return false
   const uid = await getUid()
-  if (!uid) return
+  if (!uid) return false
   const { error } = await supabase
     .from('user_journal')
     .upsert({ user_id: uid, data: state, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
-  if (error) console.error('[cloud] saveJournal:', error.message)
+  if (error) { console.error('[cloud] saveJournal:', error.message); return false }
+  return true
 }
 
 export const useJournalStore = create((set, get) => ({
@@ -66,9 +67,11 @@ export const useJournalStore = create((set, get) => ({
           const parsed = JSON.parse(raw)
           const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [] } = parsed?.state || {}
           set({ entries, priorities, goals, checkins, tradingThoughts, cloudReady: true })
-          await saveToCloud({ entries, priorities, goals, checkins, tradingThoughts })
-          localStorage.removeItem('risk-tool-journal')
-          console.info('[cloud] Journal migrated from localStorage ✓')
+          const ok = await saveToCloud({ entries, priorities, goals, checkins, tradingThoughts })
+          if (ok) {
+            localStorage.removeItem('risk-tool-journal')
+            console.info('[cloud] Journal migrated from localStorage ✓')
+          }
         } else {
           set({ cloudReady: true })
         }

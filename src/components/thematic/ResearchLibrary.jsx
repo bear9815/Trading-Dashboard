@@ -2,7 +2,8 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import {
   Upload, FileText, Trash2, ChevronDown, ChevronUp, Loader,
   AlertTriangle, X, BookOpen, TrendingUp, TrendingDown,
-  Minus, Zap, BarChart2, RefreshCw, Mic, Download,
+  Minus, Zap, BarChart2, RefreshCw, Mic, Download, ExternalLink,
+  Search,
 } from 'lucide-react'
 import { useSettingsStore }        from '../../store/useSettingsStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
@@ -378,13 +379,23 @@ export function ActiveSignals() {
   const provider = researchAiProvider || (useLocalLLM ? 'local' : 'gemini')
 
   const allSignals = useMemo(() => {
+    // AI sometimes returns array items as objects {insight,relevance} instead of strings
+    function toText(val) {
+      if (typeof val === 'string') return val
+      if (val && typeof val === 'object') {
+        return val.insight || val.text || val.signal || val.description || val.content
+          || Object.values(val).find(v => typeof v === 'string') || JSON.stringify(val)
+      }
+      return String(val ?? '')
+    }
+
     const catalysts = [], confirmations = [], contradictions = [], newInfo = []
     for (const s of sources) {
       const ins = s.insights || {}
-      ;(ins.catalysts_in_motion || []).forEach(text => catalysts.push({ text, source: s.title, type: s.source_type }))
-      ;(ins.confirmations       || []).forEach(text => confirmations.push({ text, source: s.title, type: s.source_type }))
-      ;(ins.contradictions      || []).forEach(text => contradictions.push({ text, source: s.title, type: s.source_type }))
-      ;(ins.new_information     || []).forEach(text => newInfo.push({ text, source: s.title, type: s.source_type }))
+      ;(ins.catalysts_in_motion || []).forEach(v => catalysts.push({ text: toText(v), source: s.title, type: s.source_type }))
+      ;(ins.confirmations       || []).forEach(v => confirmations.push({ text: toText(v), source: s.title, type: s.source_type }))
+      ;(ins.contradictions      || []).forEach(v => contradictions.push({ text: toText(v), source: s.title, type: s.source_type }))
+      ;(ins.new_information     || []).forEach(v => newInfo.push({ text: toText(v), source: s.title, type: s.source_type }))
     }
     return { catalysts, confirmations, contradictions, newInfo }
   }, [sources])
@@ -593,13 +604,158 @@ function exportSourceToPDF(source) {
   doc.save(`${slug}.pdf`)
 }
 
+// ── Agent picker — shows when multiple agents match the current source type ───
+function AgentPicker({ sourceType, selectedAgentId, onSelect }) {
+  const { getAgentsForTrigger } = useAgentsStore()
+  const agents = getAgentsForTrigger('researchLibrary', sourceType)
+  if (agents.length <= 1) return null  // nothing to choose from
+
+  const PROVIDER_DOT = { gemini: 'bg-accent-blue', openrouter: 'bg-accent-yellow', local: 'bg-accent-green' }
+  const PROVIDER_LABEL = { gemini: 'Gemini', openrouter: 'OpenRouter', local: 'Local' }
+
+  // Active = explicitly selected, or first in list
+  const activeId = selectedAgentId || agents[0].id
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-[10px] text-gray-600 font-semibold uppercase tracking-widest shrink-0">Agent:</span>
+      {agents.map(a => {
+        const isActive = a.id === activeId
+        const dot = PROVIDER_DOT[a.provider] || 'bg-gray-500'
+        const modelShort = (a.model || '').split('/').pop().replace(/:free$/, '')
+        return (
+          <button
+            key={a.id}
+            onClick={() => onSelect(a.id)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs transition-all ${
+              isActive
+                ? 'bg-accent-blue/15 border-accent-blue/35 text-white'
+                : 'bg-white/[0.03] border-white/10 text-gray-500 hover:border-white/20 hover:text-gray-300'
+            }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+            <span className="font-medium">{a.name}</span>
+            <span className={`text-[10px] ${isActive ? 'text-gray-400' : 'text-gray-700'}`}>
+              {PROVIDER_LABEL[a.provider]} · {modelShort}
+            </span>
+            {!a.isBuiltIn && (
+              <span className={`text-[9px] px-1 rounded ${isActive ? 'bg-accent-green/20 text-accent-green' : 'bg-white/5 text-gray-700'}`}>custom</span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── earningscall.biz quick-access panel ──────────────────────────────────────
+const EXCHANGES = [
+  { value: 'nasdaq', label: 'NASDAQ' },
+  { value: 'nyse',   label: 'NYSE'   },
+  { value: 'nysearca', label: 'NYSE Arca' },
+  { value: 'otcmkts', label: 'OTC'   },
+]
+
+function EarningsCallBizPanel({ tickerHint }) {
+  const [ticker,   setTicker]   = useState('')
+  const [exchange, setExchange] = useState('nasdaq')
+
+  // Keep ticker input synced when parent tickerHint changes
+  useEffect(() => {
+    const first = (tickerHint || '').split(',')[0].trim().toUpperCase()
+    if (first) setTicker(first)
+  }, [tickerHint])
+
+  function openTranscript() {
+    const t = ticker.trim().toLowerCase()
+    if (!t) {
+      window.open('https://earningscall.biz', '_blank', 'noopener')
+      return
+    }
+    window.open(`https://earningscall.biz/e/${exchange}/s/${t}`, '_blank', 'noopener')
+  }
+
+  function handleKey(e) {
+    if (e.key === 'Enter') openTranscript()
+  }
+
+  return (
+    <div className="bg-white/[0.02] border border-white/[0.10] rounded-xl p-4">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          {/* earningscall.biz wordmark / logo area */}
+          <div className="w-6 h-6 rounded-md bg-accent-blue/20 border border-accent-blue/30 flex items-center justify-center">
+            <span className="text-[9px] font-black text-accent-blue leading-none">EC</span>
+          </div>
+          <span className="text-xs font-semibold text-gray-300">earningscall.biz</span>
+          <span className="text-[10px] text-gray-600">· transcript source</span>
+        </div>
+        <a
+          href="https://earningscall.biz"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1 text-[10px] text-gray-600 hover:text-accent-blue transition-colors"
+        >
+          Browse all <ExternalLink size={9} />
+        </a>
+      </div>
+
+      {/* Search row */}
+      <div className="flex items-center gap-2">
+        {/* Exchange selector */}
+        <select
+          value={exchange}
+          onChange={e => setExchange(e.target.value)}
+          className="bg-white/[0.04] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-gray-400 focus:outline-none focus:border-accent-blue/40 transition-colors appearance-none cursor-pointer"
+        >
+          {EXCHANGES.map(ex => (
+            <option key={ex.value} value={ex.value} className="bg-gray-900">{ex.label}</option>
+          ))}
+        </select>
+
+        {/* Ticker input */}
+        <div className="flex-1 relative">
+          <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600 pointer-events-none" />
+          <input
+            type="text"
+            value={ticker}
+            onChange={e => setTicker(e.target.value.toUpperCase())}
+            onKeyDown={handleKey}
+            placeholder="Ticker (e.g. NVDA)"
+            maxLength={10}
+            className="w-full bg-white/[0.04] border border-white/10 rounded-lg pl-7 pr-3 py-1.5 text-xs text-white placeholder:text-gray-600 focus:outline-none focus:border-accent-blue/40 transition-colors"
+          />
+        </div>
+
+        {/* Open button */}
+        <button
+          onClick={openTranscript}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-blue/15 border border-accent-blue/30 text-xs font-semibold text-accent-blue hover:bg-accent-blue/25 hover:border-accent-blue/50 transition-all"
+        >
+          Open <ExternalLink size={10} />
+        </button>
+      </div>
+
+      <p className="text-[10px] text-gray-700 mt-2.5 leading-relaxed">
+        Find & download the transcript PDF, then drop it in the upload zone below.
+      </p>
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
-export default function ResearchLibrary() {
+export default function ResearchLibrary({ earningsMode = false }) {
   const { apiKey, openRouterApiKey, researchAiProvider, researchOpenRouterModel, useLocalLLM }  = useSettingsStore()
   const { themes }  = useThematicStore()
-  const { sources, loading: storeLoading, addSource, removeSource, updateSource } = useResearchLibraryStore()
-  const { getAgentForTrigger } = useAgentsStore()
+  const { sources: allSources, loading: storeLoading, addSource, removeSource, updateSource } = useResearchLibraryStore()
+  const { getAgentsForTrigger } = useAgentsStore()
   const provider = researchAiProvider || (useLocalLLM ? 'local' : 'gemini')
+
+  // In earningsMode, only show earnings_call sources; otherwise show all
+  const sources = earningsMode
+    ? allSources.filter(s => s.source_type === 'earnings_call')
+    : allSources
 
   const [sourceType,    setSourceType]    = useState('earnings_call')
   const [createDossier, setCreateDossier] = useState(false)
@@ -616,8 +772,9 @@ export default function ResearchLibrary() {
   const [showLibrary,  setShowLibrary]  = useState(true)
   const [driveLoading, setDriveLoading] = useState(false)
   const [lastSaved,    setLastSaved]    = useState(null)
-  const [viewMode,     setViewMode]     = useState('library')  // 'library' | 'companies'
+  const [viewMode,     setViewMode]     = useState(earningsMode ? 'companies' : 'library')  // 'library' | 'companies'
   const [openReport,   setOpenReport]   = useState(null)       // source object or null
+  const [selectedAgentId, setSelectedAgentId] = useState(null) // explicit agent override
   const inputRef = useRef()
 
   useEffect(() => { setCreateDossier(sourceType === 'deep_dive') }, [sourceType])
@@ -629,8 +786,6 @@ export default function ResearchLibrary() {
 
   const handleFiles = useCallback(async (files) => {
     if (!files.length) return
-    if (provider === 'gemini' && !apiKey) { setError('No Gemini API key. Add it in Settings → API Keys.'); return }
-    if (provider === 'openrouter' && !openRouterApiKey) { setError('No OpenRouter API key. Add it in Settings → OpenRouter API Key.'); return }
     setError(null)
     setAnalysis(null)
     setLastSaved(null)
@@ -646,7 +801,20 @@ export default function ResearchLibrary() {
       try {
         let extracted, dossierThemes = null
 
-        const agentForType = getAgentForTrigger('researchLibrary', sourceType)
+        // Use explicitly selected agent if set, otherwise auto-pick best match
+        const allAgentsForType = getAgentsForTrigger('researchLibrary', sourceType)
+        const agentForType = selectedAgentId
+          ? allAgentsForType.find(a => a.id === selectedAgentId) || allAgentsForType[0]
+          : allAgentsForType[0] || null
+
+        // Validate API keys based on what will actually be used.
+        // When an agent is selected, runAgent() validates internally.
+        // For the legacy non-agent path, check the global provider setting.
+        if (!agentForType) {
+          if (provider === 'gemini' && !apiKey) { setError('No Gemini API key. Add it in Settings → API Keys.'); break }
+          if (provider === 'openrouter' && !openRouterApiKey) { setError('No OpenRouter API key. Add it in Settings → OpenRouter API Key.'); break }
+        }
+
         if (agentForType) {
           extracted = await runAgent({
             agent:            agentForType,
@@ -704,7 +872,18 @@ export default function ResearchLibrary() {
           theme:            themeInput.trim()  || (extracted.themes_mentioned || [])[0] || '',
           raw_text:         (typeof extracted.raw_text === 'string' ? extracted.raw_text : '').substring(0, 8000),
           summary:          typeof extracted.summary === 'string' ? extracted.summary : '',
+          // Legacy flat format (old schema)
           key_points:       Array.isArray(extracted.key_points)       ? extracted.key_points       : [],
+          // New structured format (matches DELL Gem report structure)
+          key_takeaways:    Array.isArray(extracted.key_takeaways)    ? extracted.key_takeaways    : [],
+          strengths:        Array.isArray(extracted.strengths)        ? extracted.strengths        : [],
+          weaknesses:       Array.isArray(extracted.weaknesses)       ? extracted.weaknesses       : [],
+          explosive_growth: extracted.explosive_growth && typeof extracted.explosive_growth === 'object'
+            ? extracted.explosive_growth
+            : null,
+          growth_confidence: extracted.growth_confidence && typeof extracted.growth_confidence === 'object'
+            ? extracted.growth_confidence
+            : null,
           catalyst_signals: Array.isArray(extracted.catalyst_signals) ? extracted.catalyst_signals : [],
           key_metrics:      Array.isArray(extracted.key_metrics)      ? extracted.key_metrics      : [],
           themes_mentioned: Array.isArray(extracted.themes_mentioned) ? extracted.themes_mentioned : [],
@@ -753,7 +932,7 @@ export default function ResearchLibrary() {
     setUploadStatus('')
     setUploadIndex(0)
     setUploadTotal(0)
-  }, [apiKey, openRouterApiKey, researchOpenRouterModel, provider, sourceType, tickerInput, themeInput, themes, addSource])
+  }, [apiKey, openRouterApiKey, researchOpenRouterModel, provider, sourceType, tickerInput, themeInput, addSource, createDossier, getAgentsForTrigger, selectedAgentId, updateSource])
 
   const handleDrop = useCallback(e => {
     e.preventDefault(); setDragging(false)
@@ -794,9 +973,186 @@ export default function ResearchLibrary() {
     }
   }, [handleFiles])
 
-  const deepDiveCount    = sources.filter(s => s.source_type === 'deep_dive').length
-  const earningsCount    = sources.filter(s => s.source_type === 'earnings_call').length
+  const deepDiveCount = allSources.filter(s => s.source_type === 'deep_dive').length
+  const earningsCount = allSources.filter(s => s.source_type === 'earnings_call').length
 
+  const companyCount  = [...new Set(sources.map(s => s.primary_ticker || s.tickers?.[0]).filter(Boolean))].length
+
+  // ── Earnings mode: flat layout, no accordion ──
+  if (earningsMode) {
+    return (
+      <div className="space-y-4">
+
+        {/* Sub-tabs: Companies | All Reports */}
+        <div className="flex items-center gap-1 border-b border-white/[0.07]">
+          {[
+            { id: 'companies', label: 'Companies', count: companyCount },
+            { id: 'library',   label: 'All Reports', count: sources.length },
+          ].map(({ id, label, count }) => (
+            <button
+              key={id}
+              onClick={() => setViewMode(id)}
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold border-b-2 -mb-px transition-all ${
+                viewMode === id
+                  ? 'border-accent-blue text-accent-blue'
+                  : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {label}
+              {count > 0 && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${viewMode === id ? 'bg-accent-blue/20 text-accent-blue' : 'bg-white/[0.06] text-gray-600'}`}>
+                  {count}
+                </span>
+              )}
+            </button>
+          ))}
+
+          {/* Upload button inline in tab bar */}
+          <button
+            onClick={() => setViewMode('upload')}
+            className={`ml-auto flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold border-b-2 -mb-px transition-all ${
+              viewMode === 'upload'
+                ? 'border-accent-green text-accent-green'
+                : 'border-transparent text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            <Upload size={11} />
+            Upload Transcript
+          </button>
+        </div>
+
+        {/* Companies sub-tab */}
+        {viewMode === 'companies' && (
+          <CompaniesView sources={sources} onViewReport={setOpenReport} onUpdateSource={updateSource} />
+        )}
+
+        {/* All Reports sub-tab */}
+        {viewMode === 'library' && (
+          <>
+            {storeLoading && (
+              <div className="text-center py-4">
+                <Loader size={16} className="text-gray-600 animate-spin mx-auto"/>
+              </div>
+            )}
+            {!storeLoading && sources.length > 0 && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {sources.map(source => (
+                  <SourceCard key={source.id} source={source} onRemove={removeSource} onView={setOpenReport}/>
+                ))}
+              </div>
+            )}
+            {!storeLoading && sources.length === 0 && (
+              <div className="text-center py-10 text-gray-600">
+                <FileText size={24} className="mx-auto mb-2 opacity-40"/>
+                <p className="text-sm font-medium text-gray-500 mb-1">No earnings reports yet</p>
+                <p className="text-xs">Upload a transcript using the <strong className="text-gray-400">Upload Transcript</strong> tab above</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Upload sub-tab */}
+        {viewMode === 'upload' && (
+          <div className="space-y-4">
+
+            {/* ── earningscall.biz quick-access panel ── */}
+            <EarningsCallBizPanel tickerHint={tickerInput} />
+
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                <input
+                  type="text" value={tickerInput} onChange={e => setTickerInput(e.target.value)}
+                  placeholder="Tickers (AAPL, NVDA…)"
+                  className="flex-1 min-w-[140px] bg-white/[0.04] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors"
+                />
+              </div>
+              <AgentPicker sourceType="earnings_call" selectedAgentId={selectedAgentId} onSelect={setSelectedAgentId} />
+
+              {uploading ? (
+                <div className="border border-white/10 rounded-xl p-5 text-center bg-white/[0.02]">
+                  <Loader size={18} className="text-accent-blue animate-spin mx-auto mb-2"/>
+                  {uploadTotal > 1 && <p className="text-[10px] text-gray-500 mb-1">File {uploadIndex} of {uploadTotal}</p>}
+                  <p className="text-xs text-accent-blue font-medium truncate px-4">{uploadFile}</p>
+                  <p className="text-[10px] text-gray-600 mt-1 animate-pulse">{uploadStatus}</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {lastSaved && (
+                    <div className="flex items-center justify-between bg-accent-green/5 border border-accent-green/20 rounded-lg px-3 py-2">
+                      <p className="text-xs text-accent-green truncate flex-1 mr-2">Saved: {lastSaved.title}</p>
+                      <button
+                        onClick={() => { exportSourceToPDF(lastSaved); setViewMode('companies') }}
+                        className="flex items-center gap-1 text-[10px] font-semibold text-accent-green hover:text-white border border-accent-green/30 hover:border-accent-green rounded-lg px-2 py-1 transition-all shrink-0"
+                      >
+                        <Download size={10}/> Export PDF
+                      </button>
+                    </div>
+                  )}
+                  <div
+                    onDragOver={e => { e.preventDefault(); setDragging(true) }}
+                    onDragLeave={() => setDragging(false)}
+                    onDrop={handleDrop}
+                    onClick={() => inputRef.current?.click()}
+                    className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all select-none ${
+                      dragging
+                        ? 'border-accent-blue bg-accent-blue/8 scale-[1.01]'
+                        : 'border-white/10 bg-white/[0.01] hover:border-white/25 hover:bg-white/[0.03]'
+                    }`}
+                  >
+                    <input ref={inputRef} type="file"
+                      accept="application/pdf,audio/mpeg,audio/mp4,audio/x-m4a,audio/wav,audio/ogg,video/mp4,.mp3,.m4a,.wav"
+                      multiple className="hidden"
+                      onChange={e => { const f=[...e.target.files].filter(f=>f.type==='application/pdf'||isAudioFile(f)); if(f.length) handleFiles(f); e.target.value='' }}/>
+                    <div className={`flex items-center justify-center gap-2 mb-2 ${dragging ? 'text-accent-blue' : 'text-gray-600'}`}>
+                      <Upload size={18}/><Mic size={16}/>
+                    </div>
+                    <p className={`text-sm font-medium ${dragging ? 'text-accent-blue' : 'text-gray-400'}`}>
+                      {dragging ? 'Drop to analyze' : 'Drop earnings transcripts or audio files here'}
+                    </p>
+                    <p className="text-xs text-gray-600 mt-1">PDF, MP3, M4A, WAV · multiple files</p>
+                  </div>
+                  <button
+                    onClick={handleGoogleDrive}
+                    disabled={driveLoading}
+                    className="flex items-center justify-center gap-2 w-full border border-white/10 rounded-xl py-2.5 text-xs text-gray-500 hover:text-gray-300 hover:border-white/20 hover:bg-white/[0.02] transition-all disabled:opacity-50 disabled:cursor-wait"
+                  >
+                    {driveLoading ? <Loader size={13} className="animate-spin text-accent-blue"/> : (
+                      <svg width="13" height="13" viewBox="0 0 87.3 78" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066DA"/>
+                        <path d="M43.65 25L29.9 1.2C28.55 2 27.4 3.1 26.6 4.5L1.2 48.4c-.8 1.4-1.2 2.95-1.2 4.5h27.5l16.15-27.9z" fill="#00AC47"/>
+                        <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.8l5.65 9.6 8.1 14.2z" fill="#EA4335"/>
+                        <path d="M43.65 25L57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2L43.65 25z" fill="#00832D"/>
+                        <path d="M59.8 53H27.5L13.75 76.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2L59.8 53z" fill="#2684FC"/>
+                        <path d="M73.4 26.5l-12.8-22.2c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25 59.8 53h27.45c0-1.55-.4-3.1-1.2-4.5l-12.65-22z" fill="#FFBA00"/>
+                      </svg>
+                    )}
+                    {driveLoading ? 'Connecting to Drive…' : 'Open Google Drive'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {error && (
+              <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/25 rounded-lg px-3 py-2.5">
+                <AlertTriangle size={13} className="text-red-400 mt-0.5 shrink-0"/>
+                <p className="text-xs text-red-300 flex-1">{error}</p>
+                <button onClick={() => setError(null)}><X size={12} className="text-red-400 hover:text-red-200"/></button>
+              </div>
+            )}
+
+            <InsightsCard analysis={analysis} onDismiss={() => setAnalysis(null)}/>
+          </div>
+        )}
+
+        {/* Full-page report overlay */}
+        {openReport && (
+          <EarningsReport source={openReport} onBack={() => setOpenReport(null)} />
+        )}
+      </div>
+    )
+  }
+
+  // ── Standard (non-earnings) accordion mode ──
   return (
     <div className="bg-surface-50 border border-white/10 rounded-xl overflow-hidden">
       <button onClick={() => setShowLibrary(p => !p)}
@@ -804,7 +1160,7 @@ export default function ResearchLibrary() {
         <BookOpen size={14} className="text-accent-blue"/>
         <span className="text-sm font-semibold text-white flex-1 text-left">Research Library</span>
         <span className="text-xs text-gray-600 mr-2">
-          {sources.length > 0
+          {allSources.length > 0
             ? `${deepDiveCount} deep dive${deepDiveCount !== 1 ? 's' : ''} · ${earningsCount} earnings call${earningsCount !== 1 ? 's' : ''}`
             : 'Deep dives · Earnings calls · Cross-referenced intelligence'}
         </span>
@@ -818,7 +1174,7 @@ export default function ResearchLibrary() {
           <div className="flex items-center gap-1 px-4 pt-3 border-b border-white/[0.07]">
             {[
               { id: 'library',   label: 'Library',   count: sources.length },
-              { id: 'companies', label: 'Companies',  count: [...new Set(sources.map(s => s.primary_ticker || s.tickers?.[0]).filter(Boolean))].length },
+              { id: 'companies', label: 'Companies',  count: companyCount },
             ].map(({ id, label, count }) => (
               <button
                 key={id}
@@ -841,7 +1197,7 @@ export default function ResearchLibrary() {
 
           {/* ── Companies tab ── */}
           {viewMode === 'companies' && (
-            <CompaniesView sources={sources} onViewReport={setOpenReport} />
+            <CompaniesView sources={sources} onViewReport={setOpenReport} onUpdateSource={updateSource} />
           )}
 
           {/* ── Library tab ── */}
@@ -875,6 +1231,7 @@ export default function ResearchLibrary() {
                 className="flex-1 min-w-[120px] bg-white/[0.04] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors"
               />
             </div>
+            <AgentPicker sourceType={sourceType} selectedAgentId={selectedAgentId} onSelect={setSelectedAgentId} />
 
             {/* Dossier toggle */}
             <label className="flex items-center gap-2 cursor-pointer select-none w-fit">

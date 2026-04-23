@@ -7,13 +7,14 @@ async function getUid() {
 }
 
 async function saveToCloud(entries) {
-  if (!supabase) return
+  if (!supabase) return false
   const uid = await getUid()
-  if (!uid) return
+  if (!uid) return false
   const { error } = await supabase
     .from('user_morning')
     .upsert({ user_id: uid, data: { entries }, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
-  if (error) console.error('[cloud] saveMorning:', error.message)
+  if (error) { console.error('[cloud] saveMorning:', error.message); return false }
+  return true
 }
 
 export const useMorningStore = create((set, get) => ({
@@ -61,9 +62,11 @@ export const useMorningStore = create((set, get) => ({
           const parsed = JSON.parse(raw)
           const { entries = [] } = parsed?.state || {}
           set({ entries, cloudReady: true })
-          await saveToCloud(entries)
-          localStorage.removeItem('risk-tool-morning')
-          console.info('[cloud] Morning entries migrated from localStorage ✓')
+          const ok = await saveToCloud(entries)
+          if (ok) {
+            localStorage.removeItem('risk-tool-morning')
+            console.info('[cloud] Morning entries migrated from localStorage ✓')
+          }
         } else {
           set({ cloudReady: true })
         }

@@ -35,8 +35,11 @@ function formatDateLabel(ts) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function todayStr() {
-  return new Date().toISOString().slice(0, 10)
+function localDateString(date = new Date()) {
+  const year  = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day   = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -176,13 +179,24 @@ export default function TradingThoughts() {
   const [showAI,     setShowAI]     = useState(false)
 
   const inputRef = useRef(null)
-  const today = todayStr()
+  const today = localDateString()
 
   // Sort newest-first, split today vs older
   const sorted        = [...tradingThoughts].sort((a, b) => b.timestamp - a.timestamp)
-  const todayList     = sorted.filter(t => new Date(t.timestamp).toISOString().slice(0, 10) === today)
-  const olderList     = sorted.filter(t => new Date(t.timestamp).toISOString().slice(0, 10) !== today)
+  const todayList     = sorted.filter(t => localDateString(new Date(t.timestamp)) === today)
+  const olderList     = sorted.filter(t => localDateString(new Date(t.timestamp)) !== today)
   const displayOlder  = showAll ? olderList : olderList.slice(0, 3)
+  const recentInsight = useMemo(() => {
+    const recent = sorted.slice(0, 5)
+    if (recent.length < 3) return ''
+    const counts = recent.reduce((acc, item) => {
+      acc[item.tag] = (acc[item.tag] || 0) + 1
+      return acc
+    }, {})
+    const [topTag, topCount] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || []
+    if (!topTag || topCount < 2) return ''
+    return `Recent pattern: ${topCount} of your last ${recent.length} thoughts were tagged ${tagInfo(topTag).label.toLowerCase()}.`
+  }, [sorted])
 
   const tag = tagInfo(selectedTag)
   const canAnalyze = tradingThoughts.length >= 3
@@ -249,6 +263,12 @@ export default function TradingThoughts() {
           </button>
         )}
       </div>
+
+      {recentInsight && (
+        <div className="mb-3 rounded-lg border border-accent-blue/15 bg-accent-blue/5 px-3 py-2">
+          <p className="text-sm text-accent-blue">{recentInsight}</p>
+        </div>
+      )}
 
       {/* ── Input ───────────────────────────────────────────────────────────── */}
       <div className="flex gap-2 mb-3">

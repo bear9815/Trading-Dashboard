@@ -6,7 +6,7 @@
 import { useState, useMemo } from 'react'
 import {
   TrendingUp, TrendingDown, Minus, BarChart2,
-  FileText, ChevronRight, Zap,
+  FileText, ChevronRight, Zap, Tag,
 } from 'lucide-react'
 
 const SENTIMENT_CONFIG = {
@@ -88,11 +88,6 @@ function TimelineEntry({ source, onView }) {
     ? new Date(source.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     : ''
 
-  // Show first 2 key takeaways (non-labeled) as preview
-  const preview = (source.key_points || [])
-    .filter(p => !p.startsWith('[STRENGTH]') && !p.startsWith('[RISK]'))
-    .slice(0, 2)
-
   return (
     <div className="relative pl-6">
       {/* Timeline line */}
@@ -156,22 +151,94 @@ function TimelineEntry({ source, onView }) {
   )
 }
 
+// ── Unassigned source row — shows title + inline ticker assignment ─────────────
+function UnassignedRow({ source, onAssign, onView }) {
+  const [tickerInput, setTickerInput] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function handleAssign() {
+    const val = tickerInput.trim().toUpperCase()
+    if (!val) return
+    setSaving(true)
+    await onAssign(source.id, val)
+    setSaving(false)
+  }
+
+  function handleKey(e) {
+    if (e.key === 'Enter') handleAssign()
+  }
+
+  const cfg = SENTIMENT_CONFIG[source.sentiment] || SENTIMENT_CONFIG.neutral
+  const date = source.created_at
+    ? new Date(source.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : ''
+
+  return (
+    <div className="bg-white/[0.02] border border-white/[0.08] rounded-xl p-4 hover:border-white/15 transition-colors">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-300 leading-snug line-clamp-2 mb-1">{source.title}</p>
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider border rounded-full px-2 py-0.5 ${cfg.bg} ${cfg.border} ${cfg.text}`}>
+              <cfg.Icon size={9} />
+              {source.sentiment || 'neutral'}
+            </span>
+            {date && <span className="text-[10px] text-gray-700">{date}</span>}
+          </div>
+        </div>
+        <button
+          onClick={() => onView(source)}
+          className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 text-xs text-gray-400 hover:text-white hover:border-white/25 hover:bg-white/[0.07] transition-all"
+        >
+          View
+          <ChevronRight size={11} />
+        </button>
+      </div>
+
+      {/* Inline ticker assignment */}
+      <div className="flex items-center gap-2 mt-2">
+        <Tag size={12} className="text-gray-600 shrink-0" />
+        <input
+          type="text"
+          value={tickerInput}
+          onChange={e => setTickerInput(e.target.value.toUpperCase())}
+          onKeyDown={handleKey}
+          placeholder="Assign ticker (e.g. YSS)"
+          maxLength={10}
+          className="flex-1 bg-white/[0.04] border border-white/[0.10] rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-gray-700 focus:outline-none focus:border-white/25 transition-colors"
+        />
+        <button
+          onClick={handleAssign}
+          disabled={!tickerInput.trim() || saving}
+          className="px-3 py-1.5 rounded-lg bg-accent-green/10 border border-accent-green/20 text-xs font-semibold text-accent-green hover:bg-accent-green/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {saving ? '…' : 'Assign'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function CompaniesView({ sources, onViewReport }) {
+export default function CompaniesView({ sources, onViewReport, onUpdateSource }) {
   const [selectedTicker, setSelectedTicker] = useState(null)
 
   // Group all sources by primary_ticker (fall back to first ticker in array)
-  const grouped = useMemo(() => {
+  const { grouped, unassigned } = useMemo(() => {
     const map = {}
+    const noTicker = []
     for (const s of sources) {
       const ticker = s.primary_ticker || s.tickers?.[0] || null
-      if (!ticker) continue
+      if (!ticker) {
+        noTicker.push(s)
+        continue
+      }
       if (!map[ticker]) map[ticker] = []
       map[ticker].push(s)
     }
     // Sort each company's reports newest first
     for (const t in map) map[t].sort(sortByPeriod)
-    return map
+    return { grouped: map, unassigned: noTicker }
   }, [sources])
 
   const tickers = Object.keys(grouped).sort((a, b) => {
@@ -182,7 +249,7 @@ export default function CompaniesView({ sources, onViewReport }) {
   // Auto-select first ticker if nothing selected
   const active = selectedTicker || tickers[0] || null
 
-  if (tickers.length === 0) {
+  if (tickers.length === 0 && unassigned.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
         <FileText size={32} className="text-gray-700 mb-3" />
@@ -196,28 +263,85 @@ export default function CompaniesView({ sources, onViewReport }) {
 
   const activeReports = active ? (grouped[active] || []) : []
 
+  function handleAssignTicker(sourceId, ticker) {
+    if (onUpdateSource) {
+      onUpdateSource(sourceId, { primary_ticker: ticker, tickers: [ticker] })
+      // If nothing was selected, auto-select the newly assigned ticker
+      if (!selectedTicker) setSelectedTicker(ticker)
+    }
+  }
+
   return (
     <div className="flex gap-5">
 
       {/* ── Left: Ticker index ── */}
       <div className="w-52 shrink-0 space-y-1.5">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-3 px-1">
-          Companies ({tickers.length})
-        </p>
-        {tickers.map(ticker => (
-          <TickerRow
-            key={ticker}
-            ticker={ticker}
-            reports={grouped[ticker]}
-            isSelected={ticker === active}
-            onClick={() => setSelectedTicker(ticker)}
-          />
-        ))}
+        {tickers.length > 0 && (
+          <>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-3 px-1">
+              Companies ({tickers.length})
+            </p>
+            {tickers.map(ticker => (
+              <TickerRow
+                key={ticker}
+                ticker={ticker}
+                reports={grouped[ticker]}
+                isSelected={ticker === active}
+                onClick={() => setSelectedTicker(ticker)}
+              />
+            ))}
+          </>
+        )}
+
+        {unassigned.length > 0 && (
+          <div className={tickers.length > 0 ? 'pt-3' : ''}>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-3 px-1">
+              Unassigned ({unassigned.length})
+            </p>
+            <button
+              onClick={() => setSelectedTicker('__unassigned__')}
+              className={`w-full text-left px-4 py-3 rounded-xl border transition-all
+                ${active === '__unassigned__'
+                  ? 'bg-amber-500/10 border-amber-500/25'
+                  : 'bg-white/[0.02] border-white/[0.08] hover:border-white/20 hover:bg-white/[0.04]'}`
+              }
+            >
+              <div className="flex items-center gap-2">
+                <Tag size={12} className="text-amber-400" />
+                <span className={`text-sm font-semibold ${active === '__unassigned__' ? 'text-amber-300' : 'text-gray-400'}`}>
+                  No Ticker
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-600 mt-0.5 pl-5">
+                {unassigned.length} report{unassigned.length !== 1 ? 's' : ''}
+              </p>
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* ── Right: Timeline ── */}
+      {/* ── Right: Timeline or Unassigned list ── */}
       <div className="flex-1 min-w-0">
-        {active && (
+        {active === '__unassigned__' ? (
+          <>
+            <div className="mb-5">
+              <h2 className="text-lg font-bold text-white">Unassigned Reports</h2>
+              <p className="text-xs text-gray-600 mt-0.5">
+                These reports don't have a ticker symbol — assign one to move them into a company view.
+              </p>
+            </div>
+            <div className="space-y-3">
+              {unassigned.map(source => (
+                <UnassignedRow
+                  key={source.id}
+                  source={source}
+                  onAssign={handleAssignTicker}
+                  onView={onViewReport}
+                />
+              ))}
+            </div>
+          </>
+        ) : active ? (
           <>
             <div className="flex items-center justify-between mb-5">
               <div>
@@ -239,7 +363,7 @@ export default function CompaniesView({ sources, onViewReport }) {
               ))}
             </div>
           </>
-        )}
+        ) : null}
       </div>
 
     </div>
