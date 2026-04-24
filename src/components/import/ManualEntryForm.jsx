@@ -4,12 +4,13 @@ import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { formatCurrency } from '../../utils/formatters.js'
 import { fetchQuotes, fetchATR14 } from '../../utils/marketData.js'
+import { calcAtrTradePlan, formatPlanPrice } from '../../utils/atrTradePlan.js'
 import { v4 as uuidv4 } from 'uuid'
 
 const BLANK = {
   symbol: '', account: '', market: 'Stock', position: 'Long',
   edges: [],
-  entryDate: '', entryPrice: '', positionSize: '', takeProfit: '', stopLoss: '',
+  entryDate: '', entryPrice: '', atrValue: '', positionSize: '', takeProfit: '', stopLoss: '',
   status: 'Open',
   rMultiple: '', riskReward: '', duration: '', lessons: '', exitNotes: '',
   processGrade: null,
@@ -235,9 +236,17 @@ export default function ManualEntryForm({ onClose }) {
   const [customAccount, setCustomAccount] = useState('')
   const [exits, setExits]                 = useState([])
   const [selectedOpenId, setSelectedOpenId] = useState('')
+  const [atrLoading, setAtrLoading]       = useState(false)
+  const [atrError, setAtrError]           = useState(null)
+  const stopUserEdited = useRef(false)
   const tpUserEdited = useRef(false)
 
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const set = (k, v) => {
+    if (k === 'stopLoss') stopUserEdited.current = true
+    if (k === 'takeProfit') tpUserEdited.current = true
+    if (k === 'symbol') setAtrError(null)
+    setForm(f => ({ ...f, [k]: v }))
+  }
 
   // Open positions for the "closing" selector
   const openTrades = useMemo(
@@ -245,22 +254,49 @@ export default function ManualEntryForm({ onClose }) {
     [trades]
   )
 
-  // Auto-fill take profit when entry + stop change (unless user manually edited TP)
+  // Auto-fill the default ATR plan: 1 ATR stop, tpMultiplier ATR target.
+  useEffect(() => {
+    const plan = calcAtrTradePlan({
+      entryPrice: form.entryPrice,
+      atrValue: form.atrValue,
+      position: form.position,
+      targetMultiple: tpMultiplier,
+    })
+    if (!plan) return
+
+    setForm(f => ({
+      ...f,
+      stopLoss: stopUserEdited.current ? f.stopLoss : formatPlanPrice(plan.stopLoss),
+      takeProfit: tpUserEdited.current ? f.takeProfit : formatPlanPrice(plan.takeProfit),
+    }))
+  }, [form.entryPrice, form.atrValue, form.position, tpMultiplier])
+
+  // Fallback: if no ATR is supplied, still infer TP from a manually-entered stop.
   useEffect(() => {
     if (tpUserEdited.current) return
+    const atr = parseFloat(form.atrValue)
+    if (atr > 0 && !isNaN(atr)) return
     const ep = parseFloat(form.entryPrice)
     const sl = parseFloat(form.stopLoss)
     if (!ep || !sl || isNaN(ep) || isNaN(sl) || ep === sl) return
     const risk = Math.abs(ep - sl)
     const tp   = form.position === 'Long' ? ep + tpMultiplier * risk : ep - tpMultiplier * risk
     setForm(f => ({ ...f, takeProfit: tp.toFixed(2) }))
-  }, [form.entryPrice, form.stopLoss, form.position, tpMultiplier]) // eslint-disable-line
+  }, [form.entryPrice, form.stopLoss, form.atrValue, form.position, tpMultiplier]) // eslint-disable-line
 
   // Pre-fill from a selected open trade
   function prefillFromOpen(id) {
     setSelectedOpenId(id)
-    tpUserEdited.current = false
-    if (!id) { setForm(BLANK); setExits([]); return }
+    stopUserEdited.current = true
+    tpUserEdited.current = true
+    if (!id) {
+      stopUserEdited.current = false
+      tpUserEdited.current = false
+      setAtrError(null)
+      setForm(BLANK)
+      setExits([])
+      return
+    }
     const t = trades.find(tr => tr.id === id)
     if (!t) return
     setForm({
@@ -271,6 +307,7 @@ export default function ManualEntryForm({ onClose }) {
       position:     t.position     || 'Long',
       edges:        Array.isArray(t.edges) ? t.edges : (t.strategy ? [t.strategy] : []),
       entryPrice:   t.entryPrice   != null ? String(t.entryPrice)   : '',
+      atrValue:     t.atrValue     != null ? String(t.atrValue)     : '',
       positionSize: t.positionSize != null ? String(t.positionSize) : '',
       stopLoss:     t.stopLoss     != null ? String(t.stopLoss)     : '',
       takeProfit:   t.takeProfit   != null ? String(t.takeProfit)   : '',
@@ -279,6 +316,22 @@ export default function ManualEntryForm({ onClose }) {
       screenshotEntry: null, screenshotExit: null, screenshotsAdditional: [],
     })
     setExits([])
+  }
+
+  async function fetchAtrForEntry() {
+    const sym = form.symbol.trim().toUpperCase()
+    if (!sym) return
+    setAtrLoading(true)
+    setAtrError(null)
+    try {
+      const res = await fetchATR14(sym)
+      if (!res?.atr14) throw new Error('ATR unavailable')
+      setForm(f => ({ ...f, atrValue: formatPlanPrice(res.atr14) }))
+    } catch (err) {
+      setAtrError(err?.message || 'ATR fetch failed')
+    } finally {
+      setAtrLoading(false)
+    }
   }
 
   // Merge accounts from settings + existing trades, deduplicated
@@ -325,6 +378,7 @@ export default function ManualEntryForm({ onClose }) {
     const ep = parseFloat(form.entryPrice)   || null
     const sl = parseFloat(form.stopLoss)     || null
     const tp = parseFloat(form.takeProfit)   || null
+    const atr = parseFloat(form.atrValue)    || null
     const ps = parseFloat(form.positionSize) || null
 
     // Build canonical exit records from the form fills
@@ -450,6 +504,7 @@ export default function ManualEntryForm({ onClose }) {
       entryDate:    form.entryDate && !isNaN(new Date(form.entryDate)) ? new Date(form.entryDate).toISOString() : null,
       entryPrice:   ep,
       positionSize: ps,
+      atrValue:     atr,
       takeProfit:   tp,
       stopLoss:     sl,
       buyAmount:    ep && ps ? ep * ps : null,
@@ -474,6 +529,9 @@ export default function ManualEntryForm({ onClose }) {
     setForm(BLANK)
     setExits([])
     setSelectedOpenId('')
+    setAtrError(null)
+    stopUserEdited.current = false
+    tpUserEdited.current = false
     onClose()
 
     } catch (err) {
@@ -615,9 +673,10 @@ export default function ManualEntryForm({ onClose }) {
       </div>
 
       {/* ── Numeric fields ────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
           ['Entry Price',            'entryPrice',  '0.00'],
+          ['ATR at Entry',           'atrValue',    '1.85'],
           ['Stop Loss',              'stopLoss',    '0.00'],
           ['Take Profit',            'takeProfit',  '0.00'],
           ['Position Size (shares)', 'positionSize', '100'],
@@ -637,11 +696,29 @@ export default function ManualEntryForm({ onClose }) {
       </div>
 
       {/* TP auto-fill hint */}
-      {form.takeProfit && form.entryPrice && form.stopLoss && !tpUserEdited.current && (
-        <p className="text-[11px] text-accent-blue/70 -mt-2">
-          ✦ Take Profit auto-filled at {tpMultiplier}× risk — edit to override.{' '}
-          <span className="opacity-60">Change default in Settings.</span>
-        </p>
+      {(form.symbol || form.entryPrice || form.atrValue) && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 -mt-2">
+          <button
+            type="button"
+            onClick={fetchAtrForEntry}
+            disabled={atrLoading || !form.symbol.trim()}
+            className="text-[11px] text-gray-500 hover:text-accent-blue transition-colors underline underline-offset-2 disabled:no-underline disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+          >
+            {atrLoading ? <Loader2 size={10} className="animate-spin" /> : null}
+            {atrLoading ? 'Fetching ATR...' : 'Fetch ATR'}
+          </button>
+          {atrError && <span className="text-[11px] text-accent-red">{atrError}</span>}
+          {form.takeProfit && form.entryPrice && form.atrValue && (!stopUserEdited.current || !tpUserEdited.current) && (
+            <p className="text-[11px] text-accent-blue/70">
+              ATR plan auto-fills 1 ATR stop and {tpMultiplier}x ATR target. Edit either field to override.
+            </p>
+          )}
+          {form.takeProfit && form.entryPrice && form.stopLoss && !form.atrValue && !tpUserEdited.current && (
+            <p className="text-[11px] text-accent-blue/70">
+              Take Profit auto-filled at {tpMultiplier}x risk. Edit to override.
+            </p>
+          )}
+        </div>
       )}
 
       {/* ── Buying strength / weakness ───────────────────────────────────── */}

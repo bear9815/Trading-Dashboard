@@ -17,7 +17,7 @@ import {
   calcSharpe, calcSortino, calcSQN, calcCalmar, calcAvgStopEfficiency
 } from '../../utils/metrics.js'
 import { formatCurrency, formatR, formatDate } from '../../utils/formatters.js'
-import { fetchHistory, fetchATR14 } from '../../utils/marketData.js'
+import { fetchHistory, fetchATR14, fetchQuotes } from '../../utils/marketData.js'
 
 const COLORS = { Win: '#00d084', Loss: '#ff4757', Scratch: '#6b7280' }
 const TT_STYLE       = { backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }
@@ -29,6 +29,9 @@ const ROLLING_WINDOWS = [
   { key: 'w20', label: 'Last 20',  color: '#ffa502' },
   { key: 'w50', label: 'Last 50',  color: '#00d084' },
 ]
+
+const ANALYTICS_START_DATE = new Date(2025, 10, 24) // 2025-11-24, local time
+const ANALYTICS_START_LABEL = 'Nov 24, 2025'
 
 function SectionTitle({ children }) {
   return <h3 className="text-sm font-semibold text-gray-300 mb-3">{children}</h3>
@@ -168,7 +171,7 @@ const CALMAR_RATINGS = [
 function calmarRating(v) { return CALMAR_RATINGS.find(r => v >= r.min && v < r.max) ?? CALMAR_RATINGS[CALMAR_RATINGS.length - 1] }
 
 function getTimeframeCutoff(timeframe) {
-  if (timeframe === 'All') return null
+  if (timeframe === 'All') return ANALYTICS_START_DATE
   const now = new Date()
   if (timeframe === '1M') { const d = new Date(now); d.setMonth(d.getMonth() - 1); return d }
   if (timeframe === '3M') { const d = new Date(now); d.setMonth(d.getMonth() - 3); return d }
@@ -179,6 +182,10 @@ function getTimeframeCutoff(timeframe) {
 }
 
 function getTradeResolutionDate(trade) {
+  if (trade?._analyticsResolutionDate) {
+    const d = new Date(trade._analyticsResolutionDate)
+    if (!Number.isNaN(d.getTime())) return d
+  }
   const exits = (trade?.exits || [])
     .map(ex => ex.exitDate || ex.date)
     .filter(Boolean)
@@ -189,6 +196,61 @@ function getTradeResolutionDate(trade) {
   return fallback && !Number.isNaN(fallback.getTime()) ? fallback : null
 }
 
+function getRemainingShares(trade) {
+  if (trade?.remainingShares != null) return Math.abs(Number(trade.remainingShares) || 0)
+  const originalShares = Math.abs(Number(trade?._originalPositionSize ?? trade?.positionSize) || 0)
+  const exitedShares = (trade?.exits || []).reduce((sum, ex) => {
+    if (ex.shares != null) return sum + Math.abs(Number(ex.shares) || 0)
+    if (ex.amount != null && ex.price) return sum + Math.abs(Number(ex.amount) / Number(ex.price) || 0)
+    return sum
+  }, 0)
+  return Math.max(0, originalShares - exitedShares)
+}
+
+function getRealizedPLFromExits(trade) {
+  const entry = Number(trade?.entryPrice)
+  if (!Number.isFinite(entry) || entry <= 0) return 0
+  const isShort = String(trade?.position || '').toLowerCase().includes('short')
+  return (trade?.exits || []).reduce((sum, ex) => {
+    const price = Number(ex.price)
+    const shares = Math.abs(Number(ex.shares) || (ex.amount != null && price ? Number(ex.amount) / price : 0))
+    if (!Number.isFinite(price) || !Number.isFinite(shares) || shares <= 0) return sum
+    const commission = Number(ex.commission) || 0
+    const pl = isShort ? (entry - price) * shares : (price - entry) * shares
+    return sum + pl - commission
+  }, 0)
+}
+
+function buildRealtimeTrade(trade, quote, nowIso) {
+  const price = quote?.price
+  const entry = Number(trade?.entryPrice)
+  const remainingShares = getRemainingShares(trade)
+  if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(entry) || entry <= 0 || remainingShares <= 0) return null
+
+  const isShort = String(trade?.position || '').toLowerCase().includes('short')
+  const unrealizedPL = (isShort ? entry - price : price - entry) * remainingShares
+  const realizedPL = getRealizedPLFromExits(trade)
+  const pl = realizedPL + unrealizedPL
+  const originalShares = Math.abs(Number(trade?._originalPositionSize ?? trade?.positionSize) || remainingShares)
+  const stop = Number(trade?._originalStopLoss ?? trade?.stopLoss)
+  const risk = Number.isFinite(stop) && stop > 0 ? Math.abs(entry - stop) * originalShares : 0
+  const atrRisk = Number(trade?.atrValue) > 0 ? Number(trade.atrValue) * originalShares : 0
+
+  return {
+    ...trade,
+    status: pl > 0.01 ? 'Win' : pl < -0.01 ? 'Loss' : 'Scratch',
+    pl,
+    sellAmount: null,
+    currentPrice: price,
+    positionSize: remainingShares,
+    remainingShares,
+    rMultiple: risk > 0 ? Number((pl / risk).toFixed(3)) : trade.rMultiple,
+    rMultipleATR: atrRisk > 0 ? Number((pl / atrRisk).toFixed(3)) : trade.rMultipleATR,
+    _analyticsLive: true,
+    _analyticsResolutionDate: nowIso,
+  }
+}
+
 
 export default function Analytics({ selectedAccount }) {
   const { trades, accountActivities, getAccountBalance } = useTradeStore()
@@ -196,6 +258,7 @@ export default function Analytics({ selectedAccount }) {
   const {
     excludedSymbols,
     analyticsTimeframe, setAnalyticsTimeframe,
+    analyticsTradeMode, setAnalyticsTradeMode,
     analyticsWinLossMode, setAnalyticsWinLossMode,
     analyticsRiskMode, setAnalyticsRiskMode,
     analyticsSqnMode,  setAnalyticsSqnMode,
@@ -205,6 +268,9 @@ export default function Analytics({ selectedAccount }) {
 
   const timeframe    = analyticsTimeframe ?? 'All'
   const setTimeframe = setAnalyticsTimeframe
+  const tradeMode    = analyticsTradeMode ?? 'closed'
+  const setTradeMode = setAnalyticsTradeMode
+  const sampleLabel  = tradeMode === 'realtime' ? 'Trades + Live Opens' : 'Closed Trades'
 
   // R-basis toggle: 'stop' = stop-based R (default), 'atr' = ATR-budget R
   const [rBasis, setRBasis] = useState('stop')
@@ -217,6 +283,10 @@ export default function Analytics({ selectedAccount }) {
   const [strengthMap,     setStrengthMap]     = useState({})
   const [strengthLoading, setStrengthLoading] = useState(false)
   const fetchedIds = useRef(new Set())
+  const [liveQuotes, setLiveQuotes] = useState(new Map())
+  const [liveQuoteLoading, setLiveQuoteLoading] = useState(false)
+  const [liveQuoteRefreshNonce, setLiveQuoteRefreshNonce] = useState(0)
+  const liveQuoteFetchRef = useRef('')
 
   // Exposure vs Market state
   const [exposureRange, setExposureRange] = useState('90d')
@@ -254,7 +324,50 @@ export default function Analytics({ selectedAccount }) {
     return filtered.filter(t => t.entryDate && new Date(t.entryDate) >= timeframeCutoff)
   }, [filtered, timeframeCutoff])
 
-  const closed = tfFiltered.filter(t => t.status === 'Win' || t.status === 'Loss')
+  const openForRealtime = useMemo(
+    () => tfFiltered.filter(t => t.status === 'Open' && t.symbol && t.entryPrice),
+    [tfFiltered]
+  )
+
+  useEffect(() => {
+    if (tradeMode !== 'realtime') return
+    const symbols = [...new Set(openForRealtime.map(t => t.symbol?.toUpperCase()).filter(Boolean))].sort()
+    const key = `${symbols.join(',')}|${liveQuoteRefreshNonce}`
+    if (!symbols.length) {
+      setLiveQuotes(new Map())
+      liveQuoteFetchRef.current = ''
+      return
+    }
+    if (liveQuoteFetchRef.current === key) return
+    liveQuoteFetchRef.current = key
+    setLiveQuoteLoading(true)
+    fetchQuotes(symbols)
+      .then(q => setLiveQuotes(q instanceof Map ? q : new Map()))
+      .catch(() => setLiveQuotes(new Map()))
+      .finally(() => setLiveQuoteLoading(false))
+  }, [tradeMode, openForRealtime, liveQuoteRefreshNonce])
+
+  const realtimeOpenTrades = useMemo(() => {
+    if (tradeMode !== 'realtime') return []
+    const nowIso = new Date().toISOString()
+    return openForRealtime
+      .map(t => buildRealtimeTrade(t, liveQuotes.get(t.symbol?.toUpperCase()) || liveQuotes.get(t.symbol), nowIso))
+      .filter(Boolean)
+  }, [tradeMode, openForRealtime, liveQuotes])
+
+  const closedOnly = useMemo(
+    () => tfFiltered.filter(t => t.status === 'Win' || t.status === 'Loss'),
+    [tfFiltered]
+  )
+
+  const closed = useMemo(
+    () => (tradeMode === 'realtime' ? [...closedOnly, ...realtimeOpenTrades] : closedOnly)
+      .filter(t => t.status === 'Win' || t.status === 'Loss'),
+    [tradeMode, closedOnly, realtimeOpenTrades]
+  )
+
+  const closedTradeCount = closedOnly.length
+  const realtimeTradeCount = realtimeOpenTrades.length
 
   // ── Rolling win rate ───────────────────────────────────────────────────────
   const closedSorted = useMemo(
@@ -532,9 +645,13 @@ export default function Analytics({ selectedAccount }) {
 
   const totalR = calcTotalR(closedSorted, rField)
 
+  const equityTrades = useMemo(
+    () => tradeMode === 'realtime' ? [...filtered, ...realtimeOpenTrades] : filtered,
+    [tradeMode, filtered, realtimeOpenTrades]
+  )
   const fullCurve = useMemo(
-    () => buildEquityCurve(filtered, accountActivities),
-    [filtered, accountActivities]
+    () => buildEquityCurve(equityTrades, accountActivities),
+    [equityTrades, accountActivities]
   )
   const timeframeCurve = useMemo(() => {
     if (!fullCurve.length) return []
@@ -725,7 +842,7 @@ export default function Analytics({ selectedAccount }) {
     { name: 'Loss', value: losses },
   ]
 
-  const rDist = calcRMultipleDistribution(tfFiltered, rField)
+  const rDist = calcRMultipleDistribution(closed, rField)
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const byDow = Object.fromEntries(dayNames.map(d => [d, { total: 0, count: 0 }]))
@@ -818,15 +935,15 @@ export default function Analytics({ selectedAccount }) {
     }))
     .sort((a, b) => b.winRate - a.winRate)
 
-  const { avgWin, avgLoss } = calcAvgWinLoss(tfFiltered)
+  const { avgWin, avgLoss } = calcAvgWinLoss(closed)
   const payoffRatio = Math.abs(avgLoss) > 0 ? avgWin / Math.abs(avgLoss) : null
   const avgWinR  = useMemo(() => { const w = closed.filter(t => t.status === 'Win'  && t[rField] != null); return w.length ? w.reduce((s, t) => s + t[rField], 0) / w.length : null }, [closed, rField])
   const avgLossR = useMemo(() => { const l = closed.filter(t => t.status === 'Loss' && t[rField] != null); return l.length ? l.reduce((s, t) => s + t[rField], 0) / l.length : null }, [closed, rField])
-  const profitFactor = calcProfitFactor(tfFiltered)
-  const expectancy = calcExpectancy(tfFiltered)
-  const avgR = calcAvgR(tfFiltered, rField)
-  const winRate = calcWinRate(tfFiltered)
-  const avgStopEff = useMemo(() => calcAvgStopEfficiency(tfFiltered), [tfFiltered])
+  const profitFactor = calcProfitFactor(closed)
+  const expectancy = calcExpectancy(closed)
+  const avgR = calcAvgR(closed, rField)
+  const winRate = calcWinRate(closed)
+  const avgStopEff = useMemo(() => calcAvgStopEfficiency(closed), [closed])
   const hasATRData = useMemo(() => tfFiltered.some(t => t.atrValue != null), [tfFiltered])
   const rSampleCount = closed.filter(t => t[rField] != null).length
   const winSampleCount = closed.filter(t => t.status === 'Win').length
@@ -835,7 +952,7 @@ export default function Analytics({ selectedAccount }) {
   const enoughRSample = rSampleCount >= 10
   const enoughDistributionSample = closed.length >= 12
   const enoughSQNSample = rSampleCount >= 20
-  const enoughStopEffSample = tfFiltered.filter(t => t.stopEfficiency != null && (t.status === 'Win' || t.status === 'Loss')).length >= 10
+  const enoughStopEffSample = closed.filter(t => t.stopEfficiency != null && (t.status === 'Win' || t.status === 'Loss')).length >= 10
 
   const lossContainment = useMemo(() => {
     const lossesWithR = closed.filter(t => t.status === 'Loss' && t[rField] != null)
@@ -1009,7 +1126,7 @@ export default function Analytics({ selectedAccount }) {
     }
   }, [timeframeCurve, enoughRiskSample])
 
-  const sqn = useMemo(() => calcSQN(tfFiltered, rField), [tfFiltered, rField])
+  const sqn = useMemo(() => calcSQN(closed, rField), [closed, rField])
 
   // ── Drawdown Simulator ────────────────────────────────────────────────────
   const drawdownSim = useMemo(() => {
@@ -1021,10 +1138,10 @@ export default function Analytics({ selectedAccount }) {
     return { avgLoss, wr }
   }, [closed])
 
-  if (closed.length === 0) {
+  if (tfFiltered.length === 0) {
     return (
       <div className="p-4 flex items-center justify-center h-64">
-        <p className="text-gray-500">Import trades to see analytics.</p>
+        <p className="text-gray-500">No trades in the selected analytics range.</p>
       </div>
     )
   }
@@ -1032,21 +1149,59 @@ export default function Analytics({ selectedAccount }) {
   return (
     <div className="p-4 flex flex-col gap-6">
 
-      {/* Timeframe filter */}
-      <div className="flex items-center gap-1">
-        {['1M', '3M', '6M', 'YTD', '1Y', 'All'].map(tf => (
+      {/* Timeframe + sample filters */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1">
+          {['1M', '3M', '6M', 'YTD', '1Y', 'All'].map(tf => (
+            <button
+              key={tf}
+              onClick={() => setTimeframe(tf)}
+              title={tf === 'All' ? `All reliable stats since ${ANALYTICS_START_LABEL}` : undefined}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                timeframe === tf
+                  ? 'bg-accent-blue text-white'
+                  : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+              }`}
+            >
+              {tf}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center bg-surface-100 border border-white/10 rounded-lg p-0.5">
+          {[
+            ['closed', 'Closed Trades'],
+            ['realtime', 'Real Time'],
+          ].map(([mode, label]) => (
+            <button
+              key={mode}
+              onClick={() => setTradeMode(mode)}
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                tradeMode === mode ? 'bg-accent-green/20 text-accent-green' : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <span className="text-[10px] text-gray-600">
+          All starts {ANALYTICS_START_LABEL}
+          {tradeMode === 'realtime'
+            ? ` · ${closedTradeCount} closed + ${realtimeTradeCount} live open${liveQuoteLoading ? ' · refreshing quotes' : ''}`
+            : ` · closed trades only`}
+        </span>
+        {tradeMode === 'realtime' && (
           <button
-            key={tf}
-            onClick={() => setTimeframe(tf)}
-            className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-              timeframe === tf
-                ? 'bg-accent-blue text-white'
-                : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
-            }`}
+            type="button"
+            onClick={() => setLiveQuoteRefreshNonce(n => n + 1)}
+            disabled={liveQuoteLoading || openForRealtime.length === 0}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-gray-500 hover:text-gray-300 hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            {tf}
+            <RefreshCw size={11} className={liveQuoteLoading ? 'animate-spin' : ''} />
+            Refresh Marks
           </button>
-        ))}
+        )}
       </div>
 
       {/* R-basis toggle — only visible when trades have ATR data */}
@@ -1080,7 +1235,7 @@ export default function Analytics({ selectedAccount }) {
           sub={{ label: `n=${closed.length}${enoughHeadlineSample ? '' : ' · low sample'}`, cls: enoughHeadlineSample ? 'text-gray-600' : 'text-accent-yellow' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Win Rate</p>
-            <p className="text-gray-400 leading-relaxed mb-3">The percentage of closed trades that result in a profit. Higher isn't always better — a 40% win rate with large winners beats a 70% win rate with tiny gains.</p>
+            <p className="text-gray-400 leading-relaxed mb-3">The percentage of trades in the selected sample that result in a profit. Higher isn't always better — a 40% win rate with large winners beats a 70% win rate with tiny gains.</p>
             <div className="space-y-1 mb-3">
               {[['> 60%','text-accent-green','Solid for most styles'],['50–60%','text-accent-yellow','Typical momentum'],['40–50%','text-accent-yellow','Fine with high payoff ratio'],['< 40%','text-accent-red','Needs strong avg winner']].map(([r,c,d])=>(
                 <div key={r} className="flex gap-2"><span className={`font-semibold w-16 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>
@@ -1099,7 +1254,7 @@ export default function Analytics({ selectedAccount }) {
             <p className="text-gray-400 leading-relaxed mb-3">
               {rBasis === 'atr'
                 ? 'P&L ÷ (ATR × position size). Your true system expectancy — accounts for tight stops vs ATR sizing. A stopped-out trade with a tight stop costs less than -1R here.'
-                : 'The average profit or loss per closed trade expressed as a multiple of your actual stop risk (1R = stop distance × shares).'}
+                : 'The average profit or loss per trade in the selected sample expressed as a multiple of your actual stop risk (1R = stop distance × shares).'}
             </p>
             <div className="space-y-1 mb-3">
               {[['> 1.0R','text-accent-green','Excellent'],['0.5–1.0R','text-accent-green','Healthy edge'],['0–0.5R','text-accent-yellow','Marginal — watch costs'],['< 0R','text-accent-red','No edge present']].map(([r,c,d])=>(
@@ -1116,7 +1271,7 @@ export default function Analytics({ selectedAccount }) {
           sub={{ label: `n=${rSampleCount}`, cls: 'text-gray-600' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Total R</p>
-            <p className="text-gray-400 leading-relaxed mb-3">The sum of all R-multiples across every closed trade. Your cumulative "score" for the entire history. A consistent edge shows up as steady, linear growth in Total R over time.</p>
+            <p className="text-gray-400 leading-relaxed mb-3">The sum of all R-multiples across the selected sample. A consistent edge shows up as steady, linear growth in Total R over time.</p>
             <p className="text-gray-400 leading-relaxed mb-2">A sudden dip in slope (not just Total R going negative) is often the earliest warning that an edge is degrading — before P&L even shows it clearly.</p>
             <p className="text-gray-600">Use the equity curve to watch Total R grow — it should look like a steady upward trend, not a lottery.</p>
           </>}
@@ -1421,7 +1576,7 @@ export default function Analytics({ selectedAccount }) {
               <p className="text-xs text-gray-600 mt-1">consecutive losses</p>
             </div>
             <div className="card-sm text-center">
-              <p className="text-xs text-gray-500 mb-2">Closed Trades</p>
+              <p className="text-xs text-gray-500 mb-2">{sampleLabel}</p>
               <p className="text-3xl font-black mono text-white">{closed.length}</p>
               <p className="text-xs text-gray-600 mt-1">{closed.filter(t => t.status === 'Win').length}W · {closed.filter(t => t.status === 'Loss').length}L</p>
             </div>
@@ -1434,7 +1589,7 @@ export default function Analytics({ selectedAccount }) {
         <div className="card">
           <SectionTitle>Rolling Win Rate</SectionTitle>
           <p className="text-xs text-gray-500 mb-3">
-            Win rate over a sliding window of the last N closed trades. Helps identify if your edge is improving or degrading over time.
+            Win rate over a sliding window of the last N trades in the selected sample. Helps identify if your edge is improving or degrading over time.
           </p>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={rollingWinData} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
@@ -1492,7 +1647,7 @@ export default function Analytics({ selectedAccount }) {
       {cumRData.length >= 2 && (
         <div className="card">
           <SectionTitle>Cumulative R Over Time</SectionTitle>
-          <p className="text-xs text-gray-500 mb-3">Running sum of all R-multiples across closed trades. Shows how your edge compounds over time.</p>
+          <p className="text-xs text-gray-500 mb-3">Running sum of all R-multiples across the selected sample. Shows how your edge compounds over time.</p>
           <ResponsiveContainer width="100%" height={180}>
             <AreaChart data={cumRData} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
               <defs>
@@ -1519,7 +1674,9 @@ export default function Analytics({ selectedAccount }) {
       {monthlyStats.length > 0 && (
         <div className="card">
           <SectionTitle>Monthly Performance</SectionTitle>
-          <p className="text-xs text-gray-500 mb-3">Click column headers to sort. All stats computed from closed trades only.</p>
+          <p className="text-xs text-gray-500 mb-3">
+            Click column headers to sort. Stats are computed from {tradeMode === 'realtime' ? 'closed trades plus live open-trade marks.' : 'closed trades only.'}
+          </p>
           {monthlyStats.length >= 2 && (
             <ResponsiveContainer width="100%" height={110}>
               <BarChart
@@ -1602,7 +1759,7 @@ export default function Analytics({ selectedAccount }) {
               </tbody>
               <tfoot className="border-t border-white/10 text-gray-400">
                 <tr>
-                  <td className="pt-2 text-gray-300 font-semibold">All time</td>
+                  <td className="pt-2 text-gray-300 font-semibold">{timeframe === 'All' ? 'Since 11/24/25' : timeframe}</td>
                   <td className="pt-2 text-right">{closed.length}</td>
                   <td className={`pt-2 text-right mono font-semibold ${winRate >= 50 ? 'text-accent-green' : 'text-accent-red'}`}>{winRate.toFixed(0)}%</td>
                   <td className={`pt-2 text-right mono ${avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{formatR(avgR)}</td>

@@ -20,7 +20,10 @@ export function buildEquityCurve(trades, accountActivities, startingBalance = 0)
         .filter(Boolean)
         .map(v => new Date(v))
         .filter(d => !Number.isNaN(d.getTime()))
-      const exitDate = exitCandidates.length
+      const analyticsDate = t._analyticsResolutionDate ? new Date(t._analyticsResolutionDate) : null
+      const exitDate = analyticsDate && !Number.isNaN(analyticsDate.getTime())
+        ? analyticsDate
+        : exitCandidates.length
         ? new Date(Math.max(...exitCandidates.map(d => d.getTime())))
         : new Date(t.entryDate)
       events.push({ date: new Date(exitDate || t.entryDate), type: 'trade', amount: t.pl, tradeId: t.id, symbol: t.symbol })
@@ -76,7 +79,10 @@ export function buildDailyPL(trades) {
         .filter(Boolean)
         .map(v => new Date(v))
         .filter(d => !Number.isNaN(d.getTime()))
-      const resolved = exitCandidates.length
+      const analyticsDate = t._analyticsResolutionDate ? new Date(t._analyticsResolutionDate) : null
+      const resolved = analyticsDate && !Number.isNaN(analyticsDate.getTime())
+        ? analyticsDate
+        : exitCandidates.length
         ? new Date(Math.max(...exitCandidates.map(d => d.getTime())))
         : new Date(t.entryDate)
       const dateKey = resolved.toISOString().slice(0, 10)

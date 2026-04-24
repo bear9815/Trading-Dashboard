@@ -1,8 +1,11 @@
-import { useState, useMemo } from 'react'
-import { Plus, X, Check } from 'lucide-react'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { Plus, X, Check, Loader2 } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import { useTradeStore } from '../../store/useTradeStore.js'
+import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { enrichTrade } from '../../utils/enrichTrade.js'
+import { calcAtrTradePlan, formatPlanPrice } from '../../utils/atrTradePlan.js'
+import { fetchATR14 } from '../../utils/marketData.js'
 
 const BLANK = {
   symbol:       '',
@@ -11,6 +14,7 @@ const BLANK = {
   entryDate:    new Date().toISOString().slice(0, 16),
   entryPrice:   '',
   stopLoss:     '',
+  takeProfit:   '',
   atrValue:     '',
   positionSize: '',
 }
@@ -19,8 +23,13 @@ export default function QuickAddTrade() {
   const [open,    setOpen]    = useState(false)
   const [form,    setForm]    = useState(BLANK)
   const [success, setSuccess] = useState(false)
+  const [atrLoading, setAtrLoading] = useState(false)
+  const [atrError, setAtrError] = useState(null)
+  const stopUserEdited = useRef(false)
+  const tpUserEdited = useRef(false)
 
   const { addTrade, getAccounts, getAccountBalance } = useTradeStore()
+  const { tpMultiplier = 2 } = useSettingsStore()
 
   const accounts = useMemo(() => {
     const all = getAccounts()
@@ -39,8 +48,43 @@ export default function QuickAddTrade() {
   const stopEffPct    = (!isNaN(ep) && !isNaN(sl) && !isNaN(atr) && atr > 0)
     ? (Math.abs(ep - sl) / atr) * 100 : null
 
+  useEffect(() => {
+    const plan = calcAtrTradePlan({
+      entryPrice: form.entryPrice,
+      atrValue: form.atrValue,
+      position: form.position,
+      targetMultiple: tpMultiplier,
+    })
+    if (!plan) return
+
+    setForm(f => ({
+      ...f,
+      stopLoss: stopUserEdited.current ? f.stopLoss : formatPlanPrice(plan.stopLoss),
+      takeProfit: tpUserEdited.current ? f.takeProfit : formatPlanPrice(plan.takeProfit),
+    }))
+  }, [form.entryPrice, form.atrValue, form.position, tpMultiplier])
+
   function set(key, val) {
+    if (key === 'stopLoss') stopUserEdited.current = true
+    if (key === 'takeProfit') tpUserEdited.current = true
+    if (key === 'symbol') setAtrError(null)
     setForm(f => ({ ...f, [key]: val }))
+  }
+
+  async function fetchAtrForEntry() {
+    const sym = form.symbol.trim().toUpperCase()
+    if (!sym) return
+    setAtrLoading(true)
+    setAtrError(null)
+    try {
+      const res = await fetchATR14(sym)
+      if (!res?.atr14) throw new Error('ATR unavailable')
+      setForm(f => ({ ...f, atrValue: formatPlanPrice(res.atr14) }))
+    } catch (err) {
+      setAtrError(err?.message || 'ATR fetch failed')
+    } finally {
+      setAtrLoading(false)
+    }
   }
 
   function handleSubmit(e) {
@@ -53,6 +97,7 @@ export default function QuickAddTrade() {
       entryDate:    form.entryDate ? new Date(form.entryDate).toISOString() : new Date().toISOString(),
       entryPrice:   parseFloat(form.entryPrice),
       stopLoss:     parseFloat(form.stopLoss) || null,
+      takeProfit:   parseFloat(form.takeProfit) || null,
       atrValue:     parseFloat(form.atrValue)  || null,
       positionSize: parseFloat(form.positionSize) || null,
       status:       'Open',
@@ -63,12 +108,18 @@ export default function QuickAddTrade() {
     setTimeout(() => {
       setOpen(false)
       setSuccess(false)
+      setAtrError(null)
+      stopUserEdited.current = false
+      tpUserEdited.current = false
       setForm({ ...BLANK, entryDate: new Date().toISOString().slice(0, 16) })
     }, 1200)
   }
 
   function handleClose() {
     setOpen(false)
+    setAtrError(null)
+    stopUserEdited.current = false
+    tpUserEdited.current = false
     setForm({ ...BLANK, entryDate: new Date().toISOString().slice(0, 16) })
   }
 
@@ -206,7 +257,29 @@ export default function QuickAddTrade() {
                     />
                   </div>
                   <div>
-                    <label className="label mb-1">ATR <span className="text-gray-600 font-normal">(optional)</span></label>
+                    <label className="label mb-1">Take Profit</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={form.takeProfit}
+                      onChange={e => set('takeProfit', e.target.value)}
+                      placeholder="0.00"
+                      className="input w-full"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label className="label">ATR <span className="text-gray-600 font-normal">(optional)</span></label>
+                      <button
+                        type="button"
+                        onClick={fetchAtrForEntry}
+                        disabled={atrLoading || !form.symbol.trim()}
+                        className="text-[10px] text-gray-500 hover:text-accent-blue transition-colors underline underline-offset-2 disabled:no-underline disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        {atrLoading ? <Loader2 size={9} className="animate-spin" /> : null}
+                        {atrLoading ? 'ATR...' : 'Fetch'}
+                      </button>
+                    </div>
                     <input
                       type="number"
                       step="any"
@@ -229,6 +302,13 @@ export default function QuickAddTrade() {
                     />
                   </div>
                 </div>
+
+                {form.entryPrice && form.atrValue && (!stopUserEdited.current || !tpUserEdited.current) && (
+                  <p className="text-[11px] text-accent-blue/70 -mt-1">
+                    ATR plan auto-fills 1 ATR stop and {tpMultiplier}× ATR target. Edit either field to override.
+                  </p>
+                )}
+                {atrError && <p className="text-[11px] text-accent-red -mt-1">{atrError}</p>}
 
                 {/* Live risk preview */}
                 {(riskDollar != null || atrRiskDollar != null) && (
