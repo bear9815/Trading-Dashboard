@@ -14,6 +14,286 @@ import TickerTooltip from '../shared/TickerTooltip.jsx'
 const STATUS_OPTS = ['All', 'Win', 'Loss', 'Open', 'Scratch']
 const POSITION_OPTS = ['All', 'Long', 'Short']
 
+function num(v, fallback = 0) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function getExitShares(ex) {
+  if (ex?.shares != null) return Math.abs(num(ex.shares))
+  const price = num(ex?.price)
+  const amount = num(ex?.amount)
+  return price > 0 && amount ? Math.abs(amount / price) : 0
+}
+
+function getTradeOriginalShares(trade) {
+  return Math.abs(num(trade._originalPositionSize ?? trade.positionSize))
+}
+
+function getTradeExitedShares(trade) {
+  return (trade.exits || []).reduce((sum, ex) => sum + getExitShares(ex), 0)
+}
+
+function getTradeRemainingShares(trade) {
+  if (trade.remainingShares != null) return Math.abs(num(trade.remainingShares))
+  return Math.max(0, getTradeOriginalShares(trade) - getTradeExitedShares(trade))
+}
+
+function formatQty(qty, decimals = 3) {
+  const n = Number(qty)
+  if (!Number.isFinite(n)) return '—'
+  return n.toLocaleString(undefined, {
+    maximumFractionDigits: Number.isInteger(n) ? 0 : decimals,
+  })
+}
+
+function formatPriceValue(price) {
+  const n = Number(price)
+  if (!Number.isFinite(n)) return '—'
+  return `$${n >= 100 ? n.toFixed(2) : n.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}`
+}
+
+function buildReconciliationRows(trades) {
+  const rows = []
+
+  for (const trade of trades) {
+    const isShort = String(trade.position || '').toLowerCase().includes('short')
+    const originalShares = getTradeOriginalShares(trade)
+    const entryPrice = num(trade.entryPrice)
+    const account = trade.account || '—'
+    const key = `${account}|${trade.symbol || ''}`
+
+    if (trade.entryDate && originalShares > 0 && entryPrice > 0) {
+      const type = isShort ? 'Sell Short' : 'Buy'
+      const gross = entryPrice * originalShares
+      rows.push({
+        id: `${trade.id}:entry`,
+        tradeId: trade.id,
+        date: trade.entryDate,
+        sortMs: new Date(trade.entryDate).getTime() || 0,
+        account,
+        key,
+        symbol: trade.symbol,
+        type,
+        description: `${trade.symbol || ''} ${trade.position || ''} entry`.trim(),
+        quantity: originalShares,
+        signedShares: isShort ? -originalShares : originalShares,
+        price: entryPrice,
+        fees: 0,
+        amount: isShort ? gross : -gross,
+        status: trade.status,
+        source: trade.source,
+        issue: null,
+      })
+    }
+
+    ;(trade.exits || []).forEach((ex, idx) => {
+      const shares = getExitShares(ex)
+      const price = num(ex.price)
+      if (shares <= 0 || price <= 0) return
+      const fees = Math.abs(num(ex.commission))
+      const gross = num(ex.amount, price * shares) || price * shares
+      rows.push({
+        id: `${trade.id}:exit:${idx}`,
+        tradeId: trade.id,
+        date: ex.exitDate || ex.date || trade.entryDate,
+        sortMs: new Date(ex.exitDate || ex.date || trade.entryDate).getTime() || 0,
+        account,
+        key,
+        symbol: trade.symbol,
+        type: isShort ? 'Buy to Cover' : 'Sell',
+        description: `${trade.symbol || ''} exit fill ${idx + 1}`.trim(),
+        quantity: shares,
+        signedShares: isShort ? shares : -shares,
+        price,
+        fees,
+        amount: isShort ? -(gross + fees) : gross - fees,
+        status: trade.status,
+        source: trade.source,
+        issue: null,
+      })
+    })
+
+    const exited = getTradeExitedShares(trade)
+    const remaining = getTradeRemainingShares(trade)
+    const isClosed = trade.status === 'Win' || trade.status === 'Loss' || trade.status === 'Scratch' || trade.status === 'Break Even'
+    if (isClosed && originalShares > 0 && exited < originalShares - 0.001) {
+      rows.push({
+        id: `${trade.id}:missing-exit`,
+        tradeId: trade.id,
+        date: trade.entryDate,
+        sortMs: (new Date(trade.entryDate).getTime() || 0) + 1,
+        account,
+        key,
+        symbol: trade.symbol,
+        type: 'Missing Exit?',
+        description: `Closed trade has ${formatQty(originalShares - exited)} unaccounted shares`,
+        quantity: originalShares - exited,
+        signedShares: 0,
+        price: null,
+        fees: 0,
+        amount: null,
+        status: trade.status,
+        source: trade.source,
+        issue: 'Closed trade exits do not add up to original size.',
+      })
+    }
+    if (trade.status === 'Open' && originalShares > 0 && Math.abs(remaining - Math.max(0, originalShares - exited)) > 0.001) {
+      rows.push({
+        id: `${trade.id}:remaining-mismatch`,
+        tradeId: trade.id,
+        date: trade.entryDate,
+        sortMs: (new Date(trade.entryDate).getTime() || 0) + 2,
+        account,
+        key,
+        symbol: trade.symbol,
+        type: 'Share Mismatch?',
+        description: `Remaining shares field differs from entry minus exits`,
+        quantity: remaining,
+        signedShares: 0,
+        price: null,
+        fees: 0,
+        amount: null,
+        status: trade.status,
+        source: trade.source,
+        issue: 'Open trade remaining shares may be stale.',
+      })
+    }
+  }
+
+  const ascending = [...rows].sort((a, b) => a.sortMs - b.sortMs || a.id.localeCompare(b.id))
+  const running = new Map()
+  for (const row of ascending) {
+    const next = (running.get(row.key) || 0) + row.signedShares
+    running.set(row.key, next)
+    row.runningShares = next
+  }
+
+  return ascending.sort((a, b) => b.sortMs - a.sortMs || b.id.localeCompare(a.id))
+}
+
+function ReconciliationView({ rows, onOpenTrade }) {
+  const totals = rows.reduce((acc, row) => {
+    acc.fees += row.fees || 0
+    if (row.amount != null) acc.amount += row.amount
+    if (row.issue) acc.issues += 1
+    return acc
+  }, { fees: 0, amount: 0, issues: 0 })
+
+  const positions = useMemo(() => {
+    const latest = new Map()
+    for (const row of [...rows].sort((a, b) => a.sortMs - b.sortMs || a.id.localeCompare(b.id))) {
+      latest.set(row.key, row)
+    }
+    return [...latest.values()]
+      .filter(row => Math.abs(row.runningShares || 0) > 0.001)
+      .sort((a, b) => String(a.symbol).localeCompare(String(b.symbol)) || String(a.account).localeCompare(String(b.account)))
+  }, [rows])
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="card-sm">
+          <p className="text-xs text-gray-500">Transaction Rows</p>
+          <p className="text-lg font-bold mono text-white">{rows.length}</p>
+        </div>
+        <div className="card-sm">
+          <p className="text-xs text-gray-500">Open Share Balances</p>
+          <p className="text-lg font-bold mono text-accent-blue">{positions.length}</p>
+        </div>
+        <div className="card-sm">
+          <p className="text-xs text-gray-500">Fees & Comm</p>
+          <p className="text-lg font-bold mono text-gray-200">{formatCurrency(totals.fees)}</p>
+        </div>
+        <div className="card-sm">
+          <p className="text-xs text-gray-500">Reconcile Flags</p>
+          <p className={`text-lg font-bold mono ${totals.issues ? 'text-accent-yellow' : 'text-accent-green'}`}>{totals.issues}</p>
+        </div>
+      </div>
+
+      {positions.length > 0 && (
+        <div className="rounded-lg border border-white/10 bg-surface-200/50 px-3 py-2">
+          <p className="text-xs text-gray-500 mb-1.5">Dashboard open share balances</p>
+          <div className="flex flex-wrap gap-2">
+            {positions.map(row => (
+              <span key={row.key} className="text-xs mono rounded-full border border-white/10 bg-surface-300 px-2.5 py-1 text-gray-300">
+                {row.account !== '—' ? `${row.account} · ` : ''}{row.symbol}: <span className={row.runningShares >= 0 ? 'text-accent-green' : 'text-accent-red'}>{formatQty(row.runningShares)}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-lg border border-white/10">
+        <table className="w-full text-xs">
+          <thead className="bg-surface-200">
+            <tr className="text-gray-500">
+              <th className="text-left px-3 py-2 font-medium">Date</th>
+              <th className="text-left px-3 py-2 font-medium">Transaction Type</th>
+              <th className="text-left px-3 py-2 font-medium">Symbol</th>
+              <th className="text-left px-3 py-2 font-medium">Description</th>
+              <th className="text-right px-3 py-2 font-medium">Quantity</th>
+              <th className="text-right px-3 py-2 font-medium">Price</th>
+              <th className="text-right px-3 py-2 font-medium">Fees & Comm</th>
+              <th className="text-right px-3 py-2 font-medium">Amount</th>
+              <th className="text-right px-3 py-2 font-medium">Running Shares</th>
+              <th className="text-left px-3 py-2 font-medium">Trade</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {rows.map(row => (
+              <tr key={row.id} className={`hover:bg-white/3 ${row.issue ? 'bg-accent-yellow/5' : ''}`}>
+                <td className="px-3 py-2 text-gray-300 whitespace-nowrap">{formatDate(row.date)}</td>
+                <td className={`px-3 py-2 font-medium whitespace-nowrap ${
+                  row.type.includes('Buy') ? 'text-accent-green'
+                    : row.type.includes('Sell') ? 'text-accent-red'
+                    : 'text-accent-yellow'
+                }`}>
+                  {row.type}
+                </td>
+                <td className="px-3 py-2 mono font-bold text-white">{row.symbol || '—'}</td>
+                <td className="px-3 py-2 text-gray-400 min-w-[220px]">
+                  <div>{row.description}</div>
+                  <div className="text-[10px] text-gray-600">
+                    {row.account !== '—' ? row.account : 'No account'}{row.source ? ` · ${row.source}` : ''}
+                    {row.issue ? <span className="text-accent-yellow ml-2">{row.issue}</span> : null}
+                  </div>
+                </td>
+                <td className="px-3 py-2 text-right mono text-gray-200">{formatQty(row.quantity)}</td>
+                <td className="px-3 py-2 text-right mono text-gray-200">{formatPriceValue(row.price)}</td>
+                <td className="px-3 py-2 text-right mono text-gray-300">{row.fees ? formatCurrency(row.fees) : '—'}</td>
+                <td className={`px-3 py-2 text-right mono font-medium ${row.amount == null ? 'text-gray-600' : row.amount >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                  {row.amount == null ? '—' : formatCurrency(row.amount)}
+                </td>
+                <td className={`px-3 py-2 text-right mono font-semibold ${row.runningShares >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                  {formatQty(row.runningShares)}
+                </td>
+                <td className="px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => onOpenTrade(row.tradeId)}
+                    className="text-accent-blue hover:text-blue-300 transition-colors"
+                  >
+                    Open
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="bg-surface-200/60 border-t border-white/10">
+            <tr className="font-semibold">
+              <td className="px-3 py-2 text-gray-300" colSpan={6}>Total</td>
+              <td className="px-3 py-2 text-right mono text-gray-200">{formatCurrency(totals.fees)}</td>
+              <td className={`px-3 py-2 text-right mono ${totals.amount >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{formatCurrency(totals.amount)}</td>
+              <td className="px-3 py-2" colSpan={2} />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 // Helper: get edges array from a trade (new multi-select or legacy single strategy)
 function getEdges(trade) {
   if (trade.edges?.length > 0) return trade.edges
@@ -1052,6 +1332,7 @@ export default function TradeLog({ selectedAccount }) {
   const { trades, deleteTrade, clearTrades, updateTrade } = useTradeStore()
   const [expanded, setExpanded] = useState(null)
   const [symbolModal, setSymbolModal] = useState(null)
+  const [viewMode, setViewMode] = useState('trades')
   const [filters, setFilters] = useState({ status: 'All', position: 'All', symbol: '', account: 'All', sortBy: 'date-desc', tag: '' })
 
   const filtered = useMemo(() => {
@@ -1072,6 +1353,11 @@ export default function TradeLog({ selectedAccount }) {
       return 0
     })
   }, [trades, filters, selectedAccount])
+
+  const reconciliationRows = useMemo(
+    () => buildReconciliationRows(filtered),
+    [filtered]
+  )
 
   const setFilter = (k, v) => setFilters(f => ({ ...f, [k]: v }))
 
@@ -1123,7 +1409,26 @@ export default function TradeLog({ selectedAccount }) {
           <option value="pl-desc">Best P&L</option>
           <option value="r-desc">Best R</option>
         </select>
-        <span className="text-xs text-gray-500 ml-auto">{filtered.length} trades</span>
+        <div className="flex items-center bg-surface-200 border border-white/10 rounded-lg p-0.5 ml-auto">
+          {[
+            ['trades', 'Trade Log'],
+            ['reconcile', 'Reconcile'],
+          ].map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setViewMode(mode)}
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                viewMode === mode ? 'bg-accent-blue/20 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-gray-500">
+          {viewMode === 'reconcile' ? `${reconciliationRows.length} rows` : `${filtered.length} trades`}
+        </span>
         {trades.length > 0 && (
           <button
             onClick={() => { if (window.confirm('Delete all trades? This cannot be undone.')) clearTrades() }}
@@ -1138,6 +1443,16 @@ export default function TradeLog({ selectedAccount }) {
       <div className="card p-0 overflow-hidden">
         {filtered.length === 0 ? (
           <p className="text-sm text-gray-500 text-center py-12">No trades match your filters.</p>
+        ) : viewMode === 'reconcile' ? (
+          <div className="p-3">
+            <ReconciliationView
+              rows={reconciliationRows}
+              onOpenTrade={(id) => {
+                setViewMode('trades')
+                setExpanded(id)
+              }}
+            />
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
