@@ -1,10 +1,13 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
+import { useMorningStore } from '../../store/useMorningStore.js'
 import { useOpenRouterVoice } from '../../hooks/useOpenRouterVoice.js'
 import { formatCurrency } from '../../utils/formatters.js'
+import { fetchHistory } from '../../utils/marketData.js'
 import { analyzeTradeVoiceReview, generateTradeVoiceFollowUp } from '../../utils/ai.js'
 import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, Sparkles, Brain, CircleDot, RotateCcw, Mic, MicOff, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Volume2, Square } from 'lucide-react'
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine } from 'recharts'
 
 // ── Duration helper ───────────────────────────────────────────────────────────
 function tradeDuration(trade) {
@@ -412,6 +415,27 @@ function buildGuidedVoiceQuestions(trade) {
 
 const MIN_DYNAMIC_QUESTION_COUNT = 4
 
+const MORNING_BREAKOUT_LABELS = {
+  Failing: 'Failing',
+  Mixed: 'Mixed',
+  Working: 'Working',
+}
+
+const MORNING_CREDIT_LABELS = {
+  tight: 'Tight',
+  tightening: 'Tightening',
+  neutral: 'Neutral',
+  easing: 'Easing',
+  loose: 'Loose',
+}
+
+const MORNING_RISK_LABELS = {
+  cautious: 'Hard Times',
+  normal: 'Normal',
+  good: 'Good',
+  great: 'Great',
+}
+
 function hasTradeReview(trade) {
   return Boolean(
     trade?.quickReview ||
@@ -468,6 +492,224 @@ function computeReviewIntelligence(trades) {
     topLeak,
     hotTags: Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 4),
   }
+}
+
+function localDateString(date = new Date()) {
+  const year  = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day   = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function buildMorningEnvironmentNotes(trade, entry) {
+  if (!entry) return []
+  const notes = []
+
+  if (entry.breakouts === 'Failing') {
+    notes.push('Breakouts were failing that morning, so aggressive momentum entries had a headwind.')
+  } else if (entry.breakouts === 'Working') {
+    notes.push('Breakouts were working that morning, which supported cleaner momentum follow-through.')
+  }
+
+  if (entry.creditConditions === 'tight' || entry.creditConditions === 'tightening') {
+    notes.push('Credit conditions were defensive, which usually makes risk-taking and extension less forgiving.')
+  } else if (entry.creditConditions === 'easing' || entry.creditConditions === 'loose') {
+    notes.push('Credit conditions were supportive, which is usually better for risk-on participation.')
+  }
+
+  if (trade.position === 'Long' && entry.marketBias === 'Bearish') {
+    notes.push('You were taking a long trade against a bearish morning bias.')
+  }
+  if (trade.position === 'Short' && entry.marketBias === 'Bullish') {
+    notes.push('You were taking a short trade against a bullish morning bias.')
+  }
+
+  if (entry.riskMode === 'cautious') {
+    notes.push('You marked the day as hard times / cautious risk, which argues for extra selectivity.')
+  }
+
+  return notes
+}
+
+function EntryMarketChart({ symbol, trade }) {
+  const [series, setSeries] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const entryDate = trade.entryDate ? new Date(trade.entryDate) : null
+  const entryDateStr = entryDate ? localDateString(entryDate) : ''
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function load() {
+      if (!entryDate) {
+        setSeries([])
+        setLoading(false)
+        return
+      }
+
+      setLoading(true)
+      setError('')
+      try {
+        const start = new Date(entryDate)
+        start.setDate(start.getDate() - 20)
+        const end = new Date(entryDate)
+        end.setDate(end.getDate() + 10)
+        const bars = await fetchHistory(symbol, start, end)
+        if (cancelled) return
+        setSeries(
+          bars.map(bar => ({
+            ...bar,
+            label: bar.time.slice(5),
+          }))
+        )
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'Failed to load market context.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    load()
+    return () => { cancelled = true }
+  }, [entryDate, symbol])
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-semibold text-white mono">{symbol}</p>
+        <p className="text-[10px] text-gray-500">Entry marker shown</p>
+      </div>
+      {loading ? (
+        <div className="h-28 flex items-center justify-center text-xs text-gray-500">Loading {symbol}…</div>
+      ) : error ? (
+        <div className="h-28 flex items-center justify-center text-xs text-accent-red text-center">{error}</div>
+      ) : series.length === 0 ? (
+        <div className="h-28 flex items-center justify-center text-xs text-gray-500">No {symbol} data</div>
+      ) : (
+        <div className="h-28">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={series} margin={{ top: 4, right: 6, left: -20, bottom: 0 }}>
+              <XAxis dataKey="label" tick={{ fill: '#6b7280', fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={18} />
+              <YAxis hide domain={['dataMin', 'dataMax']} />
+              <Tooltip
+                contentStyle={{ background: '#0f1117', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10 }}
+                labelStyle={{ color: '#9ca3af', fontSize: 11 }}
+                formatter={(value) => [`$${Number(value).toFixed(2)}`, symbol]}
+              />
+              <ReferenceLine x={entryDateStr.slice(5)} stroke="#ffa502" strokeDasharray="3 3" />
+              <Line type="monotone" dataKey="close" stroke="#3d84ff" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MarketContextSection({ trade }) {
+  const { getEntryByDate } = useMorningStore()
+  const entryDateStr = trade.entryDate ? trade.entryDate.slice(0, 10) : null
+  const morningEntry = entryDateStr ? getEntryByDate(entryDateStr) : null
+  const notes = useMemo(() => buildMorningEnvironmentNotes(trade, morningEntry), [trade, morningEntry])
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="label mb-2">Market Context</p>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+          <EntryMarketChart symbol="SPY" trade={trade} />
+          <EntryMarketChart symbol="QQQ" trade={trade} />
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <p className="label text-white">Morning Environment</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {entryDateStr ? `Matched to morning journal entry for ${entryDateStr}` : 'No trade date available'}
+            </p>
+          </div>
+          {!morningEntry && (
+            <span className="text-[10px] px-2 py-1 rounded-full border border-white/10 text-gray-500">
+              No morning entry
+            </span>
+          )}
+        </div>
+
+        {morningEntry ? (
+          <>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {morningEntry.marketBias && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-accent-blue/15 text-accent-blue border border-accent-blue/20">
+                  Bias: {morningEntry.marketBias}
+                </span>
+              )}
+              {morningEntry.breakouts && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-white/8 text-gray-300 border border-white/10">
+                  Breakouts: {MORNING_BREAKOUT_LABELS[morningEntry.breakouts] || morningEntry.breakouts}
+                </span>
+              )}
+              {morningEntry.creditConditions && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-white/8 text-gray-300 border border-white/10">
+                  Credit: {MORNING_CREDIT_LABELS[morningEntry.creditConditions] || morningEntry.creditConditions}
+                </span>
+              )}
+              {morningEntry.riskMode && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-white/8 text-gray-300 border border-white/10">
+                  Risk: {MORNING_RISK_LABELS[morningEntry.riskMode] || morningEntry.riskMode}
+                </span>
+              )}
+              {morningEntry.confidence != null && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-white/8 text-gray-300 border border-white/10">
+                  Confidence: {morningEntry.confidence}/5
+                </span>
+              )}
+              {morningEntry.fomo != null && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-white/8 text-gray-300 border border-white/10">
+                  FOMO: {morningEntry.fomo}
+                </span>
+              )}
+            </div>
+
+            {(morningEntry.gameplan || morningEntry.lessons) && (
+              <div className="space-y-2 mb-3">
+                {morningEntry.gameplan && (
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-gray-500 mb-1">Gameplan</p>
+                    <p className="text-xs text-gray-300 leading-relaxed">{morningEntry.gameplan}</p>
+                  </div>
+                )}
+                {morningEntry.lessons && (
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-gray-500 mb-1">Process Notes</p>
+                    <p className="text-xs text-gray-300 leading-relaxed">{morningEntry.lessons}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {notes.length > 0 && (
+              <div className="rounded-lg border border-accent-yellow/15 bg-accent-yellow/[0.05] px-3 py-2.5">
+                <p className="text-[11px] uppercase tracking-[0.16em] text-accent-yellow/80 mb-2">Environment Read</p>
+                <div className="space-y-1.5">
+                  {notes.map(note => (
+                    <p key={note} className="text-xs text-gray-300 leading-relaxed">{note}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="text-xs text-gray-500">
+            No morning journal entry was found for this trade date, so environment context can’t be matched yet.
+          </p>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function ReviewIntelligenceCard({ intelligence, totalTrades }) {
@@ -1700,6 +1942,8 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate }) {
           )}
         </div>
       )}
+
+      <MarketContextSection trade={trade} />
 
       {/* ── Review section ── */}
       <div className="border-t border-white/10 pt-5 space-y-5">
