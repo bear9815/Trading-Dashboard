@@ -282,6 +282,7 @@ function maxDrawdownPctFromEquity(points) {
 
 function simulateLongGame({
   rValues,
+  samples,
   startEquity,
   riskPct,
   tradesPerMonth,
@@ -292,20 +293,28 @@ function simulateLongGame({
   payoffRatio = 1.5,
   avgLossR = 1,
   targetReturnPct = 100,
+  riskPolicy = 'fixed',
 }) {
   const cleanR = rValues.filter(v => Number.isFinite(v))
+  const cleanSamples = (samples || []).filter(s => Number.isFinite(s.r) && Number.isFinite(s.riskPct) && s.riskPct > 0)
   const totalTrades = Math.max(1, Math.round(tradesPerMonth * 12 * years))
   const annualTrades = Math.max(1, Math.round(tradesPerMonth * 12))
-  const canUseHistorical = modelMode === 'historical' && cleanR.length > 0
+  const canUseHistorical = modelMode === 'historical' && (cleanR.length > 0 || cleanSamples.length > 0)
   const canUseCustom = modelMode === 'custom' && winRatePct >= 0 && winRatePct <= 100 && payoffRatio > 0 && avgLossR > 0
   if ((!canUseHistorical && !canUseCustom) || startEquity <= 0 || riskPct <= 0 || totalTrades <= 0) return null
 
   const runSummaries = []
   const byYear = Array.from({ length: years }, () => [])
-  const rng = mulberry32(912241 + cleanR.length * 17 + Math.round(riskPct * 100) + Math.round(winRatePct * 31) + Math.round(payoffRatio * 100))
+  const rng = mulberry32(912241 + cleanR.length * 17 + cleanSamples.length * 29 + Math.round(riskPct * 100) + Math.round(winRatePct * 31) + Math.round(payoffRatio * 100))
   const winProb = winRatePct / 100
   const winR = payoffRatio * avgLossR
   const lossR = -avgLossR
+  const policyRisk = (sample) => {
+    if (riskPolicy === 'actual') return sample?.riskPct ?? riskPct
+    if (riskPolicy === 'cap-075') return Math.min(sample?.riskPct ?? riskPct, 0.75)
+    if (riskPolicy === 'cap-05') return Math.min(sample?.riskPct ?? riskPct, 0.5)
+    return riskPct
+  }
 
   for (let run = 0; run < runs; run++) {
     let equity = startEquity
@@ -314,10 +323,14 @@ function simulateLongGame({
     let yearStart = equity
 
     for (let i = 1; i <= totalTrades; i++) {
+      const sample = canUseHistorical && cleanSamples.length
+        ? cleanSamples[Math.floor(rng() * cleanSamples.length)]
+        : null
       const sampledR = canUseHistorical
-        ? cleanR[Math.floor(rng() * cleanR.length)]
+        ? (sample?.r ?? cleanR[Math.floor(rng() * cleanR.length)])
         : (rng() < winProb ? winR : lossR)
-      const tradeReturn = sampledR * (riskPct / 100)
+      const tradeRiskPct = canUseHistorical ? policyRisk(sample) : riskPct
+      const tradeReturn = sampledR * (tradeRiskPct / 100)
       equity = Math.max(0, equity * (1 + tradeReturn))
       path.push(equity)
 
@@ -443,6 +456,7 @@ export default function Analytics({ selectedAccount }) {
   const [projectionPayoffRatio, setProjectionPayoffRatio] = useState(1.5)
   const [projectionAvgLossR, setProjectionAvgLossR] = useState(1)
   const [projectionTargetReturn, setProjectionTargetReturn] = useState(100)
+  const [projectionRiskPolicy, setProjectionRiskPolicy] = useState('fixed')
 
   const excludedSet = useMemo(
     () => new Set((excludedSymbols || []).map(s => s.toUpperCase())),
@@ -1302,6 +1316,17 @@ export default function Analytics({ selectedAccount }) {
     [closedSorted, rField]
   )
 
+  const projectionAtrSamples = useMemo(() => {
+    return closedSorted
+      .map(t => {
+        const r = Number.isFinite(t.rMultipleATR) ? t.rMultipleATR : t[rField]
+        const tier = t.riskTierPct ?? t.inferredRiskTierPct ?? t.nearestAtrRiskTierPct
+        const riskPct = Number.isFinite(tier) && tier > 0 ? tier : null
+        return Number.isFinite(r) && riskPct != null ? { r, riskPct } : null
+      })
+      .filter(Boolean)
+  }, [closedSorted, rField])
+
   const actualProjectionStats = useMemo(() => {
     const winsWithR = closed.filter(t => t.status === 'Win' && Number.isFinite(t[rField]))
     const lossesWithR = closed.filter(t => t.status === 'Loss' && Number.isFinite(t[rField]))
@@ -1325,6 +1350,7 @@ export default function Analytics({ selectedAccount }) {
 
   function applyActualProjectionStats() {
     setProjectionModelMode('historical')
+    setProjectionRiskPolicy(projectionAtrSamples.length ? 'actual' : 'fixed')
     setProjectionStartValue(String(Math.round(actualProjectionStats.startEquity)))
     setProjectionTradesPerMonth(actualProjectionStats.tradesPerMonth)
     setProjectionWinRate(Number(actualProjectionStats.winRate.toFixed(1)))
@@ -1334,6 +1360,7 @@ export default function Analytics({ selectedAccount }) {
 
   const longGameProjection = useMemo(() => simulateLongGame({
     rValues: projectionRValues,
+    samples: projectionRiskPolicy === 'fixed' ? null : projectionAtrSamples,
     startEquity: effectiveProjectionStartEquity,
     riskPct: projectionRiskPct,
     tradesPerMonth: projectionTradesPerMonth,
@@ -1343,7 +1370,33 @@ export default function Analytics({ selectedAccount }) {
     payoffRatio: projectionPayoffRatio,
     avgLossR: projectionAvgLossR,
     targetReturnPct: projectionTargetReturn,
-  }), [projectionRValues, effectiveProjectionStartEquity, projectionRiskPct, projectionTradesPerMonth, projectionYears, projectionModelMode, projectionWinRate, projectionPayoffRatio, projectionAvgLossR, projectionTargetReturn])
+    riskPolicy: projectionRiskPolicy,
+  }), [projectionRValues, projectionAtrSamples, projectionRiskPolicy, effectiveProjectionStartEquity, projectionRiskPct, projectionTradesPerMonth, projectionYears, projectionModelMode, projectionWinRate, projectionPayoffRatio, projectionAvgLossR, projectionTargetReturn])
+
+  const projectionPolicyComparisons = useMemo(() => {
+    if (!projectionAtrSamples.length) return []
+    return [
+      ['actual', 'Current Mix'],
+      ['fixed-025', 'All 0.25%'],
+      ['fixed-05', 'All 0.50%'],
+      ['cap-075', 'Cap 0.75%'],
+      ['fixed', `Selected ${projectionRiskPct}%`],
+    ].map(([policy, label]) => {
+      const sim = simulateLongGame({
+        rValues: projectionRValues,
+        samples: policy === 'fixed' ? null : projectionAtrSamples,
+        startEquity: effectiveProjectionStartEquity,
+        riskPct: policy === 'fixed-025' ? 0.25 : policy === 'fixed-05' ? 0.5 : projectionRiskPct,
+        tradesPerMonth: projectionTradesPerMonth,
+        years: projectionYears,
+        modelMode: 'historical',
+        targetReturnPct: projectionTargetReturn,
+        riskPolicy: policy,
+        runs: 700,
+      })
+      return sim ? { policy, label, sim } : null
+    }).filter(Boolean)
+  }, [projectionAtrSamples, projectionRValues, effectiveProjectionStartEquity, projectionRiskPct, projectionTradesPerMonth, projectionYears, projectionTargetReturn])
 
   const projectionExpectancyR = useMemo(() => {
     if (projectionModelMode === 'historical') {
@@ -1358,6 +1411,35 @@ export default function Analytics({ selectedAccount }) {
   const projectionAnnualExpectedR = projectionExpectancyR * projectionAnnualTrades
   const projectionRiskUnit025 = effectiveProjectionStartEquity * 0.0025
   const projectionActiveRiskDollars = effectiveProjectionStartEquity * (projectionRiskPct / 100)
+  const projectionConfidence = projectionAtrSamples.length >= 60 ? 'High' : projectionAtrSamples.length >= 30 ? 'Medium' : projectionAtrSamples.length >= 12 ? 'Early' : 'Low'
+
+  const atrDisciplineStats = useMemo(() => {
+    const eligible = closed.filter(t => Number.isFinite(t.rMultipleATR))
+    const summarize = (items) => {
+      const wins = items.filter(t => t.rMultipleATR > 0).length
+      return {
+        count: items.length,
+        avgR: items.length ? items.reduce((s, t) => s + t.rMultipleATR, 0) / items.length : 0,
+        winRate: items.length ? (wins / items.length) * 100 : 0,
+        avgPL: items.length ? items.reduce((s, t) => s + (t.pl || 0), 0) / items.length : 0,
+      }
+    }
+    const compliant = eligible.filter(t => !t.atrValidationFlags?.length)
+    const flagged = eligible.filter(t => t.atrValidationFlags?.length)
+    const byTier = [0.25, 0.5, 0.75, 1].map(tier => {
+      const bucket = eligible.filter(t => {
+        const actual = t.riskTierPct ?? t.inferredRiskTierPct ?? t.nearestAtrRiskTierPct
+        return actual === tier
+      })
+      return { tier, ...summarize(bucket) }
+    })
+    return {
+      sample: eligible.length,
+      compliant: summarize(compliant),
+      flagged: summarize(flagged),
+      byTier,
+    }
+  }, [closed])
 
   if (tfFiltered.length === 0) {
     return (
@@ -2322,6 +2404,73 @@ export default function Analytics({ selectedAccount }) {
         )
       })()}
 
+      {atrDisciplineStats.sample >= 5 && (
+        <div className="card border border-accent-yellow/15 bg-gradient-to-br from-accent-yellow/5 via-transparent to-accent-blue/5">
+          <SectionTitle>
+            <span className="flex items-center gap-2">
+              <Target size={14} className="text-accent-yellow inline" />
+              ATR Discipline Analytics
+            </span>
+          </SectionTitle>
+          <p className="text-xs text-gray-500 mb-4">
+            This separates “the setup worked” from “the position sizing and plan were clean.” Compliant means no ATR validation flags: ATR present, stop near 1 ATR, target near 2 ATR, and sizing close to the selected tier.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            {[
+              ['Plan-Compliant Trades', atrDisciplineStats.compliant, 'text-accent-green'],
+              ['Flagged Trades', atrDisciplineStats.flagged, 'text-accent-yellow'],
+            ].map(([label, stats, color]) => (
+              <div key={label} className="rounded-lg border border-white/10 bg-surface-200/45 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-semibold text-gray-300">{label}</p>
+                  <span className="text-[10px] text-gray-600">n={stats.count}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div>
+                    <p className={`mono text-lg font-bold ${stats.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{stats.avgR >= 0 ? '+' : ''}{stats.avgR.toFixed(2)}R</p>
+                    <p className="text-[10px] text-gray-600">avg ATR-R</p>
+                  </div>
+                  <div>
+                    <p className={`mono text-lg font-bold ${color}`}>{stats.winRate.toFixed(0)}%</p>
+                    <p className="text-[10px] text-gray-600">win rate</p>
+                  </div>
+                  <div>
+                    <p className={`mono text-lg font-bold ${stats.avgPL >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{stats.avgPL >= 0 ? '+' : ''}{formatCurrency(stats.avgPL, true)}</p>
+                    <p className="text-[10px] text-gray-600">avg P&L</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-white/10">
+            <table className="w-full text-xs">
+              <thead className="bg-surface-200">
+                <tr className="text-gray-500">
+                  <th className="text-left px-3 py-2 font-medium">Risk Tier</th>
+                  <th className="text-right px-3 py-2 font-medium">Trades</th>
+                  <th className="text-right px-3 py-2 font-medium">Avg ATR-R</th>
+                  <th className="text-right px-3 py-2 font-medium">Win Rate</th>
+                  <th className="text-right px-3 py-2 font-medium">Avg P&L</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {atrDisciplineStats.byTier.map(row => (
+                  <tr key={row.tier}>
+                    <td className="px-3 py-2 mono text-gray-300">{row.tier}%</td>
+                    <td className="px-3 py-2 text-right mono text-gray-400">{row.count || '—'}</td>
+                    <td className={`px-3 py-2 text-right mono ${row.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{row.count ? `${row.avgR >= 0 ? '+' : ''}${row.avgR.toFixed(2)}R` : '—'}</td>
+                    <td className="px-3 py-2 text-right mono text-gray-300">{row.count ? `${row.winRate.toFixed(0)}%` : '—'}</td>
+                    <td className={`px-3 py-2 text-right mono ${row.avgPL >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{row.count ? `${row.avgPL >= 0 ? '+' : ''}${formatCurrency(row.avgPL, true)}` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Edge Performance */}
       {stratData.length > 0 && (
         <div className="card">
@@ -3070,6 +3219,40 @@ export default function Analytics({ selectedAccount }) {
           <span className="text-[10px] text-gray-600">
             Actual: {actualProjectionStats.winRate.toFixed(1)}% win · {actualProjectionStats.payoffRatio.toFixed(2)}x payoff · {actualProjectionStats.tradesPerMonth}/mo
           </span>
+          <span className={`text-[10px] px-2 py-1 rounded-full border ${
+            projectionConfidence === 'High' ? 'text-accent-green border-accent-green/20 bg-accent-green/10'
+            : projectionConfidence === 'Medium' ? 'text-accent-yellow border-accent-yellow/20 bg-accent-yellow/10'
+            : 'text-accent-red border-accent-red/20 bg-accent-red/10'
+          }`}>
+            {projectionConfidence} confidence · {projectionAtrSamples.length} ATR-tier samples
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 mb-5 flex-wrap">
+          <span className="text-[11px] text-gray-500 font-medium">Risk Policy:</span>
+          <div className="flex items-center bg-surface-100 border border-white/10 rounded-lg p-0.5 flex-wrap">
+            {[
+              ['fixed', 'Selected Risk'],
+              ['actual', 'Current Mix'],
+              ['cap-075', 'Cap 0.75%'],
+              ['cap-05', 'Cap 0.50%'],
+            ].map(([policy, label]) => (
+              <button
+                key={policy}
+                type="button"
+                onClick={() => setProjectionRiskPolicy(policy)}
+                disabled={policy !== 'fixed' && !projectionAtrSamples.length}
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                  projectionRiskPolicy === policy ? 'bg-accent-yellow/20 text-accent-yellow' : 'text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10px] text-gray-600">
+            Current Mix replays your historical 0.25/0.5/0.75/1% sizing behavior.
+          </span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-5">
@@ -3406,6 +3589,48 @@ export default function Analytics({ selectedAccount }) {
                 </div>
               </div>
             </div>
+
+            {projectionPolicyComparisons.length > 0 && (
+              <div className="mt-5 rounded-lg border border-white/10 bg-surface-200/40 p-4">
+                <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-300">Risk Policy Comparison</p>
+                    <p className="text-[11px] text-gray-600">Same historical ATR-R outcomes, different sizing rules. This is the survivability dashboard.</p>
+                  </div>
+                  <span className="text-[10px] text-gray-600">{projectionPolicyComparisons[0]?.sim.runs.toLocaleString()} sims each</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-500 border-b border-white/5">
+                        <th className="text-left pb-2 font-medium">Policy</th>
+                        <th className="text-right pb-2 font-medium">Median CAGR</th>
+                        <th className="text-right pb-2 font-medium">Median Ending</th>
+                        <th className="text-right pb-2 font-medium">P90 Drawdown</th>
+                        <th className="text-right pb-2 font-medium">Chance Target</th>
+                        <th className="text-right pb-2 font-medium">Chance Lose $</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {projectionPolicyComparisons.map(({ policy, label, sim }) => (
+                        <tr key={policy} className={projectionRiskPolicy === policy ? 'bg-accent-yellow/5' : ''}>
+                          <td className="py-2 text-gray-300 font-medium">{label}</td>
+                          <td className={`py-2 text-right mono ${sim.cagrPct.p50 >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                            {sim.cagrPct.p50 >= 0 ? '+' : ''}{sim.cagrPct.p50.toFixed(1)}%
+                          </td>
+                          <td className="py-2 text-right mono text-gray-200">{formatCurrency(sim.ending.p50, true)}</td>
+                          <td className={`py-2 text-right mono ${sim.maxDDPct.p90 >= 25 ? 'text-accent-red' : sim.maxDDPct.p90 >= 15 ? 'text-accent-yellow' : 'text-gray-300'}`}>
+                            -{sim.maxDDPct.p90.toFixed(1)}%
+                          </td>
+                          <td className="py-2 text-right mono text-gray-300">{(sim.chanceTarget * 100).toFixed(0)}%</td>
+                          <td className="py-2 text-right mono text-gray-300">{(sim.chanceLoseMoney * 100).toFixed(0)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             <div className="mt-5 rounded-lg border border-accent-yellow/20 bg-accent-yellow/5 px-4 py-3">
               <p className="text-xs font-semibold text-accent-yellow mb-1">Expectation reset</p>

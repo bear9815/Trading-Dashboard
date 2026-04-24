@@ -86,6 +86,10 @@ const RISK_COLUMNS = [
   { key: 'uplPct',     label: 'P&L % Acct',  description: 'Open profit or loss as % of account equity' },
   { key: 'riskDollar', label: 'Risk $',      description: 'Current stop-based dollar risk' },
   { key: 'riskPct',    label: 'Risk %',      description: 'Current stop-based risk as % of account' },
+  { key: 'atrHeatDollar', label: 'ATR Heat $', description: 'Open 1 ATR risk budget in dollars' },
+  { key: 'atrHeatPct', label: 'ATR Heat %', description: 'Open 1 ATR risk budget as % of account' },
+  { key: 'atrTier',    label: 'ATR Tier',    description: 'Planned or inferred ATR risk tier' },
+  { key: 'atrFlags',   label: 'ATR Flags',   description: 'ATR sizing and plan validation flags' },
   { key: 'sigmaDollar', label: 'Sigma $',    description: 'Expected 1-day ATR swing in dollars' },
   { key: 'sigmaPct',   label: 'Sigma %',     description: 'Expected 1-day ATR swing as % of account' },
   { key: 'maeR',       label: 'MAE R',       description: 'Worst adverse excursion recorded in R' },
@@ -104,6 +108,8 @@ const DEFAULT_RISK_VISIBLE_COLUMNS = [
   'upl',
   'riskDollar',
   'riskPct',
+  'atrHeatDollar',
+  'atrTier',
   'heat',
 ]
 
@@ -123,6 +129,10 @@ const RISK_DEFAULT_WIDTHS = {
   uplPct:      85,
   riskDollar:  95,
   riskPct:     80,
+  atrHeatDollar: 105,
+  atrHeatPct:   90,
+  atrTier:      80,
+  atrFlags:    150,
   sigmaDollar: 95,
   sigmaPct:    85,
   maeR:        80,
@@ -164,6 +174,22 @@ function getRowRiskMetrics(row, currentPrice, liveBalance, tpMultiplier, atrData
     ? (currentRiskPerSh / currentPrice) * 100
     : null
   const atrDollar = atrData.get(row.symbol)?.atr ?? null
+  const lotAtrHeat = Array.isArray(row.lots)
+    ? row.lots.reduce((sum, lot) => {
+        const lotSize = lot.remainingShares ?? lot.positionSize
+        const lotAtr = lot.atrAtEntry ?? lot.atrValue ?? atrDollar
+        return lotAtr && lotSize ? sum + Math.abs(lotAtr * lotSize) : sum
+      }, 0)
+    : 0
+  const atrHeatDollar = lotAtrHeat > 0 ? lotAtrHeat : (atrDollar != null && row.positionSize ? atrDollar * row.positionSize : null)
+  const atrHeatPct = liveBalance > 0 && atrHeatDollar != null
+    ? (atrHeatDollar / liveBalance) * 100
+    : null
+  const tierSet = new Set((row.lots || [row])
+    .map(lot => lot.riskTierPct ?? lot.inferredRiskTierPct ?? lot.nearestAtrRiskTierPct)
+    .filter(v => v != null))
+  const atrTier = tierSet.size === 1 ? [...tierSet][0] : tierSet.size > 1 ? 'Mixed' : null
+  const atrFlags = [...new Set((row.lots || [row]).flatMap(lot => lot.atrValidationFlags || []))]
   const sigmaDollar = atrDollar != null && row.positionSize
     ? atrDollar * row.positionSize
     : null
@@ -203,6 +229,10 @@ function getRowRiskMetrics(row, currentPrice, liveBalance, tpMultiplier, atrData
     stopATR,
     targetR,
     uplPct,
+    atrHeatDollar,
+    atrHeatPct,
+    atrTier,
+    atrFlags,
     sigmaDollar,
     sigmaPct,
     daysSinceEntry,
@@ -1695,6 +1725,10 @@ export default function RiskPanel({ selectedAccount }) {
         case 'riskDollar': av = metricsA.currentRiskDollar ?? -Infinity; bv = metricsB.currentRiskDollar ?? -Infinity; break
         case 'riskPct':
         case 'heat':       av = metricsA.currentRiskPct ?? -Infinity; bv = metricsB.currentRiskPct ?? -Infinity; break
+        case 'atrHeatDollar': av = metricsA.atrHeatDollar ?? -Infinity; bv = metricsB.atrHeatDollar ?? -Infinity; break
+        case 'atrHeatPct':    av = metricsA.atrHeatPct ?? -Infinity; bv = metricsB.atrHeatPct ?? -Infinity; break
+        case 'atrTier':       av = metricsA.atrTier ?? ''; bv = metricsB.atrTier ?? ''; break
+        case 'atrFlags':      av = metricsA.atrFlags?.length ?? 0; bv = metricsB.atrFlags?.length ?? 0; break
         case 'sigmaDollar': av = metricsA.sigmaDollar ?? -Infinity; bv = metricsB.sigmaDollar ?? -Infinity; break
         case 'sigmaPct':   av = metricsA.sigmaPct ?? -Infinity; bv = metricsB.sigmaPct ?? -Infinity; break
         case 'maeR':       av = metricsA.maeR ?? Infinity; bv = metricsB.maeR ?? Infinity; break
@@ -2384,6 +2418,10 @@ export default function RiskPanel({ selectedAccount }) {
                       targetR,
                       unrealizedPL,
                       uplPct,
+                      atrHeatDollar,
+                      atrHeatPct,
+                      atrTier,
+                      atrFlags,
                     } = getRowRiskMetrics(group, currentPrice, liveBalance, tpMultiplier, atrData)
                     const plColor = unrealizedPL == null ? '' : unrealizedPL >= 0 ? 'text-accent-green' : 'text-accent-red'
                     // Stale loser: held longer than avg loss AND still negative R
@@ -2536,6 +2574,26 @@ export default function RiskPanel({ selectedAccount }) {
                               case 'riskPct':
                                 return <td key={key} className="py-2 text-right mono text-accent-yellow">
                                   {currentRiskPct > 0 ? `${currentRiskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
+                                </td>
+                              case 'atrHeatDollar':
+                                return <td key={key} className="py-2 text-right mono text-accent-blue font-medium">
+                                  {atrHeatDollar != null ? formatCurrency(atrHeatDollar) : <span className="text-gray-600">—</span>}
+                                </td>
+                              case 'atrHeatPct':
+                                return <td key={key} className="py-2 text-right mono text-accent-blue">
+                                  {atrHeatPct != null ? `${atrHeatPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
+                                </td>
+                              case 'atrTier':
+                                return <td key={key} className="py-2 text-right mono text-gray-300">
+                                  {atrTier != null ? (atrTier === 'Mixed' ? 'Mixed' : `${atrTier}%`) : '—'}
+                                </td>
+                              case 'atrFlags':
+                                return <td key={key} className="py-2 text-right">
+                                  {atrFlags?.length ? (
+                                    <span className="inline-flex max-w-[140px] justify-end text-[10px] text-accent-yellow">
+                                      {atrFlags.slice(0, 2).map(f => f.replaceAll('_', ' ')).join(', ')}{atrFlags.length > 2 ? ` +${atrFlags.length - 2}` : ''}
+                                    </span>
+                                  ) : <span className="text-gray-600">—</span>}
                                 </td>
                               case 'sigmaDollar':
                                 return <td key={key} className="py-2 text-right mono text-accent-purple">
@@ -2701,6 +2759,10 @@ export default function RiskPanel({ selectedAccount }) {
                             targetR: lotTargetR,
                             unrealizedPL: lotUPL,
                             uplPct: lotUplPct,
+                            atrHeatDollar: lotAtrHeatDollar,
+                            atrHeatPct: lotAtrHeatPct,
+                            atrTier: lotAtrTier,
+                            atrFlags: lotAtrFlags,
                           } = getRowRiskMetrics(lotRow, currentPrice, liveBalance, tpMultiplier, atrData)
                           const lotPlClr  = lotUPL == null ? '' : lotUPL >= 0 ? 'text-accent-green' : 'text-accent-red'
                           return (
@@ -2773,6 +2835,22 @@ export default function RiskPanel({ selectedAccount }) {
                                     return <td key={key} className="py-1.5 text-right mono text-accent-yellow/60">
                                       {lotCurrentRiskPct > 0 ? `${lotCurrentRiskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
                                     </td>
+                                  case 'atrHeatDollar':
+                                    return <td key={key} className="py-1.5 text-right mono text-accent-blue/80">
+                                      {lotAtrHeatDollar != null ? formatCurrency(lotAtrHeatDollar) : '—'}
+                                    </td>
+                                  case 'atrHeatPct':
+                                    return <td key={key} className="py-1.5 text-right mono text-accent-blue/80">
+                                      {lotAtrHeatPct != null ? `${lotAtrHeatPct.toFixed(2)}%` : '—'}
+                                    </td>
+                                  case 'atrTier':
+                                    return <td key={key} className="py-1.5 text-right mono text-gray-500">
+                                      {lotAtrTier != null ? `${lotAtrTier}%` : '—'}
+                                    </td>
+                                  case 'atrFlags':
+                                    return <td key={key} className="py-1.5 text-right text-[10px] text-accent-yellow/80">
+                                      {lotAtrFlags?.length ? lotAtrFlags.slice(0, 1).map(f => f.replaceAll('_', ' ')).join(', ') : '—'}
+                                    </td>
                                   case 'sigmaDollar':
                                     return <td key={key} className="py-1.5 text-right mono text-accent-purple/80">
                                       {lotSigmaDollar != null ? formatCurrency(lotSigmaDollar) : '—'}
@@ -2818,6 +2896,8 @@ export default function RiskPanel({ selectedAccount }) {
                     let totalMktVal      = null
                     let totalRiskDollar  = 0
                     let totalSigmaDollar = 0
+                    let totalAtrHeatDollar = 0
+                    let totalAtrFlagCount = 0
                     for (const group of groupedPositions) {
                       const q  = quotes.get(group.symbol)
                       const cp = q?.price ?? null
@@ -2838,10 +2918,13 @@ export default function RiskPanel({ selectedAccount }) {
                       // Risk $: same formula as individual rows — current price to stop × shares
                       totalRiskDollar += metrics.currentRiskDollar ?? (group.riskDollar || 0)
                       totalSigmaDollar += metrics.sigmaDollar ?? 0
+                      totalAtrHeatDollar += metrics.atrHeatDollar ?? 0
+                      totalAtrFlagCount += metrics.atrFlags?.length ?? 0
                     }
                     const totalRiskPct = liveBalance > 0 ? (totalRiskDollar / liveBalance) * 100 : 0
                     const totalUplPct = liveBalance > 0 && totalUnrealPL != null ? (totalUnrealPL / liveBalance) * 100 : null
                     const totalSigmaPct = liveBalance > 0 && totalSigmaDollar > 0 ? (totalSigmaDollar / liveBalance) * 100 : 0
+                    const totalAtrHeatPct = liveBalance > 0 && totalAtrHeatDollar > 0 ? (totalAtrHeatDollar / liveBalance) * 100 : 0
                     const rColor  = totalCurrentR == null ? '' : totalCurrentR >= 0 ? 'text-accent-green' : 'text-accent-red'
                     const plColor = totalUnrealPL == null ? '' : totalUnrealPL >= 0 ? 'text-accent-green' : 'text-accent-red'
                     return (
@@ -2861,6 +2944,14 @@ export default function RiskPanel({ selectedAccount }) {
                               return <td key={key} className="pt-2 text-right mono text-accent-red">{totalRiskDollar > 0 ? formatCurrency(totalRiskDollar) : '—'}</td>
                             case 'riskPct':
                               return <td key={key} className="pt-2 text-right mono text-accent-yellow">{totalRiskPct > 0 ? `${totalRiskPct.toFixed(2)}%` : '—'}</td>
+                            case 'atrHeatDollar':
+                              return <td key={key} className="pt-2 text-right mono text-accent-blue">{totalAtrHeatDollar > 0 ? formatCurrency(totalAtrHeatDollar) : '—'}</td>
+                            case 'atrHeatPct':
+                              return <td key={key} className="pt-2 text-right mono text-accent-blue">{totalAtrHeatPct > 0 ? `${totalAtrHeatPct.toFixed(2)}%` : '—'}</td>
+                            case 'atrTier':
+                              return <td key={key} />
+                            case 'atrFlags':
+                              return <td key={key} className="pt-2 text-right mono text-accent-yellow">{totalAtrFlagCount || '—'}</td>
                             case 'sigmaDollar':
                               return <td key={key} className="pt-2 text-right mono text-accent-purple">{totalSigmaDollar > 0 ? formatCurrency(totalSigmaDollar) : '—'}</td>
                             case 'sigmaPct':

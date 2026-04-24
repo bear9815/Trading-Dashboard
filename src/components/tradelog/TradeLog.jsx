@@ -53,6 +53,11 @@ function formatPriceValue(price) {
   return `$${n >= 100 ? n.toFixed(2) : n.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}`
 }
 
+function formatAtrFlags(flags = []) {
+  if (!flags.length) return '—'
+  return flags.map(flag => flag.replaceAll('_', ' ')).join(', ')
+}
+
 function buildReconciliationRows(trades) {
   const rows = []
 
@@ -83,7 +88,13 @@ function buildReconciliationRows(trades) {
         amount: isShort ? gross : -gross,
         status: trade.status,
         source: trade.source,
-        issue: null,
+        atrAtEntry: trade.atrAtEntry ?? trade.atrValue ?? null,
+        riskTierPct: trade.riskTierPct ?? trade.inferredRiskTierPct ?? trade.nearestAtrRiskTierPct ?? null,
+        expectedPositionSize: trade.expectedPositionSize ?? null,
+        positionSizeVariancePct: trade.positionSizeVariancePct ?? null,
+        rMultipleATR: trade.rMultipleATR ?? null,
+        atrFlags: trade.atrValidationFlags || [],
+        issue: trade.atrValidationFlags?.length ? `ATR: ${formatAtrFlags(trade.atrValidationFlags)}` : null,
       })
     }
 
@@ -110,6 +121,12 @@ function buildReconciliationRows(trades) {
         amount: isShort ? -(gross + fees) : gross - fees,
         status: trade.status,
         source: trade.source,
+        atrAtEntry: null,
+        riskTierPct: null,
+        expectedPositionSize: null,
+        positionSizeVariancePct: null,
+        rMultipleATR: null,
+        atrFlags: [],
         issue: null,
       })
     })
@@ -177,8 +194,9 @@ function ReconciliationView({ rows, onOpenTrade }) {
     acc.fees += row.fees || 0
     if (row.amount != null) acc.amount += row.amount
     if (row.issue) acc.issues += 1
+    if (row.atrFlags?.length) acc.atrIssues += 1
     return acc
-  }, { fees: 0, amount: 0, issues: 0 })
+  }, { fees: 0, amount: 0, issues: 0, atrIssues: 0 })
 
   const positions = useMemo(() => {
     const latest = new Map()
@@ -192,7 +210,7 @@ function ReconciliationView({ rows, onOpenTrade }) {
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="card-sm">
           <p className="text-xs text-gray-500">Transaction Rows</p>
           <p className="text-lg font-bold mono text-white">{rows.length}</p>
@@ -208,6 +226,10 @@ function ReconciliationView({ rows, onOpenTrade }) {
         <div className="card-sm">
           <p className="text-xs text-gray-500">Reconcile Flags</p>
           <p className={`text-lg font-bold mono ${totals.issues ? 'text-accent-yellow' : 'text-accent-green'}`}>{totals.issues}</p>
+        </div>
+        <div className="card-sm">
+          <p className="text-xs text-gray-500">ATR Flags</p>
+          <p className={`text-lg font-bold mono ${totals.atrIssues ? 'text-accent-yellow' : 'text-accent-green'}`}>{totals.atrIssues}</p>
         </div>
       </div>
 
@@ -234,6 +256,10 @@ function ReconciliationView({ rows, onOpenTrade }) {
               <th className="text-left px-3 py-2 font-medium">Description</th>
               <th className="text-right px-3 py-2 font-medium">Quantity</th>
               <th className="text-right px-3 py-2 font-medium">Price</th>
+              <th className="text-right px-3 py-2 font-medium">ATR</th>
+              <th className="text-right px-3 py-2 font-medium">Tier</th>
+              <th className="text-right px-3 py-2 font-medium">Expected Qty</th>
+              <th className="text-right px-3 py-2 font-medium">Size Var</th>
               <th className="text-right px-3 py-2 font-medium">Fees & Comm</th>
               <th className="text-right px-3 py-2 font-medium">Amount</th>
               <th className="text-right px-3 py-2 font-medium">Running Shares</th>
@@ -261,6 +287,16 @@ function ReconciliationView({ rows, onOpenTrade }) {
                 </td>
                 <td className="px-3 py-2 text-right mono text-gray-200">{formatQty(row.quantity)}</td>
                 <td className="px-3 py-2 text-right mono text-gray-200">{formatPriceValue(row.price)}</td>
+                <td className="px-3 py-2 text-right mono text-accent-blue">{row.atrAtEntry != null ? formatPriceValue(row.atrAtEntry) : '—'}</td>
+                <td className="px-3 py-2 text-right mono text-gray-300">{row.riskTierPct != null ? `${row.riskTierPct}%` : '—'}</td>
+                <td className="px-3 py-2 text-right mono text-gray-300">{row.expectedPositionSize != null ? formatQty(row.expectedPositionSize, 1) : '—'}</td>
+                <td className={`px-3 py-2 text-right mono ${
+                  row.positionSizeVariancePct == null ? 'text-gray-600'
+                    : Math.abs(row.positionSizeVariancePct) > 10 ? 'text-accent-yellow'
+                    : 'text-accent-green'
+                }`}>
+                  {row.positionSizeVariancePct != null ? `${row.positionSizeVariancePct > 0 ? '+' : ''}${row.positionSizeVariancePct.toFixed(1)}%` : '—'}
+                </td>
                 <td className="px-3 py-2 text-right mono text-gray-300">{row.fees ? formatCurrency(row.fees) : '—'}</td>
                 <td className={`px-3 py-2 text-right mono font-medium ${row.amount == null ? 'text-gray-600' : row.amount >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
                   {row.amount == null ? '—' : formatCurrency(row.amount)}
@@ -282,7 +318,7 @@ function ReconciliationView({ rows, onOpenTrade }) {
           </tbody>
           <tfoot className="bg-surface-200/60 border-t border-white/10">
             <tr className="font-semibold">
-              <td className="px-3 py-2 text-gray-300" colSpan={6}>Total</td>
+              <td className="px-3 py-2 text-gray-300" colSpan={10}>Total</td>
               <td className="px-3 py-2 text-right mono text-gray-200">{formatCurrency(totals.fees)}</td>
               <td className={`px-3 py-2 text-right mono ${totals.amount >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{formatCurrency(totals.amount)}</td>
               <td className="px-3 py-2" colSpan={2} />
@@ -1333,7 +1369,7 @@ export default function TradeLog({ selectedAccount }) {
   const [expanded, setExpanded] = useState(null)
   const [symbolModal, setSymbolModal] = useState(null)
   const [viewMode, setViewMode] = useState('trades')
-  const [filters, setFilters] = useState({ status: 'All', position: 'All', symbol: '', account: 'All', sortBy: 'date-desc', tag: '' })
+  const [filters, setFilters] = useState({ status: 'All', position: 'All', symbol: '', account: 'All', sortBy: 'date-desc', tag: '', atrReview: 'All' })
 
   const filtered = useMemo(() => {
     let list = selectedAccount && selectedAccount !== 'All'
@@ -1344,6 +1380,13 @@ export default function TradeLog({ selectedAccount }) {
     if (filters.position !== 'All') list = list.filter(t => t.position === filters.position)
     if (filters.symbol) list = list.filter(t => t.symbol?.toUpperCase().includes(filters.symbol.toUpperCase()))
     if (filters.tag)    list = list.filter(t => (t.tags || []).includes(filters.tag))
+    if (filters.atrReview === 'Needs Review') list = list.filter(t => t.atrValidationFlags?.length)
+    if (filters.atrReview === 'Missing ATR') list = list.filter(t => t.atrValidationFlags?.includes('missing_atr'))
+    if (filters.atrReview === 'Oversized') list = list.filter(t => t.atrValidationFlags?.includes('position_oversized'))
+    if (filters.atrReview === 'Undersized') list = list.filter(t => t.atrValidationFlags?.includes('position_undersized'))
+    if (filters.atrReview === 'Stop/Target') list = list.filter(t =>
+      t.atrValidationFlags?.includes('stop_not_1atr') || t.atrValidationFlags?.includes('target_not_2atr')
+    )
 
     return [...list].sort((a, b) => {
       if (filters.sortBy === 'date-desc') return new Date(b.entryDate) - new Date(a.entryDate)
@@ -1402,6 +1445,10 @@ export default function TradeLog({ selectedAccount }) {
             {allTags.map(t => <option key={t} value={t}>{t || 'All Tags'}</option>)}
           </select>
         )}
+        <select value={filters.atrReview} onChange={e => setFilter('atrReview', e.target.value)}
+          className="input w-auto text-xs cursor-pointer">
+          {['All', 'Needs Review', 'Missing ATR', 'Oversized', 'Undersized', 'Stop/Target'].map(o => <option key={o}>{o}</option>)}
+        </select>
         <select value={filters.sortBy} onChange={e => setFilter('sortBy', e.target.value)}
           className="input w-auto text-xs cursor-pointer">
           <option value="date-desc">Newest first</option>
@@ -1488,6 +1535,11 @@ export default function TradeLog({ selectedAccount }) {
                             {trade.symbol}
                           </button>
                         </TickerTooltip>
+                        {trade.atrValidationFlags?.length ? (
+                          <div className="text-[10px] text-accent-yellow mt-0.5">
+                            ATR: {trade.atrValidationFlags.slice(0, 2).map(f => f.replaceAll('_', ' ')).join(', ')}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-3 py-3 text-gray-400 text-xs">{formatDate(trade.entryDate)}</td>
                       <td className="px-3 py-3 text-gray-400 text-xs">{trade.account}</td>
