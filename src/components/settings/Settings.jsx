@@ -403,7 +403,7 @@ export default function Settings() {
           <SectionTitle>OpenRouter API Key</SectionTitle>
         </div>
         <p className="text-xs text-gray-400">
-          Used for Growth Research PDF analysis when you choose OpenRouter in the dashboard.
+          Used for OpenRouter-powered research plus the new AI voice features in Trade Review and Dashboard.
           Get a key at <span className="text-accent-blue">openrouter.ai</span>.
         </p>
         <div className="flex gap-2">
@@ -425,7 +425,7 @@ export default function Settings() {
           </button>
         </div>
         {openRouterApiKey && (
-          <p className="text-xs text-accent-green">✓ OpenRouter key configured — select a model in Growth Research</p>
+          <p className="text-xs text-accent-green">✓ OpenRouter key configured — voice and OpenRouter research features are ready</p>
         )}
       </div>
 

@@ -1,9 +1,10 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
+import { useOpenRouterVoice } from '../../hooks/useOpenRouterVoice.js'
 import { formatCurrency } from '../../utils/formatters.js'
 import { analyzeTradeVoiceReview, generateTradeVoiceFollowUp } from '../../utils/ai.js'
-import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, Sparkles, Brain, CircleDot, RotateCcw, Mic, MicOff, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, Sparkles, Brain, CircleDot, RotateCcw, Mic, MicOff, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Volume2, Square } from 'lucide-react'
 
 // ── Duration helper ───────────────────────────────────────────────────────────
 function tradeDuration(trade) {
@@ -754,7 +755,7 @@ function QuickReviewSection({ trade, onUpdate }) {
 }
 
 function VoiceReviewSection({ trade, onUpdate }) {
-  const { apiKey } = useSettingsStore()
+  const { apiKey, openRouterApiKey } = useSettingsStore()
   const [mode, setMode] = useState('guided')
   const [status, setStatus] = useState('idle')
   const [answers, setAnswers] = useState([])
@@ -766,7 +767,11 @@ function VoiceReviewSection({ trade, onUpdate }) {
   const [coachReason, setCoachReason] = useState('')
   const recognitionRef = useRef(null)
   const partsRef = useRef([])
+  const spokenPromptRef = useRef('')
   const activeQuestion = questions[currentStep] || null
+  const { isLoading: voiceLoading, isPlaying: voicePlaying, error: voiceError, playText, stop } = useOpenRouterVoice({
+    apiKey: openRouterApiKey,
+  })
   const combinedTranscript = useMemo(() => (
     answers
       .filter(item => item?.answer)
@@ -787,7 +792,19 @@ function VoiceReviewSection({ trade, onUpdate }) {
     recognitionRef.current?.abort?.()
     recognitionRef.current = null
     partsRef.current = []
+    spokenPromptRef.current = ''
   }, [trade.id])
+
+  useEffect(() => {
+    if (!openRouterApiKey || mode !== 'guided' || status !== 'idle' || !activeQuestion) return
+    const promptKey = `${trade.id}:${activeQuestion.id}:${currentStep}`
+    if (spokenPromptRef.current === promptKey) return
+    spokenPromptRef.current = promptKey
+    playText({
+      text: activeQuestion.prompt,
+      instructions: 'Speak like a calm, confident trading coach. Keep it direct, warm, and natural.',
+    })
+  }, [activeQuestion, currentStep, mode, openRouterApiKey, playText, status, trade.id])
 
   async function applyVoiceAnalysis(nextAnswers, transcriptForAnalysis) {
     setStatus('processing')
@@ -1024,6 +1041,7 @@ function VoiceReviewSection({ trade, onUpdate }) {
           <button
             key={item.id}
             onClick={() => {
+              stop()
               setMode(item.id)
               setStatus('idle')
               setAnswers([])
@@ -1032,6 +1050,8 @@ function VoiceReviewSection({ trade, onUpdate }) {
               setAnalysis(null)
               setCurrentStep(0)
               setQuestions(buildGuidedVoiceQuestions(trade))
+              setCoachReason('')
+              spokenPromptRef.current = ''
             }}
             className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${
               mode === item.id
@@ -1068,14 +1088,59 @@ function VoiceReviewSection({ trade, onUpdate }) {
 
       {mode === 'guided' && activeQuestion && status !== 'done' && (
         <div className="rounded-lg border border-accent-blue/15 bg-accent-blue/[0.05] px-3 py-3 mb-3">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-accent-blue/70 mb-1">Current Prompt</p>
-          <p className="text-sm text-white leading-relaxed">{activeQuestion.prompt}</p>
-          <p className="text-xs text-gray-500 mt-2">{activeQuestion.hint}</p>
-          {coachReason && currentStep >= 2 && (
-            <p className="text-[11px] text-accent-blue mt-2">
-              Coach focus: {coachReason}
-            </p>
-          )}
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-accent-blue/70 mb-1">Current Prompt</p>
+              <p className="text-sm text-white leading-relaxed">{activeQuestion.prompt}</p>
+              <p className="text-xs text-gray-500 mt-2">{activeQuestion.hint}</p>
+              {coachReason && currentStep >= 2 && (
+                <p className="text-[11px] text-accent-blue mt-2">
+                  Coach focus: {coachReason}
+                </p>
+              )}
+            </div>
+            {openRouterApiKey && (
+              <button
+                type="button"
+                onClick={() => voicePlaying ? stop() : playText({
+                  text: activeQuestion.prompt,
+                  instructions: 'Speak like a calm, confident trading coach. Keep it direct, warm, and natural.',
+                })}
+                className={`shrink-0 text-xs px-2.5 py-1.5 rounded-lg border transition-all ${
+                  voicePlaying
+                    ? 'bg-accent-red/10 text-accent-red border-accent-red/30'
+                    : 'bg-accent-blue/10 text-accent-blue border-accent-blue/30 hover:bg-accent-blue/20'
+                }`}
+              >
+                <span className="flex items-center gap-1">
+                  {voicePlaying ? <Square size={12} /> : <Volume2 size={12} />}
+                  {voicePlaying ? 'Stop' : 'Replay'}
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {mode === 'freeform' && openRouterApiKey && (
+        <div className="mb-3">
+          <button
+            type="button"
+            onClick={() => voicePlaying ? stop() : playText({
+              text: 'Talk through this trade in your own words. Tell me what happened, what you felt, what worked, and what you would change next time.',
+              instructions: 'Speak like a warm trading coach inviting an honest debrief.',
+            })}
+            className={`text-xs px-2.5 py-1.5 rounded-lg border transition-all ${
+              voicePlaying
+                ? 'bg-accent-red/10 text-accent-red border-accent-red/30'
+                : 'bg-accent-blue/10 text-accent-blue border-accent-blue/30 hover:bg-accent-blue/20'
+            }`}
+          >
+            <span className="flex items-center gap-1">
+              {voicePlaying ? <Square size={12} /> : <Volume2 size={12} />}
+              {voicePlaying ? 'Stop coach voice' : 'Play coach intro'}
+            </span>
+          </button>
         </div>
       )}
 
@@ -1148,7 +1213,20 @@ function VoiceReviewSection({ trade, onUpdate }) {
             <span>{errorMsg}</span>
           </div>
         )}
+
+        {voiceLoading && (
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <Loader2 size={15} className="animate-spin text-accent-blue" />
+            <span>Generating coach voice…</span>
+          </div>
+        )}
       </div>
+
+      {(voiceError || (!openRouterApiKey && (mode === 'guided' || mode === 'freeform'))) && (
+        <p className={`text-xs mt-3 ${voiceError ? 'text-accent-red' : 'text-gray-500'}`}>
+          {voiceError || 'Add your OpenRouter API key in Settings to enable AI voice prompts.'}
+        </p>
+      )}
 
       {answers.length > 0 && (
         <div className="mt-4 space-y-2">
@@ -1200,9 +1278,32 @@ function VoiceReviewSection({ trade, onUpdate }) {
 
       {analysis?.summary && (
         <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2.5">
-          <p className="text-[11px] uppercase tracking-[0.16em] text-gray-500 mb-1">AI Debrief</p>
-          <p className="text-xs text-gray-300 leading-relaxed">{analysis.summary}</p>
-          {analysis.keyLesson && <p className="text-xs text-accent-blue mt-2">Key lesson: {analysis.keyLesson}</p>}
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-gray-500 mb-1">AI Debrief</p>
+              <p className="text-xs text-gray-300 leading-relaxed">{analysis.summary}</p>
+              {analysis.keyLesson && <p className="text-xs text-accent-blue mt-2">Key lesson: {analysis.keyLesson}</p>}
+            </div>
+            {openRouterApiKey && (
+              <button
+                type="button"
+                onClick={() => voicePlaying ? stop() : playText({
+                  text: `${analysis.summary}${analysis.keyLesson ? ` Key lesson: ${analysis.keyLesson}` : ''}`,
+                  instructions: 'Read this like a thoughtful trading coach delivering a short debrief.',
+                })}
+                className={`shrink-0 text-xs px-2.5 py-1.5 rounded-lg border transition-all ${
+                  voicePlaying
+                    ? 'bg-accent-red/10 text-accent-red border-accent-red/30'
+                    : 'bg-accent-blue/10 text-accent-blue border-accent-blue/30 hover:bg-accent-blue/20'
+                }`}
+              >
+                <span className="flex items-center gap-1">
+                  {voicePlaying ? <Square size={12} /> : <Volume2 size={12} />}
+                  {voicePlaying ? 'Stop' : 'Read recap'}
+                </span>
+              </button>
+            )}
+          </div>
         </div>
       )}
 

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { DollarSign, Percent, TrendingUp, Target, BarChart, Zap, AlertTriangle, ShieldAlert } from 'lucide-react'
+import { DollarSign, Percent, TrendingUp, Target, BarChart, Zap, AlertTriangle, ShieldAlert, Volume2, Square, Loader2 } from 'lucide-react'
 import MetricCard from './MetricCard.jsx'
 import EquityCurve from './EquityCurve.jsx'
 import CalendarHeatmap from './CalendarHeatmap.jsx'
@@ -10,17 +10,22 @@ import LivePositions from './LivePositions.jsx'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
+import { useOpenRouterVoice } from '../../hooks/useOpenRouterVoice.js'
 import {
   calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor, calcNetPL, calcConsecutiveStreak
 } from '../../utils/metrics.js'
 import { buildEquityCurve, buildDailyPL } from '../../utils/equityCurve.js'
 import { calcNER, calcNEP } from '../../utils/riskCalcs.js'
 import { formatCurrency, formatR, signClass } from '../../utils/formatters.js'
+import { buildDashboardVoiceBrief } from '../../utils/openrouterVoice.js'
 
 export default function Dashboard({ selectedAccount }) {
   const { trades, accountActivities } = useTradeStore()
-  const { dailyLossLimit, excludedSymbols } = useSettingsStore()
+  const { dailyLossLimit, excludedSymbols, openRouterApiKey } = useSettingsStore()
   const liveAccountBalance = useLiveMarketStore(s => s.liveAccountBalance)
+  const { isLoading: voiceLoading, isPlaying: voicePlaying, error: voiceError, playText, stop } = useOpenRouterVoice({
+    apiKey: openRouterApiKey,
+  })
 
   // Uppercase set for fast lookup
   const excludedSet = useMemo(
@@ -98,6 +103,21 @@ export default function Dashboard({ selectedAccount }) {
     return { wins: w, losses: l }
   }, [closedTrades])
 
+  const dashboardVoiceBrief = useMemo(() => buildDashboardVoiceBrief({
+    today,
+    accountBalance,
+    netPL,
+    winRate,
+    avgR,
+    expectancy,
+    profitFactor,
+    openTradesCount: openTrades.length,
+    ner,
+    dailyLimitReached,
+    dailyLimitWarning,
+    streak,
+  }), [today, accountBalance, netPL, winRate, avgR, expectancy, profitFactor, openTrades.length, ner, dailyLimitReached, dailyLimitWarning, streak])
+
   return (
     <div className="dashboard-container flex flex-col gap-5 xl:gap-6 p-4 md:p-5 2xl:p-7">
 
@@ -108,6 +128,37 @@ export default function Dashboard({ selectedAccount }) {
           <p className="text-[11px] xl:text-[12px] font-semibold uppercase tracking-[0.28em] xl:tracking-[0.34em] text-[#9ab3d1] mb-2">Trading Command Center</p>
           <h1 className="text-[clamp(2.1rem,4vw,3.6rem)] font-semibold tracking-[-0.05em] text-white">Dashboard</h1>
           <p className="text-[1rem] md:text-[1.08rem] xl:text-xl text-muted mt-1">{today}</p>
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => voicePlaying
+                ? stop()
+                : playText({
+                    text: dashboardVoiceBrief,
+                    instructions: 'Read this like a sharp but calm trading desk morning brief.',
+                  })}
+              disabled={!openRouterApiKey || voiceLoading}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${
+                voicePlaying
+                  ? 'bg-accent-red/10 text-accent-red border-accent-red/30'
+                  : 'bg-accent-blue/10 text-accent-blue border-accent-blue/30 hover:bg-accent-blue/20 disabled:opacity-40 disabled:cursor-not-allowed'
+              }`}
+            >
+              <span className="flex items-center gap-1.5">
+                {voiceLoading ? <Loader2 size={12} className="animate-spin" /> : voicePlaying ? <Square size={12} /> : <Volume2 size={12} />}
+                {voicePlaying ? 'Stop Brief' : 'Play Dashboard Brief'}
+              </span>
+            </button>
+            {!openRouterApiKey && (
+              <span className="text-xs text-gray-500">Add your OpenRouter key in Settings to enable AI voice.</span>
+            )}
+            {voiceError && (
+              <span className="text-xs text-accent-red">{voiceError}</span>
+            )}
+            {openRouterApiKey && !voiceError && (
+              <span className="text-xs text-gray-500">AI-generated voice</span>
+            )}
+          </div>
         </div>
         {accountBalance > 0 && (
           <div className="text-left md:text-right relative">
