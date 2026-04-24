@@ -279,15 +279,32 @@ function maxDrawdownPctFromEquity(points) {
   return maxDD
 }
 
-function simulateLongGame({ rValues, startEquity, riskPct, tradesPerMonth, years, runs = 1200 }) {
+function simulateLongGame({
+  rValues,
+  startEquity,
+  riskPct,
+  tradesPerMonth,
+  years,
+  runs = 1200,
+  modelMode = 'historical',
+  winRatePct = 50,
+  payoffRatio = 1.5,
+  avgLossR = 1,
+  targetReturnPct = 100,
+}) {
   const cleanR = rValues.filter(v => Number.isFinite(v))
   const totalTrades = Math.max(1, Math.round(tradesPerMonth * 12 * years))
   const annualTrades = Math.max(1, Math.round(tradesPerMonth * 12))
-  if (!cleanR.length || startEquity <= 0 || riskPct <= 0 || totalTrades <= 0) return null
+  const canUseHistorical = modelMode === 'historical' && cleanR.length > 0
+  const canUseCustom = modelMode === 'custom' && winRatePct >= 0 && winRatePct <= 100 && payoffRatio > 0 && avgLossR > 0
+  if ((!canUseHistorical && !canUseCustom) || startEquity <= 0 || riskPct <= 0 || totalTrades <= 0) return null
 
   const runSummaries = []
   const byYear = Array.from({ length: years }, () => [])
-  const rng = mulberry32(912241 + cleanR.length * 17 + Math.round(riskPct * 100))
+  const rng = mulberry32(912241 + cleanR.length * 17 + Math.round(riskPct * 100) + Math.round(winRatePct * 31) + Math.round(payoffRatio * 100))
+  const winProb = winRatePct / 100
+  const winR = payoffRatio * avgLossR
+  const lossR = -avgLossR
 
   for (let run = 0; run < runs; run++) {
     let equity = startEquity
@@ -296,7 +313,9 @@ function simulateLongGame({ rValues, startEquity, riskPct, tradesPerMonth, years
     let yearStart = equity
 
     for (let i = 1; i <= totalTrades; i++) {
-      const sampledR = cleanR[Math.floor(rng() * cleanR.length)]
+      const sampledR = canUseHistorical
+        ? cleanR[Math.floor(rng() * cleanR.length)]
+        : (rng() < winProb ? winR : lossR)
       const tradeReturn = sampledR * (riskPct / 100)
       equity = Math.max(0, equity * (1 + tradeReturn))
       path.push(equity)
@@ -354,6 +373,7 @@ function simulateLongGame({ rValues, startEquity, riskPct, tradesPerMonth, years
     },
     chanceProfit: runSummaries.filter(r => r.ending > startEquity).length / runs,
     chanceDouble: runSummaries.filter(r => r.ending >= startEquity * 2).length / runs,
+    chanceTarget: runSummaries.filter(r => r.ending >= startEquity * (1 + targetReturnPct / 100)).length / runs,
     chanceLoseMoney: runSummaries.filter(r => r.ending < startEquity).length / runs,
     chanceLargeDD: runSummaries.filter(r => r.maxDDPct >= 20).length / runs,
     expectedLosingYears: runSummaries.reduce((s, r) => s + r.losingYears, 0) / runs,
@@ -416,6 +436,12 @@ export default function Analytics({ selectedAccount }) {
   const [projectionYears, setProjectionYears] = useState(5)
   const [projectionRiskPct, setProjectionRiskPct] = useState(1)
   const [projectionTradesPerMonth, setProjectionTradesPerMonth] = useState(12)
+  const [projectionStartValue, setProjectionStartValue] = useState('')
+  const [projectionModelMode, setProjectionModelMode] = useState('historical')
+  const [projectionWinRate, setProjectionWinRate] = useState(50)
+  const [projectionPayoffRatio, setProjectionPayoffRatio] = useState(1.5)
+  const [projectionAvgLossR, setProjectionAvgLossR] = useState(1)
+  const [projectionTargetReturn, setProjectionTargetReturn] = useState(100)
 
   const excludedSet = useMemo(
     () => new Set((excludedSymbols || []).map(s => s.toUpperCase())),
@@ -1264,19 +1290,72 @@ export default function Analytics({ selectedAccount }) {
   const projectionStartEquity = accountBalance > 0
     ? accountBalance
     : (timeframeCurve[timeframeCurve.length - 1]?.balance > 0 ? timeframeCurve[timeframeCurve.length - 1].balance : 100000)
+  const customStartEquity = Number(String(projectionStartValue).replace(/[$,]/g, ''))
+  const effectiveProjectionStartEquity = Number.isFinite(customStartEquity) && customStartEquity > 0
+    ? customStartEquity
+    : projectionStartEquity
 
   const projectionRValues = useMemo(
     () => closedSorted.map(t => t[rField]).filter(v => Number.isFinite(v)),
     [closedSorted, rField]
   )
 
+  const actualProjectionStats = useMemo(() => {
+    const winsWithR = closed.filter(t => t.status === 'Win' && Number.isFinite(t[rField]))
+    const lossesWithR = closed.filter(t => t.status === 'Loss' && Number.isFinite(t[rField]))
+    const avgWinRActual = winsWithR.length
+      ? winsWithR.reduce((s, t) => s + t[rField], 0) / winsWithR.length
+      : 1
+    const avgLossRActual = lossesWithR.length
+      ? Math.abs(lossesWithR.reduce((s, t) => s + t[rField], 0) / lossesWithR.length)
+      : 1
+    return {
+      winRate: calcWinRate(closed),
+      payoffRatio: avgLossRActual > 0 ? avgWinRActual / avgLossRActual : 1.5,
+      avgWinR: avgWinRActual,
+      avgLossR: avgLossRActual,
+      tradesPerMonth: suggestedTradesPerMonth,
+      startEquity: projectionStartEquity,
+      riskPct: projectionRiskPct,
+      maxDrawdownPct: drawdownData?.maxDDPct ?? 0,
+    }
+  }, [closed, rField, suggestedTradesPerMonth, projectionStartEquity, projectionRiskPct, drawdownData])
+
+  function applyActualProjectionStats() {
+    setProjectionModelMode('historical')
+    setProjectionStartValue(String(Math.round(actualProjectionStats.startEquity)))
+    setProjectionTradesPerMonth(actualProjectionStats.tradesPerMonth)
+    setProjectionWinRate(Number(actualProjectionStats.winRate.toFixed(1)))
+    setProjectionPayoffRatio(Number(Math.max(0.1, actualProjectionStats.payoffRatio).toFixed(2)))
+    setProjectionAvgLossR(Number(Math.max(0.1, actualProjectionStats.avgLossR).toFixed(2)))
+  }
+
   const longGameProjection = useMemo(() => simulateLongGame({
     rValues: projectionRValues,
-    startEquity: projectionStartEquity,
+    startEquity: effectiveProjectionStartEquity,
     riskPct: projectionRiskPct,
     tradesPerMonth: projectionTradesPerMonth,
     years: projectionYears,
-  }), [projectionRValues, projectionStartEquity, projectionRiskPct, projectionTradesPerMonth, projectionYears])
+    modelMode: projectionModelMode,
+    winRatePct: projectionWinRate,
+    payoffRatio: projectionPayoffRatio,
+    avgLossR: projectionAvgLossR,
+    targetReturnPct: projectionTargetReturn,
+  }), [projectionRValues, effectiveProjectionStartEquity, projectionRiskPct, projectionTradesPerMonth, projectionYears, projectionModelMode, projectionWinRate, projectionPayoffRatio, projectionAvgLossR, projectionTargetReturn])
+
+  const projectionExpectancyR = useMemo(() => {
+    if (projectionModelMode === 'historical') {
+      if (!projectionRValues.length) return 0
+      return projectionRValues.reduce((sum, value) => sum + value, 0) / projectionRValues.length
+    }
+    const winProb = projectionWinRate / 100
+    return (winProb * projectionPayoffRatio * projectionAvgLossR) - ((1 - winProb) * projectionAvgLossR)
+  }, [projectionModelMode, projectionRValues, projectionWinRate, projectionPayoffRatio, projectionAvgLossR])
+
+  const projectionAnnualTrades = projectionTradesPerMonth * 12
+  const projectionAnnualExpectedR = projectionExpectancyR * projectionAnnualTrades
+  const projectionRiskUnit025 = effectiveProjectionStartEquity * 0.0025
+  const projectionActiveRiskDollars = effectiveProjectionStartEquity * (projectionRiskPct / 100)
 
   if (tfFiltered.length === 0) {
     return (
@@ -2861,21 +2940,68 @@ export default function Analytics({ selectedAccount }) {
               </span>
             </SectionTitle>
             <p className="text-xs text-gray-500 max-w-3xl">
-              A Monte Carlo model using your actual R-multiple distribution. It samples your historical wins and losses thousands of times, compounds by risk per trade, and shows ranges rather than one seductive fantasy number.
+              Model your ATR-sized risk tiers over years. Use your exact historical R distribution, or adjust win rate, payoff ratio, and average loss to see how fragile or resilient the edge really is.
             </p>
           </div>
-          <span className={`text-[11px] px-2 py-1 rounded-full border ${
-            projectionRValues.length >= 40
-              ? 'text-accent-green border-accent-green/25 bg-accent-green/10'
-              : projectionRValues.length >= 20
-              ? 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10'
-              : 'text-accent-red border-accent-red/25 bg-accent-red/10'
-          }`}>
-            {projectionRValues.length} R-trade sample
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={applyActualProjectionStats}
+              className="text-[11px] px-3 py-1.5 rounded-full bg-accent-blue text-white font-semibold shadow-lg shadow-accent-blue/20 hover:bg-accent-blue/80 transition-colors"
+            >
+              Use My Actual Stats
+            </button>
+            <span className={`text-[11px] px-2 py-1 rounded-full border ${
+              projectionRValues.length >= 40
+                ? 'text-accent-green border-accent-green/25 bg-accent-green/10'
+                : projectionRValues.length >= 20
+                ? 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10'
+                : 'text-accent-red border-accent-red/25 bg-accent-red/10'
+            }`}>
+              {projectionRValues.length} R-trade sample
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 mb-5 flex-wrap">
+          <span className="text-[11px] text-gray-500 font-medium">Model:</span>
+          <div className="flex items-center bg-surface-100 border border-white/10 rounded-lg p-0.5">
+            {[
+              ['historical', 'Historical Sample'],
+              ['custom', 'Custom Assumptions'],
+            ].map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setProjectionModelMode(mode)}
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                  projectionModelMode === mode ? 'bg-accent-blue/20 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10px] text-gray-600">
+            Actual: {actualProjectionStats.winRate.toFixed(1)}% win · {actualProjectionStats.payoffRatio.toFixed(2)}x payoff · {actualProjectionStats.tradesPerMonth}/mo
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-5">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label">Starting Equity</label>
+              <span className="mono text-xs font-bold text-white">{formatCurrency(effectiveProjectionStartEquity, true)}</span>
+            </div>
+            <input
+              type="number"
+              step="1000"
+              value={projectionStartValue}
+              onChange={e => setProjectionStartValue(e.target.value)}
+              placeholder={String(Math.round(projectionStartEquity))}
+              className="input text-sm rounded-xl bg-surface-200/70"
+            />
+          </div>
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="label">Years</label>
@@ -2894,15 +3020,34 @@ export default function Analytics({ selectedAccount }) {
                 [&::-webkit-slider-thumb]:bg-accent-blue [&::-webkit-slider-thumb]:cursor-pointer"
             />
           </div>
+          <div className="rounded-xl border border-white/10 bg-surface-200/45 px-4 py-3">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-gray-500 mb-2">0.25% Risk Unit</p>
+            <p className="mono text-lg font-bold text-white">{formatCurrency(projectionRiskUnit025)}</p>
+            <p className="text-[10px] text-gray-600 mt-1">
+              1 ATR stop budget. At current scale this is the base sleeve you described.
+            </p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-surface-200/45 px-4 py-3">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-gray-500 mb-2">Model Trades</p>
+            <p className="mono text-lg font-bold text-white">
+              {longGameProjection ? longGameProjection.totalTrades.toLocaleString() : (projectionAnnualTrades * projectionYears).toLocaleString()}
+            </p>
+            <p className="text-[10px] text-gray-600 mt-1">
+              {projectionAnnualTrades} per year at the selected cadence.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-5">
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="label">Risk Per Trade</label>
+              <label className="label">ATR Risk / Trade</label>
               <span className="mono text-sm font-bold text-accent-yellow">{projectionRiskPct}%</span>
             </div>
             <input
               type="range"
               min={0.25}
-              max={3}
+              max={2}
               step={0.25}
               value={projectionRiskPct}
               onChange={e => setProjectionRiskPct(parseFloat(e.target.value))}
@@ -2939,6 +3084,120 @@ export default function Analytics({ selectedAccount }) {
                 [&::-webkit-slider-thumb]:bg-accent-green [&::-webkit-slider-thumb]:cursor-pointer"
             />
           </div>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label">Win Rate</label>
+              <span className="mono text-sm font-bold text-accent-green">{projectionWinRate}%</span>
+            </div>
+            <input
+              type="range"
+              min={20}
+              max={80}
+              step={1}
+              value={projectionWinRate}
+              onChange={e => setProjectionWinRate(parseFloat(e.target.value))}
+              disabled={projectionModelMode === 'historical'}
+              className="w-full h-1 rounded-full appearance-none cursor-pointer bg-surface-300 disabled:opacity-40 disabled:cursor-not-allowed
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5
+                [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full
+                [&::-webkit-slider-thumb]:bg-accent-green [&::-webkit-slider-thumb]:cursor-pointer"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label">Payoff Ratio</label>
+              <span className="mono text-sm font-bold text-accent-blue">{projectionPayoffRatio}x</span>
+            </div>
+            <input
+              type="range"
+              min={0.5}
+              max={5}
+              step={0.1}
+              value={projectionPayoffRatio}
+              onChange={e => setProjectionPayoffRatio(parseFloat(e.target.value))}
+              disabled={projectionModelMode === 'historical'}
+              className="w-full h-1 rounded-full appearance-none cursor-pointer bg-surface-300 disabled:opacity-40 disabled:cursor-not-allowed
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5
+                [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full
+                [&::-webkit-slider-thumb]:bg-accent-blue [&::-webkit-slider-thumb]:cursor-pointer"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label">Avg Loss</label>
+              <span className="mono text-sm font-bold text-accent-red">-{projectionAvgLossR}R</span>
+            </div>
+            <input
+              type="range"
+              min={0.25}
+              max={2}
+              step={0.05}
+              value={projectionAvgLossR}
+              onChange={e => setProjectionAvgLossR(parseFloat(e.target.value))}
+              disabled={projectionModelMode === 'historical'}
+              className="w-full h-1 rounded-full appearance-none cursor-pointer bg-surface-300 disabled:opacity-40 disabled:cursor-not-allowed
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5
+                [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full
+                [&::-webkit-slider-thumb]:bg-accent-red [&::-webkit-slider-thumb]:cursor-pointer"
+            />
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-white/10 bg-surface-200/50 p-3 mb-5">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+            <p className="text-xs font-semibold text-gray-300">ATR Risk Budget</p>
+            <p className="text-[10px] text-gray-600">Position size = risk dollars / ATR. Active risk: {formatCurrency(projectionActiveRiskDollars)} at {projectionRiskPct}%.</p>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {[0.25, 0.5, 0.75, 1].map(tier => (
+              <div key={tier} className={`rounded-lg border px-3 py-2 ${tier === projectionRiskPct ? 'border-accent-yellow/40 bg-accent-yellow/10' : 'border-white/10 bg-black/10'}`}>
+                <p className="text-[10px] uppercase tracking-[0.18em] text-gray-500">{tier}% ATR risk</p>
+                <p className="mono text-sm font-bold text-white mt-1">{formatCurrency(effectiveProjectionStartEquity * tier / 100)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+          <div className="rounded-lg border border-white/10 bg-black/10 px-4 py-3">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-gray-500 mb-1">Expected R / Trade</p>
+            <p className={`mono text-lg font-bold ${projectionExpectancyR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+              {projectionExpectancyR >= 0 ? '+' : ''}{projectionExpectancyR.toFixed(2)}R
+            </p>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/10 px-4 py-3">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-gray-500 mb-1">Expected R / Year</p>
+            <p className={`mono text-lg font-bold ${projectionAnnualExpectedR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+              {projectionAnnualExpectedR >= 0 ? '+' : ''}{projectionAnnualExpectedR.toFixed(1)}R
+            </p>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/10 px-4 py-3">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-gray-500 mb-1">ATR Translation</p>
+            <p className="text-xs text-gray-300 leading-relaxed">
+              Every simulated 1R assumes one full ATR stop. Share count should come from risk dollars divided by ATR, not from arbitrary share targets.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label">Success Target</label>
+              <span className="mono text-sm font-bold text-accent-green">+{projectionTargetReturn}%</span>
+            </div>
+            <input
+              type="range"
+              min={10}
+              max={300}
+              step={10}
+              value={projectionTargetReturn}
+              onChange={e => setProjectionTargetReturn(parseFloat(e.target.value))}
+              className="w-full h-1 rounded-full appearance-none cursor-pointer bg-surface-300
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5
+                [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full
+                [&::-webkit-slider-thumb]:bg-accent-green [&::-webkit-slider-thumb]:cursor-pointer"
+            />
+          </div>
         </div>
 
         {!longGameProjection ? (
@@ -2947,7 +3206,7 @@ export default function Analytics({ selectedAccount }) {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
               <div className="card-sm text-center">
                 <p className="text-xs text-gray-500 mb-1">Likely Ending Equity</p>
                 <p className="text-lg font-bold mono text-white">{formatCurrency(longGameProjection.ending.p50)}</p>
@@ -2970,6 +3229,17 @@ export default function Analytics({ selectedAccount }) {
                   -{longGameProjection.maxDDPct.p90.toFixed(1)}%
                 </p>
                 <p className="text-[10px] text-gray-600 mt-0.5">90th percentile max DD</p>
+              </div>
+              <div className="card-sm text-center">
+                <p className="text-xs text-gray-500 mb-1">Chance Hit Target</p>
+                <p className={`text-lg font-bold mono ${
+                  longGameProjection.chanceTarget >= 0.65 ? 'text-accent-green'
+                  : longGameProjection.chanceTarget >= 0.4 ? 'text-accent-yellow'
+                  : 'text-accent-red'
+                }`}>
+                  {(longGameProjection.chanceTarget * 100).toFixed(0)}%
+                </p>
+                <p className="text-[10px] text-gray-600 mt-0.5">to reach +{projectionTargetReturn}%</p>
               </div>
               <div className="card-sm text-center">
                 <p className="text-xs text-gray-500 mb-1">Chance Of Profit</p>
@@ -3028,6 +3298,10 @@ export default function Analytics({ selectedAccount }) {
                   <p className="text-xs font-semibold text-gray-300 mb-2">Reality Checks</p>
                   <div className="space-y-2 text-xs">
                     <div className="flex justify-between gap-3">
+                      <span className="text-gray-500">Chance of +{projectionTargetReturn}% target</span>
+                      <span className="mono text-gray-300">{(longGameProjection.chanceTarget * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
                       <span className="text-gray-500">Chance of losing money</span>
                       <span className={`mono ${longGameProjection.chanceLoseMoney > 0.25 ? 'text-accent-yellow' : 'text-gray-300'}`}>{(longGameProjection.chanceLoseMoney * 100).toFixed(0)}%</span>
                     </div>
@@ -3063,16 +3337,16 @@ export default function Analytics({ selectedAccount }) {
         <SectionTitle>
           <span className="flex items-center gap-2">
             <AlertTriangle size={14} className="text-accent-yellow inline" />
-            Drawdown Simulator
+            ATR Drawdown Simulator
           </span>
         </SectionTitle>
         <p className="text-xs text-gray-500 mb-4">
-          Forward-looking risk projection: how much capital would you lose given a streak of consecutive losses at different risk levels? Based on your historical average loss of {formatCurrency(drawdownSim.avgLoss, true)}.
+          Forward-looking risk projection for your ATR-sized tiers: how much capital would you lose given a streak of consecutive 1R losses? Based on your historical average loss of {formatCurrency(drawdownSim.avgLoss, true)}.
         </p>
 
         <div className="grid grid-cols-2 gap-4 mb-5">
           <div>
-            <label className="label mb-2">Risk per Trade (%)</label>
+            <label className="label mb-2">ATR Risk per Trade (%)</label>
             <div className="flex items-center gap-2">
               <input
                 type="range" min={0.25} max={3} step={0.25} value={simRiskPct}
@@ -3139,7 +3413,7 @@ export default function Analytics({ selectedAccount }) {
           </table>
         </div>
         <p className="text-xs text-gray-600 mt-3">
-          Compounding model: each loss removes N% from remaining capital. Your historical avg loss is {formatCurrency(drawdownSim.avgLoss, true)} (win rate: {(drawdownSim.wr * 100).toFixed(0)}%). Bold column = currently selected risk level.
+          Compounding model: each 1R ATR loss removes N% from remaining capital. Your historical avg loss is {formatCurrency(drawdownSim.avgLoss, true)} (win rate: {(drawdownSim.wr * 100).toFixed(0)}%). Bold column = currently selected risk level.
         </p>
       </div>
 
