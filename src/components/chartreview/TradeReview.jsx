@@ -411,6 +411,135 @@ function buildGuidedVoiceQuestions(trade) {
 
 const MIN_DYNAMIC_QUESTION_COUNT = 4
 
+function hasTradeReview(trade) {
+  return Boolean(
+    trade?.quickReview ||
+    (trade?.reviewTags || []).length > 0 ||
+    (trade?.reviewNotes || '').trim()
+  )
+}
+
+function pickTopCount(counts) {
+  return Object.entries(counts || {}).sort((a, b) => b[1] - a[1])[0] || null
+}
+
+function computeReviewIntelligence(trades) {
+  const reviewed = (trades || []).filter(hasTradeReview)
+  if (!reviewed.length) return null
+
+  const verdictCounts = {}
+  const focusCounts   = {}
+  const moodCounts    = {}
+  const tagCounts     = {}
+  let processSum = 0
+  let processCount = 0
+
+  for (const trade of reviewed) {
+    const qr = trade.quickReview || {}
+    if (qr.verdict) verdictCounts[qr.verdict] = (verdictCounts[qr.verdict] || 0) + 1
+    if (qr.focus)   focusCounts[qr.focus]     = (focusCounts[qr.focus] || 0) + 1
+    if (qr.mood)    moodCounts[qr.mood]       = (moodCounts[qr.mood] || 0) + 1
+    for (const tag of (trade.reviewTags || [])) tagCounts[tag] = (tagCounts[tag] || 0) + 1
+    if (typeof trade.processGrade === 'number') {
+      processSum += trade.processGrade
+      processCount++
+    }
+  }
+
+  const positiveTags = ['Followed plan', 'Perfect execution', 'Good patience', 'Good size', 'Let winner run']
+  const negativeTags = ['Chased entry', 'Cut winner early', 'Sized too big', 'Broke rules', 'FOMO trade', 'Moved stop', 'Revenge trade', 'Review later']
+  const positiveCounts = Object.fromEntries(Object.entries(tagCounts).filter(([tag]) => positiveTags.includes(tag)))
+  const negativeCounts = Object.fromEntries(Object.entries(tagCounts).filter(([tag]) => negativeTags.includes(tag)))
+
+  const topVerdict = pickTopCount(verdictCounts)
+  const topFocus   = pickTopCount(focusCounts)
+  const topMood    = pickTopCount(moodCounts)
+  const topStrength = pickTopCount(positiveCounts)
+  const topLeak     = pickTopCount(negativeCounts)
+
+  return {
+    reviewedCount: reviewed.length,
+    avgProcess: processCount ? Math.round((processSum / processCount) * 10) / 10 : null,
+    topVerdict,
+    topFocus,
+    topMood,
+    topStrength,
+    topLeak,
+    hotTags: Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 4),
+  }
+}
+
+function ReviewIntelligenceCard({ intelligence, totalTrades }) {
+  if (!intelligence) return null
+
+  const verdictLabel = intelligence.topVerdict
+    ? QUICK_REVIEW_VERDICTS.find(v => v.id === intelligence.topVerdict[0])?.label || intelligence.topVerdict[0]
+    : null
+  const focusLabel = intelligence.topFocus
+    ? QUICK_REVIEW_FOCUS_AREAS.find(v => v.id === intelligence.topFocus[0])?.label || intelligence.topFocus[0]
+    : null
+  const moodLabel = intelligence.topMood
+    ? QUICK_REVIEW_MOODS.find(v => v.id === intelligence.topMood[0])?.label || intelligence.topMood[0]
+    : null
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Review Intelligence</p>
+          <p className="text-xs text-gray-400 mt-1">
+            {intelligence.reviewedCount} of {totalTrades} trades reviewed in this queue
+          </p>
+        </div>
+        {intelligence.avgProcess != null && (
+          <div className="text-right">
+            <p className="text-[10px] text-gray-500">Avg Process</p>
+            <p className="text-sm font-semibold text-white">{intelligence.avgProcess}/5</p>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2 text-xs">
+        {intelligence.topLeak && (
+          <p className="text-gray-300">
+            <span className="text-accent-red">Recurring leak:</span> {intelligence.topLeak[0]} ({intelligence.topLeak[1]})
+          </p>
+        )}
+        {intelligence.topStrength && (
+          <p className="text-gray-300">
+            <span className="text-accent-green">Repeatable strength:</span> {intelligence.topStrength[0]} ({intelligence.topStrength[1]})
+          </p>
+        )}
+        {focusLabel && (
+          <p className="text-gray-300">
+            <span className="text-accent-blue">Most reviewed focus:</span> {focusLabel}
+          </p>
+        )}
+        {moodLabel && (
+          <p className="text-gray-300">
+            <span className="text-accent-yellow">Common mood:</span> {moodLabel}
+          </p>
+        )}
+        {verdictLabel && (
+          <p className="text-gray-300">
+            <span className="text-gray-500">Typical review verdict:</span> {verdictLabel}
+          </p>
+        )}
+      </div>
+
+      {intelligence.hotTags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {intelligence.hotTags.map(([tag, count]) => (
+            <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full border border-white/10 bg-black/20 text-gray-300">
+              {tag} · {count}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function QuickReviewSection({ trade, onUpdate }) {
   const [mood, setMood]       = useState(trade.quickReview?.mood || '')
   const [verdict, setVerdict] = useState(trade.quickReview?.verdict || '')
@@ -626,6 +755,7 @@ function QuickReviewSection({ trade, onUpdate }) {
 
 function VoiceReviewSection({ trade, onUpdate }) {
   const { apiKey } = useSettingsStore()
+  const [mode, setMode] = useState('guided')
   const [status, setStatus] = useState('idle')
   const [answers, setAnswers] = useState([])
   const [errorMsg, setErrorMsg] = useState('')
@@ -633,6 +763,7 @@ function VoiceReviewSection({ trade, onUpdate }) {
   const [analysis, setAnalysis] = useState(null)
   const [currentStep, setCurrentStep] = useState(0)
   const [questions, setQuestions] = useState(() => buildGuidedVoiceQuestions(trade))
+  const [coachReason, setCoachReason] = useState('')
   const recognitionRef = useRef(null)
   const partsRef = useRef([])
   const activeQuestion = questions[currentStep] || null
@@ -644,6 +775,7 @@ function VoiceReviewSection({ trade, onUpdate }) {
   ), [answers])
 
   useEffect(() => {
+    setMode('guided')
     setStatus('idle')
     setAnswers([])
     setErrorMsg('')
@@ -651,10 +783,55 @@ function VoiceReviewSection({ trade, onUpdate }) {
     setAnalysis(null)
     setCurrentStep(0)
     setQuestions(buildGuidedVoiceQuestions(trade))
+    setCoachReason('')
     recognitionRef.current?.abort?.()
     recognitionRef.current = null
     partsRef.current = []
   }, [trade.id])
+
+  async function applyVoiceAnalysis(nextAnswers, transcriptForAnalysis) {
+    setStatus('processing')
+    try {
+      const result = await analyzeTradeVoiceReview(trade, transcriptForAnalysis, apiKey)
+      setAnalysis(result)
+
+      const voiceQuick = result.quickReview || {}
+      const mergedQuickReview = {
+        ...(trade.quickReview || {}),
+        ...Object.fromEntries(Object.entries(voiceQuick).filter(([, v]) => v !== null && v !== undefined && v !== '')),
+        updatedAt: new Date().toISOString(),
+      }
+      const mergedTags = [...new Set([
+        ...(trade.reviewTags || []),
+        ...(Array.isArray(result.reviewTags) ? result.reviewTags : []),
+        ...quickReviewTagMap(mergedQuickReview),
+      ].filter(Boolean))]
+
+      const updates = {
+        quickReview: mergedQuickReview,
+        reviewTags: mergedTags,
+        reviewNotes: buildVoiceReviewNotes(trade.reviewNotes || '', result, transcriptForAnalysis),
+        voiceReview: {
+          mode,
+          transcript: transcriptForAnalysis,
+          summary: result.summary || null,
+          keyLesson: result.keyLesson || null,
+          answers: nextAnswers,
+          analyzedAt: new Date().toISOString(),
+        },
+      }
+
+      if (result.processGradeSuggestion != null && trade.processGrade == null) {
+        updates.processGrade = result.processGradeSuggestion
+      }
+
+      onUpdate(updates)
+      setStatus('done')
+    } catch (err) {
+      setStatus('error')
+      setErrorMsg(err.message || 'Voice review failed.')
+    }
+  }
 
   function startRecording() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -691,6 +868,18 @@ function VoiceReviewSection({ trade, onUpdate }) {
         return
       }
 
+      if (mode === 'freeform') {
+      const nextAnswers = [{
+          id: 'freeform',
+          question: 'Talk through this trade in your own words.',
+          answer: full,
+        }]
+        setAnswers(nextAnswers)
+        setCoachReason('')
+        await applyVoiceAnalysis(nextAnswers, full)
+        return
+      }
+
       const nextAnswers = [...answers]
       nextAnswers[currentStep] = {
         id: activeQuestion?.id || `step_${currentStep}`,
@@ -717,6 +906,7 @@ function VoiceReviewSection({ trade, onUpdate }) {
                   hint: followUp.hint || 'What would you repeat or avoid?',
                 },
               ]))
+              setCoachReason(followUp.why || '')
             } catch (err) {
               console.warn('[voice-review] dynamic follow-up failed:', err)
             }
@@ -737,6 +927,7 @@ function VoiceReviewSection({ trade, onUpdate }) {
               hint: followUp.hint || 'What would you repeat or avoid?',
             },
           ]))
+          setCoachReason(followUp.why || '')
           setCurrentStep(currentStep + 1)
           setStatus('idle')
           return
@@ -749,47 +940,7 @@ function VoiceReviewSection({ trade, onUpdate }) {
         .filter(item => item?.answer)
         .map((item, idx) => `Question ${idx + 1}: ${item.question}\nAnswer ${idx + 1}: ${item.answer}`)
         .join('\n\n')
-
-      setStatus('processing')
-      try {
-        const result = await analyzeTradeVoiceReview(trade, transcriptForAnalysis, apiKey)
-        setAnalysis(result)
-
-        const voiceQuick = result.quickReview || {}
-        const mergedQuickReview = {
-          ...(trade.quickReview || {}),
-          ...Object.fromEntries(Object.entries(voiceQuick).filter(([, v]) => v !== null && v !== undefined && v !== '')),
-          updatedAt: new Date().toISOString(),
-        }
-        const mergedTags = [...new Set([
-          ...(trade.reviewTags || []),
-          ...(Array.isArray(result.reviewTags) ? result.reviewTags : []),
-          ...quickReviewTagMap(mergedQuickReview),
-        ].filter(Boolean))]
-
-        const updates = {
-          quickReview: mergedQuickReview,
-          reviewTags: mergedTags,
-          reviewNotes: buildVoiceReviewNotes(trade.reviewNotes || '', result, transcriptForAnalysis),
-          voiceReview: {
-            transcript: transcriptForAnalysis,
-            summary: result.summary || null,
-            keyLesson: result.keyLesson || null,
-            answers: nextAnswers,
-            analyzedAt: new Date().toISOString(),
-          },
-        }
-
-        if (result.processGradeSuggestion != null && trade.processGrade == null) {
-          updates.processGrade = result.processGradeSuggestion
-        }
-
-        onUpdate(updates)
-        setStatus('done')
-      } catch (err) {
-        setStatus('error')
-        setErrorMsg(err.message || 'Voice review failed.')
-      }
+      await applyVoiceAnalysis(nextAnswers, transcriptForAnalysis)
     }
 
     rec.onerror = (e) => {
@@ -817,6 +968,8 @@ function VoiceReviewSection({ trade, onUpdate }) {
     setShowTranscript(false)
     setAnalysis(null)
     setCurrentStep(0)
+    setQuestions(buildGuidedVoiceQuestions(trade))
+    setCoachReason('')
   }
 
   function skipQuestion() {
@@ -843,10 +996,14 @@ function VoiceReviewSection({ trade, onUpdate }) {
           <div className="flex items-center gap-2 mb-1">
             <Mic size={14} className="text-accent-blue" />
             <p className="label text-white">Voice Review</p>
-            <span className="text-[10px] uppercase tracking-[0.16em] text-accent-blue/70">Phase 2.5</span>
+            <span className="text-[10px] uppercase tracking-[0.16em] text-accent-blue/70">
+              {mode === 'freeform' ? 'Phase 2' : 'Phase 2.5'}
+            </span>
           </div>
           <p className="text-xs text-gray-400 leading-relaxed">
-            Guided voice debrief: answer one short question at a time and let the app build the review.
+            {mode === 'freeform'
+              ? 'Speak freely about the trade and let the app turn it into tags, notes, and a debrief.'
+              : 'Guided voice debrief: answer one short question at a time and let the app build the review.'}
           </p>
         </div>
         {(status === 'done' || status === 'error') && (
@@ -859,23 +1016,66 @@ function VoiceReviewSection({ trade, onUpdate }) {
         )}
       </div>
 
-      <div className="flex items-center justify-between text-[11px] text-gray-500 mb-3">
-        <span>{Math.min(answers.filter(x => x?.answer).length + (status === 'processing' || status === 'done' ? 0 : 0), questions.length)}/{questions.length} answers captured</span>
-        <span>Question {Math.min(currentStep + 1, questions.length)} of {questions.length}</span>
+      <div className="flex gap-1 mb-4">
+        {[
+          { id: 'freeform', label: 'Freeform' },
+          { id: 'guided', label: 'Guided' },
+        ].map(item => (
+          <button
+            key={item.id}
+            onClick={() => {
+              setMode(item.id)
+              setStatus('idle')
+              setAnswers([])
+              setErrorMsg('')
+              setShowTranscript(false)
+              setAnalysis(null)
+              setCurrentStep(0)
+              setQuestions(buildGuidedVoiceQuestions(trade))
+            }}
+            className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${
+              mode === item.id
+                ? 'bg-accent-blue/15 text-accent-blue border-accent-blue/30'
+                : 'text-gray-500 border-white/10 hover:text-white hover:border-white/20'
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
 
-      <div className="h-1.5 rounded-full bg-white/5 overflow-hidden mb-4">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-accent-blue via-accent-blue to-accent-green transition-all"
-          style={{ width: `${(answers.filter(x => x?.answer).length / questions.length) * 100}%` }}
-        />
-      </div>
+      {mode === 'guided' ? (
+        <>
+          <div className="flex items-center justify-between text-[11px] text-gray-500 mb-3">
+            <span>{answers.filter(x => x?.answer).length}/{questions.length} answers captured</span>
+            <span>Question {Math.min(currentStep + 1, questions.length)} of {questions.length}</span>
+          </div>
 
-      {activeQuestion && status !== 'done' && (
+          <div className="h-1.5 rounded-full bg-white/5 overflow-hidden mb-4">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-accent-blue via-accent-blue to-accent-green transition-all"
+              style={{ width: `${(answers.filter(x => x?.answer).length / questions.length) * 100}%` }}
+            />
+          </div>
+        </>
+      ) : (
+        <div className="rounded-lg border border-accent-blue/15 bg-accent-blue/[0.05] px-3 py-3 mb-4">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-accent-blue/70 mb-1">Freeform Prompt</p>
+          <p className="text-sm text-white leading-relaxed">Talk through the trade in your own words.</p>
+          <p className="text-xs text-gray-500 mt-2">What happened, what you felt, what worked, and what you would change.</p>
+        </div>
+      )}
+
+      {mode === 'guided' && activeQuestion && status !== 'done' && (
         <div className="rounded-lg border border-accent-blue/15 bg-accent-blue/[0.05] px-3 py-3 mb-3">
           <p className="text-[11px] uppercase tracking-[0.16em] text-accent-blue/70 mb-1">Current Prompt</p>
           <p className="text-sm text-white leading-relaxed">{activeQuestion.prompt}</p>
           <p className="text-xs text-gray-500 mt-2">{activeQuestion.hint}</p>
+          {coachReason && currentStep >= 2 && (
+            <p className="text-[11px] text-accent-blue mt-2">
+              Coach focus: {coachReason}
+            </p>
+          )}
         </div>
       )}
 
@@ -888,9 +1088,11 @@ function VoiceReviewSection({ trade, onUpdate }) {
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-blue/10 border border-accent-blue/30 text-accent-blue hover:bg-accent-blue/20 transition-all text-sm font-medium"
             >
               <Mic size={15} />
-              {answers[currentStep]?.answer ? 'Re-record Answer' : 'Record Answer'}
+              {mode === 'freeform'
+                ? (answers[0]?.answer ? 'Re-record Voice Review' : 'Start Voice Review')
+                : (answers[currentStep]?.answer ? 'Re-record Answer' : 'Record Answer')}
             </button>
-            {currentStep < questions.length - 1 && (
+            {mode === 'guided' && currentStep < questions.length - 1 && (
               <button
                 type="button"
                 onClick={skipQuestion}
@@ -950,12 +1152,18 @@ function VoiceReviewSection({ trade, onUpdate }) {
 
       {answers.length > 0 && (
         <div className="mt-4 space-y-2">
-          {questions.map((question, idx) => {
+          {(mode === 'freeform' ? answers : questions).map((question, idx) => {
             const answer = answers[idx]?.answer
-            const isCurrent = idx === currentStep && status !== 'done'
+            const promptText = mode === 'freeform'
+              ? answers[idx]?.question || 'Voice review'
+              : question.prompt
+            const key = mode === 'freeform'
+              ? answers[idx]?.id || `freeform_${idx}`
+              : question.id
+            const isCurrent = mode === 'guided' && idx === currentStep && status !== 'done'
             return (
               <div
-                key={question.id}
+                key={key}
                 className={`rounded-lg border px-3 py-2.5 ${
                   answer
                     ? 'border-white/10 bg-black/20'
@@ -964,8 +1172,10 @@ function VoiceReviewSection({ trade, onUpdate }) {
                       : 'border-white/5 bg-white/[0.01]'
                 }`}
               >
-                <p className="text-[11px] uppercase tracking-[0.16em] text-gray-500 mb-1">Question {idx + 1}</p>
-                <p className="text-xs text-gray-300">{question.prompt}</p>
+                <p className="text-[11px] uppercase tracking-[0.16em] text-gray-500 mb-1">
+                  {mode === 'freeform' ? 'Voice Review' : `Question ${idx + 1}`}
+                </p>
+                <p className="text-xs text-gray-300">{promptText}</p>
                 <p className={`text-xs mt-2 leading-relaxed ${answer ? 'text-white' : 'text-gray-600 italic'}`}>
                   {answer || (isCurrent ? 'Waiting for your answer…' : 'No answer captured')}
                 </p>
@@ -1421,6 +1631,8 @@ function TradeListItem({ trade, selected, onClick }) {
     ? new Date(trade.entryDate).toLocaleDateString([], { month: 'short', day: 'numeric' })
     : '—'
   const reviewTagCount = (trade.reviewTags || []).length
+  const reviewed = hasTradeReview(trade)
+  const quickSummary = trade.quickReview ? buildQuickReviewSummary(trade.quickReview) : null
 
   return (
     <button
@@ -1444,11 +1656,26 @@ function TradeListItem({ trade, selected, onClick }) {
         <div className="flex items-center gap-1.5 mb-0.5">
           <span className="font-semibold mono text-sm text-white">{trade.symbol}</span>
           <StatusBadge status={trade.status} />
+          {reviewed && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent-green/15 text-accent-green border border-accent-green/20">
+              Reviewed
+            </span>
+          )}
         </div>
         <p className="text-xs text-gray-500 truncate">
           {entryDate}
           {reviewTagCount > 0 && <span className="ml-1.5 text-accent-blue/60">{reviewTagCount} tag{reviewTagCount !== 1 ? 's' : ''}</span>}
         </p>
+        {quickSummary && (
+          <p className="text-[11px] text-gray-400 truncate mt-0.5">
+            {quickSummary.verdict} · {quickSummary.focus}
+          </p>
+        )}
+        {!reviewed && (
+          <p className="text-[11px] text-accent-yellow/80 truncate mt-0.5">
+            Needs review
+          </p>
+        )}
       </div>
 
       {/* R + P&L + shot count */}
@@ -1474,11 +1701,12 @@ export default function TradeReview({ selectedAccount }) {
   const { trades, updateTrade } = useTradeStore()
   const [selectedId,    setSelectedId]    = useState(null)
   const [statusFilter,  setStatusFilter]  = useState('All')
+  const [reviewFilter,  setReviewFilter]  = useState('Needs Review')
   const [search,        setSearch]        = useState('')
   const [sortBy,        setSortBy]        = useState('date')
   const [showAllTrades, setShowAllTrades] = useState(false)
 
-  const reviewTrades = useMemo(() => {
+  const scopedTrades = useMemo(() => {
     return trades
       .filter(t => {
         if (selectedAccount && selectedAccount !== 'All' && t.account !== selectedAccount) return false
@@ -1487,19 +1715,37 @@ export default function TradeReview({ selectedAccount }) {
       })
       .filter(t => statusFilter === 'All' || t.status === statusFilter)
       .filter(t => !search || (t.symbol || '').toUpperCase().includes(search.toUpperCase()))
+  }, [trades, selectedAccount, statusFilter, search, showAllTrades])
+
+  const reviewTrades = useMemo(() => {
+    return scopedTrades
+      .filter(t => {
+        const reviewed = hasTradeReview(t)
+        if (reviewFilter === 'Reviewed') return reviewed
+        if (reviewFilter === 'Needs Review') return !reviewed
+        return true
+      })
       .sort((a, b) => {
+        const aReviewed = hasTradeReview(a)
+        const bReviewed = hasTradeReview(b)
+        if (sortBy === 'queue' || reviewFilter === 'All') {
+          if (aReviewed !== bReviewed) return Number(aReviewed) - Number(bReviewed)
+        }
         if (sortBy === 'pl') return (b.pl || 0) - (a.pl || 0)
         if (sortBy === 'r')  return (b.rMultiple || 0) - (a.rMultiple || 0)
         return new Date(b.entryDate || 0) - new Date(a.entryDate || 0)
       })
-  }, [trades, selectedAccount, statusFilter, search, sortBy, showAllTrades])
+  }, [scopedTrades, reviewFilter, sortBy])
+
+  const reviewIntelligence = useMemo(() => computeReviewIntelligence(scopedTrades), [scopedTrades])
 
   const sidebarStats = useMemo(() => {
     if (!reviewTrades.length) return null
     const closed = reviewTrades.filter(t => t.status === 'Win' || t.status === 'Loss')
     const wins   = closed.filter(t => t.status === 'Win').length
     const totalR = closed.reduce((s, t) => s + (t.rMultiple || 0), 0)
-    return { wins, total: closed.length, totalR: Math.round(totalR * 100) / 100 }
+    const reviewedCount = reviewTrades.filter(hasTradeReview).length
+    return { wins, total: closed.length, totalR: Math.round(totalR * 100) / 100, reviewedCount, pendingCount: reviewTrades.length - reviewedCount }
   }, [reviewTrades])
 
   const currentIdx   = reviewTrades.findIndex(t => t.id === selectedId)
@@ -1530,7 +1776,7 @@ export default function TradeReview({ selectedAccount }) {
           </div>
 
           {sidebarStats && sidebarStats.total > 0 && (
-            <div className="flex items-center gap-3 px-2 py-1.5 rounded-lg bg-surface-200 text-xs">
+            <div className="flex items-center gap-3 px-2 py-1.5 rounded-lg bg-surface-200 text-xs flex-wrap">
               <span className={`mono font-semibold ${sidebarStats.wins / sidebarStats.total >= 0.5 ? 'text-accent-green' : 'text-accent-red'}`}>
                 {((sidebarStats.wins / sidebarStats.total) * 100).toFixed(0)}% WR
               </span>
@@ -1540,8 +1786,30 @@ export default function TradeReview({ selectedAccount }) {
               </span>
               <span className="text-gray-600">·</span>
               <span className="text-gray-500">{sidebarStats.wins}W {sidebarStats.total - sidebarStats.wins}L</span>
+              <span className="text-gray-600">·</span>
+              <span className="text-accent-yellow">{sidebarStats.pendingCount} pending</span>
             </div>
           )}
+
+          <div className="flex gap-1">
+            {['Needs Review', 'Reviewed', 'All'].map(s => (
+              <button
+                key={s}
+                onClick={() => setReviewFilter(s)}
+                className={`flex-1 text-[10px] py-1 rounded border transition-all ${
+                  reviewFilter === s
+                    ? s === 'Reviewed'
+                      ? 'bg-accent-green/15 text-accent-green border-accent-green/30'
+                      : s === 'Needs Review'
+                        ? 'bg-accent-yellow/15 text-accent-yellow border-accent-yellow/30'
+                        : 'bg-accent-blue/15 text-accent-blue border-accent-blue/30'
+                    : 'text-gray-600 border-gray-700 hover:border-gray-500 hover:text-gray-400'
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
 
           <div className="relative">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
@@ -1580,6 +1848,7 @@ export default function TradeReview({ selectedAccount }) {
               onChange={e => setSortBy(e.target.value)}
               className="input text-[10px] py-0.5 flex-1"
             >
+              <option value="queue">Review queue</option>
               <option value="date">Date (newest)</option>
               <option value="pl">P&amp;L (best)</option>
               <option value="r">R-Multiple (best)</option>
@@ -1592,6 +1861,8 @@ export default function TradeReview({ selectedAccount }) {
               All
             </button>
           </div>
+
+          <ReviewIntelligenceCard intelligence={reviewIntelligence} totalTrades={scopedTrades.length} />
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
