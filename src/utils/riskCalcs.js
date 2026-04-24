@@ -136,3 +136,47 @@ export function buildOpenPositionRisk(openTrades, accountBalance) {
     }
   })
 }
+
+export function calcAtrPortfolioHeat(openTrades, atrMap, accountBalance) {
+  let oneAtrShock = 0
+  const byTier = {}
+  const bySymbol = {}
+
+  const positions = openTrades.map(t => {
+    const remainingShares = Math.abs((t.remainingShares ?? t.positionSize) || 0)
+    const atr = t.atrAtEntry || t.atrValue || atrMap?.get(t.symbol)?.atr || 0
+    const isShort = (t.position || 'Long').toLowerCase().includes('short')
+    const shock = atr > 0 && remainingShares > 0 ? atr * remainingShares : 0
+    const signedShock = isShort ? shock : -shock
+    const tier = t.riskTierPct ?? t.inferredRiskTierPct ?? t.nearestAtrRiskTierPct ?? 'Unknown'
+
+    oneAtrShock += signedShock
+    byTier[tier] = (byTier[tier] || 0) + Math.abs(shock)
+    bySymbol[t.symbol] = (bySymbol[t.symbol] || 0) + Math.abs(shock)
+
+    return {
+      symbol: t.symbol,
+      shock,
+      signedShock,
+      atr,
+      remainingShares,
+      tier,
+    }
+  })
+
+  const grossOneAtrShock = positions.reduce((s, p) => s + Math.abs(p.shock), 0)
+  return {
+    positions,
+    oneAtrShock,
+    grossOneAtrShock,
+    oneAtrShockPct: accountBalance > 0 ? (oneAtrShock / accountBalance) * 100 : 0,
+    grossOneAtrShockPct: accountBalance > 0 ? (grossOneAtrShock / accountBalance) * 100 : 0,
+    twoAtrShock: oneAtrShock * 2,
+    twoAtrShockPct: accountBalance > 0 ? ((oneAtrShock * 2) / accountBalance) * 100 : 0,
+    threeAtrShock: oneAtrShock * 3,
+    threeAtrShockPct: accountBalance > 0 ? ((oneAtrShock * 3) / accountBalance) * 100 : 0,
+    byTier,
+    bySymbol,
+    coveragePct: openTrades.length ? (positions.filter(p => p.atr > 0).length / openTrades.length) * 100 : 0,
+  }
+}

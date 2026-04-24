@@ -359,7 +359,7 @@ export const useTradeStore = create((set, get) => ({
   // ── Trades ────────────────────────────────────────────────────────────────
 
   addTrade: (trade) => {
-    const t = { ...trade, id: trade.id || uuidv4() }
+    const t = enrichTrade({ ...trade, id: trade.id || uuidv4() })
     set(s => ({ trades: [...s.trades, t], deletedTradeIds: s.deletedTradeIds.filter(id => id !== t.id) }))
     saveSnapshot(get())
     syncTrade(t)
@@ -372,7 +372,7 @@ export const useTradeStore = create((set, get) => ({
       const existingKeys = new Set(s.trades.map(buildTradeDedupKey))
       added = []
       for (const trade of newTrades) {
-        const candidate = { ...trade, id: trade.id || uuidv4() }
+        const candidate = enrichTrade({ ...trade, id: trade.id || uuidv4() })
         const dedupKey = buildTradeDedupKey(candidate)
         if (existing.has(candidate.id) || existingKeys.has(dedupKey)) continue
         existing.add(candidate.id)
@@ -400,7 +400,7 @@ export const useTradeStore = create((set, get) => ({
 
       toAdd = []
       for (const trade of newTrades) {
-        const candidate = { ...trade, id: trade.id || uuidv4(), _batchId: batchId }
+        const candidate = enrichTrade({ ...trade, id: trade.id || uuidv4(), _batchId: batchId })
         const dedupKey = buildTradeDedupKey(candidate)
         if (existing.has(candidate.id) || existingTradeKeys.has(dedupKey)) continue
         existing.add(candidate.id)
@@ -517,7 +517,7 @@ export const useTradeStore = create((set, get) => ({
   recalcAllTrades: () => {
     let recalced = []
     set(s => {
-      recalced = s.trades.map(t => enrichTrade({ ...t, rMultiple: null, riskReward: null }))
+      recalced = s.trades.map(t => enrichTrade({ ...t, rMultiple: null, rMultipleATR: null, riskReward: null }))
       return { trades: recalced }
     })
     recalced.forEach(syncTrade)

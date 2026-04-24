@@ -5,6 +5,7 @@ import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { formatCurrency } from '../../utils/formatters.js'
 import { fetchQuotes, fetchATR14 } from '../../utils/marketData.js'
 import { calcAtrTradePlan, formatPlanPrice } from '../../utils/atrTradePlan.js'
+import { nearestAtrRiskTier } from '../../utils/atrRisk.js'
 import { v4 as uuidv4 } from 'uuid'
 
 const BLANK = {
@@ -230,7 +231,7 @@ function StrengthIndicator({ symbol, entryPrice }) {
 
 // ── Main form ──────────────────────────────────────────────────────────────────
 export default function ManualEntryForm({ onClose }) {
-  const { addTrade, updateTrade, getAccounts, trades } = useTradeStore()
+  const { addTrade, updateTrade, getAccounts, getAccountBalance, trades } = useTradeStore()
   const { accounts: settingsAccounts, edges, tpMultiplier = 2 } = useSettingsStore()
   const [form, setForm]                   = useState(BLANK)
   const [customAccount, setCustomAccount] = useState('')
@@ -518,6 +519,12 @@ export default function ManualEntryForm({ onClose }) {
       if (risk > 0) riskReward = parseFloat((reward / risk).toFixed(2))
     }
 
+    const accountEquityAtEntry = getAccountBalance(form.account || 'All')
+    const atrRiskDollar = atr && ps ? atr * ps : null
+    const atrRiskPct = atrRiskDollar != null && accountEquityAtEntry > 0
+      ? (atrRiskDollar / accountEquityAtEntry) * 100
+      : null
+
     addTrade({
       id:           uuidv4(),
       symbol:       form.symbol.toUpperCase().trim(),
@@ -529,6 +536,8 @@ export default function ManualEntryForm({ onClose }) {
       entryPrice:   ep,
       positionSize: ps,
       atrValue:     atr,
+      accountEquityAtEntry: accountEquityAtEntry > 0 ? accountEquityAtEntry : null,
+      riskTierPct:  atrRiskPct != null ? nearestAtrRiskTier(atrRiskPct) : null,
       takeProfit:   tp,
       stopLoss:     sl,
       buyAmount:    ep && ps ? ep * ps : null,

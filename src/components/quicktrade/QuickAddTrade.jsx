@@ -5,6 +5,7 @@ import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { enrichTrade } from '../../utils/enrichTrade.js'
 import { calcAtrTradePlan, formatPlanPrice } from '../../utils/atrTradePlan.js'
+import { nearestAtrRiskTier } from '../../utils/atrRisk.js'
 import { fetchATR14 } from '../../utils/marketData.js'
 
 const BLANK = {
@@ -89,6 +90,9 @@ export default function QuickAddTrade() {
 
   function handleSubmit(e) {
     e.preventDefault()
+    const actualAtrRiskPct = atrRiskDollar != null && accountBalance > 0
+      ? (atrRiskDollar / accountBalance) * 100
+      : null
     const trade = enrichTrade({
       id:           uuidv4(),
       symbol:       form.symbol.trim().toUpperCase(),
@@ -100,6 +104,8 @@ export default function QuickAddTrade() {
       takeProfit:   parseFloat(form.takeProfit) || null,
       atrValue:     parseFloat(form.atrValue)  || null,
       positionSize: parseFloat(form.positionSize) || null,
+      accountEquityAtEntry: accountBalance > 0 ? accountBalance : null,
+      riskTierPct:  actualAtrRiskPct != null ? nearestAtrRiskTier(actualAtrRiskPct) : null,
       status:       'Open',
       market:       'Stock',
     })

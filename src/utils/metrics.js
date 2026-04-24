@@ -40,6 +40,25 @@ export function calcProfitFactor(trades) {
   return grossProfit / grossLoss
 }
 
+export function calcProfitFactorR(trades, rField = 'rMultipleATR') {
+  const rs = trades
+    .filter(t => (t.status === 'Win' || t.status === 'Loss') && Number.isFinite(t[rField]))
+    .map(t => t[rField])
+  const grossWinR = rs.filter(r => r > 0).reduce((s, r) => s + r, 0)
+  const grossLossR = Math.abs(rs.filter(r => r < 0).reduce((s, r) => s + r, 0))
+  if (!grossLossR) return grossWinR ? Infinity : 0
+  return grossWinR / grossLossR
+}
+
+export function calcPayoffRatioR(trades, rField = 'rMultipleATR') {
+  const wins = trades.filter(t => t.status === 'Win' && Number.isFinite(t[rField])).map(t => t[rField])
+  const losses = trades.filter(t => t.status === 'Loss' && Number.isFinite(t[rField])).map(t => Math.abs(t[rField]))
+  if (!wins.length || !losses.length) return null
+  const avgWinR = wins.reduce((s, r) => s + r, 0) / wins.length
+  const avgLossR = losses.reduce((s, r) => s + r, 0) / losses.length
+  return avgLossR > 0 ? avgWinR / avgLossR : null
+}
+
 export function calcNetPL(trades) {
   return trades.reduce((s, t) => s + (t.pl || 0), 0)
 }
@@ -192,4 +211,33 @@ export function calcAvgStopEfficiency(trades) {
   const ts = trades.filter(t => t.stopEfficiency != null && (t.status === 'Win' || t.status === 'Loss'))
   if (!ts.length) return null
   return ts.reduce((s, t) => s + t.stopEfficiency, 0) / ts.length
+}
+
+export function calcAtrAnalyticsSummary(trades) {
+  const closed = trades.filter(t => t.status === 'Win' || t.status === 'Loss')
+  const atrClosed = closed.filter(t => Number.isFinite(t.rMultipleATR))
+  const wins = atrClosed.filter(t => t.rMultipleATR > 0)
+  const losses = atrClosed.filter(t => t.rMultipleATR < 0)
+  const avg = arr => arr.length ? arr.reduce((s, t) => s + t.rMultipleATR, 0) / arr.length : 0
+  const totalAtrRisk = trades.reduce((s, t) => s + (Number.isFinite(t.atrRiskDollars) ? t.atrRiskDollars : 0), 0)
+  const flags = trades.reduce((acc, t) => {
+    for (const flag of t.atrValidationFlags || []) acc[flag] = (acc[flag] || 0) + 1
+    return acc
+  }, {})
+
+  return {
+    sample: atrClosed.length,
+    coveragePct: closed.length ? (atrClosed.length / closed.length) * 100 : 0,
+    expectancyR: atrClosed.length ? avg(atrClosed) : 0,
+    totalR: atrClosed.reduce((s, t) => s + t.rMultipleATR, 0),
+    winRate: atrClosed.length ? (wins.length / atrClosed.length) * 100 : 0,
+    payoffRatio: calcPayoffRatioR(atrClosed, 'rMultipleATR'),
+    profitFactor: calcProfitFactorR(atrClosed, 'rMultipleATR'),
+    avgWinR: avg(wins),
+    avgLossR: avg(losses),
+    totalAtrRisk,
+    reviewCount: trades.filter(t => t.atrSizingStatus === 'review').length,
+    missingCount: trades.filter(t => t.atrSizingStatus === 'missing_data').length,
+    flags,
+  }
 }

@@ -6,7 +6,7 @@ import { useTradeStore } from '../../store/useTradeStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
-import { buildOpenPositionRisk, calcEffectiveExposure } from '../../utils/riskCalcs.js'
+import { buildOpenPositionRisk, calcEffectiveExposure, calcAtrPortfolioHeat } from '../../utils/riskCalcs.js'
 import { formatCurrency } from '../../utils/formatters.js'
 import { calcWinRate, calcAvgR } from '../../utils/metrics.js'
 import { fetchQuotes, fetchATR14, fetchSectors, computeSchwabMAE } from '../../utils/marketData.js'
@@ -1756,6 +1756,11 @@ export default function RiskPanel({ selectedAccount }) {
     [openTrades, atrData, benchmarkAtrPct, liveBalance]
   )
 
+  const atrHeat = useMemo(
+    () => calcAtrPortfolioHeat(openTrades, atrData, liveBalance),
+    [openTrades, atrData, liveBalance]
+  )
+
   // Write live balance + effective exposure to the transient runtime store so
   // other components (Morning journal, Dashboard) can read them without
   // re-fetching quotes. Using a separate non-persisted store prevents cascade
@@ -2113,6 +2118,77 @@ export default function RiskPanel({ selectedAccount }) {
               </p>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* ── ATR Heat / Shock Layer ─────────────────────────────────────── */}
+      <div className="card border border-accent-blue/15 bg-gradient-to-br from-accent-blue/5 via-transparent to-accent-red/5">
+        <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">ATR Portfolio Heat</p>
+            <h3 className="text-base font-semibold text-white">What happens if the book moves one ATR against you?</h3>
+            <p className="text-xs text-gray-500 mt-1 max-w-3xl">
+              This uses your sizing model directly. Stop-based NER shows current stop loss exposure; ATR heat shows the volatility energy currently loaded in open positions.
+            </p>
+          </div>
+          <span className={`text-[11px] px-2 py-1 rounded-full border ${
+            atrHeat.coveragePct >= 80 ? 'text-accent-green border-accent-green/25 bg-accent-green/10'
+            : atrHeat.coveragePct >= 50 ? 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10'
+            : 'text-accent-red border-accent-red/25 bg-accent-red/10'
+          }`}>
+            {atrHeat.coveragePct.toFixed(0)}% ATR coverage
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="card-sm text-center">
+            <p className="text-xs text-gray-500 mb-1">1 ATR Adverse</p>
+            <p className="text-lg font-bold mono text-accent-yellow">-{formatCurrency(atrHeat.grossOneAtrShock)}</p>
+            <p className="text-[10px] text-gray-600 mt-0.5">{atrHeat.grossOneAtrShockPct.toFixed(2)}% of equity</p>
+          </div>
+          <div className="card-sm text-center">
+            <p className="text-xs text-gray-500 mb-1">2 ATR Adverse</p>
+            <p className="text-lg font-bold mono text-accent-red">-{formatCurrency(atrHeat.grossOneAtrShock * 2)}</p>
+            <p className="text-[10px] text-gray-600 mt-0.5">{(atrHeat.grossOneAtrShockPct * 2).toFixed(2)}% of equity</p>
+          </div>
+          <div className="card-sm text-center">
+            <p className="text-xs text-gray-500 mb-1">3 ATR Adverse</p>
+            <p className="text-lg font-bold mono text-accent-red">-{formatCurrency(atrHeat.grossOneAtrShock * 3)}</p>
+            <p className="text-[10px] text-gray-600 mt-0.5">{(atrHeat.grossOneAtrShockPct * 3).toFixed(2)}% of equity</p>
+          </div>
+          <div className="card-sm text-center">
+            <p className="text-xs text-gray-500 mb-1">Net 1 ATR Shock</p>
+            <p className={`text-lg font-bold mono ${atrHeat.oneAtrShock <= 0 ? 'text-accent-red' : 'text-accent-green'}`}>
+              {atrHeat.oneAtrShock >= 0 ? '+' : ''}{formatCurrency(atrHeat.oneAtrShock)}
+            </p>
+            <p className="text-[10px] text-gray-600 mt-0.5">direction-aware longs/shorts</p>
+          </div>
+          <div className="card-sm text-center">
+            <p className="text-xs text-gray-500 mb-1">Largest Symbol Heat</p>
+            {(() => {
+              const top = Object.entries(atrHeat.bySymbol).sort((a, b) => b[1] - a[1])[0]
+              return top ? (
+                <>
+                  <p className="text-lg font-bold mono text-white">{top[0]}</p>
+                  <p className="text-[10px] text-gray-600 mt-0.5">{formatCurrency(top[1])} per ATR</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-lg font-bold mono text-gray-500">—</p>
+                  <p className="text-[10px] text-gray-600 mt-0.5">no ATR heat</p>
+                </>
+              )
+            })()}
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-2">
+          {[0.25, 0.5, 0.75, 1].map(tier => (
+            <div key={tier} className="rounded-lg border border-white/10 bg-black/10 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-gray-500">{tier}% Tier Heat</p>
+              <p className="mono text-sm font-bold text-white mt-1">{formatCurrency(atrHeat.byTier[tier] || 0)}</p>
+            </div>
+          ))}
         </div>
       </div>
 

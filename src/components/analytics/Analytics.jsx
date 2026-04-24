@@ -5,7 +5,7 @@ import {
   CartesianGrid, LineChart, Line, ReferenceLine, Legend, AreaChart, Area,
   ScatterChart, Scatter, ZAxis, ComposedChart
 } from 'recharts'
-import { RefreshCw, ChevronUp, ChevronDown, Clock, TrendingDown, Brain, AlertTriangle, Maximize2, X } from 'lucide-react'
+import { RefreshCw, ChevronUp, ChevronDown, Clock, TrendingDown, Brain, AlertTriangle, Maximize2, X, Target } from 'lucide-react'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
@@ -14,7 +14,8 @@ import { buildEquityCurve } from '../../utils/equityCurve.js'
 import {
   calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor,
   calcRMultipleDistribution, groupByField, calcAvgWinLoss, calcTotalR,
-  calcSharpe, calcSortino, calcSQN, calcCalmar, calcAvgStopEfficiency
+  calcSharpe, calcSortino, calcSQN, calcCalmar, calcAvgStopEfficiency,
+  calcAtrAnalyticsSummary
 } from '../../utils/metrics.js'
 import { formatCurrency, formatR, formatDate } from '../../utils/formatters.js'
 import { fetchHistory, fetchATR14, fetchQuotes } from '../../utils/marketData.js'
@@ -1083,6 +1084,7 @@ export default function Analytics({ selectedAccount }) {
   const avgR = calcAvgR(closed, rField)
   const winRate = calcWinRate(closed)
   const avgStopEff = useMemo(() => calcAvgStopEfficiency(closed), [closed])
+  const atrSummary = useMemo(() => calcAtrAnalyticsSummary(closed), [closed])
   const hasATRData = useMemo(() => tfFiltered.some(t => t.atrValue != null), [tfFiltered])
   const rSampleCount = closed.filter(t => t[rField] != null).length
   const winSampleCount = closed.filter(t => t.status === 'Win').length
@@ -1422,6 +1424,89 @@ export default function Analytics({ selectedAccount }) {
           </button>
         )}
       </div>
+
+      {hasATRData && (
+        <div className="card border border-accent-blue/15 bg-gradient-to-br from-accent-blue/5 via-transparent to-accent-yellow/5">
+          <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+            <div>
+              <SectionTitle>
+                <span className="flex items-center gap-2">
+                  <Target size={14} className="text-accent-blue inline" />
+                  ATR Risk Lens
+                </span>
+              </SectionTitle>
+              <p className="text-xs text-gray-500 max-w-3xl">
+                This normalizes performance to your actual sizing rule: 1R = one ATR of risk on the original position. Dollars show account results; ATR-R shows whether the process is producing efficient risk.
+              </p>
+            </div>
+            <span className={`text-[11px] px-2 py-1 rounded-full border ${
+              atrSummary.coveragePct >= 80 ? 'text-accent-green border-accent-green/25 bg-accent-green/10'
+              : atrSummary.coveragePct >= 50 ? 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10'
+              : 'text-accent-red border-accent-red/25 bg-accent-red/10'
+            }`}>
+              {atrSummary.coveragePct.toFixed(0)}% ATR coverage
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            <div className="card-sm text-center">
+              <p className="text-xs text-gray-500 mb-1">ATR Expectancy</p>
+              <p className={`text-lg font-bold mono ${atrSummary.expectancyR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                {atrSummary.expectancyR >= 0 ? '+' : ''}{atrSummary.expectancyR.toFixed(2)}R
+              </p>
+              <p className="text-[10px] text-gray-600 mt-0.5">per trade</p>
+            </div>
+            <div className="card-sm text-center">
+              <p className="text-xs text-gray-500 mb-1">Total ATR-R</p>
+              <p className={`text-lg font-bold mono ${atrSummary.totalR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                {formatR(atrSummary.totalR)}
+              </p>
+              <p className="text-[10px] text-gray-600 mt-0.5">n={atrSummary.sample}</p>
+            </div>
+            <div className="card-sm text-center">
+              <p className="text-xs text-gray-500 mb-1">ATR Win Rate</p>
+              <p className={`text-lg font-bold mono ${atrSummary.winRate >= 50 ? 'text-accent-green' : 'text-accent-yellow'}`}>
+                {atrSummary.winRate.toFixed(1)}%
+              </p>
+              <p className="text-[10px] text-gray-600 mt-0.5">ATR-R wins</p>
+            </div>
+            <div className="card-sm text-center">
+              <p className="text-xs text-gray-500 mb-1">ATR Payoff</p>
+              <p className={`text-lg font-bold mono ${atrSummary.payoffRatio == null ? 'text-gray-500' : atrSummary.payoffRatio >= 1.5 ? 'text-accent-green' : 'text-accent-yellow'}`}>
+                {atrSummary.payoffRatio == null ? '—' : `${atrSummary.payoffRatio.toFixed(2)}x`}
+              </p>
+              <p className="text-[10px] text-gray-600 mt-0.5">avg win/loss R</p>
+            </div>
+            <div className="card-sm text-center">
+              <p className="text-xs text-gray-500 mb-1">ATR Profit Factor</p>
+              <p className={`text-lg font-bold mono ${atrSummary.profitFactor >= 1.5 ? 'text-accent-green' : atrSummary.profitFactor >= 1 ? 'text-accent-yellow' : 'text-accent-red'}`}>
+                {isFinite(atrSummary.profitFactor) ? atrSummary.profitFactor.toFixed(2) : '∞'}
+              </p>
+              <p className="text-[10px] text-gray-600 mt-0.5">gross R wins/losses</p>
+            </div>
+            <div className="card-sm text-center">
+              <p className="text-xs text-gray-500 mb-1">Needs Review</p>
+              <p className={`text-lg font-bold mono ${atrSummary.reviewCount || atrSummary.missingCount ? 'text-accent-yellow' : 'text-accent-green'}`}>
+                {atrSummary.reviewCount + atrSummary.missingCount}
+              </p>
+              <p className="text-[10px] text-gray-600 mt-0.5">ATR data/discipline flags</p>
+            </div>
+          </div>
+
+          {(atrSummary.reviewCount > 0 || atrSummary.missingCount > 0) && (
+            <div className="mt-4 rounded-lg border border-white/10 bg-surface-200/50 p-3">
+              <p className="text-xs font-semibold text-gray-300 mb-2">Top ATR quality flags</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(atrSummary.flags).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([flag, count]) => (
+                  <span key={flag} className="text-[11px] px-2 py-1 rounded-full bg-black/20 border border-white/10 text-gray-400">
+                    {flag.replaceAll('_', ' ')}: <span className="mono text-white">{count}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* R-basis toggle — only visible when trades have ATR data */}
       {hasATRData && (

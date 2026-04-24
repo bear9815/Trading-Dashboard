@@ -1,3 +1,5 @@
+import { deriveAtrRiskFields } from './atrRisk.js'
+
 /**
  * Enriches a trade with derived / calculated fields:
  *
@@ -77,6 +79,8 @@ export function enrichTrade(trade) {
       result.stopEfficiency = Math.round((stopDist / result.atrValue) * 1000) / 1000
     }
   }
+
+  Object.assign(result, deriveAtrRiskFields(result))
 
   // ── 3. Planned Risk:Reward ────────────────────────────────────────────────
   if (result.riskReward == null && entry != null && stop != null && result.takeProfit != null) {
