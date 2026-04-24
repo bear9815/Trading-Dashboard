@@ -72,16 +72,19 @@ function normalizeSnapshotData(parsed) {
     trades: parsed?.state?.trades || [],
     accountActivities: parsed?.state?.accountActivities || [],
     importBatches: parsed?.state?.importBatches || [],
+    deletedTradeIds: parsed?.state?.deletedTradeIds || [],
+    deletedActivityIds: parsed?.state?.deletedActivityIds || [],
+    deletedBatchIds: parsed?.state?.deletedBatchIds || [],
   }
 }
 
-function saveLocalBackup({ trades, accountActivities, importBatches }) {
+function saveLocalBackup({ trades, accountActivities, importBatches, deletedTradeIds = [], deletedActivityIds = [], deletedBatchIds = [] }) {
   try {
     // Strip screenshots so we stay well within localStorage quota
     const light = trades.map(({ screenshotEntry, screenshotExit, screenshotsAdditional, ...t }) => t)
     localStorage.setItem(LS_BACKUP_KEY, JSON.stringify({
       meta: { userId: getSnapshotOwnerId() },
-      state: { trades: light, accountActivities, importBatches },
+      state: { trades: light, accountActivities, importBatches, deletedTradeIds, deletedActivityIds, deletedBatchIds },
     }))
   } catch (e) {
     console.warn('[localStorage] trade backup write failed:', e)
@@ -89,13 +92,20 @@ function saveLocalBackup({ trades, accountActivities, importBatches }) {
 }
 
 function saveSnapshot(state) {
-  const { trades, accountActivities, importBatches } = state
+  const {
+    trades,
+    accountActivities,
+    importBatches,
+    deletedTradeIds = [],
+    deletedActivityIds = [],
+    deletedBatchIds = [],
+  } = state
   idbStorage.setItem(IDB_KEY, JSON.stringify({
     meta: { userId: getSnapshotOwnerId() },
-    state: { trades, accountActivities, importBatches },
+    state: { trades, accountActivities, importBatches, deletedTradeIds, deletedActivityIds, deletedBatchIds },
   }))
     .catch(e => console.warn('[idb] snapshot write failed:', e))
-  saveLocalBackup(state)
+  saveLocalBackup({ trades, accountActivities, importBatches, deletedTradeIds, deletedActivityIds, deletedBatchIds })
 }
 
 async function readLocalSnapshot(userId = null) {
@@ -140,6 +150,9 @@ export const useTradeStore = create((set, get) => ({
   trades:            [],
   accountActivities: [],
   importBatches:     [],
+  deletedTradeIds:    [],
+  deletedActivityIds: [],
+  deletedBatchIds:    [],
   cloudLoading:      false,
   cloudReady:        false,
 
@@ -153,11 +166,21 @@ export const useTradeStore = create((set, get) => ({
       if (!snapshot) { set({ cloudReady: true }); return }
       if (snapshot.ownerId && !currentUid) { set({ cloudReady: true }); return }
 
-      const { trades = [], accountActivities = [], importBatches = [] } = snapshot
+      const {
+        trades = [],
+        accountActivities = [],
+        importBatches = [],
+        deletedTradeIds = [],
+        deletedActivityIds = [],
+        deletedBatchIds = [],
+      } = snapshot
       set({
         trades:            trades.map(t => enrichTrade(t)),
         accountActivities,
         importBatches,
+        deletedTradeIds,
+        deletedActivityIds,
+        deletedBatchIds,
         cloudReady: true,
       })
     } catch (err) {
@@ -191,6 +214,9 @@ export const useTradeStore = create((set, get) => ({
           trades:            localSnapshot.trades.map(t => enrichTrade(t)),
           accountActivities: localSnapshot.accountActivities,
           importBatches:     localSnapshot.importBatches,
+          deletedTradeIds:    localSnapshot.deletedTradeIds || [],
+          deletedActivityIds: localSnapshot.deletedActivityIds || [],
+          deletedBatchIds:    localSnapshot.deletedBatchIds || [],
           cloudLoading:      false,
           cloudReady:        true,
         })
@@ -200,17 +226,28 @@ export const useTradeStore = create((set, get) => ({
       return
     }
 
+    const deletedTradeIds = new Set(localSnapshot?.deletedTradeIds || [])
+    const deletedActivityIds = new Set(localSnapshot?.deletedActivityIds || [])
+    const deletedBatchIds = new Set(localSnapshot?.deletedBatchIds || [])
+
     const cloudSnapshot = {
-      trades:            (tRes.data || []).map(r => r.data),
-      accountActivities: (aRes.data || []).map(r => r.data),
-      importBatches:     (bRes.data || []).map(r => r.data),
+      trades:            (tRes.data || []).map(r => r.data).filter(t => !deletedTradeIds.has(t.id)),
+      accountActivities: (aRes.data || []).map(r => r.data).filter(a => !deletedActivityIds.has(a.id)),
+      importBatches:     (bRes.data || []).map(r => r.data).filter(b => !deletedBatchIds.has(b.id)),
     }
+
+    deletedTradeIds.forEach(id => cloudDeleteTrade(id))
+    deletedActivityIds.forEach(id => cloudDeleteActivity(id))
+    deletedBatchIds.forEach(id => cloudDeleteBatch(id))
 
     const mergedSnapshot = await get().mergeLocalSnapshot(userId, cloudSnapshot, localSnapshot)
     const nextState = {
       trades:            mergedSnapshot.trades.map(t => enrichTrade(t)),
       accountActivities: mergedSnapshot.accountActivities,
       importBatches:     mergedSnapshot.importBatches,
+      deletedTradeIds:    [...deletedTradeIds],
+      deletedActivityIds: [...deletedActivityIds],
+      deletedBatchIds:    [...deletedBatchIds],
     }
 
     set({ ...nextState, cloudLoading: false, cloudReady: true })
@@ -220,6 +257,7 @@ export const useTradeStore = create((set, get) => ({
   /** Clear in-memory state on sign-out */
   clearLocalState: () => set({
     trades: [], accountActivities: [], importBatches: [],
+    deletedTradeIds: [], deletedActivityIds: [], deletedBatchIds: [],
     cloudReady: false, cloudLoading: false,
   }),
 
@@ -235,14 +273,17 @@ export const useTradeStore = create((set, get) => ({
 
       const cloudTradeIds = new Set(cloudSnapshot.trades.map(t => t.id))
       const cloudTradeKeys = new Set(cloudSnapshot.trades.map(buildTradeDedupKey))
-      const missingTrades = snapshot.trades.filter(t => !cloudTradeIds.has(t.id) && !cloudTradeKeys.has(buildTradeDedupKey(t)))
+      const deletedTradeIds = new Set(snapshot.deletedTradeIds || [])
+      const missingTrades = snapshot.trades.filter(t => !deletedTradeIds.has(t.id) && !cloudTradeIds.has(t.id) && !cloudTradeKeys.has(buildTradeDedupKey(t)))
 
       const cloudActivityIds = new Set(cloudSnapshot.accountActivities.map(a => a.id))
       const cloudActivityKeys = new Set(cloudSnapshot.accountActivities.map(buildActivityDedupKey))
-      const missingActivities = snapshot.accountActivities.filter(a => !cloudActivityIds.has(a.id) && !cloudActivityKeys.has(buildActivityDedupKey(a)))
+      const deletedActivityIds = new Set(snapshot.deletedActivityIds || [])
+      const missingActivities = snapshot.accountActivities.filter(a => !deletedActivityIds.has(a.id) && !cloudActivityIds.has(a.id) && !cloudActivityKeys.has(buildActivityDedupKey(a)))
 
       const cloudBatchIds = new Set(cloudSnapshot.importBatches.map(b => b.id))
-      const missingBatches = snapshot.importBatches.filter(b => !cloudBatchIds.has(b.id))
+      const deletedBatchIds = new Set(snapshot.deletedBatchIds || [])
+      const missingBatches = snapshot.importBatches.filter(b => !deletedBatchIds.has(b.id) && !cloudBatchIds.has(b.id))
 
       if (!missingTrades.length && !missingActivities.length && !missingBatches.length) {
         return cloudSnapshot
@@ -319,7 +360,7 @@ export const useTradeStore = create((set, get) => ({
 
   addTrade: (trade) => {
     const t = { ...trade, id: trade.id || uuidv4() }
-    set(s => ({ trades: [...s.trades, t] }))
+    set(s => ({ trades: [...s.trades, t], deletedTradeIds: s.deletedTradeIds.filter(id => id !== t.id) }))
     saveSnapshot(get())
     syncTrade(t)
   },
@@ -338,7 +379,11 @@ export const useTradeStore = create((set, get) => ({
         existingKeys.add(dedupKey)
         added.push(candidate)
       }
-      return { trades: [...s.trades, ...added] }
+      const addedIds = new Set(added.map(t => t.id))
+      return {
+        trades: [...s.trades, ...added],
+        deletedTradeIds: s.deletedTradeIds.filter(id => !addedIds.has(id)),
+      }
     })
     saveSnapshot(get())
     added.forEach(syncTrade)
@@ -383,10 +428,15 @@ export const useTradeStore = create((set, get) => ({
         tradeIds:      toAdd.map(t => t.id),
         activityIds:   actToAdd.map(a => a.id),
       }
+      const addedTradeIds = new Set(toAdd.map(t => t.id))
+      const addedActivityIds = new Set(actToAdd.map(a => a.id))
       return {
         trades:            [...s.trades, ...toAdd],
         accountActivities: [...s.accountActivities, ...actToAdd],
         importBatches:     [batch, ...s.importBatches].slice(0, 20),
+        deletedTradeIds:    s.deletedTradeIds.filter(id => !addedTradeIds.has(id)),
+        deletedActivityIds: s.deletedActivityIds.filter(id => !addedActivityIds.has(id)),
+        deletedBatchIds:    s.deletedBatchIds.filter(id => id !== batchId),
       }
     })
     toAdd.forEach(syncTrade)
@@ -406,6 +456,9 @@ export const useTradeStore = create((set, get) => ({
         trades:            s.trades.filter(t => !tradeIds.has(t.id)),
         accountActivities: s.accountActivities.filter(a => !actIds.has(a.id)),
         importBatches:     s.importBatches.filter(b => b.id !== batchId),
+        deletedTradeIds:    [...new Set([...s.deletedTradeIds, ...tradeIds])].slice(-1000),
+        deletedActivityIds: [...new Set([...s.deletedActivityIds, ...actIds])].slice(-1000),
+        deletedBatchIds:    [...new Set([...s.deletedBatchIds, batchId])].slice(-1000),
       }
     })
     tradeIds.forEach(id => cloudDeleteTrade(id))
@@ -436,7 +489,10 @@ export const useTradeStore = create((set, get) => ({
   },
 
   deleteTrade: (id) => {
-    set(s => ({ trades: s.trades.filter(t => t.id !== id) }))
+    set(s => ({
+      trades: s.trades.filter(t => t.id !== id),
+      deletedTradeIds: [...new Set([...s.deletedTradeIds, id])].slice(-1000),
+    }))
     saveSnapshot(get())
     cloudDeleteTrade(id)
   },
@@ -449,7 +505,12 @@ export const useTradeStore = create((set, get) => ({
         await supabase.from('import_batches').delete().eq('user_id', uid)
       }
     }
-    set({ trades: [], importBatches: [] })
+    set(s => ({
+      trades: [],
+      importBatches: [],
+      deletedTradeIds: [...new Set([...s.deletedTradeIds, ...s.trades.map(t => t.id)])].slice(-1000),
+      deletedBatchIds: [...new Set([...s.deletedBatchIds, ...s.importBatches.map(b => b.id)])].slice(-1000),
+    }))
     saveSnapshot(get())
   },
 
@@ -506,7 +567,10 @@ export const useTradeStore = create((set, get) => ({
 
   addActivity: (activity) => {
     const a = { ...activity, id: activity.id || uuidv4() }
-    set(s => ({ accountActivities: [...s.accountActivities, a] }))
+    set(s => ({
+      accountActivities: [...s.accountActivities, a],
+      deletedActivityIds: s.deletedActivityIds.filter(id => id !== a.id),
+    }))
     saveSnapshot(get())
     syncActivity(a)
   },
@@ -523,13 +587,22 @@ export const useTradeStore = create((set, get) => ({
       acc.push(candidate)
       return acc
     }, [])
-    set(s => ({ accountActivities: [...s.accountActivities, ...toAdd] }))
+    set(s => {
+      const addedIds = new Set(toAdd.map(a => a.id))
+      return {
+        accountActivities: [...s.accountActivities, ...toAdd],
+        deletedActivityIds: s.deletedActivityIds.filter(id => !addedIds.has(id)),
+      }
+    })
     saveSnapshot(get())
     toAdd.forEach(syncActivity)
   },
 
   deleteActivity: (id) => {
-    set(s => ({ accountActivities: s.accountActivities.filter(a => a.id !== id) }))
+    set(s => ({
+      accountActivities: s.accountActivities.filter(a => a.id !== id),
+      deletedActivityIds: [...new Set([...s.deletedActivityIds, id])].slice(-1000),
+    }))
     saveSnapshot(get())
     cloudDeleteActivity(id)
   },
@@ -539,7 +612,10 @@ export const useTradeStore = create((set, get) => ({
       const uid = await getUid()
       if (uid) await supabase.from('account_activities').delete().eq('user_id', uid)
     }
-    set({ accountActivities: [] })
+    set(s => ({
+      accountActivities: [],
+      deletedActivityIds: [...new Set([...s.deletedActivityIds, ...s.accountActivities.map(a => a.id)])].slice(-1000),
+    }))
     saveSnapshot(get())
   },
 

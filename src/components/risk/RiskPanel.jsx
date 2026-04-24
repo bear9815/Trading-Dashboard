@@ -410,11 +410,14 @@ function ClosePositionModal({ position, onClose, onConfirm }) {
       commission: comm,
     }
     onConfirm({
-      status: autoStatus,
-      pl,
-      sellAmount: gross != null ? gross - comm : null,
+      // Keep the fill as the source of truth. enrichTrade() recalculates
+      // partial/full-close status, P&L, sell amount, and R from every exit.
+      status: 'Open',
+      pl: null,
+      sellAmount: null,
       exits: [...(position.exits || []), exitRecord],
-      rMultiple: rMultiple != null ? parseFloat(rMultiple.toFixed(2)) : position.rMultiple,
+      rMultiple: null,
+      _originalPositionSize: position._originalPositionSize ?? position.positionSize,
       screenshotExit: screenshot || position.screenshotExit || null,
     })
     onClose()

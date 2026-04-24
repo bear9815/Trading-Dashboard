@@ -343,20 +343,31 @@ export default function ManualEntryForm({ onClose }) {
       const orig = trades.find(t => t.id === selectedOpenId)
       if (!orig) { alert('Could not find the original trade.'); return }
 
-      const origShares = orig.positionSize || ps || 0
+      const alreadyExited = (orig.exits || []).reduce((s, ex) => {
+        const shares = ex.shares != null
+          ? Math.abs(ex.shares)
+          : (ex.amount != null && ex.price ? Math.round(Math.abs(ex.amount) / Math.abs(ex.price)) : 0)
+        return s + shares
+      }, 0)
+      const origShares = orig._originalPositionSize
+        ?? (orig.exits?.length ? (orig.positionSize || 0) + alreadyExited : (orig.positionSize || ps || 0))
+      const remainingBefore = orig.remainingShares ?? Math.max(0, origShares - alreadyExited)
       const exitedNow  = exitRecords.reduce((s, ex) => s + (ex.shares || 0), 0)
       const allExits   = [...(orig.exits || []), ...exitRecords]
-      const remaining  = Math.max(0, origShares - exitedNow)
+      const remaining  = Math.max(0, remainingBefore - exitedNow)
       const isFullClose = remaining <= 0.001
 
       const origEntryPrice = orig.entryPrice || ep || 0
-      const origBuyAmount  = orig.buyAmount  || (origEntryPrice * origShares)
+      const origBuyAmount  = orig._originalBuyAmount
+        ?? (!orig.exits?.length ? orig.buyAmount : null)
+        ?? (origEntryPrice * origShares)
+      const isShort = (orig.position || form.position || '').toLowerCase().includes('short')
 
       if (isFullClose) {
         // Full close — compute total P&L across ALL exit fills (original + this batch)
         const allGross  = allExits.reduce((s, e) => s + (e.amount || (e.price || 0) * (e.shares || 0)), 0)
         const allComm   = allExits.reduce((s, e) => s + (e.commission || 0), 0)
-        const totalPL   = allGross - allComm - origBuyAmount
+        const totalPL   = isShort ? origBuyAmount - allGross - allComm : allGross - allComm - origBuyAmount
 
         const origSL      = orig.stopLoss ?? sl
         const riskPerSh   = (origEntryPrice && origSL) ? Math.abs(origEntryPrice - origSL) : 0
@@ -374,6 +385,8 @@ export default function ManualEntryForm({ onClose }) {
           sellAmount: allGross - allComm,
           exits:     allExits,
           rMultiple,
+          _originalPositionSize: orig._originalPositionSize ?? origShares,
+          _originalBuyAmount:    orig._originalBuyAmount ?? origBuyAmount,
           screenshotExit:        form.screenshotExit || orig.screenshotExit || null,
           screenshotsAdditional: form.screenshotsAdditional.length > 0
             ? form.screenshotsAdditional
@@ -389,6 +402,7 @@ export default function ManualEntryForm({ onClose }) {
         updateTrade(selectedOpenId, {
           positionSize: remaining,
           _originalPositionSize: orig._originalPositionSize ?? origShares,
+          _originalBuyAmount:    orig._originalBuyAmount ?? origBuyAmount,
           buyAmount:    proportionalBuy,
           exits:        allExits,
           screenshotExit:        form.screenshotExit || orig.screenshotExit || null,
