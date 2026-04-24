@@ -180,8 +180,8 @@ function StrengthIndicator({ symbol, entryPrice }) {
       const prevClose = q.price - q.change
       if (prevClose <= 0) { setData(null); setLoading(false); return }
       const pct  = ((ep - prevClose) / prevClose) * 100
-      const atrs = atr?.atr14 ? (ep - prevClose) / atr.atr14 : null
-      setData({ prevClose, atr14: atr?.atr14, pct, atrs })
+      const atrs = atr?.atr ? (ep - prevClose) / atr.atr : null
+      setData({ prevClose, atr14: atr?.atr, pct, atrs })
     } catch (e) {
       setErr(e.message || 'Fetch failed')
     } finally {
@@ -349,8 +349,8 @@ export default function ManualEntryForm({ onClose }) {
     setAtrError(null)
     try {
       const res = await fetchATR14(sym)
-      if (!res?.atr14) throw new Error('ATR unavailable')
-      setForm(f => ({ ...f, atrValue: formatPlanPrice(res.atr14) }))
+      if (!res?.atr) throw new Error('ATR unavailable')
+      setForm(f => ({ ...f, atrValue: formatPlanPrice(res.atr) }))
     } catch (err) {
       setAtrError(err?.message || 'ATR fetch failed')
     } finally {
@@ -725,7 +725,7 @@ export default function ManualEntryForm({ onClose }) {
           ['Entry Price',            'entryPrice',  '0.00'],
           ['Stop Loss',              'stopLoss',    '0.00'],
           ['Take Profit',            'takeProfit',  '0.00'],
-          ['Position Size (shares)', 'positionSize', '100'],
+          ['Position Size',          'positionSize', '100'],
         ].map(([label, key, ph]) => (
           <div key={key}>
             <label className="label">{label}</label>

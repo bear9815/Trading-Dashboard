@@ -78,8 +78,8 @@ export default function QuickAddTrade() {
     setAtrError(null)
     try {
       const res = await fetchATR14(sym)
-      if (!res?.atr14) throw new Error('ATR unavailable')
-      setForm(f => ({ ...f, atrValue: formatPlanPrice(res.atr14) }))
+      if (!res?.atr) throw new Error('ATR unavailable')
+      setForm(f => ({ ...f, atrValue: formatPlanPrice(res.atr) }))
     } catch (err) {
       setAtrError(err?.message || 'ATR fetch failed')
     } finally {
