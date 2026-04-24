@@ -411,19 +411,22 @@ export default function ImportModal({ onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="bg-surface-100 border border-white/10 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+      <div className="bg-[#121a2a] border border-white/10 rounded-[28px] w-full max-w-4xl max-h-[92vh] overflow-y-auto shadow-2xl shadow-black/50">
 
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-          <h2 className="text-base font-semibold text-white">Import Trades</h2>
+        <div className="flex items-center justify-between px-7 py-5 border-b border-white/10 bg-gradient-to-r from-white/[0.06] to-transparent">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.32em] text-accent-blue mb-1">Trading Journal</p>
+            <h2 className="text-lg font-semibold text-white">Import Trades</h2>
+          </div>
           <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
             <X size={18} />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 px-6 py-3 border-b border-white/5">
+        <div className="flex gap-2 px-7 py-4 border-b border-white/5 bg-black/10">
           {[
             ['file',    'Import File'],
             ['manual',  'Manual Entry'],
@@ -432,15 +435,15 @@ export default function ImportModal({ onClose }) {
             <button
               key={id}
               onClick={() => setTab(id)}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all
-                ${tab === id ? 'bg-accent-blue text-white' : 'text-gray-400 hover:text-white'}`}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition-all
+                ${tab === id ? 'bg-accent-blue text-white shadow-lg shadow-accent-blue/20' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
             >
               {label}
             </button>
           ))}
         </div>
 
-        <div className="p-6">
+        <div className="p-7">
           {tab === 'manual' && <ManualEntryForm onClose={onClose} />}
           {tab === 'history' && <ImportHistory onClose={onClose} />}
           {tab === 'file' && (

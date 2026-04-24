@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
-import { Plus, Trash2, X, ImageIcon, TrendingUp, TrendingDown, Loader2, Clipboard } from 'lucide-react'
+import { Plus, Trash2, X, ImageIcon, TrendingUp, TrendingDown, Loader2, Clipboard, RefreshCw } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { formatCurrency } from '../../utils/formatters.js'
@@ -238,13 +238,25 @@ export default function ManualEntryForm({ onClose }) {
   const [selectedOpenId, setSelectedOpenId] = useState('')
   const [atrLoading, setAtrLoading]       = useState(false)
   const [atrError, setAtrError]           = useState(null)
+  const atrAutoFetchKey = useRef('')
   const stopUserEdited = useRef(false)
   const tpUserEdited = useRef(false)
 
   const set = (k, v) => {
     if (k === 'stopLoss') stopUserEdited.current = true
     if (k === 'takeProfit') tpUserEdited.current = true
-    if (k === 'symbol') setAtrError(null)
+    if (k === 'symbol') {
+      setAtrError(null)
+      atrAutoFetchKey.current = ''
+      setForm(f => ({
+        ...f,
+        symbol: String(v || '').toUpperCase(),
+        atrValue: '',
+        stopLoss: stopUserEdited.current ? f.stopLoss : '',
+        takeProfit: tpUserEdited.current ? f.takeProfit : '',
+      }))
+      return
+    }
     setForm(f => ({ ...f, [k]: v }))
   }
 
@@ -270,6 +282,18 @@ export default function ManualEntryForm({ onClose }) {
       takeProfit: tpUserEdited.current ? f.takeProfit : formatPlanPrice(plan.takeProfit),
     }))
   }, [form.entryPrice, form.atrValue, form.position, tpMultiplier])
+
+  // Fetch ATR automatically from the ticker so entry stop/target can populate.
+  useEffect(() => {
+    if (selectedOpenId) return
+    const sym = form.symbol.trim().toUpperCase()
+    if (sym.length < 1 || atrAutoFetchKey.current === sym) return
+    const timer = setTimeout(() => {
+      atrAutoFetchKey.current = sym
+      fetchAtrForEntry()
+    }, 450)
+    return () => clearTimeout(timer)
+  }, [form.symbol, selectedOpenId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fallback: if no ATR is supplied, still infer TP from a manually-entered stop.
   useEffect(() => {
@@ -540,19 +564,27 @@ export default function ManualEntryForm({ onClose }) {
     }
   }
 
+  const entryPlan = calcAtrTradePlan({
+    entryPrice: form.entryPrice,
+    atrValue: form.atrValue,
+    position: form.position,
+    targetMultiple: tpMultiplier,
+  })
+  const planReady = !!entryPlan && parseFloat(form.entryPrice) > 0
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
 
       {/* ── Close Open Position selector ─────────────────────────────────── */}
       {openTrades.length > 0 && (
-        <div className={`rounded-lg border p-3 transition-colors ${
+        <div className={`rounded-2xl border px-4 py-3 transition-colors ${
           selectedOpenId
-            ? 'border-accent-blue/30 bg-accent-blue/5'
-            : 'border-white/10 bg-surface-200/50'
+            ? 'border-accent-blue/40 bg-accent-blue/10 shadow-lg shadow-accent-blue/5'
+            : 'border-white/10 bg-white/[0.03]'
         }`}>
-          <label className="label text-accent-blue mb-2">Closing an open position?</label>
+          <label className="text-[10px] uppercase tracking-[0.28em] text-accent-blue mb-2 block">Closing an open position?</label>
           <select
-            className="input text-sm cursor-pointer"
+            className="input text-sm cursor-pointer rounded-xl bg-surface-200/80"
             value={selectedOpenId}
             onChange={e => prefillFromOpen(e.target.value)}
           >
@@ -574,15 +606,29 @@ export default function ManualEntryForm({ onClose }) {
       )}
 
       {/* ── Row 1: Symbol / Account ──────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-white/[0.07] via-white/[0.025] to-accent-blue/[0.04] p-5 shadow-2xl shadow-black/20">
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.34em] text-accent-blue mb-1">Manual Ticket</p>
+            <h3 className="text-lg font-semibold text-white">Plan the trade before the emotion gets a vote.</h3>
+          </div>
+          <div className={`hidden sm:block text-right text-[11px] rounded-2xl border px-3 py-2 ${
+            planReady ? 'border-accent-green/25 bg-accent-green/10 text-accent-green' : 'border-white/10 bg-black/10 text-gray-500'
+          }`}>
+            <p className="uppercase tracking-[0.18em] text-[9px] opacity-70">ATR Plan</p>
+            <p className="mono font-semibold">{planReady ? 'Ready' : atrLoading ? 'Calculating' : 'Waiting'}</p>
+          </div>
+        </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr] gap-4">
         <div>
           <label className="label">Symbol</label>
           <input
             type="text"
-            className="input text-sm"
+            className="input text-base h-12 rounded-2xl bg-surface-200/70 border-white/10 uppercase font-semibold tracking-wide"
             placeholder="AAPL"
             value={form.symbol}
-            onChange={e => set('symbol', e.target.value)}
+            onChange={e => set('symbol', e.target.value.toUpperCase())}
           />
         </div>
 
@@ -591,7 +637,7 @@ export default function ManualEntryForm({ onClose }) {
           {accountOptions.length > 0 ? (
             <>
               <select
-                className="input text-sm cursor-pointer"
+                className="input text-sm cursor-pointer h-12 rounded-2xl bg-surface-200/70 border-white/10"
                 value={accountOptions.includes(form.account) ? form.account : (form.account ? '__custom__' : '')}
                 onChange={e => {
                   if (e.target.value === '__custom__') { set('account', customAccount) }
@@ -603,21 +649,22 @@ export default function ManualEntryForm({ onClose }) {
                 <option value="__custom__">Other…</option>
               </select>
               {!accountOptions.includes(form.account) && form.account && (
-                <input type="text" className="input text-sm mt-1" placeholder="Account name" value={customAccount}
+                <input type="text" className="input text-sm mt-2 rounded-2xl bg-surface-200/70 border-white/10" placeholder="Account name" value={customAccount}
                   onChange={e => { setCustomAccount(e.target.value); set('account', e.target.value) }} />
               )}
             </>
           ) : (
-            <input type="text" className="input text-sm" placeholder="Schwab" value={form.account} onChange={e => set('account', e.target.value)} />
+            <input type="text" className="input text-sm h-12 rounded-2xl bg-surface-200/70 border-white/10" placeholder="Schwab" value={form.account} onChange={e => set('account', e.target.value)} />
           )}
         </div>
       </div>
+      </div>
 
       {/* ── Edges multi-select ──────────────────────────────────────────────── */}
-      <div>
-        <label className="label">Edges Present at Entry</label>
+      <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
+        <label className="text-[10px] uppercase tracking-[0.28em] text-gray-400">Edges Present at Entry</label>
         {edges.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5 mt-1.5">
+          <div className="flex flex-wrap gap-2 mt-3">
             {edges.map(edge => {
               const selected = form.edges.includes(edge)
               return (
@@ -625,10 +672,10 @@ export default function ManualEntryForm({ onClose }) {
                   key={edge}
                   type="button"
                   onClick={() => set('edges', selected ? form.edges.filter(x => x !== edge) : [...form.edges, edge])}
-                  className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
+                  className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
                     selected
-                      ? 'bg-accent-blue/20 text-accent-blue border-accent-blue/40 font-medium'
-                      : 'text-gray-500 border-gray-700 hover:border-gray-500 hover:text-gray-300'
+                      ? 'bg-accent-blue/20 text-accent-blue border-accent-blue/40 font-medium shadow-sm shadow-accent-blue/10'
+                      : 'text-gray-500 border-white/10 bg-black/10 hover:border-gray-500 hover:text-gray-300'
                   }`}
                 >
                   {edge}
@@ -647,36 +694,35 @@ export default function ManualEntryForm({ onClose }) {
       </div>
 
       {/* ── Row 2: Market / Position / Status / Entry Date ──────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-2xl border border-white/10 bg-white/[0.025] p-4">
         <div>
           <label className="label">Market</label>
-          <select value={form.market} onChange={e => set('market', e.target.value)} className="input text-sm cursor-pointer">
+          <select value={form.market} onChange={e => set('market', e.target.value)} className="input text-sm cursor-pointer rounded-xl bg-surface-200/70">
             {['Stock', 'Options', 'Futures', 'Forex', 'Crypto'].map(o => <option key={o}>{o}</option>)}
           </select>
         </div>
         <div>
           <label className="label">Position</label>
-          <select value={form.position} onChange={e => set('position', e.target.value)} className="input text-sm cursor-pointer">
+          <select value={form.position} onChange={e => set('position', e.target.value)} className="input text-sm cursor-pointer rounded-xl bg-surface-200/70">
             <option>Long</option><option>Short</option>
           </select>
         </div>
         <div>
           <label className="label">Status</label>
-          <select value={form.status} onChange={e => set('status', e.target.value)} className="input text-sm cursor-pointer">
+          <select value={form.status} onChange={e => set('status', e.target.value)} className="input text-sm cursor-pointer rounded-xl bg-surface-200/70">
             {['Open', 'Win', 'Loss', 'Scratch'].map(o => <option key={o}>{o}</option>)}
           </select>
         </div>
         <div>
           <label className="label">Entry Date</label>
-          <input type="datetime-local" className="input text-sm" value={form.entryDate} onChange={e => set('entryDate', e.target.value)} />
+          <input type="datetime-local" className="input text-sm rounded-xl bg-surface-200/70" value={form.entryDate} onChange={e => set('entryDate', e.target.value)} />
         </div>
       </div>
 
       {/* ── Numeric fields ────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-2xl border border-white/10 bg-white/[0.025] p-4">
         {[
           ['Entry Price',            'entryPrice',  '0.00'],
-          ['ATR at Entry',           'atrValue',    '1.85'],
           ['Stop Loss',              'stopLoss',    '0.00'],
           ['Take Profit',            'takeProfit',  '0.00'],
           ['Position Size (shares)', 'positionSize', '100'],
@@ -684,7 +730,7 @@ export default function ManualEntryForm({ onClose }) {
           <div key={key}>
             <label className="label">{label}</label>
             <input
-              type="number" step="any" className="input text-sm"
+              type="number" step="any" className="input text-sm rounded-xl bg-surface-200/70"
               placeholder={ph} value={form[key]}
               onChange={e => {
                 if (key === 'takeProfit') tpUserEdited.current = true
@@ -695,27 +741,40 @@ export default function ManualEntryForm({ onClose }) {
         ))}
       </div>
 
-      {/* TP auto-fill hint */}
+      {/* ATR plan card */}
       {(form.symbol || form.entryPrice || form.atrValue) && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 -mt-2">
-          <button
-            type="button"
-            onClick={fetchAtrForEntry}
-            disabled={atrLoading || !form.symbol.trim()}
-            className="text-[11px] text-gray-500 hover:text-accent-blue transition-colors underline underline-offset-2 disabled:no-underline disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-          >
-            {atrLoading ? <Loader2 size={10} className="animate-spin" /> : null}
-            {atrLoading ? 'Fetching ATR...' : 'Fetch ATR'}
-          </button>
-          {atrError && <span className="text-[11px] text-accent-red">{atrError}</span>}
+        <div className="rounded-2xl border border-accent-blue/20 bg-gradient-to-r from-accent-blue/10 via-white/[0.03] to-accent-green/10 p-4">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.28em] text-accent-blue">Automated ATR Plan</p>
+              <p className="text-xs text-gray-500 mt-1">ATR is fetched from market data. Stop = 1 ATR, target = {tpMultiplier}x ATR.</p>
+            </div>
+            <button
+              type="button"
+              onClick={fetchAtrForEntry}
+              disabled={atrLoading || !form.symbol.trim()}
+              className="text-[11px] text-gray-400 hover:text-accent-blue border border-white/10 hover:border-accent-blue/30 rounded-full px-3 py-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              {atrLoading ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
+              {atrLoading ? 'Calculating...' : 'Refresh ATR'}
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              ['ATR', form.atrValue ? `$${form.atrValue}` : atrLoading ? '...' : 'Pending', atrError ? 'text-accent-red' : form.atrValue ? 'text-white' : 'text-gray-600'],
+              ['Stop', form.stopLoss ? `$${form.stopLoss}` : '—', form.stopLoss ? 'text-accent-red' : 'text-gray-600'],
+              ['Target', form.takeProfit ? `$${form.takeProfit}` : '—', form.takeProfit ? 'text-accent-green' : 'text-gray-600'],
+            ].map(([label, value, cls]) => (
+              <div key={label} className="rounded-xl border border-white/10 bg-black/15 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-[0.18em] text-gray-500">{label}</p>
+                <p className={`mono text-sm font-semibold mt-1 ${cls}`}>{value}</p>
+              </div>
+            ))}
+          </div>
+          {atrError && <p className="text-[11px] text-accent-red mt-2">{atrError}</p>}
           {form.takeProfit && form.entryPrice && form.atrValue && (!stopUserEdited.current || !tpUserEdited.current) && (
-            <p className="text-[11px] text-accent-blue/70">
-              ATR plan auto-fills 1 ATR stop and {tpMultiplier}x ATR target. Edit either field to override.
-            </p>
-          )}
-          {form.takeProfit && form.entryPrice && form.stopLoss && !form.atrValue && !tpUserEdited.current && (
-            <p className="text-[11px] text-accent-blue/70">
-              Take Profit auto-filled at {tpMultiplier}x risk. Edit to override.
+            <p className="text-[11px] text-accent-blue/80 mt-2">
+              Plan auto-filled from ATR. Edit stop or target only if you intentionally override the system plan.
             </p>
           )}
         </div>
@@ -725,10 +784,10 @@ export default function ManualEntryForm({ onClose }) {
       <StrengthIndicator symbol={form.symbol} entryPrice={form.entryPrice} />
 
       {/* ── Exits ─────────────────────────────────────────────────────────── */}
-      <div>
+      <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
         <div className="flex items-center justify-between mb-2">
-          <label className="label">Exit Fills</label>
-          <button type="button" onClick={addExit} className="btn-ghost text-xs flex items-center gap-1">
+          <label className="text-[10px] uppercase tracking-[0.28em] text-gray-400">Exit Fills</label>
+          <button type="button" onClick={addExit} className="text-xs flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-gray-300 hover:text-white hover:border-accent-blue/30 transition-colors">
             <Plus size={12} /> Add Exit
           </button>
         </div>
@@ -740,25 +799,25 @@ export default function ManualEntryForm({ onClose }) {
         ) : (
           <div className="space-y-2">
             {exits.map((ex, i) => (
-              <div key={i} className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end bg-surface-200 border border-white/5 rounded-lg px-3 py-2.5">
+              <div key={i} className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end bg-black/15 border border-white/10 rounded-2xl px-3 py-2.5">
                 <div>
                   <label className="label text-[10px]">Date / Time</label>
-                  <input type="datetime-local" className="input text-xs" value={ex.date}
+                  <input type="datetime-local" className="input text-xs rounded-xl bg-surface-200/70" value={ex.date}
                     onChange={e => updateExit(i, 'date', e.target.value)} />
                 </div>
                 <div>
                   <label className="label text-[10px]">Exit Price</label>
-                  <input type="number" step="any" className="input text-xs mono" placeholder="52.40" value={ex.price}
+                  <input type="number" step="any" className="input text-xs mono rounded-xl bg-surface-200/70" placeholder="52.40" value={ex.price}
                     onChange={e => updateExit(i, 'price', e.target.value)} />
                 </div>
                 <div>
                   <label className="label text-[10px]">Shares</label>
-                  <input type="number" step="any" className="input text-xs mono" placeholder="100" value={ex.shares}
+                  <input type="number" step="any" className="input text-xs mono rounded-xl bg-surface-200/70" placeholder="100" value={ex.shares}
                     onChange={e => updateExit(i, 'shares', e.target.value)} />
                 </div>
                 <div>
                   <label className="label text-[10px]">Commission</label>
-                  <input type="number" step="any" className="input text-xs mono" placeholder="0" value={ex.commission}
+                  <input type="number" step="any" className="input text-xs mono rounded-xl bg-surface-200/70" placeholder="0" value={ex.commission}
                     onChange={e => updateExit(i, 'commission', e.target.value)} />
                 </div>
                 <div className="flex justify-end pb-0.5">
@@ -797,8 +856,8 @@ export default function ManualEntryForm({ onClose }) {
       </div>
 
       {/* ── Process Grade ─────────────────────────────────────────────────── */}
-      <div>
-        <label className="label">Process Grade — Did you follow your plan?</label>
+      <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
+        <label className="text-[10px] uppercase tracking-[0.28em] text-gray-400">Process Grade — Did you follow your plan?</label>
         <div className="flex gap-2 mt-1">
           {[
             { v: 1, label: 'F', desc: 'Broke rules',      color: 'text-accent-red'    },
@@ -814,8 +873,8 @@ export default function ManualEntryForm({ onClose }) {
               onClick={() => set('processGrade', form.processGrade === g.v ? null : g.v)}
               className={`flex-1 py-2 rounded border text-sm font-bold transition-all ${
                 form.processGrade === g.v
-                  ? `${g.color} border-current bg-white/5`
-                  : 'text-gray-600 border-gray-700 hover:border-gray-500 hover:text-gray-400'
+                  ? `${g.color} border-current bg-white/10 shadow-lg shadow-black/10`
+                  : 'text-gray-600 border-white/10 bg-black/10 hover:border-gray-500 hover:text-gray-400'
               }`}
             >
               {g.label}
@@ -830,8 +889,8 @@ export default function ManualEntryForm({ onClose }) {
       </div>
 
       {/* ── Trade Screenshots ─────────────────────────────────────────────── */}
-      <div>
-        <label className="label">Trade Screenshots</label>
+      <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
+        <label className="text-[10px] uppercase tracking-[0.28em] text-gray-400">Trade Screenshots</label>
         <div className="grid grid-cols-2 gap-3 mt-1">
           <ScreenshotUploader
             label="Entry Chart"
@@ -905,20 +964,20 @@ export default function ManualEntryForm({ onClose }) {
       </div>
 
       {/* ── Notes ─────────────────────────────────────────────────────────── */}
-      <div>
+      <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
         <label className="label">Lessons / Insights</label>
-        <textarea className="input min-h-[60px] resize-y text-sm" value={form.lessons} onChange={e => set('lessons', e.target.value)} placeholder="What did you learn from this trade?" />
+        <textarea className="input min-h-[80px] resize-y text-sm rounded-2xl bg-surface-200/70" value={form.lessons} onChange={e => set('lessons', e.target.value)} placeholder="What did you learn from this trade?" />
       </div>
-      <div>
+      <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
         <label className="label">Exit Notes</label>
-        <textarea className="input min-h-[50px] resize-y text-sm" value={form.exitNotes} onChange={e => set('exitNotes', e.target.value)} placeholder="Why did you exit?" />
+        <textarea className="input min-h-[70px] resize-y text-sm rounded-2xl bg-surface-200/70" value={form.exitNotes} onChange={e => set('exitNotes', e.target.value)} placeholder="Why did you exit?" />
       </div>
 
-      <div className="flex gap-2 pt-2">
-        <button type="button" onClick={handleSave} className="btn-primary">
+      <div className="sticky bottom-0 flex gap-2 pt-3 pb-1 bg-gradient-to-t from-[#121a2a] via-[#121a2a]/95 to-transparent">
+        <button type="button" onClick={handleSave} className="btn-primary rounded-xl px-5">
           {selectedOpenId ? 'Save Close' : 'Add Trade'}
         </button>
-        <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+        <button type="button" onClick={onClose} className="btn-ghost rounded-xl">Cancel</button>
       </div>
     </div>
   )

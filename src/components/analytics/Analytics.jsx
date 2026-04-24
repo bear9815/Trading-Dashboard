@@ -251,6 +251,116 @@ function buildRealtimeTrade(trade, quote, nowIso) {
   }
 }
 
+function percentile(sorted, p) {
+  if (!sorted.length) return null
+  const idx = (sorted.length - 1) * p
+  const lo = Math.floor(idx)
+  const hi = Math.ceil(idx)
+  if (lo === hi) return sorted[lo]
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo)
+}
+
+function mulberry32(seed) {
+  return function rand() {
+    let t = seed += 0x6D2B79F5
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function maxDrawdownPctFromEquity(points) {
+  let peak = points[0] || 1
+  let maxDD = 0
+  for (const value of points) {
+    if (value > peak) peak = value
+    if (peak > 0) maxDD = Math.max(maxDD, ((peak - value) / peak) * 100)
+  }
+  return maxDD
+}
+
+function simulateLongGame({ rValues, startEquity, riskPct, tradesPerMonth, years, runs = 1200 }) {
+  const cleanR = rValues.filter(v => Number.isFinite(v))
+  const totalTrades = Math.max(1, Math.round(tradesPerMonth * 12 * years))
+  const annualTrades = Math.max(1, Math.round(tradesPerMonth * 12))
+  if (!cleanR.length || startEquity <= 0 || riskPct <= 0 || totalTrades <= 0) return null
+
+  const runSummaries = []
+  const byYear = Array.from({ length: years }, () => [])
+  const rng = mulberry32(912241 + cleanR.length * 17 + Math.round(riskPct * 100))
+
+  for (let run = 0; run < runs; run++) {
+    let equity = startEquity
+    const path = [equity]
+    let losingYears = 0
+    let yearStart = equity
+
+    for (let i = 1; i <= totalTrades; i++) {
+      const sampledR = cleanR[Math.floor(rng() * cleanR.length)]
+      const tradeReturn = sampledR * (riskPct / 100)
+      equity = Math.max(0, equity * (1 + tradeReturn))
+      path.push(equity)
+
+      if (i % annualTrades === 0 || i === totalTrades) {
+        const yearIdx = Math.min(years - 1, Math.ceil(i / annualTrades) - 1)
+        byYear[yearIdx].push(equity)
+        if (equity < yearStart) losingYears++
+        yearStart = equity
+      }
+    }
+
+    runSummaries.push({
+      ending: equity,
+      returnPct: ((equity / startEquity) - 1) * 100,
+      maxDDPct: maxDrawdownPctFromEquity(path),
+      cagrPct: (Math.pow(equity / startEquity, 1 / years) - 1) * 100,
+      losingYears,
+    })
+  }
+
+  const pick = (field, p) => percentile(runSummaries.map(r => r[field]).sort((a, b) => a - b), p)
+  const yearBands = byYear.map((vals, idx) => {
+    const sorted = vals.sort((a, b) => a - b)
+    return {
+      year: `Y${idx + 1}`,
+      p10: Math.round(percentile(sorted, 0.10) || 0),
+      p50: Math.round(percentile(sorted, 0.50) || 0),
+      p90: Math.round(percentile(sorted, 0.90) || 0),
+    }
+  })
+
+  return {
+    totalTrades,
+    annualTrades,
+    runs,
+    ending: {
+      p10: pick('ending', 0.10),
+      p50: pick('ending', 0.50),
+      p90: pick('ending', 0.90),
+    },
+    returnPct: {
+      p10: pick('returnPct', 0.10),
+      p50: pick('returnPct', 0.50),
+      p90: pick('returnPct', 0.90),
+    },
+    cagrPct: {
+      p10: pick('cagrPct', 0.10),
+      p50: pick('cagrPct', 0.50),
+      p90: pick('cagrPct', 0.90),
+    },
+    maxDDPct: {
+      p50: pick('maxDDPct', 0.50),
+      p90: pick('maxDDPct', 0.90),
+    },
+    chanceProfit: runSummaries.filter(r => r.ending > startEquity).length / runs,
+    chanceDouble: runSummaries.filter(r => r.ending >= startEquity * 2).length / runs,
+    chanceLoseMoney: runSummaries.filter(r => r.ending < startEquity).length / runs,
+    chanceLargeDD: runSummaries.filter(r => r.maxDDPct >= 20).length / runs,
+    expectedLosingYears: runSummaries.reduce((s, r) => s + r.losingYears, 0) / runs,
+    yearBands,
+  }
+}
+
 
 export default function Analytics({ selectedAccount }) {
   const { trades, accountActivities, getAccountBalance } = useTradeStore()
@@ -303,6 +413,9 @@ export default function Analytics({ selectedAccount }) {
   // Drawdown Simulator state
   const [simLosses, setSimLosses] = useState(5)
   const [simRiskPct, setSimRiskPct] = useState(1)
+  const [projectionYears, setProjectionYears] = useState(5)
+  const [projectionRiskPct, setProjectionRiskPct] = useState(1)
+  const [projectionTradesPerMonth, setProjectionTradesPerMonth] = useState(12)
 
   const excludedSet = useMemo(
     () => new Set((excludedSymbols || []).map(s => s.toUpperCase())),
@@ -1137,6 +1250,33 @@ export default function Analytics({ selectedAccount }) {
     const wr = calcWinRate(closed) / 100
     return { avgLoss, wr }
   }, [closed])
+
+  const suggestedTradesPerMonth = useMemo(() => {
+    const dated = closedSorted
+      .map(t => getTradeResolutionDate(t))
+      .filter(Boolean)
+      .sort((a, b) => a - b)
+    if (dated.length < 2) return projectionTradesPerMonth
+    const days = Math.max(1, (dated[dated.length - 1] - dated[0]) / (1000 * 60 * 60 * 24))
+    return Math.max(1, Math.round((dated.length / days) * 30.44))
+  }, [closedSorted, projectionTradesPerMonth])
+
+  const projectionStartEquity = accountBalance > 0
+    ? accountBalance
+    : (timeframeCurve[timeframeCurve.length - 1]?.balance > 0 ? timeframeCurve[timeframeCurve.length - 1].balance : 100000)
+
+  const projectionRValues = useMemo(
+    () => closedSorted.map(t => t[rField]).filter(v => Number.isFinite(v)),
+    [closedSorted, rField]
+  )
+
+  const longGameProjection = useMemo(() => simulateLongGame({
+    rValues: projectionRValues,
+    startEquity: projectionStartEquity,
+    riskPct: projectionRiskPct,
+    tradesPerMonth: projectionTradesPerMonth,
+    years: projectionYears,
+  }), [projectionRValues, projectionStartEquity, projectionRiskPct, projectionTradesPerMonth, projectionYears])
 
   if (tfFiltered.length === 0) {
     return (
@@ -2709,6 +2849,214 @@ export default function Analytics({ selectedAccount }) {
           </>
         )
       })()}
+
+      {/* ── Long Game Projection ─────────────────────────────────────────── */}
+      <div className="card border border-accent-blue/15 bg-gradient-to-br from-accent-blue/5 via-transparent to-accent-green/5">
+        <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
+          <div>
+            <SectionTitle>
+              <span className="flex items-center gap-2">
+                <Brain size={14} className="text-accent-blue inline" />
+                Long Game Equity Projection
+              </span>
+            </SectionTitle>
+            <p className="text-xs text-gray-500 max-w-3xl">
+              A Monte Carlo model using your actual R-multiple distribution. It samples your historical wins and losses thousands of times, compounds by risk per trade, and shows ranges rather than one seductive fantasy number.
+            </p>
+          </div>
+          <span className={`text-[11px] px-2 py-1 rounded-full border ${
+            projectionRValues.length >= 40
+              ? 'text-accent-green border-accent-green/25 bg-accent-green/10'
+              : projectionRValues.length >= 20
+              ? 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10'
+              : 'text-accent-red border-accent-red/25 bg-accent-red/10'
+          }`}>
+            {projectionRValues.length} R-trade sample
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label">Years</label>
+              <span className="mono text-sm font-bold text-accent-blue">{projectionYears}</span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={10}
+              step={1}
+              value={projectionYears}
+              onChange={e => setProjectionYears(parseInt(e.target.value))}
+              className="w-full h-1 rounded-full appearance-none cursor-pointer bg-surface-300
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5
+                [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full
+                [&::-webkit-slider-thumb]:bg-accent-blue [&::-webkit-slider-thumb]:cursor-pointer"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label">Risk Per Trade</label>
+              <span className="mono text-sm font-bold text-accent-yellow">{projectionRiskPct}%</span>
+            </div>
+            <input
+              type="range"
+              min={0.25}
+              max={3}
+              step={0.25}
+              value={projectionRiskPct}
+              onChange={e => setProjectionRiskPct(parseFloat(e.target.value))}
+              className="w-full h-1 rounded-full appearance-none cursor-pointer bg-surface-300
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5
+                [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full
+                [&::-webkit-slider-thumb]:bg-accent-yellow [&::-webkit-slider-thumb]:cursor-pointer"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label">Trades / Month</label>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setProjectionTradesPerMonth(suggestedTradesPerMonth)}
+                  className="text-[10px] text-gray-500 hover:text-accent-blue underline underline-offset-2"
+                >
+                  use observed {suggestedTradesPerMonth}
+                </button>
+                <span className="mono text-sm font-bold text-accent-green">{projectionTradesPerMonth}</span>
+              </div>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={60}
+              step={1}
+              value={projectionTradesPerMonth}
+              onChange={e => setProjectionTradesPerMonth(parseInt(e.target.value))}
+              className="w-full h-1 rounded-full appearance-none cursor-pointer bg-surface-300
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5
+                [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full
+                [&::-webkit-slider-thumb]:bg-accent-green [&::-webkit-slider-thumb]:cursor-pointer"
+            />
+          </div>
+        </div>
+
+        {!longGameProjection ? (
+          <div className="rounded-lg bg-surface-200 px-4 py-6 text-xs text-gray-500 text-center">
+            Need trades with valid R-multiples to model the long game. The model becomes more useful after roughly 20-40 closed trades.
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+              <div className="card-sm text-center">
+                <p className="text-xs text-gray-500 mb-1">Likely Ending Equity</p>
+                <p className="text-lg font-bold mono text-white">{formatCurrency(longGameProjection.ending.p50)}</p>
+                <p className="text-[10px] text-gray-600 mt-0.5">middle outcome</p>
+              </div>
+              <div className="card-sm text-center">
+                <p className="text-xs text-gray-500 mb-1">Likely CAGR</p>
+                <p className={`text-lg font-bold mono ${longGameProjection.cagrPct.p50 >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                  {longGameProjection.cagrPct.p50 >= 0 ? '+' : ''}{longGameProjection.cagrPct.p50.toFixed(1)}%
+                </p>
+                <p className="text-[10px] text-gray-600 mt-0.5">annualized median</p>
+              </div>
+              <div className="card-sm text-center">
+                <p className="text-xs text-gray-500 mb-1">Bad-Run Drawdown</p>
+                <p className={`text-lg font-bold mono ${
+                  longGameProjection.maxDDPct.p90 > 30 ? 'text-accent-red'
+                  : longGameProjection.maxDDPct.p90 > 18 ? 'text-accent-yellow'
+                  : 'text-accent-green'
+                }`}>
+                  -{longGameProjection.maxDDPct.p90.toFixed(1)}%
+                </p>
+                <p className="text-[10px] text-gray-600 mt-0.5">90th percentile max DD</p>
+              </div>
+              <div className="card-sm text-center">
+                <p className="text-xs text-gray-500 mb-1">Chance Of Profit</p>
+                <p className={`text-lg font-bold mono ${longGameProjection.chanceProfit >= 0.65 ? 'text-accent-green' : longGameProjection.chanceProfit >= 0.5 ? 'text-accent-yellow' : 'text-accent-red'}`}>
+                  {(longGameProjection.chanceProfit * 100).toFixed(0)}%
+                </p>
+                <p className="text-[10px] text-gray-600 mt-0.5">{longGameProjection.runs.toLocaleString()} simulations</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+              <div className="lg:col-span-3">
+                <p className="text-xs text-gray-500 mb-2">Projected equity range by year</p>
+                <ResponsiveContainer width="100%" height={220}>
+                  <AreaChart data={longGameProjection.yearBands} margin={{ top: 8, right: 10, left: -6, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="projectionBand" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3d84ff" stopOpacity={0.26} />
+                        <stop offset="95%" stopColor="#3d84ff" stopOpacity={0.04} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                    <XAxis dataKey="year" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => formatCurrency(v, true)} width={72} />
+                    <Tooltip contentStyle={TT_STYLE} labelStyle={TT_LABEL_STYLE} itemStyle={TT_ITEM_STYLE}
+                      formatter={(v, name) => [formatCurrency(v), name === 'p10' ? 'Pessimistic p10' : name === 'p50' ? 'Median p50' : 'Optimistic p90']} />
+                    <Area type="monotone" dataKey="p90" stroke="none" fill="url(#projectionBand)" />
+                    <Area type="monotone" dataKey="p10" stroke="none" fill="#0f1117" fillOpacity={1} />
+                    <Line type="monotone" dataKey="p50" stroke="#00d084" strokeWidth={2} dot={{ r: 2 }} />
+                    <Line type="monotone" dataKey="p10" stroke="#ff4757" strokeWidth={1.2} strokeDasharray="4 4" dot={false} />
+                    <Line type="monotone" dataKey="p90" stroke="#3d84ff" strokeWidth={1.2} strokeDasharray="4 4" dot={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="lg:col-span-2 space-y-3">
+                <div className="rounded-lg bg-surface-200 border border-white/8 p-3">
+                  <p className="text-xs font-semibold text-gray-300 mb-2">Range After {projectionYears} Years</p>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-gray-500">Pessimistic p10</span>
+                      <span className="mono text-accent-red">{formatCurrency(longGameProjection.ending.p10)} ({longGameProjection.returnPct.p10 >= 0 ? '+' : ''}{longGameProjection.returnPct.p10.toFixed(0)}%)</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-gray-500">Median p50</span>
+                      <span className="mono text-gray-200">{formatCurrency(longGameProjection.ending.p50)} ({longGameProjection.returnPct.p50 >= 0 ? '+' : ''}{longGameProjection.returnPct.p50.toFixed(0)}%)</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-gray-500">Optimistic p90</span>
+                      <span className="mono text-accent-green">{formatCurrency(longGameProjection.ending.p90)} ({longGameProjection.returnPct.p90 >= 0 ? '+' : ''}{longGameProjection.returnPct.p90.toFixed(0)}%)</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-surface-200 border border-white/8 p-3">
+                  <p className="text-xs font-semibold text-gray-300 mb-2">Reality Checks</p>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-gray-500">Chance of losing money</span>
+                      <span className={`mono ${longGameProjection.chanceLoseMoney > 0.25 ? 'text-accent-yellow' : 'text-gray-300'}`}>{(longGameProjection.chanceLoseMoney * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-gray-500">Chance of doubling</span>
+                      <span className="mono text-gray-300">{(longGameProjection.chanceDouble * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-gray-500">Chance of 20%+ drawdown</span>
+                      <span className={`mono ${longGameProjection.chanceLargeDD > 0.3 ? 'text-accent-red' : longGameProjection.chanceLargeDD > 0.1 ? 'text-accent-yellow' : 'text-gray-300'}`}>{(longGameProjection.chanceLargeDD * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-gray-500">Avg losing years</span>
+                      <span className="mono text-gray-300">{longGameProjection.expectedLosingYears.toFixed(1)} / {projectionYears}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-lg border border-accent-yellow/20 bg-accent-yellow/5 px-4 py-3">
+              <p className="text-xs font-semibold text-accent-yellow mb-1">Expectation reset</p>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                This is not a promise. It assumes your edge, trade frequency, execution quality, and risk discipline stay similar. The useful part is the shape: good systems still have losing years, ugly drawdowns, and long flat stretches. The job is not to get rich overnight; it is to keep risk small enough that your edge gets thousands of chances to express itself.
+              </p>
+            </div>
+          </>
+        )}
+      </div>
 
       {/* ── Drawdown Simulator ───────────────────────────────────────────── */}
       <div className="card">
