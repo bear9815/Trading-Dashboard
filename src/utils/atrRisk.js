@@ -1,4 +1,5 @@
 export const ATR_RISK_TIERS = [0.25, 0.5, 0.75, 1]
+export const ATR_RULE_ENFORCEMENT_DATE = '2026-04-24'
 
 const DEFAULT_TARGET_MULTIPLE = 2
 const STOP_TOLERANCE_ATR = 0.15
@@ -24,6 +25,7 @@ const DERIVED_ATR_KEYS = [
   'positionSizeVariancePct',
   'atrValidationFlags',
   'atrSizingStatus',
+  'atrValidationEnforced',
   'hasAtrRiskModel',
 ]
 
@@ -61,6 +63,12 @@ function getAccountEquity(trade, fallback) {
     ?? null
 }
 
+function isAtrRuleEnforced(trade, cutoff = ATR_RULE_ENFORCEMENT_DATE) {
+  const entryDate = new Date(trade?.entryDate)
+  if (Number.isNaN(entryDate.getTime())) return true
+  return entryDate >= new Date(`${cutoff}T00:00:00`)
+}
+
 export function deriveAtrRiskFields(trade, options = {}) {
   if (!trade) return trade
 
@@ -80,6 +88,7 @@ export function deriveAtrRiskFields(trade, options = {}) {
 
   const result = { ...trade }
   DERIVED_ATR_KEYS.forEach(key => { delete result[key] })
+  const enforceValidation = options.enforceValidation ?? isAtrRuleEnforced(trade, options.enforcementDate)
   const flags = []
 
   if (atr == null || atr <= 0) flags.push('missing_atr')
@@ -113,7 +122,7 @@ export function deriveAtrRiskFields(trade, options = {}) {
     result.atrStopDistance = round(stopDistance, 4)
     result.atrStopMultiple = round(stopMultiple, 3)
     result.stopEfficiency = result.atrStopMultiple
-    if (Math.abs(stopMultiple - 1) > STOP_TOLERANCE_ATR) {
+    if (enforceValidation && Math.abs(stopMultiple - 1) > STOP_TOLERANCE_ATR) {
       flags.push('stop_not_1atr')
     }
   }
@@ -123,7 +132,7 @@ export function deriveAtrRiskFields(trade, options = {}) {
     const targetMult = targetDistance / atr
     result.atrTargetDistance = round(targetDistance, 4)
     result.atrTargetMultiple = round(targetMult, 3)
-    if (Math.abs(targetMult - targetMultiple) > TARGET_TOLERANCE_ATR) {
+    if (enforceValidation && Math.abs(targetMult - targetMultiple) > TARGET_TOLERANCE_ATR) {
       flags.push('target_not_2atr')
     }
   }
@@ -152,19 +161,23 @@ export function deriveAtrRiskFields(trade, options = {}) {
     const variance = pctDiff(size, expectedPositionSize)
     result.expectedPositionSize = round(expectedPositionSize, 2)
     result.positionSizeVariancePct = round(variance, 1)
-    if (variance != null && Math.abs(variance) > SIZE_TOLERANCE_PCT) {
+    if (enforceValidation && variance != null && Math.abs(variance) > SIZE_TOLERANCE_PCT) {
       flags.push(variance > 0 ? 'position_oversized' : 'position_undersized')
     }
   }
 
-  if (atrRiskPctOfAccount != null && nearestTier != null && Math.abs(atrRiskPctOfAccount - nearestTier) > 0.08) {
+  if (enforceValidation && atrRiskPctOfAccount != null && nearestTier != null && Math.abs(atrRiskPctOfAccount - nearestTier) > 0.08) {
     flags.push('risk_tier_mismatch')
   }
 
-  result.atrValidationFlags = [...new Set(flags)]
-  result.atrSizingStatus = flags.length === 0
-    ? 'ok'
-    : flags.some(f => f.startsWith('missing_')) ? 'missing_data' : 'review'
+  const validationFlags = enforceValidation ? [...new Set(flags)] : []
+  result.atrValidationFlags = validationFlags
+  result.atrSizingStatus = enforceValidation
+    ? (validationFlags.length === 0
+        ? 'ok'
+        : validationFlags.some(f => f.startsWith('missing_')) ? 'missing_data' : 'review')
+    : 'legacy'
+  result.atrValidationEnforced = enforceValidation
   result.hasAtrRiskModel = atr != null && atr > 0
 
   return result
