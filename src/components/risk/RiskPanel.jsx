@@ -13,17 +13,39 @@ import OpenHeatMeter from './OpenHeatMeter.jsx'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
 
 const RISK_COLUMNS = [
-  { key: 'last',       label: 'Last' },
-  { key: 'mktVal',     label: 'Mkt Val' },
-  { key: 'entry',      label: 'Entry' },
-  { key: 'breakeven',  label: 'Breakeven' },
-  { key: 'stop',       label: 'Stop' },
-  { key: 'target',     label: 'Target' },
-  { key: 'curR',       label: 'Cur. R' },
-  { key: 'upl',        label: 'Unreal. P&L' },
-  { key: 'riskDollar', label: 'Risk $' },
-  { key: 'riskPct',    label: 'Risk %' },
-  { key: 'heat',       label: 'Heat' },
+  { key: 'last',       label: 'Last',        description: 'Latest fetched price' },
+  { key: 'mktVal',     label: 'Mkt Val',     description: 'Current marked market value' },
+  { key: 'entry',      label: 'Entry',       description: 'Weighted average entry price' },
+  { key: 'breakeven',  label: 'Breakeven',   description: 'Average cost basis of remaining shares' },
+  { key: 'stop',       label: 'Stop',        description: 'Current stop price' },
+  { key: 'stopGapPct', label: 'Stop Gap %',  description: 'Distance from last price to stop as % of price' },
+  { key: 'stopATR',    label: 'Stop ATR',    description: 'Stop distance measured in ATR units' },
+  { key: 'target',     label: 'Target',      description: 'Current take-profit price' },
+  { key: 'targetR',    label: 'Target R',    description: 'Distance from entry to target in R-multiples' },
+  { key: 'curR',       label: 'Cur. R',      description: 'Current open R-multiple versus original risk' },
+  { key: 'upl',        label: 'Unreal. P&L', description: 'Open profit or loss in dollars' },
+  { key: 'uplPct',     label: 'P&L % Acct',  description: 'Open profit or loss as % of account equity' },
+  { key: 'riskDollar', label: 'Risk $',      description: 'Current stop-based dollar risk' },
+  { key: 'riskPct',    label: 'Risk %',      description: 'Current stop-based risk as % of account' },
+  { key: 'sigmaDollar', label: 'Sigma $',    description: 'Expected 1-day ATR swing in dollars' },
+  { key: 'sigmaPct',   label: 'Sigma %',     description: 'Expected 1-day ATR swing as % of account' },
+  { key: 'maeR',       label: 'MAE R',       description: 'Worst adverse excursion recorded in R' },
+  { key: 'age',        label: 'Age',         description: 'Days since entry' },
+  { key: 'heat',       label: 'Heat',        description: 'Visualized risk intensity' },
+]
+
+const DEFAULT_RISK_VISIBLE_COLUMNS = [
+  'last',
+  'mktVal',
+  'entry',
+  'breakeven',
+  'stop',
+  'target',
+  'curR',
+  'upl',
+  'riskDollar',
+  'riskPct',
+  'heat',
 ]
 
 const RISK_DEFAULT_WIDTHS = {
@@ -33,12 +55,100 @@ const RISK_DEFAULT_WIDTHS = {
   entry:       85,
   breakeven:   95,
   stop:        85,
+  stopGapPct:  90,
+  stopATR:     85,
   target:      85,
+  targetR:     80,
   curR:        75,
   upl:        115,
+  uplPct:      85,
   riskDollar:  95,
   riskPct:     80,
+  sigmaDollar: 95,
+  sigmaPct:    85,
+  maeR:        80,
+  age:         72,
   heat:       100,
+}
+
+const RISK_COLUMN_META = Object.fromEntries(RISK_COLUMNS.map(col => [col.key, col]))
+
+function getRowRiskMetrics(row, currentPrice, liveBalance, tpMultiplier, atrData) {
+  const isLong = (row.position ?? 'Long').toLowerCase() !== 'short'
+  const origStop = row._originalStopLoss ?? row.stopLoss
+  const riskPerShare = row.entryPrice && origStop ? Math.abs(row.entryPrice - origStop) : null
+  const defaultTP = row.entryPrice && riskPerShare
+    ? row.entryPrice + (isLong ? 1 : -1) * tpMultiplier * riskPerShare
+    : null
+  const effectiveTP = row.takeProfit ?? defaultTP
+  const currentR = currentPrice != null && row.entryPrice && riskPerShare && riskPerShare > 0
+    ? (isLong ? currentPrice - row.entryPrice : row.entryPrice - currentPrice) / riskPerShare
+    : null
+  const unrealizedPL = currentPrice != null
+    ? row.lots.reduce((sum, lot) => {
+        const lotSize = lot.remainingShares ?? lot.positionSize
+        if (!lot.entryPrice || !lotSize) return sum
+        const lotIsLong = (lot.position ?? 'Long').toLowerCase() !== 'short'
+        return sum + (lotIsLong ? currentPrice - lot.entryPrice : lot.entryPrice - currentPrice) * lotSize
+      }, 0)
+    : null
+  const currentRiskPerSh = currentPrice != null && row.stopLoss
+    ? Math.max(0, isLong ? currentPrice - row.stopLoss : row.stopLoss - currentPrice)
+    : null
+  const currentRiskDollar = currentRiskPerSh != null
+    ? currentRiskPerSh * (row.positionSize || 0)
+    : row.riskDollar
+  const currentRiskPct = liveBalance > 0 && currentRiskDollar != null
+    ? (currentRiskDollar / liveBalance) * 100
+    : row.riskPct
+  const stopGapPct = currentPrice != null && currentRiskPerSh != null && currentPrice > 0
+    ? (currentRiskPerSh / currentPrice) * 100
+    : null
+  const atrDollar = atrData.get(row.symbol)?.atr ?? null
+  const sigmaDollar = atrDollar != null && row.positionSize
+    ? atrDollar * row.positionSize
+    : null
+  const sigmaPct = liveBalance > 0 && sigmaDollar != null
+    ? (sigmaDollar / liveBalance) * 100
+    : null
+  const stopATR = atrDollar && currentRiskPerSh != null
+    ? currentRiskPerSh / atrDollar
+    : null
+  const targetR = row.entryPrice != null && effectiveTP != null && riskPerShare && riskPerShare > 0
+    ? Math.abs(effectiveTP - row.entryPrice) / riskPerShare
+    : null
+  const uplPct = liveBalance > 0 && unrealizedPL != null
+    ? (unrealizedPL / liveBalance) * 100
+    : null
+  const daysSinceEntry = row.entryDate
+    ? Math.floor((Date.now() - new Date(row.entryDate).getTime()) / (1000 * 60 * 60 * 24))
+    : null
+  const maeR = Array.isArray(row.lots)
+    ? row.lots.reduce((worst, lot) => {
+        if (lot.maxAdverseR == null) return worst
+        return worst == null ? lot.maxAdverseR : Math.min(worst, lot.maxAdverseR)
+      }, null)
+    : null
+
+  return {
+    isLong,
+    origStop,
+    riskPerShare,
+    effectiveTP,
+    currentR,
+    unrealizedPL,
+    currentRiskPerSh,
+    currentRiskDollar,
+    currentRiskPct,
+    stopGapPct,
+    stopATR,
+    targetR,
+    uplPct,
+    sigmaDollar,
+    sigmaPct,
+    daysSinceEntry,
+    maeR,
+  }
 }
 
 const HEALTH_DEFAULT_WIDTHS = {
@@ -1032,7 +1142,17 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
 
 export default function RiskPanel({ selectedAccount }) {
   const { trades, accountActivities, updateTrade, getAccountBalance } = useTradeStore()
-  const { benchmarkSymbol, setBenchmarkSymbol, tpMultiplier = 2, riskColumnOrder, setRiskColumnOrder, riskColumnWidths, setRiskColumnWidths } = useSettingsStore()
+  const {
+    benchmarkSymbol,
+    setBenchmarkSymbol,
+    tpMultiplier = 2,
+    riskColumnOrder,
+    setRiskColumnOrder,
+    riskVisibleColumns,
+    setRiskVisibleColumns,
+    riskColumnWidths,
+    setRiskColumnWidths,
+  } = useSettingsStore()
   const accountBalance = getAccountBalance(selectedAccount)
 
   const [quotes, setQuotes]           = useState(new Map())
@@ -1087,6 +1207,11 @@ export default function RiskPanel({ selectedAccount }) {
     const extra = ALL_RISK_KEYS.filter(k => !base.includes(k))
     return [...base, ...extra]
   }, [riskColumnOrder])
+  const visibleRiskCols = useMemo(() => {
+    const base = (riskVisibleColumns?.length ? riskVisibleColumns : DEFAULT_RISK_VISIBLE_COLUMNS)
+      .filter(key => ALL_RISK_KEYS.includes(key))
+    return riskColOrder.filter(key => base.includes(key))
+  }, [riskVisibleColumns, riskColOrder])
 
   const RISK_RESIZE_KEYS = ['_symbol', ...ALL_RISK_KEYS]
   const { widths: riskColWidths, startResize: startRiskResize } = useColumnResize(
@@ -1211,9 +1336,11 @@ export default function RiskPanel({ selectedAccount }) {
     if (!sortCol) return groupedPositions
     const sorted = [...groupedPositions]
     sorted.sort((a, b) => {
-      let av, bv
       const qA = quotes.get(a.symbol), qB = quotes.get(b.symbol)
       const cpA = qA?.price ?? null, cpB = qB?.price ?? null
+      const metricsA = getRowRiskMetrics(a, cpA, liveBalance, tpMultiplier, atrData)
+      const metricsB = getRowRiskMetrics(b, cpB, liveBalance, tpMultiplier, atrData)
+      let av, bv
       switch (sortCol) {
         case '_symbol':   av = a.symbol; bv = b.symbol; break
         case 'last':      av = cpA ?? -Infinity; bv = cpB ?? -Infinity; break
@@ -1221,45 +1348,27 @@ export default function RiskPanel({ selectedAccount }) {
         case 'entry':     av = a.entryPrice ?? -Infinity; bv = b.entryPrice ?? -Infinity; break
         case 'breakeven': av = a.breakeven ?? -Infinity; bv = b.breakeven ?? -Infinity; break
         case 'stop':      av = a.stopLoss ?? -Infinity; bv = b.stopLoss ?? -Infinity; break
-        case 'target':    av = a.takeProfit ?? -Infinity; bv = b.takeProfit ?? -Infinity; break
-        case 'curR': {
-          const rpsA = a.entryPrice && (a._originalStopLoss ?? a.stopLoss) ? Math.abs(a.entryPrice - (a._originalStopLoss ?? a.stopLoss)) : 0
-          const rpsB = b.entryPrice && (b._originalStopLoss ?? b.stopLoss) ? Math.abs(b.entryPrice - (b._originalStopLoss ?? b.stopLoss)) : 0
-          const isLongA = (a.position ?? 'Long').toLowerCase() !== 'short'
-          const isLongB = (b.position ?? 'Long').toLowerCase() !== 'short'
-          av = cpA != null && rpsA > 0 ? (isLongA ? cpA - a.entryPrice : a.entryPrice - cpA) / rpsA : -Infinity
-          bv = cpB != null && rpsB > 0 ? (isLongB ? cpB - b.entryPrice : b.entryPrice - cpB) / rpsB : -Infinity
-          break
-        }
-        case 'upl': {
-          const uplA = cpA != null ? a.lots.reduce((s, l) => { const sz = l.remainingShares ?? l.positionSize; const lng = (l.position ?? 'Long').toLowerCase() !== 'short'; return s + ((lng ? cpA - l.entryPrice : l.entryPrice - cpA) * (sz || 0)) }, 0) : -Infinity
-          const uplB = cpB != null ? b.lots.reduce((s, l) => { const sz = l.remainingShares ?? l.positionSize; const lng = (l.position ?? 'Long').toLowerCase() !== 'short'; return s + ((lng ? cpB - l.entryPrice : l.entryPrice - cpB) * (sz || 0)) }, 0) : -Infinity
-          av = uplA; bv = uplB; break
-        }
-        case 'riskDollar': {
-          const ilA = (a.position ?? 'Long').toLowerCase() !== 'short'
-          const ilB = (b.position ?? 'Long').toLowerCase() !== 'short'
-          av = cpA != null && a.stopLoss ? Math.max(0, ilA ? cpA - a.stopLoss : a.stopLoss - cpA) * (a.positionSize || 0) : (a.riskDollar ?? -Infinity)
-          bv = cpB != null && b.stopLoss ? Math.max(0, ilB ? cpB - b.stopLoss : b.stopLoss - cpB) * (b.positionSize || 0) : (b.riskDollar ?? -Infinity)
-          break
-        }
+        case 'stopGapPct': av = metricsA.stopGapPct ?? -Infinity; bv = metricsB.stopGapPct ?? -Infinity; break
+        case 'stopATR':    av = metricsA.stopATR ?? -Infinity; bv = metricsB.stopATR ?? -Infinity; break
+        case 'target':     av = metricsA.effectiveTP ?? -Infinity; bv = metricsB.effectiveTP ?? -Infinity; break
+        case 'targetR':    av = metricsA.targetR ?? -Infinity; bv = metricsB.targetR ?? -Infinity; break
+        case 'curR':       av = metricsA.currentR ?? -Infinity; bv = metricsB.currentR ?? -Infinity; break
+        case 'upl':        av = metricsA.unrealizedPL ?? -Infinity; bv = metricsB.unrealizedPL ?? -Infinity; break
+        case 'uplPct':     av = metricsA.uplPct ?? -Infinity; bv = metricsB.uplPct ?? -Infinity; break
+        case 'riskDollar': av = metricsA.currentRiskDollar ?? -Infinity; bv = metricsB.currentRiskDollar ?? -Infinity; break
         case 'riskPct':
-        case 'heat': {
-          const ilA = (a.position ?? 'Long').toLowerCase() !== 'short'
-          const ilB = (b.position ?? 'Long').toLowerCase() !== 'short'
-          const rdA = cpA != null && a.stopLoss ? Math.max(0, ilA ? cpA - a.stopLoss : a.stopLoss - cpA) * (a.positionSize || 0) : (a.riskDollar ?? 0)
-          const rdB = cpB != null && b.stopLoss ? Math.max(0, ilB ? cpB - b.stopLoss : b.stopLoss - cpB) * (b.positionSize || 0) : (b.riskDollar ?? 0)
-          av = liveBalance > 0 ? rdA / liveBalance : -Infinity
-          bv = liveBalance > 0 ? rdB / liveBalance : -Infinity
-          break
-        }
+        case 'heat':       av = metricsA.currentRiskPct ?? -Infinity; bv = metricsB.currentRiskPct ?? -Infinity; break
+        case 'sigmaDollar': av = metricsA.sigmaDollar ?? -Infinity; bv = metricsB.sigmaDollar ?? -Infinity; break
+        case 'sigmaPct':   av = metricsA.sigmaPct ?? -Infinity; bv = metricsB.sigmaPct ?? -Infinity; break
+        case 'maeR':       av = metricsA.maeR ?? Infinity; bv = metricsB.maeR ?? Infinity; break
+        case 'age':        av = metricsA.daysSinceEntry ?? -Infinity; bv = metricsB.daysSinceEntry ?? -Infinity; break
         default: return 0
       }
       if (typeof av === 'string') return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av)
       return sortDir === 'asc' ? av - bv : bv - av
     })
     return sorted
-  }, [groupedPositions, sortCol, sortDir, quotes])
+  }, [groupedPositions, sortCol, sortDir, quotes, liveBalance, tpMultiplier, atrData])
 
   const handleSort = useCallback((col) => {
     if (sortCol === col) {
@@ -1669,14 +1778,58 @@ export default function RiskPanel({ selectedAccount }) {
               <button
                 onClick={() => setShowRiskColMenu(v => !v)}
                 className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
-                title="Reorder columns"
+                title="Customize columns"
               >
                 <Settings2 size={14} />
               </button>
               {showRiskColMenu && (
-                <div className="absolute right-0 top-7 z-50 bg-surface-100 border border-white/10 rounded-lg shadow-xl p-2 min-w-40">
-                  <p className="text-xs text-gray-500 px-2 pb-1.5 border-b border-white/5 mb-1">Drag to reorder</p>
-                  {riskColOrder.map(key => {
+                <div className="absolute right-0 top-7 z-50 bg-surface-100 border border-white/10 rounded-lg shadow-xl p-2 w-72">
+                  <div className="flex items-center justify-between gap-2 px-2 pb-2 border-b border-white/5 mb-2">
+                    <div>
+                      <p className="text-xs text-gray-400 font-semibold uppercase tracking-[0.18em]">Risk Columns</p>
+                      <p className="text-[11px] text-gray-600 mt-0.5">Show, hide, and reorder the table</p>
+                    </div>
+                    <button
+                      onClick={() => setRiskVisibleColumns(DEFAULT_RISK_VISIBLE_COLUMNS)}
+                      className="text-[11px] text-accent-blue hover:text-white transition-colors"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                  <div className="px-2 pb-1.5">
+                    <p className="text-[11px] text-gray-500 mb-1.5">Visible columns</p>
+                    <div className="space-y-1 max-h-80 overflow-y-auto pr-1">
+                      {riskColOrder.map(key => {
+                        const col = RISK_COLUMN_META[key]
+                        if (!col) return null
+                        const checked = visibleRiskCols.includes(key)
+                        return (
+                          <label
+                            key={`toggle-${key}`}
+                            className="flex items-start gap-2.5 px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                const next = checked
+                                  ? visibleRiskCols.filter(colKey => colKey !== key)
+                                  : [...visibleRiskCols, key]
+                                if (next.length > 0) setRiskVisibleColumns(next)
+                              }}
+                              className="mt-0.5 accent-blue-500"
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-sm text-gray-200">{col.label}</span>
+                              <span className="block text-[11px] leading-4 text-gray-600">{col.description}</span>
+                            </span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-gray-500 px-2 pt-2 pb-1.5 border-t border-white/5 mb-1">Drag visible columns to reorder</p>
+                  {visibleRiskCols.map(key => {
                     const col = RISK_COLUMNS.find(c => c.key === key)
                     if (!col) return null
                     return (
@@ -1725,7 +1878,7 @@ export default function RiskPanel({ selectedAccount }) {
               <table className="w-full text-sm table-fixed">
                 <colgroup>
                   <col style={{ width: riskColWidths._symbol }} />
-                  {riskColOrder.map(k => <col key={k} style={{ width: riskColWidths[k] }} />)}
+                  {visibleRiskCols.map(k => <col key={k} style={{ width: riskColWidths[k] }} />)}
                   <col style={{ width: 48 }} />
                 </colgroup>
                 <thead>
@@ -1740,8 +1893,8 @@ export default function RiskPanel({ selectedAccount }) {
                       </span>
                       <div onMouseDown={e => { e.stopPropagation(); startRiskResize('_symbol', e) }} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent-blue/60 rounded" />
                     </th>
-                    {riskColOrder.map(key => {
-                      const col = RISK_COLUMNS.find(c => c.key === key)
+                    {visibleRiskCols.map(key => {
+                      const col = RISK_COLUMN_META[key]
                       const right = key !== 'heat'
                       return (
                         <th
@@ -1749,7 +1902,7 @@ export default function RiskPanel({ selectedAccount }) {
                           className={`pb-3 font-semibold relative select-none cursor-pointer hover:text-gray-200 transition-colors ${right ? 'text-right' : ''}`}
                           onClick={() => handleSort(key)}
                         >
-                          <span className={`flex items-center gap-1 ${right ? 'justify-end' : ''}`}>
+                          <span className={`flex items-center gap-1 ${right ? 'justify-end' : ''}`} title={col?.description}>
                             {col?.label ?? key}
                             {sortCol === key && <span className="text-accent-blue text-[10px]">{sortDir === 'asc' ? '▲' : '▼'}</span>}
                           </span>
@@ -1766,41 +1919,24 @@ export default function RiskPanel({ selectedAccount }) {
                     const isExpanded = expandedSymbols.has(group.symbol)
                     const q          = quotes.get(group.symbol)
                     const currentPrice = q?.price ?? null
-                    const isLong     = (group.position ?? 'Long').toLowerCase() !== 'short'
-                    // Cur R uses the ORIGINAL stop (frozen at entry) so trailing the stop to
-                    // manage heat doesn't corrupt the R calculation.
-                    const origStop     = group._originalStopLoss ?? group.stopLoss
-                    const riskPerShare = group.entryPrice && origStop ? Math.abs(group.entryPrice - origStop) : null
-                    const defaultTP  = group.entryPrice && riskPerShare ? group.entryPrice + (isLong ? 1 : -1) * tpMultiplier * riskPerShare : null
-                    const effectiveTP = group.takeProfit ?? defaultTP
-                    const currentR   = currentPrice != null && group.entryPrice && riskPerShare && riskPerShare > 0
-                      ? (isLong ? currentPrice - group.entryPrice : group.entryPrice - currentPrice) / riskPerShare : null
-                    // Sum unrealized P&L across all lots (accurate even with different entry prices)
-                    const unrealizedPL = currentPrice != null
-                      ? group.lots.reduce((s, l) => {
-                          const lSz = l.remainingShares ?? l.positionSize
-                          if (!l.entryPrice || !lSz) return s
-                          const lng = (l.position ?? 'Long').toLowerCase() !== 'short'
-                          return s + (lng ? currentPrice - l.entryPrice : l.entryPrice - currentPrice) * lSz
-                        }, 0)
-                      : null
+                    const {
+                      currentR,
+                      currentRiskDollar,
+                      currentRiskPct,
+                      daysSinceEntry,
+                      effectiveTP,
+                      isLong,
+                      maeR,
+                      riskPerShare,
+                      sigmaDollar,
+                      sigmaPct,
+                      stopATR,
+                      stopGapPct,
+                      targetR,
+                      unrealizedPL,
+                      uplPct,
+                    } = getRowRiskMetrics(group, currentPrice, liveBalance, tpMultiplier, atrData)
                     const plColor = unrealizedPL == null ? '' : unrealizedPL >= 0 ? 'text-accent-green' : 'text-accent-red'
-
-                    // Risk from current price to stop (not entry to stop)
-                    const currentRiskPerSh = currentPrice != null && group.stopLoss
-                      ? Math.max(0, isLong ? currentPrice - group.stopLoss : group.stopLoss - currentPrice)
-                      : null
-                    const currentRiskDollar = currentRiskPerSh != null
-                      ? currentRiskPerSh * (group.positionSize || 0)
-                      : group.riskDollar
-                    const currentRiskPct = liveBalance > 0 && currentRiskDollar != null
-                      ? (currentRiskDollar / liveBalance) * 100
-                      : group.riskPct
-
-                    // Position age (days since first lot entry)
-                    const daysSinceEntry = group.entryDate
-                      ? Math.floor((Date.now() - new Date(group.entryDate).getTime()) / (1000 * 60 * 60 * 24))
-                      : null
                     // Stale loser: held longer than avg loss AND still negative R
                     const isStale = daysSinceEntry != null && avgLossDays != null
                       && daysSinceEntry > avgLossDays
@@ -1864,7 +2000,7 @@ export default function RiskPanel({ selectedAccount }) {
                               </div>
                             )}
                           </td>
-                          {riskColOrder.map(key => {
+                          {visibleRiskCols.map(key => {
                             switch(key) {
                               case 'last':
                                 return <td key={key} className="py-2 text-right mono text-white font-medium">
@@ -1914,9 +2050,21 @@ export default function RiskPanel({ selectedAccount }) {
                                 return <td key={key} className="py-2 text-right" onClick={e => e.stopPropagation()}>
                                   <StopLossInput value={group.stopLoss} onSave={val => updateTrade(group.lots[0].id, { stopLoss: val })} />
                                 </td>
+                              case 'stopGapPct':
+                                return <td key={key} className="py-2 text-right mono text-gray-300">
+                                  {stopGapPct != null ? `${stopGapPct.toFixed(2)}%` : '—'}
+                                </td>
+                              case 'stopATR':
+                                return <td key={key} className="py-2 text-right mono text-gray-300">
+                                  {stopATR != null ? `${stopATR.toFixed(2)}x` : '—'}
+                                </td>
                               case 'target':
                                 return <td key={key} className="py-2 text-right" onClick={e => e.stopPropagation()}>
                                   <TakeProfitInput value={effectiveTP} onSave={val => updateTrade(group.lots[0].id, { takeProfit: val })} />
+                                </td>
+                              case 'targetR':
+                                return <td key={key} className="py-2 text-right mono text-accent-blue">
+                                  {targetR != null ? `${targetR.toFixed(2)}R` : '—'}
                                 </td>
                               case 'curR':
                                 return <td key={key} className="py-2 text-right mono text-xs">
@@ -1928,6 +2076,10 @@ export default function RiskPanel({ selectedAccount }) {
                                 return <td key={key} className={`py-2 text-right mono font-medium ${plColor}`}>
                                   {unrealizedPL != null ? (unrealizedPL >= 0 ? '+' : '') + formatCurrency(unrealizedPL) : '—'}
                                 </td>
+                              case 'uplPct':
+                                return <td key={key} className={`py-2 text-right mono ${uplPct != null && uplPct >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                                  {uplPct != null ? `${uplPct >= 0 ? '+' : ''}${uplPct.toFixed(2)}%` : '—'}
+                                </td>
                               case 'riskDollar':
                                 return <td key={key} className="py-2 text-right mono text-accent-red font-medium">
                                   {currentRiskDollar > 0 ? formatCurrency(currentRiskDollar) : <span className="text-gray-600">—</span>}
@@ -1935,6 +2087,22 @@ export default function RiskPanel({ selectedAccount }) {
                               case 'riskPct':
                                 return <td key={key} className="py-2 text-right mono text-accent-yellow">
                                   {currentRiskPct > 0 ? `${currentRiskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
+                                </td>
+                              case 'sigmaDollar':
+                                return <td key={key} className="py-2 text-right mono text-accent-purple">
+                                  {sigmaDollar != null ? formatCurrency(sigmaDollar) : '—'}
+                                </td>
+                              case 'sigmaPct':
+                                return <td key={key} className="py-2 text-right mono text-accent-purple">
+                                  {sigmaPct != null ? `${sigmaPct.toFixed(2)}%` : '—'}
+                                </td>
+                              case 'maeR':
+                                return <td key={key} className="py-2 text-right mono text-gray-300">
+                                  {maeR != null ? `${maeR.toFixed(2)}R` : '—'}
+                                </td>
+                              case 'age':
+                                return <td key={key} className="py-2 text-right mono text-gray-300">
+                                  {daysSinceEntry != null ? `${daysSinceEntry}d` : '—'}
                                 </td>
                               case 'heat':
                                 return <td key={key} className="py-2 text-right">
@@ -1989,7 +2157,7 @@ export default function RiskPanel({ selectedAccount }) {
                           }))
                           return (
                             <tr className="bg-white/[0.01]">
-                              <td colSpan={riskColOrder.length + 2} className="pb-2 pt-0 px-2">
+                              <td colSpan={visibleRiskCols.length + 2} className="pb-2 pt-0 px-2">
                                 <div className="flex items-center gap-1 flex-wrap">
                                   <span className="text-[10px] text-gray-600 shrink-0 mr-0.5">R Levels:</span>
                                   {levels.map(l => (
@@ -2009,7 +2177,7 @@ export default function RiskPanel({ selectedAccount }) {
                         {/* ── Hypothetical buy/sell sub-row ── */}
                         {hypoSymbol === group.symbol && (
                           <tr className="bg-white/[0.01]">
-                            <td colSpan={riskColOrder.length + 2} className="pb-2 pt-1 px-2">
+                            <td colSpan={visibleRiskCols.length + 2} className="pb-2 pt-1 px-2">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-[10px] text-gray-500 shrink-0">What-if:</span>
                                 <div className="flex items-center gap-0.5">
@@ -2068,26 +2236,24 @@ export default function RiskPanel({ selectedAccount }) {
 
                         {/* ── Individual lot sub-rows (expanded) ── */}
                         {isMulti && isExpanded && group.lots.map((lot, lotIdx) => {
-                          const lotOrigStop = lot._originalStopLoss ?? lot.stopLoss
-                          const lotRPS    = lot.entryPrice && lotOrigStop ? Math.abs(lot.entryPrice - lotOrigStop) : null
-                          const lotIsLong = (lot.position ?? 'Long').toLowerCase() !== 'short'
-                          const lotDefTP  = lot.entryPrice && lotRPS ? lot.entryPrice + (lotIsLong ? 1 : -1) * tpMultiplier * lotRPS : null
-                          const lotEffTP  = lot.takeProfit ?? lotDefTP
-                          const lotCurR   = currentPrice != null && lot.entryPrice && lotRPS && lotRPS > 0
-                            ? (lotIsLong ? currentPrice - lot.entryPrice : lot.entryPrice - currentPrice) / lotRPS : null
                           const lotSz     = lot.remainingShares ?? lot.positionSize
-                          const lotUPL    = currentPrice != null && lot.entryPrice && lotSz
-                            ? (lotIsLong ? currentPrice - lot.entryPrice : lot.entryPrice - currentPrice) * lotSz : null
+                          const lotRow = { ...lot, lots: [lot] }
+                          const {
+                            currentR: lotCurR,
+                            currentRiskDollar: lotCurrentRiskDollar,
+                            currentRiskPct: lotCurrentRiskPct,
+                            daysSinceEntry: lotDaysSinceEntry,
+                            effectiveTP: lotEffTP,
+                            maeR: lotMaeR,
+                            sigmaDollar: lotSigmaDollar,
+                            sigmaPct: lotSigmaPct,
+                            stopATR: lotStopATR,
+                            stopGapPct: lotStopGapPct,
+                            targetR: lotTargetR,
+                            unrealizedPL: lotUPL,
+                            uplPct: lotUplPct,
+                          } = getRowRiskMetrics(lotRow, currentPrice, liveBalance, tpMultiplier, atrData)
                           const lotPlClr  = lotUPL == null ? '' : lotUPL >= 0 ? 'text-accent-green' : 'text-accent-red'
-                          const lotCurrentRiskPerSh = currentPrice != null && lot.stopLoss
-                            ? Math.max(0, lotIsLong ? currentPrice - lot.stopLoss : lot.stopLoss - currentPrice)
-                            : null
-                          const lotCurrentRiskDollar = lotCurrentRiskPerSh != null
-                            ? lotCurrentRiskPerSh * (lotSz || 0)
-                            : lot.riskDollar
-                          const lotCurrentRiskPct = liveBalance > 0 && lotCurrentRiskDollar != null
-                            ? (lotCurrentRiskDollar / liveBalance) * 100
-                            : lot.riskPct
                           return (
                             <tr key={lot.id} className="bg-white/[0.02] text-xs border-l-2 border-accent-blue/20">
                               <td className="py-1.5 pl-7 mono text-gray-400">
@@ -2095,7 +2261,7 @@ export default function RiskPanel({ selectedAccount }) {
                                 Lot {lotIdx + 1}
                                 <span className="ml-1.5 text-gray-600">{lotSz?.toLocaleString()} sh</span>
                               </td>
-                              {riskColOrder.map(key => {
+                              {visibleRiskCols.map(key => {
                                 switch(key) {
                                   case 'last':
                                     return <td key={key} className="py-1.5 text-right mono text-gray-500">
@@ -2120,9 +2286,21 @@ export default function RiskPanel({ selectedAccount }) {
                                     return <td key={key} className="py-1.5 text-right">
                                       <StopLossInput value={lot.stopLoss} onSave={val => updateTrade(lot.id, { stopLoss: val })} />
                                     </td>
+                                  case 'stopGapPct':
+                                    return <td key={key} className="py-1.5 text-right mono text-gray-500">
+                                      {lotStopGapPct != null ? `${lotStopGapPct.toFixed(2)}%` : '—'}
+                                    </td>
+                                  case 'stopATR':
+                                    return <td key={key} className="py-1.5 text-right mono text-gray-500">
+                                      {lotStopATR != null ? `${lotStopATR.toFixed(2)}x` : '—'}
+                                    </td>
                                   case 'target':
                                     return <td key={key} className="py-1.5 text-right">
                                       <TakeProfitInput value={lotEffTP} onSave={val => updateTrade(lot.id, { takeProfit: val })} />
+                                    </td>
+                                  case 'targetR':
+                                    return <td key={key} className="py-1.5 text-right mono text-accent-blue/80">
+                                      {lotTargetR != null ? `${lotTargetR.toFixed(2)}R` : '—'}
                                     </td>
                                   case 'curR':
                                     return <td key={key} className="py-1.5 text-right mono">
@@ -2134,6 +2312,10 @@ export default function RiskPanel({ selectedAccount }) {
                                     return <td key={key} className={`py-1.5 text-right mono ${lotPlClr}`}>
                                       {lotUPL != null ? (lotUPL >= 0 ? '+' : '') + formatCurrency(lotUPL) : '—'}
                                     </td>
+                                  case 'uplPct':
+                                    return <td key={key} className={`py-1.5 text-right mono ${lotUplPct != null && lotUplPct >= 0 ? 'text-accent-green/80' : 'text-accent-red/80'}`}>
+                                      {lotUplPct != null ? `${lotUplPct >= 0 ? '+' : ''}${lotUplPct.toFixed(2)}%` : '—'}
+                                    </td>
                                   case 'riskDollar':
                                     return <td key={key} className="py-1.5 text-right mono text-accent-red/60">
                                       {lotCurrentRiskDollar > 0 ? formatCurrency(lotCurrentRiskDollar) : <span className="text-gray-600">—</span>}
@@ -2141,6 +2323,22 @@ export default function RiskPanel({ selectedAccount }) {
                                   case 'riskPct':
                                     return <td key={key} className="py-1.5 text-right mono text-accent-yellow/60">
                                       {lotCurrentRiskPct > 0 ? `${lotCurrentRiskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
+                                    </td>
+                                  case 'sigmaDollar':
+                                    return <td key={key} className="py-1.5 text-right mono text-accent-purple/80">
+                                      {lotSigmaDollar != null ? formatCurrency(lotSigmaDollar) : '—'}
+                                    </td>
+                                  case 'sigmaPct':
+                                    return <td key={key} className="py-1.5 text-right mono text-accent-purple/80">
+                                      {lotSigmaPct != null ? `${lotSigmaPct.toFixed(2)}%` : '—'}
+                                    </td>
+                                  case 'maeR':
+                                    return <td key={key} className="py-1.5 text-right mono text-gray-500">
+                                      {lotMaeR != null ? `${lotMaeR.toFixed(2)}R` : '—'}
+                                    </td>
+                                  case 'age':
+                                    return <td key={key} className="py-1.5 text-right mono text-gray-500">
+                                      {lotDaysSinceEntry != null ? `${lotDaysSinceEntry}d` : '—'}
                                     </td>
                                   case 'heat':
                                     return <td key={key} />
@@ -2170,18 +2368,14 @@ export default function RiskPanel({ selectedAccount }) {
                     let totalCurrentR    = null
                     let totalMktVal      = null
                     let totalRiskDollar  = 0
+                    let totalSigmaDollar = 0
                     for (const group of groupedPositions) {
                       const q  = quotes.get(group.symbol)
                       const cp = q?.price ?? null
-                      const isLong = (group.position ?? 'Long').toLowerCase() !== 'short'
+                      const metrics = getRowRiskMetrics(group, cp, liveBalance, tpMultiplier, atrData)
                       // Unrealized P&L: sum across individual lots so each lot's entry/size is exact
-                      if (cp != null) {
-                        const upl = group.lots.reduce((s, l) => {
-                          const sz  = l.remainingShares ?? l.positionSize
-                          const lng = (l.position ?? 'Long').toLowerCase() !== 'short'
-                          return s + ((lng ? cp - l.entryPrice : l.entryPrice - cp) * (sz || 0))
-                        }, 0)
-                        totalUnrealPL = (totalUnrealPL ?? 0) + upl
+                      if (metrics.unrealizedPL != null) {
+                        totalUnrealPL = (totalUnrealPL ?? 0) + metrics.unrealizedPL
                       }
                       // Market value: current price (or entry as fallback) × total shares
                       const mvPrice = cp ?? group.entryPrice
@@ -2189,29 +2383,22 @@ export default function RiskPanel({ selectedAccount }) {
                         totalMktVal = (totalMktVal ?? 0) + mvPrice * group.positionSize
                       }
                       // Current R: use original stop so trailing doesn't distort the number
-                      const origStop = group._originalStopLoss ?? group.stopLoss
-                      if (cp != null && group.entryPrice && origStop) {
-                        const rps = Math.abs(group.entryPrice - origStop)
-                        if (rps > 0) {
-                          totalCurrentR = (totalCurrentR ?? 0) +
-                            (isLong ? cp - group.entryPrice : group.entryPrice - cp) / rps
-                        }
+                      if (metrics.currentR != null) {
+                        totalCurrentR = (totalCurrentR ?? 0) + metrics.currentR
                       }
                       // Risk $: same formula as individual rows — current price to stop × shares
-                      const grpRiskPerSh = cp != null && group.stopLoss
-                        ? Math.max(0, isLong ? cp - group.stopLoss : group.stopLoss - cp)
-                        : null
-                      totalRiskDollar += grpRiskPerSh != null
-                        ? grpRiskPerSh * (group.positionSize || 0)
-                        : (group.riskDollar || 0)
+                      totalRiskDollar += metrics.currentRiskDollar ?? (group.riskDollar || 0)
+                      totalSigmaDollar += metrics.sigmaDollar ?? 0
                     }
                     const totalRiskPct = liveBalance > 0 ? (totalRiskDollar / liveBalance) * 100 : 0
+                    const totalUplPct = liveBalance > 0 && totalUnrealPL != null ? (totalUnrealPL / liveBalance) * 100 : null
+                    const totalSigmaPct = liveBalance > 0 && totalSigmaDollar > 0 ? (totalSigmaDollar / liveBalance) * 100 : 0
                     const rColor  = totalCurrentR == null ? '' : totalCurrentR >= 0 ? 'text-accent-green' : 'text-accent-red'
                     const plColor = totalUnrealPL == null ? '' : totalUnrealPL >= 0 ? 'text-accent-green' : 'text-accent-red'
                     return (
                       <tr className="border-t border-white/10 text-sm text-gray-400 font-semibold">
                         <td className="pt-2">Total</td>
-                        {riskColOrder.map(key => {
+                        {visibleRiskCols.map(key => {
                           switch(key) {
                             case 'mktVal':
                               return <td key={key} className="pt-2 text-right mono text-gray-300">{totalMktVal != null ? formatCurrency(totalMktVal, true) : '—'}</td>
@@ -2219,10 +2406,16 @@ export default function RiskPanel({ selectedAccount }) {
                               return <td key={key} className={`pt-2 text-right mono ${rColor}`}>{totalCurrentR != null ? `${totalCurrentR >= 0 ? '+' : ''}${totalCurrentR.toFixed(2)}R` : '—'}</td>
                             case 'upl':
                               return <td key={key} className={`pt-2 text-right mono ${plColor}`}>{totalUnrealPL != null ? (totalUnrealPL >= 0 ? '+' : '') + formatCurrency(totalUnrealPL) : '—'}</td>
+                            case 'uplPct':
+                              return <td key={key} className={`pt-2 text-right mono ${plColor}`}>{totalUplPct != null ? `${totalUplPct >= 0 ? '+' : ''}${totalUplPct.toFixed(2)}%` : '—'}</td>
                             case 'riskDollar':
                               return <td key={key} className="pt-2 text-right mono text-accent-red">{totalRiskDollar > 0 ? formatCurrency(totalRiskDollar) : '—'}</td>
                             case 'riskPct':
                               return <td key={key} className="pt-2 text-right mono text-accent-yellow">{totalRiskPct > 0 ? `${totalRiskPct.toFixed(2)}%` : '—'}</td>
+                            case 'sigmaDollar':
+                              return <td key={key} className="pt-2 text-right mono text-accent-purple">{totalSigmaDollar > 0 ? formatCurrency(totalSigmaDollar) : '—'}</td>
+                            case 'sigmaPct':
+                              return <td key={key} className="pt-2 text-right mono text-accent-purple">{totalSigmaPct > 0 ? `${totalSigmaPct.toFixed(2)}%` : '—'}</td>
                             default:
                               return <td key={key} />
                           }

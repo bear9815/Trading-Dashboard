@@ -20,6 +20,7 @@ const CLOUD_FIELDS = [
   'equityCurveRange', 'analyticsTimeframe', 'analyticsWinLossMode',
   'analyticsRiskMode', 'analyticsSqnMode',
   'dashboardNote', 'openPositionsColumns',
+  'riskVisibleColumns',
   'excludedSymbols', 'strategies', 'edges',
   // symbolThemes intentionally excluded — it's a large AI cache, device-local is fine
 ]
@@ -71,6 +72,7 @@ export const useSettingsStore = create(
       openPositionsColumns: ['entryDate', 'held', 'entryPrice', 'stop', 'target', 'riskDollar', 'riskPct', 'sector', 'theme'],
       openPositionsColumnOrder: null,
       riskColumnOrder: null,
+      riskVisibleColumns: null,
       openPositionsColumnWidths: {},
       riskColumnWidths: {},
       healthColumnWidths: {},
@@ -135,6 +137,7 @@ export const useSettingsStore = create(
       setOpenPositionsColumns: (cols)      => { set({ openPositionsColumns: cols }); saveToCloud({ ...get(), openPositionsColumns: cols }) },
       setOpenPositionsColumnOrder: (order) => set({ openPositionsColumnOrder: order }),
       setRiskColumnOrder:          (order) => set({ riskColumnOrder: order }),
+      setRiskVisibleColumns:       (cols)  => { set({ riskVisibleColumns: cols }); saveToCloud({ ...get(), riskVisibleColumns: cols }) },
       setOpenPositionsColumnWidths: (w) => set({ openPositionsColumnWidths: w }),
       setRiskColumnWidths:          (w) => set({ riskColumnWidths: w }),
       setHealthColumnWidths:        (w) => set({ healthColumnWidths: w }),
