@@ -133,6 +133,7 @@ function tripToTrade(symbol, trip, isOpen) {
     .map(r => ({
       price:      parseNum(r['Price']),
       amount:     Math.abs(parseNum(r['Gross Amount'])),
+      shares:     Math.abs(parseNum(r['Quantity'])),
       date:       toISO(r['Date']),
       commission: Math.abs(parseNum(r['Commission'])),
     }))

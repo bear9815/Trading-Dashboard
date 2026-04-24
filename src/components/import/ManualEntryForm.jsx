@@ -388,6 +388,7 @@ export default function ManualEntryForm({ onClose }) {
 
         updateTrade(selectedOpenId, {
           positionSize: remaining,
+          _originalPositionSize: orig._originalPositionSize ?? origShares,
           buyAmount:    proportionalBuy,
           exits:        allExits,
           screenshotExit:        form.screenshotExit || orig.screenshotExit || null,

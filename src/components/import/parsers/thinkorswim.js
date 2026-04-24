@@ -183,6 +183,7 @@ function buildTradesFromFills(fills, accountName) {
       const exits = sells.map(s => ({
         price: s.price,
         amount: s.amount,
+        shares: s.qty,
         date: s.date ? new Date(s.date).toISOString() : null,
         commission: s.commission || 0,
       }))

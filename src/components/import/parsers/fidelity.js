@@ -64,6 +64,7 @@ export function parseFidelity(text) {
     const exits = sells.map(s => ({
       price: getPrice(s),
       amount: getAmt(s),
+      shares: getQty(s),
       date: getDate(s),
       commission: 0,
     }))
