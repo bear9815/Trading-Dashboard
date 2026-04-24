@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor, calcAvgWinLoss } from './metrics.js'
 import { formatCurrency } from './formatters.js'
 import { resolveTickerToName } from './marketData.js'
+import { parseJsonText } from './aiHelpers.js'
 
 // ── Anthropic fallback key (set at app startup from useSettingsStore) ──────────
 let _anthropicFallbackKey = ''
@@ -1164,4 +1165,115 @@ Return ONLY valid JSON (no markdown, no code fences):
   const jsonMatch = text.match(/\{[\s\S]*\}/)
   if (!jsonMatch) throw new Error('AI returned unrecognised format.')
   return JSON.parse(jsonMatch[0])
+}
+
+function buildTradeVoiceReviewPrompt(trade, transcript) {
+  const tradeContext = {
+    symbol: trade.symbol || null,
+    status: trade.status || null,
+    position: trade.position || null,
+    pl: trade.pl ?? null,
+    rMultiple: trade.rMultiple ?? null,
+    processGrade: trade.processGrade ?? null,
+    reviewTags: trade.reviewTags || [],
+    quickReview: trade.quickReview || null,
+    lessons: trade.lessons || null,
+    exitNotes: trade.exitNotes || null,
+  }
+
+  return `You are a trading coach helping turn a trader's spoken post-trade debrief into structured review data.
+
+Trade context:
+${JSON.stringify(tradeContext)}
+
+Transcript:
+${JSON.stringify(transcript)}
+
+Infer the trader's review as faithfully as possible from what they actually said. Do not invent details that were not implied. Prefer concise language.
+
+Return ONLY a valid JSON object in this exact shape:
+{
+  "quickReview": {
+    "mood": "proud | neutral | frustrated | confused | curious | null",
+    "verdict": "a_plus | solid | chased | cut_early | rule_break | null",
+    "focus": "entry | exit | sizing | patience | market_read | emotions | null",
+    "followUp": "short plain-English phrase capturing the most important voice takeaway, or null"
+  },
+  "reviewTags": ["0-5 short tags chosen from themes like Followed plan, Perfect execution, Good patience, Chased entry, Cut winner early, Sized too big, Broke rules, FOMO trade, Moved stop, Revenge trade, Review later"],
+  "noteBullets": [
+    "3-5 concise bullet-ready review notes from the transcript",
+    "each should be useful inside the trade journal"
+  ],
+  "summary": "1 sentence summary of the trade review",
+  "keyLesson": "1 sentence describing the main repeat/avoid lesson",
+  "processGradeSuggestion": 1
+}
+
+Rules:
+- Use null when a quickReview field cannot be inferred confidently
+- processGradeSuggestion must be an integer 1-5 if implied, otherwise null
+- noteBullets should be plain strings without bullet characters
+- reviewTags should avoid duplicates
+- No markdown, no code fences, no commentary outside the JSON`
+}
+
+export async function analyzeTradeVoiceReview(trade, transcript, apiKey) {
+  if (!apiKey) throw new Error('No API key configured. Add your Gemini key in Settings.')
+  if (!transcript?.trim()) throw new Error('No transcript provided.')
+
+  const prompt = buildTradeVoiceReviewPrompt(trade, transcript.trim())
+  const text = await callAI(apiKey, prompt)
+  return parseJsonText(text)
+}
+
+function buildTradeVoiceFollowUpPrompt(trade, answers) {
+  const tradeContext = {
+    symbol: trade.symbol || null,
+    status: trade.status || null,
+    position: trade.position || null,
+    pl: trade.pl ?? null,
+    rMultiple: trade.rMultiple ?? null,
+    processGrade: trade.processGrade ?? null,
+    quickReview: trade.quickReview || null,
+    reviewTags: trade.reviewTags || [],
+  }
+
+  const conversation = (answers || []).map((item, idx) => ({
+    step: idx + 1,
+    question: item.question,
+    answer: item.answer,
+  }))
+
+  return `You are an expert trading review coach. Your job is to ask the single next-best follow-up question after hearing a trader debrief a trade.
+
+Trade context:
+${JSON.stringify(tradeContext)}
+
+Conversation so far:
+${JSON.stringify(conversation)}
+
+Choose the most useful next question to deepen the review. Focus on uncovering process quality, emotional state, repeatable strengths, or the real mistake. Do not repeat an already-asked question.
+
+Return ONLY valid JSON:
+{
+  "question": "one concise, natural follow-up question",
+  "hint": "a short hint telling the trader what kind of answer is useful",
+  "why": "brief internal rationale in plain English"
+}
+
+Rules:
+- Keep the question under 18 words
+- Keep the hint under 12 words
+- The question must feel conversational, not robotic
+- Prioritize specificity over generic coaching
+- No markdown, no code fences, no extra text`
+}
+
+export async function generateTradeVoiceFollowUp(trade, answers, apiKey) {
+  if (!apiKey) throw new Error('No API key configured. Add your Gemini key in Settings.')
+  if (!Array.isArray(answers) || answers.length === 0) throw new Error('No voice answers provided.')
+
+  const prompt = buildTradeVoiceFollowUpPrompt(trade, answers)
+  const text = await callAI(apiKey, prompt)
+  return parseJsonText(text)
 }

@@ -1,7 +1,9 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useTradeStore } from '../../store/useTradeStore.js'
+import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { formatCurrency } from '../../utils/formatters.js'
-import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List } from 'lucide-react'
+import { analyzeTradeVoiceReview, generateTradeVoiceFollowUp } from '../../utils/ai.js'
+import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, Sparkles, Brain, CircleDot, RotateCcw, Mic, MicOff, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
 
 // ── Duration helper ───────────────────────────────────────────────────────────
 function tradeDuration(trade) {
@@ -191,6 +193,828 @@ const TAG_COLORS = {
   blue:   { bg: 'bg-accent-blue/15',   text: 'text-accent-blue',   border: 'border-accent-blue/25'   },
   yellow: { bg: 'bg-accent-yellow/15', text: 'text-accent-yellow', border: 'border-accent-yellow/25' },
   gray:   { bg: 'bg-white/8',          text: 'text-gray-300',      border: 'border-white/15'         },
+}
+
+const QUICK_REVIEW_MOODS = [
+  { id: 'proud',      label: 'Proud',      tone: 'green'  },
+  { id: 'neutral',    label: 'Neutral',    tone: 'gray'   },
+  { id: 'frustrated', label: 'Frustrated', tone: 'red'    },
+  { id: 'confused',   label: 'Confused',   tone: 'yellow' },
+  { id: 'curious',    label: 'Curious',    tone: 'blue'   },
+]
+
+const QUICK_REVIEW_VERDICTS = [
+  { id: 'a_plus',     label: 'A+ process',      tone: 'green'  },
+  { id: 'solid',      label: 'Solid but sloppy',tone: 'blue'   },
+  { id: 'chased',     label: 'Chased',          tone: 'red'    },
+  { id: 'cut_early',  label: 'Cut early',       tone: 'red'    },
+  { id: 'rule_break', label: 'Rule break',      tone: 'red'    },
+]
+
+const QUICK_REVIEW_FOCUS_AREAS = [
+  { id: 'entry',       label: 'Entry'       },
+  { id: 'exit',        label: 'Exit'        },
+  { id: 'sizing',      label: 'Sizing'      },
+  { id: 'patience',    label: 'Patience'    },
+  { id: 'market_read', label: 'Market read' },
+  { id: 'emotions',    label: 'Emotions'    },
+]
+
+const QUICK_REVIEW_FOLLOW_UPS = {
+  a_plus: {
+    question: 'What made this one repeatable?',
+    options: ['Waited for confirmation', 'Sized it right', 'Managed risk cleanly', 'Stayed patient through noise'],
+  },
+  solid: {
+    question: 'What was the main leak?',
+    options: ['Entry was a little early', 'Exit got emotional', 'Risk was a bit loose', 'The read was right but execution drifted'],
+  },
+  chased: {
+    question: 'What pulled you into the chase?',
+    options: ['Fear of missing the move', 'Wanted quick green', 'Bored and forced it', 'Ignored my entry criteria'],
+  },
+  cut_early: {
+    question: 'Why did you take it off early?',
+    options: ['PnL made me uncomfortable', 'I lost conviction too fast', 'I misread the tape', 'I wanted to protect a small win'],
+  },
+  rule_break: {
+    question: 'What rule slipped most?',
+    options: ['Took a non-A setup', 'Oversized it', 'Moved the stop', 'Re-entered emotionally'],
+  },
+  default: {
+    question: 'What deserves the closest review?',
+    options: ['Entry timing', 'Exit decision', 'Position sizing', 'Emotional control'],
+  },
+}
+
+function deriveTradeAwarePrompt(trade, verdict, mood, focus) {
+  const status = trade.status || ''
+  const r = typeof trade.rMultiple === 'number' ? trade.rMultiple : null
+  const grade = typeof trade.processGrade === 'number' ? trade.processGrade : null
+  const position = trade.position || 'Long'
+
+  if (status === 'Open') {
+    return {
+      question: 'This trade is still open. What needs the most discipline from here?',
+      options: ['Stick to my exit plan', 'Do not move the stop', 'Do not over-manage every candle', 'Let the thesis play out'],
+    }
+  }
+
+  if (status === 'Scratch') {
+    return {
+      question: 'Was the scratch decision actually correct?',
+      options: ['Yes, risk was invalidated', 'Yes, it protected capital', 'No, I got shaken out', 'Not sure, need chart replay'],
+    }
+  }
+
+  if (status === 'Loss' && grade >= 4) {
+    return {
+      question: 'This looks like a good loss. What confirms that?',
+      options: ['Followed the plan anyway', 'Stop was respected', 'Sizing stayed appropriate', 'The setup was still valid'],
+    }
+  }
+
+  if (status === 'Win' && grade != null && grade <= 2) {
+    return {
+      question: 'This paid you, but what part was still dangerous?',
+      options: ['Got rewarded for bad behavior', 'Chased and got lucky', 'Risk was too loose', 'Exit covered up weak execution'],
+    }
+  }
+
+  if (status === 'Win' && r != null && r >= 2) {
+    return {
+      question: 'What helped you capture the larger win?',
+      options: ['Held through normal noise', 'Trusted the higher-timeframe thesis', 'Took partials with a plan', 'Did not micromanage it'],
+    }
+  }
+
+  if (status === 'Loss' && r != null && r <= -1) {
+    return {
+      question: 'What mattered most in keeping this loss from getting worse?',
+      options: ['Honored the stop', 'Cut it once thesis changed', 'Avoided revenge trading after', 'Size kept the damage manageable'],
+    }
+  }
+
+  if (grade != null && grade <= 2) {
+    return {
+      question: 'Where did process break down the most?',
+      options: ['Setup quality was weak', 'Entry discipline slipped', 'Risk management slipped', 'Emotions took over'],
+    }
+  }
+
+  if (focus === 'emotions' || mood === 'frustrated' || mood === 'confused') {
+    return {
+      question: 'What feeling had the biggest impact on this trade?',
+      options: ['FOMO', 'Fear of giving back P&L', 'Impatience', 'Need to be right'],
+    }
+  }
+
+  if (focus === 'entry') {
+    return {
+      question: `How clean was the ${position.toLowerCase()} entry really?`,
+      options: ['A-level timing', 'Slightly early', 'Late and stretched', 'I ignored my trigger'],
+    }
+  }
+
+  if (focus === 'exit') {
+    return {
+      question: 'What best explains the exit decision?',
+      options: ['Thesis changed', 'Target or stop hit', 'PnL emotions took over', 'I exited without a clear reason'],
+    }
+  }
+
+  if (focus === 'sizing') {
+    return {
+      question: 'How appropriate was the size for this setup?',
+      options: ['Exactly right', 'Too big for conviction', 'Too small for quality', 'Size changed my behavior'],
+    }
+  }
+
+  if (focus === 'market_read') {
+    return {
+      question: 'How accurate was your market read going into this trade?',
+      options: ['Very aligned', 'Mostly right', 'Mixed / noisy', 'I misread the context'],
+    }
+  }
+
+  return QUICK_REVIEW_FOLLOW_UPS[verdict] || QUICK_REVIEW_FOLLOW_UPS.default
+}
+
+function quickToneClasses(tone) {
+  return TAG_COLORS[tone] || TAG_COLORS.gray
+}
+
+function quickReviewTagMap(review) {
+  const tags = []
+  if (review.verdict === 'a_plus') tags.push('Perfect execution', 'Followed plan')
+  if (review.verdict === 'solid') tags.push('Followed plan')
+  if (review.verdict === 'chased') tags.push('Chased entry', 'FOMO trade')
+  if (review.verdict === 'cut_early') tags.push('Cut winner early')
+  if (review.verdict === 'rule_break') tags.push('Broke rules')
+  if (review.focus === 'patience') tags.push('Good patience')
+  if (review.mood === 'confused') tags.push('Review later')
+  return [...new Set(tags)]
+}
+
+function buildQuickReviewSummary(review) {
+  const mood   = QUICK_REVIEW_MOODS.find(x => x.id === review.mood)?.label || '—'
+  const verdict = QUICK_REVIEW_VERDICTS.find(x => x.id === review.verdict)?.label || '—'
+  const focus  = QUICK_REVIEW_FOCUS_AREAS.find(x => x.id === review.focus)?.label || '—'
+  const follow = review.followUp || '—'
+  return { mood, verdict, focus, follow }
+}
+
+function buildVoiceReviewNotes(existingNotes, analysis, transcript) {
+  const parts = []
+  const summary = analysis.summary?.trim()
+  const lesson = analysis.keyLesson?.trim()
+  const bullets = Array.isArray(analysis.noteBullets)
+    ? analysis.noteBullets.map(x => String(x || '').trim()).filter(Boolean)
+    : []
+
+  if (summary) parts.push(summary)
+  if (lesson) parts.push(`Key lesson: ${lesson}`)
+  bullets.forEach(item => parts.push(`• ${item.replace(/^[•\-\s]+/, '')}`))
+  if (transcript?.trim()) parts.push(`Voice transcript: "${transcript.trim()}"`)
+
+  const block = parts.join('\n')
+  if (!block) return existingNotes || ''
+  return existingNotes?.trim() ? `${existingNotes.trim()}\n\n${block}` : block
+}
+
+function buildGuidedVoiceQuestions(trade) {
+  const derived = deriveTradeAwarePrompt(
+    trade,
+    trade.quickReview?.verdict || '',
+    trade.quickReview?.mood || '',
+    trade.quickReview?.focus || ''
+  )
+
+  return [
+    {
+      id: 'story',
+      prompt: 'Walk me through this trade from entry to exit. What actually happened?',
+      hint: 'Setup, trigger, management, and exit.',
+    },
+    {
+      id: 'process',
+      prompt: 'What were you feeling during the trade, and where did your process help or slip?',
+      hint: 'Confidence, hesitation, FOMO, discipline, patience.',
+    },
+    {
+      id: 'lesson',
+      prompt: derived.question,
+      hint: 'Keep it short and honest.',
+    },
+  ]
+}
+
+const MIN_DYNAMIC_QUESTION_COUNT = 4
+
+function QuickReviewSection({ trade, onUpdate }) {
+  const [mood, setMood]       = useState(trade.quickReview?.mood || '')
+  const [verdict, setVerdict] = useState(trade.quickReview?.verdict || '')
+  const [focus, setFocus]     = useState(trade.quickReview?.focus || '')
+  const [followUp, setFollowUp] = useState(trade.quickReview?.followUp || '')
+  const [saved, setSaved]     = useState(false)
+  const savedTimer            = useRef(null)
+
+  useEffect(() => {
+    setMood(trade.quickReview?.mood || '')
+    setVerdict(trade.quickReview?.verdict || '')
+    setFocus(trade.quickReview?.focus || '')
+    setFollowUp(trade.quickReview?.followUp || '')
+    setSaved(false)
+  }, [trade.id]) // eslint-disable-line
+
+  const prompt = useMemo(
+    () => deriveTradeAwarePrompt(trade, verdict, mood, focus),
+    [trade, verdict, mood, focus]
+  )
+  const progress = [mood, verdict, focus, followUp].filter(Boolean).length
+  const complete = progress === 4
+
+  function saveQuickReview(next = {}) {
+    const review = {
+      mood: next.mood ?? mood,
+      verdict: next.verdict ?? verdict,
+      focus: next.focus ?? focus,
+      followUp: next.followUp ?? followUp,
+      updatedAt: new Date().toISOString(),
+    }
+    const mergedTags = [...new Set([...(trade.reviewTags || []), ...quickReviewTagMap(review)])]
+    onUpdate({ quickReview: review, reviewTags: mergedTags })
+    setSaved(true)
+    clearTimeout(savedTimer.current)
+    savedTimer.current = setTimeout(() => setSaved(false), 2000)
+  }
+
+  function resetQuickReview() {
+    setMood('')
+    setVerdict('')
+    setFocus('')
+    setFollowUp('')
+    onUpdate({ quickReview: null })
+    setSaved(false)
+  }
+
+  const summary = trade.quickReview ? buildQuickReviewSummary(trade.quickReview) : null
+
+  return (
+    <div className="rounded-xl border border-accent-blue/15 bg-accent-blue/[0.04] p-4 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Sparkles size={14} className="text-accent-blue" />
+            <p className="label text-white">Quick Review</p>
+            <span className="text-[10px] uppercase tracking-[0.16em] text-accent-blue/70">Phase 1</span>
+          </div>
+          <p className="text-xs text-gray-400 leading-relaxed">
+            Tap through a short guided debrief instead of staring at a blank notes box.
+          </p>
+        </div>
+        {trade.quickReview && (
+          <button
+            onClick={resetQuickReview}
+            className="shrink-0 flex items-center gap-1 text-xs px-2 py-1 rounded-lg border border-white/10 text-gray-500 hover:text-white hover:border-white/20 transition-all"
+          >
+            <RotateCcw size={11} />
+            Reset
+          </button>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between text-[11px] text-gray-500">
+        <span>{complete ? 'Quick review complete' : `${progress}/4 prompts answered`}</span>
+        {saved && <span className="text-accent-green">Saved</span>}
+      </div>
+
+      <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-accent-blue via-accent-blue to-accent-green transition-all"
+          style={{ width: `${(progress / 4) * 100}%` }}
+        />
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <Brain size={13} className="text-gray-500" />
+            <p className="label">How do you feel about this trade?</p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {QUICK_REVIEW_MOODS.map(item => {
+              const active = mood === item.id
+              const c = quickToneClasses(item.tone)
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setMood(item.id)
+                    saveQuickReview({ mood: item.id })
+                  }}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
+                    active ? `${c.bg} ${c.text} ${c.border}` : 'text-gray-500 border-white/10 hover:text-white hover:border-white/20'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <CircleDot size={13} className="text-gray-500" />
+            <p className="label">What kind of trade was this?</p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {QUICK_REVIEW_VERDICTS.map(item => {
+              const active = verdict === item.id
+              const c = quickToneClasses(item.tone)
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setVerdict(item.id)
+                    setFollowUp('')
+                    saveQuickReview({ verdict: item.id, followUp: '' })
+                  }}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
+                    active ? `${c.bg} ${c.text} ${c.border}` : 'text-gray-500 border-white/10 hover:text-white hover:border-white/20'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <Tag size={13} className="text-gray-500" />
+            <p className="label">What mattered most?</p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {QUICK_REVIEW_FOCUS_AREAS.map(item => {
+              const active = focus === item.id
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setFocus(item.id)
+                    saveQuickReview({ focus: item.id })
+                  }}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
+                    active
+                      ? 'bg-accent-blue/15 text-accent-blue border-accent-blue/25'
+                      : 'text-gray-500 border-white/10 hover:text-white hover:border-white/20'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <MessageSquare size={13} className="text-gray-500" />
+            <p className="label">{prompt.question}</p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {prompt.options.map(option => {
+              const active = followUp === option
+              return (
+                <button
+                  key={option}
+                  onClick={() => {
+                    setFollowUp(option)
+                    saveQuickReview({ followUp: option })
+                  }}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
+                    active
+                      ? 'bg-white/10 text-white border-white/20'
+                      : 'text-gray-500 border-white/10 hover:text-white hover:border-white/20'
+                  }`}
+                >
+                  {option}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      {summary && (
+        <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2.5">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-gray-500 mb-2">Saved Debrief</p>
+          <div className="grid grid-cols-2 gap-2 text-xs text-gray-300">
+            <div><span className="text-gray-500">Mood:</span> {summary.mood}</div>
+            <div><span className="text-gray-500">Type:</span> {summary.verdict}</div>
+            <div><span className="text-gray-500">Focus:</span> {summary.focus}</div>
+            <div><span className="text-gray-500">Key note:</span> {summary.follow}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function VoiceReviewSection({ trade, onUpdate }) {
+  const { apiKey } = useSettingsStore()
+  const [status, setStatus] = useState('idle')
+  const [answers, setAnswers] = useState([])
+  const [errorMsg, setErrorMsg] = useState('')
+  const [showTranscript, setShowTranscript] = useState(false)
+  const [analysis, setAnalysis] = useState(null)
+  const [currentStep, setCurrentStep] = useState(0)
+  const [questions, setQuestions] = useState(() => buildGuidedVoiceQuestions(trade))
+  const recognitionRef = useRef(null)
+  const partsRef = useRef([])
+  const activeQuestion = questions[currentStep] || null
+  const combinedTranscript = useMemo(() => (
+    answers
+      .filter(item => item?.answer)
+      .map((item, idx) => `Question ${idx + 1}: ${item.question}\nAnswer ${idx + 1}: ${item.answer}`)
+      .join('\n\n')
+  ), [answers])
+
+  useEffect(() => {
+    setStatus('idle')
+    setAnswers([])
+    setErrorMsg('')
+    setShowTranscript(false)
+    setAnalysis(null)
+    setCurrentStep(0)
+    setQuestions(buildGuidedVoiceQuestions(trade))
+    recognitionRef.current?.abort?.()
+    recognitionRef.current = null
+    partsRef.current = []
+  }, [trade.id])
+
+  function startRecording() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setErrorMsg('Speech recognition not supported. Use Chrome or Edge.')
+      setStatus('error')
+      return
+    }
+    if (!apiKey) {
+      setErrorMsg('Add your Gemini API key in Settings first.')
+      setStatus('error')
+      return
+    }
+
+    partsRef.current = []
+    setAnalysis(null)
+    setErrorMsg('')
+
+    const rec = new SpeechRecognition()
+    rec.continuous = true
+    rec.interimResults = false
+    rec.lang = 'en-US'
+
+    rec.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        partsRef.current.push(e.results[i][0].transcript)
+      }
+    }
+
+    rec.onend = async () => {
+      const full = partsRef.current.join(' ').trim()
+      if (!full) {
+        setStatus('idle')
+        return
+      }
+
+      const nextAnswers = [...answers]
+      nextAnswers[currentStep] = {
+        id: activeQuestion?.id || `step_${currentStep}`,
+        question: activeQuestion?.prompt || `Question ${currentStep + 1}`,
+        answer: full,
+      }
+      setAnswers(nextAnswers)
+
+      const answeredCount = nextAnswers.filter(item => item?.answer).length
+      const hasAnotherExistingQuestion = currentStep < questions.length - 1
+      const shouldAnalyzeNow = answeredCount >= MIN_DYNAMIC_QUESTION_COUNT
+
+      if (!shouldAnalyzeNow) {
+        if (hasAnotherExistingQuestion) {
+          if (currentStep === questions.length - 2) {
+            setStatus('thinking')
+            try {
+              const followUp = await generateTradeVoiceFollowUp(trade, nextAnswers.filter(Boolean), apiKey)
+              setQuestions(prev => ([
+                ...prev,
+                {
+                  id: `dynamic_${answeredCount + 1}`,
+                  prompt: followUp.question || 'What was the real lesson here?',
+                  hint: followUp.hint || 'What would you repeat or avoid?',
+                },
+              ]))
+            } catch (err) {
+              console.warn('[voice-review] dynamic follow-up failed:', err)
+            }
+          }
+          setCurrentStep(currentStep + 1)
+          setStatus('idle')
+          return
+        }
+
+        setStatus('thinking')
+        try {
+          const followUp = await generateTradeVoiceFollowUp(trade, nextAnswers.filter(Boolean), apiKey)
+          setQuestions(prev => ([
+            ...prev,
+            {
+              id: `dynamic_${answeredCount + 1}`,
+              prompt: followUp.question || 'What was the real lesson here?',
+              hint: followUp.hint || 'What would you repeat or avoid?',
+            },
+          ]))
+          setCurrentStep(currentStep + 1)
+          setStatus('idle')
+          return
+        } catch (err) {
+          console.warn('[voice-review] dynamic follow-up failed:', err)
+        }
+      }
+
+      const transcriptForAnalysis = nextAnswers
+        .filter(item => item?.answer)
+        .map((item, idx) => `Question ${idx + 1}: ${item.question}\nAnswer ${idx + 1}: ${item.answer}`)
+        .join('\n\n')
+
+      setStatus('processing')
+      try {
+        const result = await analyzeTradeVoiceReview(trade, transcriptForAnalysis, apiKey)
+        setAnalysis(result)
+
+        const voiceQuick = result.quickReview || {}
+        const mergedQuickReview = {
+          ...(trade.quickReview || {}),
+          ...Object.fromEntries(Object.entries(voiceQuick).filter(([, v]) => v !== null && v !== undefined && v !== '')),
+          updatedAt: new Date().toISOString(),
+        }
+        const mergedTags = [...new Set([
+          ...(trade.reviewTags || []),
+          ...(Array.isArray(result.reviewTags) ? result.reviewTags : []),
+          ...quickReviewTagMap(mergedQuickReview),
+        ].filter(Boolean))]
+
+        const updates = {
+          quickReview: mergedQuickReview,
+          reviewTags: mergedTags,
+          reviewNotes: buildVoiceReviewNotes(trade.reviewNotes || '', result, transcriptForAnalysis),
+          voiceReview: {
+            transcript: transcriptForAnalysis,
+            summary: result.summary || null,
+            keyLesson: result.keyLesson || null,
+            answers: nextAnswers,
+            analyzedAt: new Date().toISOString(),
+          },
+        }
+
+        if (result.processGradeSuggestion != null && trade.processGrade == null) {
+          updates.processGrade = result.processGradeSuggestion
+        }
+
+        onUpdate(updates)
+        setStatus('done')
+      } catch (err) {
+        setStatus('error')
+        setErrorMsg(err.message || 'Voice review failed.')
+      }
+    }
+
+    rec.onerror = (e) => {
+      if (e.error === 'aborted' || e.error === 'no-speech') return
+      setStatus('error')
+      setErrorMsg(`Mic error: ${e.error}`)
+    }
+
+    recognitionRef.current = rec
+    rec.start()
+    setStatus('recording')
+  }
+
+  function stopRecording() {
+    recognitionRef.current?.stop()
+  }
+
+  function resetVoiceReview() {
+    recognitionRef.current?.abort?.()
+    recognitionRef.current = null
+    partsRef.current = []
+    setStatus('idle')
+    setAnswers([])
+    setErrorMsg('')
+    setShowTranscript(false)
+    setAnalysis(null)
+    setCurrentStep(0)
+  }
+
+  function skipQuestion() {
+    if (currentStep < questions.length - 1) {
+      setCurrentStep(currentStep + 1)
+      setStatus('idle')
+      return
+    }
+    setStatus('idle')
+  }
+
+  const summaryChips = analysis ? [
+    analysis.quickReview?.mood ? `Mood: ${analysis.quickReview.mood}` : null,
+    analysis.quickReview?.verdict ? `Type: ${analysis.quickReview.verdict}` : null,
+    analysis.quickReview?.focus ? `Focus: ${analysis.quickReview.focus}` : null,
+    analysis.processGradeSuggestion != null ? `Grade: ${analysis.processGradeSuggestion}/5` : null,
+    analysis.keyLesson ? 'Lesson captured' : null,
+  ].filter(Boolean) : []
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Mic size={14} className="text-accent-blue" />
+            <p className="label text-white">Voice Review</p>
+            <span className="text-[10px] uppercase tracking-[0.16em] text-accent-blue/70">Phase 2.5</span>
+          </div>
+          <p className="text-xs text-gray-400 leading-relaxed">
+            Guided voice debrief: answer one short question at a time and let the app build the review.
+          </p>
+        </div>
+        {(status === 'done' || status === 'error') && (
+          <button
+            onClick={resetVoiceReview}
+            className="text-xs px-2 py-1 rounded-lg border border-white/10 text-gray-500 hover:text-white hover:border-white/20 transition-all"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between text-[11px] text-gray-500 mb-3">
+        <span>{Math.min(answers.filter(x => x?.answer).length + (status === 'processing' || status === 'done' ? 0 : 0), questions.length)}/{questions.length} answers captured</span>
+        <span>Question {Math.min(currentStep + 1, questions.length)} of {questions.length}</span>
+      </div>
+
+      <div className="h-1.5 rounded-full bg-white/5 overflow-hidden mb-4">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-accent-blue via-accent-blue to-accent-green transition-all"
+          style={{ width: `${(answers.filter(x => x?.answer).length / questions.length) * 100}%` }}
+        />
+      </div>
+
+      {activeQuestion && status !== 'done' && (
+        <div className="rounded-lg border border-accent-blue/15 bg-accent-blue/[0.05] px-3 py-3 mb-3">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-accent-blue/70 mb-1">Current Prompt</p>
+          <p className="text-sm text-white leading-relaxed">{activeQuestion.prompt}</p>
+          <p className="text-xs text-gray-500 mt-2">{activeQuestion.hint}</p>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 flex-wrap">
+        {status === 'idle' && (
+          <>
+            <button
+              type="button"
+              onClick={startRecording}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-blue/10 border border-accent-blue/30 text-accent-blue hover:bg-accent-blue/20 transition-all text-sm font-medium"
+            >
+              <Mic size={15} />
+              {answers[currentStep]?.answer ? 'Re-record Answer' : 'Record Answer'}
+            </button>
+            {currentStep < questions.length - 1 && (
+              <button
+                type="button"
+                onClick={skipQuestion}
+                className="text-xs px-3 py-2 rounded-lg border border-white/10 text-gray-500 hover:text-white hover:border-white/20 transition-all"
+              >
+                Skip for now
+              </button>
+            )}
+          </>
+        )}
+
+        {status === 'recording' && (
+          <>
+            <button
+              type="button"
+              onClick={stopRecording}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-red/10 border border-accent-red/40 text-accent-red hover:bg-accent-red/20 transition-all text-sm font-medium"
+            >
+              <MicOff size={15} />
+              Stop Answer
+            </button>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-accent-red animate-pulse" />
+              <span className="text-xs text-gray-400">Speak naturally, then stop when you’re done with this answer</span>
+            </div>
+          </>
+        )}
+
+        {status === 'thinking' && (
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <Loader2 size={15} className="animate-spin text-accent-blue" />
+            <span>Coach is choosing the next best question…</span>
+          </div>
+        )}
+
+        {status === 'processing' && (
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <Loader2 size={15} className="animate-spin text-accent-blue" />
+            <span>Building your voice debrief…</span>
+          </div>
+        )}
+
+        {status === 'done' && (
+          <div className="flex items-center gap-2 text-accent-green text-sm font-medium">
+            <CheckCircle size={15} />
+            Guided voice review saved into the debrief and notes
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div className="flex items-center gap-2 text-accent-red text-sm">
+            <XCircle size={15} />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+      </div>
+
+      {answers.length > 0 && (
+        <div className="mt-4 space-y-2">
+          {questions.map((question, idx) => {
+            const answer = answers[idx]?.answer
+            const isCurrent = idx === currentStep && status !== 'done'
+            return (
+              <div
+                key={question.id}
+                className={`rounded-lg border px-3 py-2.5 ${
+                  answer
+                    ? 'border-white/10 bg-black/20'
+                    : isCurrent
+                      ? 'border-accent-blue/20 bg-accent-blue/[0.04]'
+                      : 'border-white/5 bg-white/[0.01]'
+                }`}
+              >
+                <p className="text-[11px] uppercase tracking-[0.16em] text-gray-500 mb-1">Question {idx + 1}</p>
+                <p className="text-xs text-gray-300">{question.prompt}</p>
+                <p className={`text-xs mt-2 leading-relaxed ${answer ? 'text-white' : 'text-gray-600 italic'}`}>
+                  {answer || (isCurrent ? 'Waiting for your answer…' : 'No answer captured')}
+                </p>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {summaryChips.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-3">
+          {summaryChips.map((chip) => (
+            <span
+              key={chip}
+              className="text-[11px] bg-accent-green/10 border border-accent-green/20 text-accent-green rounded-full px-2 py-0.5 mono"
+            >
+              {chip}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {analysis?.summary && (
+        <div className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2.5">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-gray-500 mb-1">AI Debrief</p>
+          <p className="text-xs text-gray-300 leading-relaxed">{analysis.summary}</p>
+          {analysis.keyLesson && <p className="text-xs text-accent-blue mt-2">Key lesson: {analysis.keyLesson}</p>}
+        </div>
+      )}
+
+      {combinedTranscript && (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setShowTranscript(v => !v)}
+            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            {showTranscript ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            {showTranscript ? 'Hide conversation' : 'Show conversation'}
+          </button>
+          {showTranscript && (
+            <pre className="mt-2 text-xs text-gray-400 bg-surface-200 border border-white/10 rounded-lg p-3 leading-relaxed whitespace-pre-wrap italic font-sans">
+              {combinedTranscript}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ReviewTagsSection({ trade, onUpdate }) {
@@ -569,6 +1393,8 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate }) {
       {/* ── Review section ── */}
       <div className="border-t border-white/10 pt-5 space-y-5">
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Post-Trade Review</p>
+        <QuickReviewSection trade={trade} onUpdate={onUpdate} />
+        <VoiceReviewSection trade={trade} onUpdate={onUpdate} />
         <ReviewTagsSection  trade={trade} onUpdate={onUpdate} />
         <ReviewNotesSection trade={trade} onUpdate={onUpdate} />
       </div>
