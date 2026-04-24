@@ -99,20 +99,20 @@ export default function Dashboard({ selectedAccount }) {
   }, [closedTrades])
 
   return (
-    <div className="flex flex-col gap-6 p-5 md:p-7">
+    <div className="dashboard-container flex flex-col gap-5 xl:gap-6 p-4 md:p-5 2xl:p-7">
 
       {/* ── Page header ───────────────────────────────────────────────────── */}
-      <div className="luxury-panel rounded-[28px] px-6 py-6 md:px-8 md:py-7 flex items-end justify-between flex-wrap gap-4 overflow-hidden relative">
+      <div className="luxury-panel rounded-[24px] xl:rounded-[28px] px-5 py-5 md:px-6 md:py-6 2xl:px-8 2xl:py-7 flex items-end justify-between flex-wrap gap-4 overflow-hidden relative">
         <div className="absolute inset-y-0 right-0 w-1/2 bg-gradient-to-l from-accent-blue/10 via-accent-purple/5 to-transparent pointer-events-none" />
         <div className="relative">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-[#9ab3d1] mb-2">Trading Command Center</p>
-          <h1 className="text-4xl md:text-[3.6rem] font-semibold tracking-[-0.05em] text-white">Dashboard</h1>
-          <p className="text-lg md:text-xl text-muted mt-1">{today}</p>
+          <p className="text-[11px] xl:text-[12px] font-semibold uppercase tracking-[0.28em] xl:tracking-[0.34em] text-[#9ab3d1] mb-2">Trading Command Center</p>
+          <h1 className="text-[clamp(2.1rem,4vw,3.6rem)] font-semibold tracking-[-0.05em] text-white">Dashboard</h1>
+          <p className="text-[1rem] md:text-[1.08rem] xl:text-xl text-muted mt-1">{today}</p>
         </div>
         {accountBalance > 0 && (
           <div className="text-left md:text-right relative">
-            <p className="text-[11px] font-semibold text-[#9ab3d1] uppercase tracking-[0.32em] mb-2">Account Balance</p>
-            <p className="text-3xl md:text-5xl font-semibold text-white mono tabular-nums tracking-[-0.05em]">{formatCurrency(accountBalance)}</p>
+            <p className="text-[11px] xl:text-[12px] font-semibold text-[#9ab3d1] uppercase tracking-[0.24em] xl:tracking-[0.32em] mb-2">Account Balance</p>
+            <p className="text-[clamp(2rem,3.2vw,3rem)] font-semibold text-white mono tabular-nums tracking-[-0.05em]">{formatCurrency(accountBalance)}</p>
           </div>
         )}
       </div>

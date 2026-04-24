@@ -294,17 +294,17 @@ export default function TopBar({ page, onImport, onOpenReminder }) {
   const { connected } = useSchwabStore()
 
   return (
-    <header className="h-16 bg-surface-50/72 backdrop-blur-xl border-b border-white/10 flex items-center px-5 shrink-0 sticky top-0 z-10 gap-3">
-      <h1 className="text-lg font-semibold tracking-[0.08em] text-white flex-shrink-0 uppercase">{PAGE_TITLES[page] || 'Trading Dashboard'}</h1>
+    <header className="h-14 xl:h-16 bg-surface-50/72 backdrop-blur-xl border-b border-white/10 flex items-center px-3 md:px-4 xl:px-5 shrink-0 sticky top-0 z-10 gap-2 xl:gap-3">
+      <h1 className="text-[0.92rem] xl:text-lg font-semibold tracking-[0.06em] xl:tracking-[0.08em] text-white flex-shrink-0 uppercase">{PAGE_TITLES[page] || 'Trading Dashboard'}</h1>
 
       {/* Quotes ticker — fills remaining space between title and import button */}
       <QuotesTicker />
 
-      <div className="flex items-center gap-2 flex-shrink-0">
+      <div className="flex items-center gap-1.5 xl:gap-2 flex-shrink-0">
         {connected && (
           <div
             title="Schwab connected — price history sourced from Schwab API"
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-accent-green/10 border border-accent-green/25 text-accent-green text-xs font-semibold"
+            className="hidden md:flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-full bg-accent-green/10 border border-accent-green/25 text-accent-green text-[11px] xl:text-xs font-semibold"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse" />
             Schwab
@@ -313,14 +313,14 @@ export default function TopBar({ page, onImport, onOpenReminder }) {
         <button
           onClick={onOpenReminder}
           title="Open trading reminder popup"
-          className="btn-ghost flex items-center gap-1.5 text-sm"
+          className="btn-ghost flex items-center gap-1.5 text-[13px] xl:text-sm px-3 xl:px-4 py-2 xl:py-2.5"
         >
           <Bell size={14} />
           <span className="hidden sm:inline">Reminder</span>
         </button>
         <button
           onClick={onImport}
-          className="btn-primary flex items-center gap-1.5 text-sm"
+          className="btn-primary flex items-center gap-1.5 text-[13px] xl:text-sm px-3 xl:px-4 py-2 xl:py-2.5"
         >
           <Upload size={14} />
           <span className="hidden sm:inline">Import</span>
@@ -329,7 +329,7 @@ export default function TopBar({ page, onImport, onOpenReminder }) {
           <button
             onClick={() => signOut()}
             title={`Sign out (${user.email})`}
-            className="btn-ghost flex items-center gap-1.5 text-sm text-gray-300 hover:text-accent-red"
+            className="btn-ghost flex items-center gap-1.5 text-[13px] xl:text-sm text-gray-300 hover:text-accent-red px-3 xl:px-4 py-2 xl:py-2.5"
           >
             <LogOut size={14} />
             <span className="hidden sm:inline">Sign Out</span>

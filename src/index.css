@@ -165,7 +165,25 @@
 
 @layer base {
   html {
-    font-size: 17px;
+    font-size: clamp(14px, 0.28vw + 13px, 17px);
+  }
+
+  @media (max-width: 1600px) {
+    html {
+      font-size: clamp(13.75px, 0.24vw + 12.7px, 16px);
+    }
+  }
+
+  @media (max-width: 1280px), (max-height: 900px) {
+    html {
+      font-size: clamp(13.25px, 0.22vw + 12.15px, 15px);
+    }
+  }
+
+  @media (max-width: 1100px), (max-height: 820px) {
+    html {
+      font-size: 13px;
+    }
   }
 
   body {
@@ -213,6 +231,11 @@
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
       radial-gradient(circle at top, rgba(94, 168, 255, 0.08), transparent 42%);
+  }
+
+  .dashboard-container {
+    width: min(100%, 118rem);
+    margin-inline: auto;
   }
 
   .card {

@@ -39,7 +39,7 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
   }
 
   return (
-    <aside className="luxury-panel w-16 md:w-60 flex flex-col shrink-0 h-screen sticky top-0 border-r border-white/10 bg-surface-50/80">
+    <aside className="luxury-panel w-16 lg:w-52 2xl:w-60 flex flex-col shrink-0 h-screen sticky top-0 border-r border-white/10 bg-surface-50/80">
 
       {/* Logo */}
       <div className="px-4 py-5 border-b border-white/10">
@@ -48,7 +48,7 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
 
       {/* ── Account Selector — desktop ── */}
       {realAccounts.length > 0 && (
-        <div className="hidden md:block px-3 pt-4 pb-3 border-b border-white/10">
+        <div className="hidden lg:block px-3 pt-4 pb-3 border-b border-white/10">
           <p className="text-[10px] text-gray-500 uppercase tracking-[0.28em] mb-2 px-1 font-semibold">Account</p>
           <div className="space-y-0.5">
 
@@ -90,7 +90,7 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
 
       {/* ── Mobile account indicator — colored dot on collapsed sidebar ── */}
       {realAccounts.length > 0 && (
-        <div className="md:hidden flex justify-center py-2 border-b border-white/10">
+        <div className="lg:hidden flex justify-center py-2 border-b border-white/10">
           {selectedAccount === 'All'
             ? <span className="w-2.5 h-2.5 rounded-full bg-white/40" title="All Accounts" />
             : (() => {
@@ -102,21 +102,21 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
       )}
 
       {/* ── Nav ── */}
-      <nav className="flex-1 py-5 px-2.5 space-y-1">
+      <nav className="flex-1 py-4 lg:py-5 px-2 lg:px-2.5 space-y-1">
         {NAV.map(({ id, label, icon: Icon }) => {
           const active = page === id
           return (
             <button
               key={id}
               onClick={() => setPage(id)}
-              className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium transition-all
+              className={`w-full flex items-center gap-3 px-3 py-2.5 lg:px-3.5 lg:py-3 rounded-xl text-[13px] lg:text-sm font-medium transition-all
                 ${active
                   ? 'bg-gradient-to-r from-accent-blue/18 to-accent-purple/12 text-white border border-accent-blue/20 shadow-lg shadow-accent-blue/10'
                   : 'text-gray-300 hover:text-white hover:bg-white/5'
                 }`}
             >
               <Icon size={18} className={`shrink-0 ${active ? 'text-accent-blue' : ''}`} />
-              <span className="hidden md:block">{label}</span>
+              <span className="hidden lg:block">{label}</span>
             </button>
           )
         })}
@@ -124,7 +124,7 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
 
       {/* ── Mobile account select — pinned above footer ── */}
       {realAccounts.length > 0 && (
-        <div className="md:hidden px-2 pb-2 pt-2 border-t border-white/10">
+        <div className="lg:hidden px-2 pb-2 pt-2 border-t border-white/10">
           <select
             value={selectedAccount}
             onChange={e => setSelectedAccount(e.target.value)}
@@ -138,7 +138,7 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
       )}
 
       {/* ── Footer ── */}
-      <div className="px-3 py-4 border-t border-white/10 hidden md:block">
+      <div className="px-3 py-4 border-t border-white/10 hidden lg:block">
         {selectedAccount !== 'All' && realAccounts.includes(selectedAccount) && (() => {
           const colors = getColor(selectedAccount)
           return (
