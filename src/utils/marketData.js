@@ -487,6 +487,45 @@ export async function fetchATR14(symbol) {
 }
 
 /**
+ * Fetch historical 14-period ATR as of a trade entry date.
+ * Uses completed daily candles before the entry date to avoid lookahead bias.
+ */
+export async function fetchATR14AtDate(symbol, entryDate) {
+  const entry = new Date(entryDate)
+  if (!symbol || Number.isNaN(entry.getTime())) throw new Error('Invalid symbol or entry date')
+
+  const end = new Date(entry)
+  end.setDate(end.getDate() - 1)
+  const start = new Date(entry)
+  start.setDate(start.getDate() - 70)
+
+  const bars = await fetchHistory(symbol, start, end)
+  const usable = bars
+    .filter(b => b.time < entry.toISOString().slice(0, 10))
+    .sort((a, b) => a.time.localeCompare(b.time))
+  if (usable.length < 15) throw new Error(`${symbol}: not enough historical bars for entry ATR`)
+
+  const trs = []
+  for (let i = 1; i < usable.length; i++) {
+    const { high, low } = usable[i]
+    const prev = usable[i - 1].close
+    trs.push(Math.max(high - low, Math.abs(high - prev), Math.abs(low - prev)))
+  }
+
+  const last14 = trs.slice(-14)
+  const atr = last14.reduce((s, v) => s + v, 0) / last14.length
+  const lastBar = usable[usable.length - 1]
+
+  return {
+    atr: Math.round(atr * 10000) / 10000,
+    atrPct: lastBar.close > 0 ? Math.round((atr / lastBar.close) * 10000) / 100 : 0,
+    lastClose: Math.round(lastBar.close * 100) / 100,
+    asOfDate: lastBar.time,
+    method: 'prior_completed_daily_atr14',
+  }
+}
+
+/**
  * Fetch quotes for multiple symbols. Returns a Map of symbol -> quote.
  * Uses Yahoo Finance v7 batch endpoint first (pre-market aware, 2 requests for 30+ symbols),
  * then falls back to individual fetchQuote for any that failed.

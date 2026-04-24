@@ -10,6 +10,7 @@ import TickerTooltip from '../shared/TickerTooltip.jsx'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
+import { useAtrBackfill } from '../../hooks/useAtrBackfill.js'
 import { buildEquityCurve } from '../../utils/equityCurve.js'
 import {
   calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor,
@@ -397,7 +398,7 @@ function simulateLongGame({
 
 
 export default function Analytics({ selectedAccount }) {
-  const { trades, accountActivities, getAccountBalance } = useTradeStore()
+  const { trades, accountActivities, getAccountBalance, updateTrade } = useTradeStore()
   const accountBalance = getAccountBalance(selectedAccount)
   const {
     excludedSymbols,
@@ -457,6 +458,7 @@ export default function Analytics({ selectedAccount }) {
   const [projectionAvgLossR, setProjectionAvgLossR] = useState(1)
   const [projectionTargetReturn, setProjectionTargetReturn] = useState(100)
   const [projectionRiskPolicy, setProjectionRiskPolicy] = useState('fixed')
+  const atrBackfill = useAtrBackfill(trades, updateTrade)
 
   const excludedSet = useMemo(
     () => new Set((excludedSymbols || []).map(s => s.toUpperCase())),
@@ -1504,6 +1506,15 @@ export default function Analytics({ selectedAccount }) {
             <RefreshCw size={11} className={liveQuoteLoading ? 'animate-spin' : ''} />
             Refresh Marks
           </button>
+        )}
+        {(atrBackfill.running || atrBackfill.filled > 0 || atrBackfill.failed > 0) && (
+          <span className={`text-[10px] px-2 py-1 rounded-full border ${
+            atrBackfill.running ? 'text-accent-blue border-accent-blue/25 bg-accent-blue/10'
+            : atrBackfill.failed ? 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10'
+            : 'text-accent-green border-accent-green/25 bg-accent-green/10'
+          }`}>
+            ATR backfill {atrBackfill.running ? 'running' : 'complete'} · {atrBackfill.filled}/{atrBackfill.pending} filled{atrBackfill.failed ? ` · ${atrBackfill.failed} failed` : ''}
+          </span>
         )}
       </div>
 

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { ChevronDown, ChevronRight, Trash2, Sparkles, Pencil, Check, X, BarChart2, Image, ZoomIn, Clipboard, Upload, Loader2 } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
+import { useAtrBackfill } from '../../hooks/useAtrBackfill.js'
 import { formatCurrency, formatDate, formatR, signClass } from '../../utils/formatters.js'
 import { analyzeSingleTrade } from '../../utils/ai.js'
 import { enrichTrade } from '../../utils/enrichTrade.js'
@@ -1366,6 +1367,7 @@ function SymbolStatsModal({ symbol, trades, onClose }) {
 
 export default function TradeLog({ selectedAccount }) {
   const { trades, deleteTrade, clearTrades, updateTrade } = useTradeStore()
+  const atrBackfill = useAtrBackfill(trades, updateTrade)
   const [expanded, setExpanded] = useState(null)
   const [symbolModal, setSymbolModal] = useState(null)
   const [viewMode, setViewMode] = useState('trades')
@@ -1476,6 +1478,15 @@ export default function TradeLog({ selectedAccount }) {
         <span className="text-xs text-gray-500">
           {viewMode === 'reconcile' ? `${reconciliationRows.length} rows` : `${filtered.length} trades`}
         </span>
+        {(atrBackfill.running || atrBackfill.filled > 0 || atrBackfill.failed > 0) && (
+          <span className={`text-[10px] px-2 py-1 rounded-full border ${
+            atrBackfill.running ? 'text-accent-blue border-accent-blue/25 bg-accent-blue/10'
+            : atrBackfill.failed ? 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10'
+            : 'text-accent-green border-accent-green/25 bg-accent-green/10'
+          }`}>
+            ATR backfill {atrBackfill.running ? 'running' : 'complete'} · {atrBackfill.filled}/{atrBackfill.pending} filled{atrBackfill.failed ? ` · ${atrBackfill.failed} failed` : ''}
+          </span>
+        )}
         {trades.length > 0 && (
           <button
             onClick={() => { if (window.confirm('Delete all trades? This cannot be undone.')) clearTrades() }}
