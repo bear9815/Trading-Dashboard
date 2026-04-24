@@ -436,6 +436,11 @@ const MORNING_RISK_LABELS = {
   great: 'Great',
 }
 
+function avg(nums) {
+  if (!nums?.length) return null
+  return nums.reduce((s, n) => s + n, 0) / nums.length
+}
+
 function hasTradeReview(trade) {
   return Boolean(
     trade?.quickReview ||
@@ -492,6 +497,131 @@ function computeReviewIntelligence(trades) {
     topLeak,
     hotTags: Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 4),
   }
+}
+
+function computeEnvironmentStats(trades, morningEntries) {
+  const morningMap = new Map((morningEntries || []).map(entry => [entry.date, entry]))
+  const matched = (trades || [])
+    .filter(t => t.status === 'Win' || t.status === 'Loss')
+    .map(trade => {
+      const date = trade.entryDate?.slice(0, 10)
+      const morning = date ? morningMap.get(date) : null
+      return morning ? { trade, morning } : null
+    })
+    .filter(Boolean)
+
+  if (!matched.length) return null
+
+  const breakoutStats = ['Working', 'Mixed', 'Failing'].map(key => {
+    const list = matched.filter(x => x.morning.breakouts === key)
+    return {
+      key,
+      count: list.length,
+      winRate: list.length ? (list.filter(x => x.trade.status === 'Win').length / list.length) * 100 : null,
+      avgR: list.length ? avg(list.map(x => x.trade.rMultiple || 0)) : null,
+    }
+  }).filter(x => x.count > 0)
+
+  const creditStats = ['loose', 'easing', 'neutral', 'tightening', 'tight'].map(key => {
+    const list = matched.filter(x => x.morning.creditConditions === key)
+    return {
+      key,
+      count: list.length,
+      avgR: list.length ? avg(list.map(x => x.trade.rMultiple || 0)) : null,
+    }
+  }).filter(x => x.count > 0)
+
+  const aligned = matched.filter(({ trade, morning }) =>
+    (trade.position === 'Long' && morning.marketBias === 'Bullish') ||
+    (trade.position === 'Short' && morning.marketBias === 'Bearish')
+  )
+  const counter = matched.filter(({ trade, morning }) =>
+    (trade.position === 'Long' && morning.marketBias === 'Bearish') ||
+    (trade.position === 'Short' && morning.marketBias === 'Bullish')
+  )
+
+  const highFomo = matched.filter(x => x.morning.fomo != null && x.morning.fomo >= 70)
+  const calmFomo = matched.filter(x => x.morning.fomo != null && x.morning.fomo < 45)
+  const greedy = matched.filter(x => x.morning.fearGreed != null && x.morning.fearGreed >= 1)
+  const fearful = matched.filter(x => x.morning.fearGreed != null && x.morning.fearGreed <= -1)
+
+  return {
+    sample: matched.length,
+    breakoutStats,
+    creditStats,
+    aligned: {
+      count: aligned.length,
+      avgR: aligned.length ? avg(aligned.map(x => x.trade.rMultiple || 0)) : null,
+      winRate: aligned.length ? (aligned.filter(x => x.trade.status === 'Win').length / aligned.length) * 100 : null,
+    },
+    counter: {
+      count: counter.length,
+      avgR: counter.length ? avg(counter.map(x => x.trade.rMultiple || 0)) : null,
+      winRate: counter.length ? (counter.filter(x => x.trade.status === 'Win').length / counter.length) * 100 : null,
+    },
+    fomo: {
+      high: { count: highFomo.length, avgR: highFomo.length ? avg(highFomo.map(x => x.trade.rMultiple || 0)) : null },
+      calm: { count: calmFomo.length, avgR: calmFomo.length ? avg(calmFomo.map(x => x.trade.rMultiple || 0)) : null },
+    },
+    fearGreed: {
+      greedy: { count: greedy.length, avgR: greedy.length ? avg(greedy.map(x => x.trade.rMultiple || 0)) : null },
+      fearful: { count: fearful.length, avgR: fearful.length ? avg(fearful.map(x => x.trade.rMultiple || 0)) : null },
+    },
+  }
+}
+
+function fmtPct(value) {
+  return value == null ? '—' : `${Math.round(value)}%`
+}
+
+function fmtRShort(value) {
+  return value == null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}R`
+}
+
+function EnvironmentStatsCard({ stats }) {
+  if (!stats) return null
+  const bestBreakouts = [...stats.breakoutStats].sort((a, b) => (b.avgR ?? -Infinity) - (a.avgR ?? -Infinity))[0]
+  const worstBreakouts = [...stats.breakoutStats].sort((a, b) => (a.avgR ?? Infinity) - (b.avgR ?? Infinity))[0]
+  const bestCredit = [...stats.creditStats].sort((a, b) => (b.avgR ?? -Infinity) - (a.avgR ?? -Infinity))[0]
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-3">
+      <div>
+        <p className="text-[11px] uppercase tracking-[0.16em] text-gray-500">Environment Stats</p>
+        <p className="text-xs text-gray-400 mt-1">{stats.sample} closed trades matched to morning context</p>
+      </div>
+
+      <div className="space-y-2 text-xs text-gray-300">
+        {bestBreakouts && (
+          <p><span className="text-accent-green">Best breakout tape:</span> {bestBreakouts.key} ({fmtRShort(bestBreakouts.avgR)}, {fmtPct(bestBreakouts.winRate)})</p>
+        )}
+        {worstBreakouts && bestBreakouts?.key !== worstBreakouts.key && (
+          <p><span className="text-accent-red">Weakest breakout tape:</span> {worstBreakouts.key} ({fmtRShort(worstBreakouts.avgR)}, {fmtPct(worstBreakouts.winRate)})</p>
+        )}
+        {bestCredit && (
+          <p><span className="text-accent-blue">Best credit backdrop:</span> {MORNING_CREDIT_LABELS[bestCredit.key] || bestCredit.key} ({fmtRShort(bestCredit.avgR)})</p>
+        )}
+        {stats.aligned.count > 0 && (
+          <p><span className="text-gray-500">Bias aligned:</span> {fmtRShort(stats.aligned.avgR)} across {stats.aligned.count} trades</p>
+        )}
+        {stats.counter.count > 0 && (
+          <p><span className="text-gray-500">Against bias:</span> {fmtRShort(stats.counter.avgR)} across {stats.counter.count} trades</p>
+        )}
+        {stats.fomo.high.count > 0 && (
+          <p><span className="text-accent-yellow">High FOMO 70+:</span> {fmtRShort(stats.fomo.high.avgR)} across {stats.fomo.high.count} trades</p>
+        )}
+        {stats.fomo.calm.count > 0 && (
+          <p><span className="text-accent-green">Calmer FOMO &lt;45:</span> {fmtRShort(stats.fomo.calm.avgR)} across {stats.fomo.calm.count} trades</p>
+        )}
+        {stats.fearGreed.greedy.count > 0 && (
+          <p><span className="text-orange-300">Greedy mornings +1 or more:</span> {fmtRShort(stats.fearGreed.greedy.avgR)} across {stats.fearGreed.greedy.count}</p>
+        )}
+        {stats.fearGreed.fearful.count > 0 && (
+          <p><span className="text-cyan-300">Fearful mornings -1 or less:</span> {fmtRShort(stats.fearGreed.fearful.avgR)} across {stats.fearGreed.fearful.count}</p>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function localDateString(date = new Date()) {
@@ -670,6 +800,11 @@ function MarketContextSection({ trade }) {
               {morningEntry.fomo != null && (
                 <span className="text-xs px-2 py-0.5 rounded-full bg-white/8 text-gray-300 border border-white/10">
                   FOMO: {morningEntry.fomo}
+                </span>
+              )}
+              {morningEntry.fearGreed != null && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-white/8 text-gray-300 border border-white/10">
+                  F/G: {morningEntry.fearGreed > 0 ? `+${morningEntry.fearGreed}` : morningEntry.fearGreed}
                 </span>
               )}
             </div>
@@ -2044,6 +2179,7 @@ function TradeListItem({ trade, selected, onClick }) {
 // ── Main component ────────────────────────────────────────────────────────────
 export default function TradeReview({ selectedAccount }) {
   const { trades, updateTrade } = useTradeStore()
+  const { entries: morningEntries } = useMorningStore()
   const [selectedId,    setSelectedId]    = useState(null)
   const [statusFilter,  setStatusFilter]  = useState('All')
   const [reviewFilter,  setReviewFilter]  = useState('Needs Review')
@@ -2083,6 +2219,7 @@ export default function TradeReview({ selectedAccount }) {
   }, [scopedTrades, reviewFilter, sortBy])
 
   const reviewIntelligence = useMemo(() => computeReviewIntelligence(scopedTrades), [scopedTrades])
+  const environmentStats = useMemo(() => computeEnvironmentStats(scopedTrades, morningEntries), [scopedTrades, morningEntries])
 
   const sidebarStats = useMemo(() => {
     if (!reviewTrades.length) return null
@@ -2208,6 +2345,7 @@ export default function TradeReview({ selectedAccount }) {
           </div>
 
           <ReviewIntelligenceCard intelligence={reviewIntelligence} totalTrades={scopedTrades.length} />
+          <EnvironmentStatsCard stats={environmentStats} />
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
