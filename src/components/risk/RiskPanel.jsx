@@ -154,16 +154,19 @@ function getRowRiskMetrics(row, currentPrice, liveBalance, tpMultiplier, atrData
 const HEALTH_DEFAULT_WIDTHS = {
   zone:       65,
   lot:        60,
+  cohort:    150,
   symbol:    100,
   entry:      80,
   origStop:   85,
   worstPrice: 90,
   worstR:     85,
   liveR:      75,
-  proximity: 110,
-  trimPlan:  200,
+  proximity: 120,
+  velocity:   95,
+  kill:       75,
+  trimPlan:  260,
 }
-const HEALTH_RESIZE_KEYS = ['zone', 'lot', 'symbol', 'entry', 'origStop', 'worstPrice', 'worstR', 'liveR', 'proximity', 'trimPlan']
+const HEALTH_RESIZE_KEYS = ['zone', 'lot', 'cohort', 'symbol', 'entry', 'origStop', 'worstPrice', 'worstR', 'liveR', 'proximity', 'velocity', 'kill', 'trimPlan']
 
 // ── Image helpers ─────────────────────────────────────────────────────────────
 function readImageAsBase64(file) {
@@ -567,6 +570,64 @@ function LotPickerModal({ group, onClose, onPickLot, onCloseAll }) {
 // ── Position Health & Adaptive Trim ──────────────────────────────────────────
 // Combined panel: Stop Proximity (MAE tracking) + Adaptive Trim planning.
 // Trim trigger auto-derives from winner MAE distribution (since Nov 14 2025).
+function pctile(arr, p) {
+  if (!arr.length) return null
+  if (arr.length === 1) return arr[0]
+  const idx = (arr.length - 1) * p
+  const lo = Math.floor(idx)
+  const hi = Math.ceil(idx)
+  if (lo === hi) return arr[lo]
+  const w = idx - lo
+  return arr[lo] * (1 - w) + arr[hi] * w
+}
+
+function computeDistributionStats(values) {
+  if (!values.length) return null
+  const sorted = [...values].sort((a, b) => a - b)
+  const n = sorted.length
+  const avg = sorted.reduce((s, v) => s + v, 0) / n
+  return {
+    n,
+    avg: Math.round(avg * 1000) / 1000,
+    median: Math.round(pctile(sorted, 0.5) * 1000) / 1000,
+    p75: Math.round(pctile(sorted, 0.75) * 1000) / 1000,
+    p90: Math.round(pctile(sorted, 0.9) * 1000) / 1000,
+    p95: Math.round(pctile(sorted, 0.95) * 1000) / 1000,
+  }
+}
+
+function tradeHoldDays(trade, nowMs = Date.now()) {
+  if (typeof trade.duration === 'number' && !Number.isNaN(trade.duration) && trade.duration >= 0) return trade.duration
+  if (!trade.entryDate) return null
+  const entryMs = new Date(trade.entryDate).getTime()
+  if (!Number.isFinite(entryMs)) return null
+  const exitDates = (trade.exits || [])
+    .map(ex => ex.exitDate || ex.date)
+    .filter(Boolean)
+    .map(v => new Date(v).getTime())
+    .filter(Number.isFinite)
+  const endMs = exitDates.length ? Math.max(...exitDates) : nowMs
+  return Math.max(0, (endMs - entryMs) / 86_400_000)
+}
+
+function holdBucket(days) {
+  if (days == null) return 'Unknown'
+  if (days < 1.25) return '0-1d'
+  if (days < 5) return '2-5d'
+  if (days < 20) return '1-4w'
+  return '1m+'
+}
+
+function edgeLabel(trade) {
+  if (Array.isArray(trade.edges) && trade.edges.length > 0) return String(trade.edges[0]).trim() || 'General'
+  if (trade.strategy) return String(trade.strategy).trim() || 'General'
+  return 'General'
+}
+
+function sideLabel(trade) {
+  return (trade.position || 'Long').toLowerCase() === 'short' ? 'Short' : 'Long'
+}
+
 function computeWinnerMAEStats(trades) {
   const cutoff = new Date('2025-11-14T00:00:00Z')
   const winners = trades.filter(t =>
@@ -574,26 +635,68 @@ function computeWinnerMAEStats(trades) {
     t.maxAdverseR != null &&
     t.entryDate && new Date(t.entryDate) >= cutoff
   )
-  if (winners.length === 0) return null
-  const absMAE = winners.map(t => Math.abs(t.maxAdverseR)).sort((a, b) => a - b)
-  const n   = absMAE.length
-  const avg = absMAE.reduce((s, v) => s + v, 0) / n
-  function pctile(arr, p) {
-    if (arr.length === 1) return arr[0]
-    const idx = (arr.length - 1) * p
-    const lo = Math.floor(idx)
-    const hi = Math.ceil(idx)
-    if (lo === hi) return arr[lo]
-    const w = idx - lo
-    return arr[lo] * (1 - w) + arr[hi] * w
+  return computeDistributionStats(winners.map(t => Math.abs(t.maxAdverseR)))
+}
+
+function buildWinnerMAECohorts(trades) {
+  const cutoff = new Date('2025-11-14T00:00:00Z')
+  const winners = trades.filter(t =>
+    t.status === 'Win' &&
+    t.maxAdverseR != null &&
+    t.entryDate && new Date(t.entryDate) >= cutoff
+  )
+  const exact = new Map()
+  const sideBucket = new Map()
+  const edgeOnly = new Map()
+  const overallMae = []
+  const overallVel = []
+
+  for (const trade of winners) {
+    const days = Math.max(tradeHoldDays(trade) ?? 0.2, 0.2)
+    const mae = Math.abs(trade.maxAdverseR)
+    const velocity = mae / days
+    const side = sideLabel(trade)
+    const edge = edgeLabel(trade)
+    const bucket = holdBucket(days)
+    const exactKey = `${edge}|${side}|${bucket}`
+    const sideBucketKey = `${side}|${bucket}`
+
+    if (!exact.has(exactKey)) exact.set(exactKey, { label: `${edge} · ${side} · ${bucket}`, mae: [], velocity: [] })
+    if (!sideBucket.has(sideBucketKey)) sideBucket.set(sideBucketKey, { label: `${side} · ${bucket}`, mae: [], velocity: [] })
+    if (!edgeOnly.has(edge)) edgeOnly.set(edge, { label: edge, mae: [], velocity: [] })
+
+    exact.get(exactKey).mae.push(mae)
+    exact.get(exactKey).velocity.push(velocity)
+    sideBucket.get(sideBucketKey).mae.push(mae)
+    sideBucket.get(sideBucketKey).velocity.push(velocity)
+    edgeOnly.get(edge).mae.push(mae)
+    edgeOnly.get(edge).velocity.push(velocity)
+    overallMae.push(mae)
+    overallVel.push(velocity)
   }
+
+  const finalize = (map, type) => new Map(
+    [...map.entries()].map(([key, value]) => [
+      key,
+      {
+        type,
+        label: value.label,
+        mae: computeDistributionStats(value.mae),
+        velocity: computeDistributionStats(value.velocity),
+      },
+    ])
+  )
+
   return {
-    n,
-    avg:    Math.round(avg                    * 1000) / 1000,
-    median: Math.round(pctile(absMAE, 0.5)   * 1000) / 1000,
-    p75:    Math.round(pctile(absMAE, 0.75)  * 1000) / 1000,
-    p90:    Math.round(pctile(absMAE, 0.9)   * 1000) / 1000,
-    p95:    Math.round(pctile(absMAE, 0.95)  * 1000) / 1000,
+    exact: finalize(exact, 'exact'),
+    sideBucket: finalize(sideBucket, 'sideBucket'),
+    edgeOnly: finalize(edgeOnly, 'edge'),
+    overall: {
+      type: 'overall',
+      label: 'All winners',
+      mae: computeDistributionStats(overallMae),
+      velocity: computeDistributionStats(overallVel),
+    },
   }
 }
 
@@ -623,6 +726,7 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
   )
 
   const winnerStats  = useMemo(() => computeWinnerMAEStats(allTrades), [allTrades])
+  const winnerCohorts = useMemo(() => buildWinnerMAECohorts(allTrades), [allTrades])
   const trimTriggerR = winnerStats ? (winnerStats[maeThreshold] ?? 0.9) : 0.9
 
   function handleSort(col) {
@@ -695,7 +799,6 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
   }
 
   const rows = useMemo(() => {
-    const cutoffMs = new Date('2025-11-14T00:00:00Z').getTime()
     // Assign lot numbers: Lot 1 = earliest entry per symbol
     const lotNums = {}
     const lotTotals = {}
@@ -714,6 +817,19 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
       const riskPerSh = Math.abs(entry - origStop)
       const isLong    = (t.position || 'Long').toLowerCase() !== 'short'
       const remainingSize = t.remainingShares ?? t.positionSize ?? 0
+      const holdDays = Math.max(tradeHoldDays(t) ?? 0.2, 0.2)
+      const edge = edgeLabel(t)
+      const side = sideLabel(t)
+      const bucket = holdBucket(holdDays)
+      const exactKey = `${edge}|${side}|${bucket}`
+      const sideBucketKey = `${side}|${bucket}`
+      const cohort =
+        (winnerCohorts.exact.get(exactKey)?.mae?.n ?? 0) >= 5 ? winnerCohorts.exact.get(exactKey)
+        : (winnerCohorts.sideBucket.get(sideBucketKey)?.mae?.n ?? 0) >= 5 ? winnerCohorts.sideBucket.get(sideBucketKey)
+        : (winnerCohorts.edgeOnly.get(edge)?.mae?.n ?? 0) >= 5 ? winnerCohorts.edgeOnly.get(edge)
+        : winnerCohorts.overall
+      const cohortThresholdR = cohort?.mae?.[maeThreshold] ?? trimTriggerR
+      const cohortVelP75 = cohort?.velocity?.p75 ?? null
       const cp        = quotes.get(t.symbol)?.price ?? null
       const liveR     = cp != null && riskPerSh > 0
         ? (isLong ? cp - entry : entry - cp) / riskPerSh
@@ -725,16 +841,16 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
 
       let zone = 'none'
       if (absWorstR != null) {
-        if (absWorstR > trimTriggerR)                            zone = 'alert'
-        else if (winnerStats && absWorstR > winnerStats.avg)     zone = 'watch'
-        else if (winnerStats)                                     zone = 'safe'
+        if (absWorstR > cohortThresholdR)                        zone = 'alert'
+        else if (cohort?.mae && absWorstR > cohort.mae.avg)      zone = 'watch'
+        else if (cohort?.mae)                                     zone = 'safe'
         else zone = absWorstR > 0.75 ? 'alert' : absWorstR > 0.4 ? 'watch' : 'safe'
       }
 
       const trimShares = remainingSize > 0 ? Math.max(1, Math.round(remainingSize * trimFrac)) : 0
       const remShares  = Math.max(0, remainingSize - trimShares)
       const thresholdPrice  = riskPerSh > 0
-        ? (isLong ? entry - trimTriggerR * riskPerSh : entry + trimTriggerR * riskPerSh)
+        ? (isLong ? entry - cohortThresholdR * riskPerSh : entry + cohortThresholdR * riskPerSh)
         : null
       const cutNowPnL  = cp != null
         ? trimShares * (isLong ? cp - entry : entry - cp)
@@ -755,12 +871,25 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
       const newTargetATR = atrDollar && newTargetPrice != null
         ? Math.abs(newTargetPrice - entry) / atrDollar
         : null
-      const thresholdUsagePct = trimTriggerR > 0 && absWorstR != null
-        ? (absWorstR / trimTriggerR) * 100
+      const thresholdUsagePct = cohortThresholdR > 0 && absWorstR != null
+        ? (absWorstR / cohortThresholdR) * 100
         : null
       const stopUsagePct = absWorstR != null ? absWorstR * 100 : null
-      const overshootR = absWorstR != null ? Math.max(0, absWorstR - trimTriggerR) : null
+      const overshootR = absWorstR != null ? Math.max(0, absWorstR - cohortThresholdR) : null
       const stopBufferR = liveR != null && liveR < 0 ? Math.max(0, 1 + liveR) : null
+      const adverseVelocity = absWorstR != null ? absWorstR / holdDays : null
+      const velocityUsagePct = adverseVelocity != null && cohortVelP75
+        ? (adverseVelocity / cohortVelP75) * 100
+        : null
+      const negativePct = liveR != null && liveR < 0 ? Math.min(100, Math.abs(liveR) * 100) : 0
+      const stopPressurePct = stopBufferR != null ? Math.max(0, (1 - stopBufferR) * 100) : 0
+      const lossCompressionScore = Math.round(Math.min(
+        100,
+        (thresholdUsagePct ?? 0) * 0.45 +
+        (velocityUsagePct ?? 0) * 0.25 +
+        negativePct * 0.2 +
+        stopPressurePct * 0.1
+      ))
 
       let action = '—'
       let actionTone = 'neutral'
@@ -771,7 +900,10 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
         actionTone = 'exit'
         actionDetail = 'Exit now and log the rule break.'
       } else if (zone === 'alert' && liveR != null && liveR < 0) {
-        const shouldExit = liveR <= -0.9 || (thresholdUsagePct != null && thresholdUsagePct >= 135)
+        const shouldExit =
+          liveR <= -0.9 ||
+          lossCompressionScore >= 90 ||
+          ((thresholdUsagePct ?? 0) >= 130 && (velocityUsagePct ?? 0) >= 110)
         if (shouldExit) {
           action = 'Exit now'
           actionTone = 'exit'
@@ -790,7 +922,7 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
         actionTone = 'trim'
         actionDetail = 'Trade recovered, but risk path is outside your winning sample.'
       } else if (zone === 'watch' && liveR != null && liveR < 0) {
-        action = 'No adds / tighten'
+        action = (velocityUsagePct ?? 0) >= 100 ? 'Tighten / pre-cut' : 'No adds / tighten'
         actionTone = 'watch'
         actionDetail = 'Negative and degrading toward your winner-risk budget.'
       } else if (zone === 'watch') {
@@ -805,6 +937,9 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
         worstPrice:    t.maxAdversePrice ?? null,
         proximityPct:  thresholdUsagePct != null ? Math.min(160, thresholdUsagePct) : null,
         thresholdUsagePct, stopUsagePct, overshootR, stopBufferR,
+        holdDays, adverseVelocity, velocityUsagePct, lossCompressionScore,
+        cohortLabel: cohort?.label ?? 'All winners',
+        cohortThresholdR, cohortN: cohort?.mae?.n ?? 0, cohortType: cohort?.type ?? 'overall',
         zone, remainingSize, trimShares, remShares, thresholdPrice,
         cutNowPnL, newTargetPrice, breakEvenPrice, newTargetATR,
         action, actionTone, actionDetail,
@@ -823,8 +958,12 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
     const dir = sortDir === 'desc' ? -1 : 1
     const comparators = {
       symbol: (a, b) => dir * a.symbol.localeCompare(b.symbol),
+      cohort: (a, b) => dir * a.cohortLabel.localeCompare(b.cohortLabel),
       worstR: (a, b) => dir * nullLast(a, b, r => r.absWorstR),
       liveR:  (a, b) => dir * nullLast(a, b, r => r.liveR),
+      proximity: (a, b) => dir * nullLast(a, b, r => r.thresholdUsagePct),
+      velocity: (a, b) => dir * nullLast(a, b, r => r.adverseVelocity),
+      kill: (a, b) => dir * nullLast(a, b, r => r.lossCompressionScore),
       zone:   (a, b) => {
         const zo = zoneOrder[a.zone] - zoneOrder[b.zone]
         if (zo !== 0) return dir * zo
@@ -832,7 +971,7 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
       },
     }
     return mapped.sort(comparators[sortCol] ?? comparators.zone)
-  }, [openTrades, quotes, winnerStats, trimTriggerR, trimFrac, tpMultiplier, atrData, sortCol, sortDir])
+  }, [openTrades, quotes, winnerCohorts, maeThreshold, trimTriggerR, trimFrac, tpMultiplier, atrData, sortCol, sortDir])
 
   const pendingOpen = openTrades.filter(t =>
     t.entryPrice && (t._originalStopLoss ?? t.stopLoss) && t.maxAdverseR == null
@@ -965,6 +1104,7 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
               <span><span className="text-gray-500">p75 </span><span className="mono font-semibold text-gray-200">{winnerStats.p75.toFixed(2)}R</span></span>
               <span><span className="text-gray-500">p90 </span><span className="mono font-semibold text-accent-yellow">{winnerStats.p90.toFixed(2)}R</span></span>
               <span><span className="text-gray-500">p95 </span><span className="mono font-semibold text-accent-red">{winnerStats.p95.toFixed(2)}R</span></span>
+              <span className="text-gray-600">Rows use setup/side/hold cohorts when sample size is sufficient.</span>
             </>
           ) : (
             <span className="text-gray-500 italic">
@@ -1023,20 +1163,23 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
               <tr className="border-b border-gray-800 text-[11px] text-gray-500 uppercase tracking-wider">
                 <SortTh col="zone"   label="Zone"       align="left" rk="zone" />
                 <PlainTh             label="Lot"        align="left" rk="lot" />
+                <SortTh col="cohort" label="Cohort"     align="left" rk="cohort" />
                 <SortTh col="symbol" label="Symbol"     align="left" rk="symbol" />
                 <PlainTh             label="Entry"                   rk="entry" />
                 <PlainTh             label="Orig Stop"               rk="origStop" />
                 <PlainTh             label="Worst Price"             rk="worstPrice" />
                 <SortTh col="worstR" label="Max Adv R"               rk="worstR" />
                 <SortTh col="liveR"  label="Live R"                  rk="liveR" />
-                <PlainTh             label="Budget Used"             rk="proximity" />
-                <PlainTh             label="Decision"   align="left" rk="trimPlan" />
+                <SortTh col="proximity" label="Budget Used"          rk="proximity" />
+                <SortTh col="velocity"  label="Vel"                  rk="velocity" />
+                <SortTh col="kill"      label="Kill"                 rk="kill" />
+                <PlainTh                label="Decision" align="left" rk="trimPlan" />
               </tr>
             </thead>
             <tbody>
               {visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="py-6 text-center text-xs text-gray-500">
+                  <td colSpan={13} className="py-6 text-center text-xs text-gray-500">
                     {viewMode === 'active' && hiddenCount > 0
                       ? `All ${hiddenCount} lot${hiddenCount === 1 ? '' : 's'} have hit the ${tpMultiplier}R target and been derisked — switch to "All" to review.`
                       : 'No positions to display.'}
@@ -1061,6 +1204,16 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
                       <span className="mono text-xs text-gray-500">
                         {r.totalLots > 1 ? `${r.lotNum}/${r.totalLots}` : '—'}
                       </span>
+                    </td>
+
+                    {/* Cohort */}
+                    <td className="py-2 pr-3">
+                      <div className="leading-tight">
+                        <div className="text-[11px] text-gray-300 truncate" title={r.cohortLabel}>{r.cohortLabel}</div>
+                        <div className="text-[10px] text-gray-600">
+                          {r.cohortType === 'overall' ? 'fallback' : r.cohortType} · n={r.cohortN} · {r.cohortThresholdR.toFixed(2)}R
+                        </div>
+                      </div>
                     </td>
 
                     {/* Symbol */}
@@ -1143,6 +1296,47 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
                       )}
                     </td>
 
+                    {/* Adverse velocity */}
+                    <td className="py-2 pr-3 text-right">
+                      {r.adverseVelocity != null ? (
+                        <div className="leading-tight">
+                          <div className={`mono text-xs font-semibold ${
+                            (r.velocityUsagePct ?? 0) >= 125 ? 'text-accent-red' :
+                            (r.velocityUsagePct ?? 0) >= 100 ? 'text-accent-yellow' :
+                            'text-gray-300'
+                          }`}>
+                            {r.adverseVelocity.toFixed(2)}R/d
+                          </div>
+                          <div className="text-[10px] text-gray-600">
+                            {(r.velocityUsagePct ?? 0).toFixed(0)}% cohort
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-600">—</span>
+                      )}
+                    </td>
+
+                    {/* Kill score */}
+                    <td className="py-2 pr-3 text-right">
+                      <div className="inline-flex items-center justify-center min-w-[2.3rem] px-2 py-1 rounded-md mono text-xs font-bold
+                        border border-white/10
+                        text-white"
+                        style={{
+                          backgroundColor:
+                            r.lossCompressionScore >= 90 ? 'rgba(255, 103, 122, 0.18)' :
+                            r.lossCompressionScore >= 75 ? 'rgba(245, 183, 73, 0.18)' :
+                            'rgba(94, 168, 255, 0.14)',
+                          color:
+                            r.lossCompressionScore >= 90 ? '#ff8c9b' :
+                            r.lossCompressionScore >= 75 ? '#f6cb76' :
+                            '#a9ccff',
+                        }}
+                        title="Loss compression score: combines winner-budget breach, adverse velocity, live loss, and stop pressure."
+                      >
+                        {r.lossCompressionScore}
+                      </div>
+                    </td>
+
                     {/* Decision */}
                     <td className="py-2 pl-3">
                       {r.zone === 'alert' ? (
@@ -1207,7 +1401,8 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
         <span className="text-accent-green font-medium">Safe</span> = within avg winner MAE ·{' '}
         <span className="text-accent-yellow font-medium">Watch</span> = between avg and the {maeThreshold.toUpperCase()} winner threshold ({trimTriggerR.toFixed(2)}R) ·{' '}
         <span className="text-accent-red font-medium">Alert</span> = beyond your winning MAE budget.
-        Budget Used compares adverse excursion to the selected winner threshold; stop % compares it to a full 1R stop. Signals always use original stop so trailing doesn’t dilute the read.
+        Budget Used compares adverse excursion to the selected winner threshold; stop % compares it to a full 1R stop; Vel measures adverse drift in R/day against similar winners; Kill is a loss-compression score.
+        Signals always use original stop so trailing doesn’t dilute the read.
       </p>
     </div>
   )
