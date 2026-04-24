@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useCallback, Fragment, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useColumnResize } from '../../hooks/useColumnResize.js'
 import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Zap, Layers, Target, X, ImageIcon, Clipboard, Loader2, ChevronDown, ShieldCheck, Settings2, Scissors, Pencil, Check } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
@@ -11,6 +12,64 @@ import { calcWinRate, calcAvgR } from '../../utils/metrics.js'
 import { fetchQuotes, fetchATR14, fetchSectors, computeSchwabMAE } from '../../utils/marketData.js'
 import OpenHeatMeter from './OpenHeatMeter.jsx'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
+
+function useHoverTooltip(delay = 300) {
+  const [visible, setVisible] = useState(false)
+  const [style, setStyle] = useState({})
+  const ref = useRef(null)
+  const timer = useRef(null)
+
+  function open() {
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      const rect = ref.current?.getBoundingClientRect()
+      if (!rect) return
+      const width = 300
+      let left = Math.round(rect.left)
+      if (left + width > window.innerWidth - 12) left = window.innerWidth - width - 12
+      setStyle({ top: Math.round(rect.bottom) + 8, left, width })
+      setVisible(true)
+    }, delay)
+  }
+
+  function close() {
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setVisible(false), 120)
+  }
+
+  function cancelClose() {
+    clearTimeout(timer.current)
+  }
+
+  return { ref, visible, style, open, close, cancelClose }
+}
+
+function InlineMetricHelp({ label = '?', tooltipContent }) {
+  const { ref, visible, style, open, close, cancelClose } = useHoverTooltip()
+  return (
+    <>
+      <span
+        ref={ref}
+        className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-gray-700 text-[10px] text-gray-600 hover:text-gray-300 hover:border-gray-500 transition-colors cursor-default shrink-0"
+        onMouseEnter={open}
+        onMouseLeave={close}
+      >
+        {label}
+      </span>
+      {visible && createPortal(
+        <div
+          className="fixed z-[9999] rounded-lg border border-white/10 bg-surface-100 shadow-2xl p-4 text-xs"
+          style={style}
+          onMouseEnter={cancelClose}
+          onMouseLeave={close}
+        >
+          {tooltipContent}
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
 
 const RISK_COLUMNS = [
   { key: 'last',       label: 'Last',        description: 'Latest fetched price' },
@@ -1163,16 +1222,16 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
               <tr className="border-b border-gray-800 text-[11px] text-gray-500 uppercase tracking-wider">
                 <SortTh col="zone"   label="Zone"       align="left" rk="zone" />
                 <PlainTh             label="Lot"        align="left" rk="lot" />
-                <SortTh col="cohort" label="Cohort"     align="left" rk="cohort" />
+                <SortTh col="cohort" label={<span className="inline-flex items-center gap-1">Cohort<InlineMetricHelp tooltipContent={<><p className="font-bold text-white text-sm mb-2">Cohort Baseline</p><p className="text-gray-400 leading-relaxed mb-3">The winner sample this trade is being compared against. The system prefers setup/edge + side + hold bucket, then falls back to broader samples if the data is thin.</p><p className="text-gray-600">Higher-quality cohorts make the loss signals much more trustworthy.</p></>} /></span>} align="left" rk="cohort" />
                 <SortTh col="symbol" label="Symbol"     align="left" rk="symbol" />
                 <PlainTh             label="Entry"                   rk="entry" />
                 <PlainTh             label="Orig Stop"               rk="origStop" />
                 <PlainTh             label="Worst Price"             rk="worstPrice" />
                 <SortTh col="worstR" label="Max Adv R"               rk="worstR" />
                 <SortTh col="liveR"  label="Live R"                  rk="liveR" />
-                <SortTh col="proximity" label="Budget Used"          rk="proximity" />
-                <SortTh col="velocity"  label="Vel"                  rk="velocity" />
-                <SortTh col="kill"      label="Kill"                 rk="kill" />
+                <SortTh col="proximity" label={<span className="inline-flex items-center gap-1 justify-end">Budget Used<InlineMetricHelp tooltipContent={<><p className="font-bold text-white text-sm mb-2">Budget Used</p><p className="text-gray-400 leading-relaxed mb-3">Adverse excursion divided by the selected winner-MAE threshold for that cohort. 100% means the trade has already moved against you as far as your chosen winner budget allows.</p><div className="space-y-1 mb-2">{[['< 70%','text-accent-green','Comfortable'],['70–100%','text-accent-yellow','Tightening zone'],['> 100%','text-accent-red','Budget breach']].map(([r,c,d]) => <div key={r} className="flex gap-2"><span className={`font-semibold w-16 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>)}</div><p className="text-gray-600">The smaller this stays on losers, the better your loss compression.</p></>} /></span>} rk="proximity" />
+                <SortTh col="velocity"  label={<span className="inline-flex items-center gap-1 justify-end">Vel<InlineMetricHelp tooltipContent={<><p className="font-bold text-white text-sm mb-2">Adverse Velocity</p><p className="text-gray-400 leading-relaxed mb-3">How quickly the trade has moved against you in R per day, compared to the cohort’s winner velocity. Fast failures deserve less patience than slow drifts.</p><div className="space-y-1 mb-2">{[['< 80% cohort','text-accent-green','Calm'],['80–100%','text-accent-yellow','Normal'],['> 100%','text-accent-red','Failing fast']].map(([r,c,d]) => <div key={r} className="flex gap-2"><span className={`font-semibold w-24 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>)}</div></>} /></span>} rk="velocity" />
+                <SortTh col="kill"      label={<span className="inline-flex items-center gap-1 justify-end">Kill<InlineMetricHelp tooltipContent={<><p className="font-bold text-white text-sm mb-2">Loss Compression Score</p><p className="text-gray-400 leading-relaxed mb-3">Composite score from winner-budget breach, adverse velocity, live negative R, and stop pressure. It is designed to identify losers that should be cut before they become full-size losses.</p><div className="space-y-1 mb-2">{[['< 75','text-accent-green','Manageable'],['75–89','text-accent-yellow','Tighten / pre-cut'],['90+','text-accent-red','Hard kill zone']].map(([r,c,d]) => <div key={r} className="flex gap-2"><span className={`font-semibold w-16 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>)}</div></>} /></span>} rk="kill" />
                 <PlainTh                label="Decision" align="left" rk="trimPlan" />
               </tr>
             </thead>
@@ -1958,7 +2017,19 @@ export default function RiskPanel({ selectedAccount }) {
         <div className="relative flex flex-col items-center justify-center p-5 rounded-xl bg-surface-50 border border-white/8 border-l-2 border-l-accent-yellow overflow-hidden">
           <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full opacity-[0.05] bg-accent-yellow blur-2xl pointer-events-none" />
           <div className="self-start mb-2">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Portfolio Heat</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+              Portfolio Heat
+              <InlineMetricHelp tooltipContent={<>
+                <p className="font-bold text-white text-sm mb-2">Portfolio Heat</p>
+                <p className="text-gray-400 leading-relaxed mb-3">Your total open stop risk as a percent of account equity. This is the portfolio-level pressure gauge for how much damage a normal failure cluster can do.</p>
+                <div className="space-y-1 mb-2">
+                  {[['< 2%','text-accent-green','Controlled'],['2–4%','text-accent-yellow','Monitor closely'],['> 4%','text-accent-red','Crowded risk']].map(([r,c,d]) => (
+                    <div key={r} className="flex gap-2"><span className={`font-semibold w-14 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>
+                  ))}
+                </div>
+                <p className="text-gray-600">If this stays high while your losers are degrading, you are letting the whole book absorb too much correlated pain.</p>
+              </>} />
+            </p>
           </div>
           <OpenHeatMeter pct={ner} />
           <p className="text-xs text-gray-600 mt-1 text-center">
@@ -1971,14 +2042,33 @@ export default function RiskPanel({ selectedAccount }) {
           border-l-accent-red">
           <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full opacity-[0.05] bg-accent-red blur-2xl pointer-events-none" />
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">NER — Net Equity Risk</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+              NER — Net Equity Risk
+              <InlineMetricHelp tooltipContent={<>
+                <p className="font-bold text-white text-sm mb-2">NER</p>
+                <p className="text-gray-400 leading-relaxed mb-3">Net Equity Risk is the sum of all current stop-based risk divided by account equity. It answers: “What percent of my account is currently on the line if all open stops hit?”</p>
+                <div className="space-y-1 mb-2">
+                  {[['< 2%','text-accent-green','Strong discipline'],['2–4%','text-accent-yellow','Moderate'],['> 4%','text-accent-red','Aggressive / crowded']].map(([r,c,d]) => (
+                    <div key={r} className="flex gap-2"><span className={`font-semibold w-14 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>
+                  ))}
+                </div>
+                <p className="text-gray-600">For your style, lower NER makes it easier to cut losers fast without destabilizing the whole book.</p>
+              </>} />
+            </p>
             <p className={`text-3xl font-bold mono ${ner < 2 ? 'text-accent-green' : ner < 4 ? 'text-accent-yellow' : 'text-accent-red'}`}>
               {ner.toFixed(2)}%
             </p>
             <p className="text-xs text-gray-500 mt-1">% of account currently at risk</p>
           </div>
           <div className="border-t border-white/10 pt-4">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">NEP — Net Equity Points</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+              NEP — Net Equity Points
+              <InlineMetricHelp tooltipContent={<>
+                <p className="font-bold text-white text-sm mb-2">NEP</p>
+                <p className="text-gray-400 leading-relaxed mb-3">The raw dollar version of NER. This is the total amount you would lose if every current stop were hit from here.</p>
+                <p className="text-gray-600">Use NEP to ask whether your open risk is psychologically and financially acceptable before the market decides for you.</p>
+              </>} />
+            </p>
             <p className="text-2xl font-bold mono text-white">{formatCurrency(nep)}</p>
             <p className="text-xs text-gray-500 mt-1">Dollar amount at risk if all stops hit</p>
           </div>
@@ -2727,7 +2817,7 @@ export default function RiskPanel({ selectedAccount }) {
 
           <div className="grid grid-cols-3 gap-3 mb-4">
             <div className="card-sm text-center">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Max Loss</p>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5 flex items-center justify-center gap-1.5">Max Loss<InlineMetricHelp tooltipContent={<><p className="font-bold text-white text-sm mb-2">Max Loss</p><p className="text-gray-400 leading-relaxed mb-3">Worst-case open loss if every stop is hit from current prices.</p><p className="text-gray-600">Think of it as an instant stress envelope for the current book.</p></>} /></p>
               <p className={`text-xl font-bold mono ${nep > 0 ? 'text-accent-red' : 'text-gray-500'}`}>
                 {nep > 0 ? `-${formatCurrency(nep)}` : '—'}
               </p>
@@ -2739,7 +2829,7 @@ export default function RiskPanel({ selectedAccount }) {
               </p>
             </div>
             <div className="card-sm text-center">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Drawdown</p>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5 flex items-center justify-center gap-1.5">Drawdown<InlineMetricHelp tooltipContent={<><p className="font-bold text-white text-sm mb-2">Open Drawdown Shock</p><p className="text-gray-400 leading-relaxed mb-3">Percent hit to the account if all current stops trigger.</p><div className="space-y-1 mb-2">{[['< 2%','text-accent-green','Contained'],['2–5%','text-accent-yellow','Meaningful'],['> 5%','text-accent-red','Too much open pain']].map(([r,c,d]) => <div key={r} className="flex gap-2"><span className={`font-semibold w-14 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>)}</div></>} /></p>
               <p className={`text-xl font-bold mono ${
                 maxPainPct < 2 ? 'text-accent-green'
                 : maxPainPct < 5 ? 'text-accent-yellow'
@@ -2883,7 +2973,7 @@ export default function RiskPanel({ selectedAccount }) {
               {/* 3 summary tiles */}
               <div className="grid grid-cols-3 gap-3 mb-4">
                 <div className="card-sm text-center">
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Cash Deployed</p>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5 flex items-center justify-center gap-1.5">Cash Deployed<InlineMetricHelp tooltipContent={<><p className="font-bold text-white text-sm mb-2">Cash Deployed</p><p className="text-gray-400 leading-relaxed mb-3">Gross notional exposure as a percent of account equity. It measures capital committed, not volatility-adjusted danger.</p><div className="space-y-1 mb-2">{[['< 60%','text-accent-green','Light book'],['60–100%','text-accent-yellow','Normal to full'],['> 100%','text-accent-red','Levered gross exposure']].map(([r,c,d]) => <div key={r} className="flex gap-2"><span className={`font-semibold w-16 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>)}</div></>} /></p>
                   <p className={`text-xl font-bold mono ${
                     exposure.cashPct > 100 ? 'text-accent-red'
                     : exposure.cashPct > 80 ? 'text-accent-yellow'
@@ -2892,7 +2982,7 @@ export default function RiskPanel({ selectedAccount }) {
                   <p className="text-xs text-gray-600">of account</p>
                 </div>
                 <div className="card-sm text-center">
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">{benchmarkSymbol} Equiv</p>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5 flex items-center justify-center gap-1.5">{benchmarkSymbol} Equiv<InlineMetricHelp tooltipContent={<><p className="font-bold text-white text-sm mb-2">{benchmarkSymbol} Equivalent Exposure</p><p className="text-gray-400 leading-relaxed mb-3">ATR-weighted portfolio exposure translated into equivalent {benchmarkSymbol} exposure. This is closer to “how much market movement am I really carrying?” than gross notional.</p><div className="space-y-1 mb-2">{[['< 75%','text-accent-green','Contained'],['75–100%','text-accent-yellow','Full risk'],['> 100%','text-accent-red','Volatility-amplified']].map(([r,c,d]) => <div key={r} className="flex gap-2"><span className={`font-semibold w-16 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>)}</div></>} /></p>
                   <p className={`text-xl font-bold mono ${
                     exposure.effectivePct < 0   ? 'text-accent-green'
                     : exposure.effectivePct > 100 ? 'text-accent-red'
@@ -2904,7 +2994,7 @@ export default function RiskPanel({ selectedAccount }) {
                   <p className="text-xs text-gray-600">{exposure.effectivePct < 0 ? 'net short (hedged)' : 'effective exposure'}</p>
                 </div>
                 <div className="card-sm text-center">
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">Vol Factor</p>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5 flex items-center justify-center gap-1.5">Vol Factor<InlineMetricHelp tooltipContent={<><p className="font-bold text-white text-sm mb-2">Volatility Factor</p><p className="text-gray-400 leading-relaxed mb-3">How much more volatile your long book is than plain notional suggests. A value of 1.30 means your names move about 30% harder than the benchmark-adjusted baseline.</p><div className="space-y-1 mb-2">{[['< 1.1x','text-accent-green','Calm'],['1.1–1.5x','text-accent-yellow','Hotter names'],['> 1.5x','text-accent-red','High beta / unstable']].map(([r,c,d]) => <div key={r} className="flex gap-2"><span className={`font-semibold w-16 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>)}</div></>} /></p>
                   <p className={`text-xl font-bold mono ${
                     exposure.leverageFactor > 1.5 ? 'text-accent-red'
                     : exposure.leverageFactor > 1.1 ? 'text-accent-yellow'

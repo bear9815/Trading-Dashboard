@@ -15,7 +15,14 @@ export function buildEquityCurve(trades, accountActivities, startingBalance = 0)
   trades
     .filter(t => t.pl != null && t.entryDate && (t.status === 'Win' || t.status === 'Loss' || t.status === 'Scratch' || t.status === 'Break Even'))
     .forEach(t => {
-      const exitDate = t.exits?.find(e => e.date)?.date || t.entryDate
+      const exitCandidates = (t.exits || [])
+        .map(e => e.exitDate || e.date)
+        .filter(Boolean)
+        .map(v => new Date(v))
+        .filter(d => !Number.isNaN(d.getTime()))
+      const exitDate = exitCandidates.length
+        ? new Date(Math.max(...exitCandidates.map(d => d.getTime())))
+        : new Date(t.entryDate)
       events.push({ date: new Date(exitDate || t.entryDate), type: 'trade', amount: t.pl, tradeId: t.id, symbol: t.symbol })
     })
 
@@ -64,8 +71,15 @@ export function buildDailyPL(trades) {
   trades
     .filter(t => t.pl != null && t.entryDate)
     .forEach(t => {
-      const exitDate = t.exits?.find(e => e.date)?.date
-      const dateKey = (exitDate || t.entryDate).toString().slice(0, 10)
+      const exitCandidates = (t.exits || [])
+        .map(e => e.exitDate || e.date)
+        .filter(Boolean)
+        .map(v => new Date(v))
+        .filter(d => !Number.isNaN(d.getTime()))
+      const resolved = exitCandidates.length
+        ? new Date(Math.max(...exitCandidates.map(d => d.getTime())))
+        : new Date(t.entryDate)
+      const dateKey = resolved.toISOString().slice(0, 10)
       map[dateKey] = (map[dateKey] || 0) + t.pl
     })
   return map

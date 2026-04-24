@@ -167,6 +167,28 @@ const CALMAR_RATINGS = [
 ]
 function calmarRating(v) { return CALMAR_RATINGS.find(r => v >= r.min && v < r.max) ?? CALMAR_RATINGS[CALMAR_RATINGS.length - 1] }
 
+function getTimeframeCutoff(timeframe) {
+  if (timeframe === 'All') return null
+  const now = new Date()
+  if (timeframe === '1M') { const d = new Date(now); d.setMonth(d.getMonth() - 1); return d }
+  if (timeframe === '3M') { const d = new Date(now); d.setMonth(d.getMonth() - 3); return d }
+  if (timeframe === '6M') { const d = new Date(now); d.setMonth(d.getMonth() - 6); return d }
+  if (timeframe === 'YTD') return new Date(now.getFullYear(), 0, 1)
+  if (timeframe === '1Y') { const d = new Date(now); d.setFullYear(d.getFullYear() - 1); return d }
+  return null
+}
+
+function getTradeResolutionDate(trade) {
+  const exits = (trade?.exits || [])
+    .map(ex => ex.exitDate || ex.date)
+    .filter(Boolean)
+    .map(v => new Date(v))
+    .filter(d => !Number.isNaN(d.getTime()))
+  if (exits.length) return new Date(Math.max(...exits.map(d => d.getTime())))
+  const fallback = trade?.entryDate ? new Date(trade.entryDate) : null
+  return fallback && !Number.isNaN(fallback.getTime()) ? fallback : null
+}
+
 
 export default function Analytics({ selectedAccount }) {
   const { trades, accountActivities, getAccountBalance } = useTradeStore()
@@ -225,23 +247,18 @@ export default function Analytics({ selectedAccount }) {
     return accountFiltered.filter(t => !excludedSet.has((t.symbol || '').toUpperCase()))
   }, [trades, selectedAccount, excludedSet])
 
+  const timeframeCutoff = useMemo(() => getTimeframeCutoff(timeframe), [timeframe])
+
   const tfFiltered = useMemo(() => {
-    if (timeframe === 'All') return filtered
-    const now = new Date()
-    let cutoff
-    if (timeframe === '1M') { cutoff = new Date(now); cutoff.setMonth(cutoff.getMonth() - 1) }
-    else if (timeframe === '3M') { cutoff = new Date(now); cutoff.setMonth(cutoff.getMonth() - 3) }
-    else if (timeframe === '6M') { cutoff = new Date(now); cutoff.setMonth(cutoff.getMonth() - 6) }
-    else if (timeframe === 'YTD') { cutoff = new Date(now.getFullYear(), 0, 1) }
-    else if (timeframe === '1Y') { cutoff = new Date(now); cutoff.setFullYear(cutoff.getFullYear() - 1) }
-    return filtered.filter(t => t.entryDate && new Date(t.entryDate) >= cutoff)
-  }, [filtered, timeframe])
+    if (!timeframeCutoff) return filtered
+    return filtered.filter(t => t.entryDate && new Date(t.entryDate) >= timeframeCutoff)
+  }, [filtered, timeframeCutoff])
 
   const closed = tfFiltered.filter(t => t.status === 'Win' || t.status === 'Loss')
 
   // ── Rolling win rate ───────────────────────────────────────────────────────
   const closedSorted = useMemo(
-    () => [...closed].sort((a, b) => new Date(a.entryDate) - new Date(b.entryDate)),
+    () => [...closed].sort((a, b) => (getTradeResolutionDate(a)?.getTime() ?? 0) - (getTradeResolutionDate(b)?.getTime() ?? 0)),
     [closed]
   )
 
@@ -463,7 +480,7 @@ export default function Analytics({ selectedAccount }) {
     const byMonth = {}
     for (const t of closedSorted) {
       let m = ''
-      try { m = new Date(t.entryDate).toISOString().slice(0, 7) } catch { continue }
+      try { m = getTradeResolutionDate(t)?.toISOString().slice(0, 7) || '' } catch { continue }
       if (!m) continue
       if (!byMonth[m]) byMonth[m] = []
       byMonth[m].push(t)
@@ -503,6 +520,19 @@ export default function Analytics({ selectedAccount }) {
 
   const totalR = calcTotalR(closedSorted, rField)
 
+  const fullCurve = useMemo(
+    () => buildEquityCurve(filtered, accountActivities),
+    [filtered, accountActivities]
+  )
+  const timeframeCurve = useMemo(() => {
+    if (!fullCurve.length) return []
+    if (!timeframeCutoff) return fullCurve
+    const cutoffMs = timeframeCutoff.getTime()
+    const idx = fullCurve.findIndex(point => new Date(point.date).getTime() >= cutoffMs)
+    if (idx <= 0) return fullCurve.slice(Math.max(0, idx))
+    return [fullCurve[idx - 1], ...fullCurve.slice(idx)]
+  }, [fullCurve, timeframeCutoff])
+
   // ── Time of Day Analysis ───────────────────────────────────────────────────
   // All times in CST (Central): market open = 8:30, close = 3:00.
   // Premarket/postmarket hidden until trades actually occur there —
@@ -535,15 +565,15 @@ export default function Analytics({ selectedAccount }) {
       bucket.trades.push(t)
       if (t.status === 'Win') bucket.wins++
       bucket.totalPL += t.pl || 0
-      bucket.totalR += t.rMultiple || 0
+      bucket.totalR += t[rField] || 0
     }
 
     return { buckets: buckets.filter(b => b.trades.length > 0), noTimeCount }
-  }, [closed])
+  }, [closed, rField])
 
   // ── Drawdown Analysis ─────────────────────────────────────────────────────
   const drawdownData = useMemo(() => {
-    const curve = buildEquityCurve(trades, accountActivities)
+    const curve = timeframeCurve
     if (curve.length < 2) return null
 
     const balances = curve.map(p => p.balance)
@@ -588,7 +618,7 @@ export default function Analytics({ selectedAccount }) {
     })
 
     return { maxDD, maxDDPct, currentDD, currentDDPct, ddChart }
-  }, [trades, accountActivities])
+  }, [timeframeCurve])
 
   // ── MAE Analytics (reads stored maxAdverseR from computeSchwabMAE) ──────────
   const maeAnalytics = useMemo(() => {
@@ -770,7 +800,7 @@ export default function Analytics({ selectedAccount }) {
       strategy: edge.length > 20 ? edge.slice(0, 20) + '…' : edge,
       avgPL: ts.reduce((s, t) => s + (t.pl || 0), 0) / ts.length,
       pl: ts.reduce((s, t) => s + (t.pl || 0), 0),
-      avgR: ts.reduce((s, t) => s + (t.rMultiple || 0), 0) / ts.length,
+      avgR: ts.reduce((s, t) => s + (t[rField] || 0), 0) / ts.length,
       winRate: (ts.filter(t => t.status === 'Win').length / ts.length) * 100,
       count: ts.length,
     }))
@@ -786,6 +816,44 @@ export default function Analytics({ selectedAccount }) {
   const winRate = calcWinRate(tfFiltered)
   const avgStopEff = useMemo(() => calcAvgStopEfficiency(tfFiltered), [tfFiltered])
   const hasATRData = useMemo(() => tfFiltered.some(t => t.atrValue != null), [tfFiltered])
+  const rSampleCount = closed.filter(t => t[rField] != null).length
+  const winSampleCount = closed.filter(t => t.status === 'Win').length
+  const lossSampleCount = closed.filter(t => t.status === 'Loss').length
+  const enoughHeadlineSample = closed.length >= 10
+  const enoughRSample = rSampleCount >= 10
+  const enoughDistributionSample = closed.length >= 12
+  const enoughSQNSample = rSampleCount >= 20
+  const enoughStopEffSample = tfFiltered.filter(t => t.stopEfficiency != null && (t.status === 'Win' || t.status === 'Loss')).length >= 10
+
+  const lossContainment = useMemo(() => {
+    const lossesWithR = closed.filter(t => t.status === 'Loss' && t[rField] != null)
+    if (lossesWithR.length < 8) return null
+    const avgLoserR = lossesWithR.reduce((sum, t) => sum + t[rField], 0) / lossesWithR.length
+    const tailCount = lossesWithR.filter(t => t[rField] <= -1).length
+    const catastrophicCount = lossesWithR.filter(t => t[rField] <= -1.25).length
+    return {
+      avgLoserR,
+      tailLossRate: (tailCount / lossesWithR.length) * 100,
+      catastrophicRate: (catastrophicCount / lossesWithR.length) * 100,
+      sample: lossesWithR.length,
+    }
+  }, [closed, rField])
+
+  const edgeDrift = useMemo(() => {
+    const recent = closedSorted.filter(t => t[rField] != null)
+    if (recent.length < 20) return null
+    const last20 = recent.slice(-20)
+    const prev20 = recent.slice(-40, -20)
+    const avg = arr => arr.length ? arr.reduce((sum, t) => sum + t[rField], 0) / arr.length : null
+    const lastAvg = avg(last20)
+    const prevAvg = avg(prev20)
+    return {
+      lastAvg,
+      prevAvg,
+      delta: prevAvg == null || lastAvg == null ? null : lastAvg - prevAvg,
+      sample: recent.length,
+    }
+  }, [closedSorted, rField])
 
   // ── Streaks ──────────────────────────────────────────────────────────────
   const streaks = useMemo(() => {
@@ -828,11 +896,11 @@ export default function Analytics({ selectedAccount }) {
       const b = days < 1 ? buckets[0] : days <= 5 ? buckets[1] : days <= 20 ? buckets[2] : buckets[3]
       b.trades.push(t)
       if (t.status === 'Win') b.wins++
-      b.totalR  += t.rMultiple || 0
+      b.totalR  += t[rField] || 0
       b.totalPL += t.pl || 0
     }
     return buckets.filter(b => b.trades.length > 0)
-  }, [closed])
+  }, [closed, rField])
 
   // ── Avg Hold: Winners vs Losers ───────────────────────────────────────────
   const holdComparison = useMemo(() => {
@@ -918,10 +986,16 @@ export default function Analytics({ selectedAccount }) {
   }, [morningEntries, closed])
 
   // ── Sharpe / Sortino / Calmar ─────────────────────────────────────────────
+  const returnSampleCount = Math.max(0, timeframeCurve.length - 1)
+  const enoughRiskSample = returnSampleCount >= 20
   const { sharpe, sortino, calmar } = useMemo(() => {
-    const curve = buildEquityCurve(trades, accountActivities)
-    return { sharpe: calcSharpe(curve), sortino: calcSortino(curve), calmar: calcCalmar(curve) }
-  }, [trades, accountActivities])
+    if (!enoughRiskSample) return { sharpe: null, sortino: null, calmar: null }
+    return {
+      sharpe: calcSharpe(timeframeCurve),
+      sortino: calcSortino(timeframeCurve),
+      calmar: calcCalmar(timeframeCurve),
+    }
+  }, [timeframeCurve, enoughRiskSample])
 
   const sqn = useMemo(() => calcSQN(tfFiltered, rField), [tfFiltered, rField])
 
@@ -989,8 +1063,9 @@ export default function Analytics({ selectedAccount }) {
       <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
 
         <StatCardWithTooltip
-          label="Win Rate" value={`${winRate.toFixed(1)}%`}
-          valueClass={winRate >= 50 ? 'text-accent-green' : 'text-accent-red'}
+          label="Win Rate" value={enoughHeadlineSample ? `${winRate.toFixed(1)}%` : '—'}
+          valueClass={!enoughHeadlineSample ? 'text-gray-500' : winRate >= 50 ? 'text-accent-green' : 'text-accent-red'}
+          sub={{ label: `n=${closed.length}${enoughHeadlineSample ? '' : ' · low sample'}`, cls: enoughHeadlineSample ? 'text-gray-600' : 'text-accent-yellow' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Win Rate</p>
             <p className="text-gray-400 leading-relaxed mb-3">The percentage of closed trades that result in a profit. Higher isn't always better — a 40% win rate with large winners beats a 70% win rate with tiny gains.</p>
@@ -1004,8 +1079,9 @@ export default function Analytics({ selectedAccount }) {
         />
 
         <StatCardWithTooltip
-          label={rBasis === 'atr' ? 'Avg R (ATR)' : 'Avg R-Multiple'} value={formatR(avgR)}
-          valueClass={avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}
+          label={rBasis === 'atr' ? 'Avg R (ATR)' : 'Avg R-Multiple'} value={enoughRSample ? formatR(avgR) : '—'}
+          valueClass={!enoughRSample ? 'text-gray-500' : avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}
+          sub={{ label: `n=${rSampleCount}${enoughRSample ? '' : ' · low sample'}`, cls: enoughRSample ? 'text-gray-600' : 'text-accent-yellow' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Average R-Multiple</p>
             <p className="text-gray-400 leading-relaxed mb-3">
@@ -1023,8 +1099,9 @@ export default function Analytics({ selectedAccount }) {
         />
 
         <StatCardWithTooltip
-          label="Total R" value={formatR(totalR)}
-          valueClass={totalR >= 0 ? 'text-accent-green' : 'text-accent-red'}
+          label="Total R" value={rSampleCount > 0 ? formatR(totalR) : '—'}
+          valueClass={rSampleCount === 0 ? 'text-gray-500' : totalR >= 0 ? 'text-accent-green' : 'text-accent-red'}
+          sub={{ label: `n=${rSampleCount}`, cls: 'text-gray-600' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Total R</p>
             <p className="text-gray-400 leading-relaxed mb-3">The sum of all R-multiples across every closed trade. Your cumulative "score" for the entire history. A consistent edge shows up as steady, linear growth in Total R over time.</p>
@@ -1034,8 +1111,9 @@ export default function Analytics({ selectedAccount }) {
         />
 
         <StatCardWithTooltip
-          label="Profit Factor" value={isFinite(profitFactor) ? profitFactor.toFixed(2) : '∞'}
-          valueClass={profitFactor >= 1.5 ? 'text-accent-green' : profitFactor >= 1 ? 'text-accent-yellow' : 'text-accent-red'}
+          label="Profit Factor" value={enoughHeadlineSample ? (isFinite(profitFactor) ? profitFactor.toFixed(2) : '∞') : '—'}
+          valueClass={!enoughHeadlineSample ? 'text-gray-500' : profitFactor >= 1.5 ? 'text-accent-green' : profitFactor >= 1 ? 'text-accent-yellow' : 'text-accent-red'}
+          sub={{ label: `${winSampleCount}W · ${lossSampleCount}L${enoughHeadlineSample ? '' : ' · low sample'}`, cls: enoughHeadlineSample ? 'text-gray-600' : 'text-accent-yellow' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Profit Factor</p>
             <p className="text-gray-400 leading-relaxed mb-2">Gross winning P&L ÷ Gross losing P&L. For every $1 lost, how many $ did you make? The most size-agnostic measure of system quality — works regardless of account size or position sizing.</p>
@@ -1049,8 +1127,9 @@ export default function Analytics({ selectedAccount }) {
         />
 
         <StatCardWithTooltip
-          label="Expectancy / Trade" value={formatCurrency(expectancy, true)}
-          valueClass={expectancy >= 0 ? 'text-accent-green' : 'text-accent-red'}
+          label="Expectancy / Trade" value={enoughHeadlineSample ? formatCurrency(expectancy, true) : '—'}
+          valueClass={!enoughHeadlineSample ? 'text-gray-500' : expectancy >= 0 ? 'text-accent-green' : 'text-accent-red'}
+          sub={{ label: `n=${closed.length}${enoughHeadlineSample ? '' : ' · low sample'}`, cls: enoughHeadlineSample ? 'text-gray-600' : 'text-accent-yellow' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Expectancy Per Trade</p>
             <p className="text-accent-blue font-medium text-[11px] mb-2">Van Tharp: "The most important statistic a trader can know"</p>
@@ -1061,8 +1140,9 @@ export default function Analytics({ selectedAccount }) {
         />
 
         <StatCardWithTooltip
-          label="Payoff Ratio" value={payoffRatio != null ? `${payoffRatio.toFixed(2)}x` : '—'}
-          valueClass={payoffRatio == null ? 'text-gray-500' : payoffRatio >= 1.5 ? 'text-accent-green' : payoffRatio >= 1 ? 'text-accent-yellow' : 'text-accent-red'}
+          label="Payoff Ratio" value={enoughHeadlineSample && payoffRatio != null ? `${payoffRatio.toFixed(2)}x` : '—'}
+          valueClass={!enoughHeadlineSample || payoffRatio == null ? 'text-gray-500' : payoffRatio >= 1.5 ? 'text-accent-green' : payoffRatio >= 1 ? 'text-accent-yellow' : 'text-accent-red'}
+          sub={{ label: `${winSampleCount}W / ${lossSampleCount}L`, cls: 'text-gray-600' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Payoff Ratio</p>
             <p className="text-gray-400 leading-relaxed mb-3">Average winning trade $ ÷ Average losing trade $. Shows how large your winners are relative to your losers. A 2.0x payoff means winners are twice the size of losers on average.</p>
@@ -1084,6 +1164,7 @@ export default function Analytics({ selectedAccount }) {
               label: 'Sharpe',
               value: sharpe != null ? sharpe.toFixed(2) : '—',
               valueClass: sharpe == null ? 'text-gray-500' : sharpe >= 1 ? 'text-accent-green' : sharpe >= 0 ? 'text-accent-yellow' : 'text-accent-red',
+              sub: { label: `${returnSampleCount} return obs${enoughRiskSample ? '' : ' · low sample'}`, cls: enoughRiskSample ? 'text-gray-600' : 'text-accent-yellow' },
               shortDesc: 'Only penalizes downside volatility — better for asymmetric systems.',
               tooltipContent: <>
                 <p className="font-bold text-white text-sm mb-2">Sharpe Ratio</p>
@@ -1101,6 +1182,7 @@ export default function Analytics({ selectedAccount }) {
               label: 'Sortino',
               value: sortino != null ? sortino.toFixed(2) : '—',
               valueClass: sortino == null ? 'text-gray-500' : sortino >= 1.5 ? 'text-accent-green' : sortino >= 0 ? 'text-accent-yellow' : 'text-accent-red',
+              sub: { label: `${returnSampleCount} return obs${enoughRiskSample ? '' : ' · low sample'}`, cls: enoughRiskSample ? 'text-gray-600' : 'text-accent-yellow' },
               shortDesc: 'Penalizes both upside and downside volatility equally.',
               tooltipContent: <>
                 <p className="font-bold text-white text-sm mb-2">Sortino Ratio</p>
@@ -1123,9 +1205,9 @@ export default function Analytics({ selectedAccount }) {
             {
               key: 'sqn',
               label: 'SQN',
-              value: sqn != null ? sqn.toFixed(2) : '—',
+              value: enoughSQNSample && sqn != null ? sqn.toFixed(2) : '—',
               valueClass: sqn == null ? 'text-gray-500' : sqn >= 2.5 ? 'text-accent-green' : sqn >= 1.6 ? 'text-accent-yellow' : 'text-accent-red',
-              sub: sqn != null ? sqnRating(sqn) : null,
+              sub: enoughSQNSample && sqn != null ? sqnRating(sqn) : { label: `n=${rSampleCount} · low sample`, cls: 'text-accent-yellow' },
               shortDesc: 'Return per unit of drawdown — style-agnostic risk measure.',
               tooltipContent: <>
                 <p className="font-bold text-white text-sm mb-2">System Quality Number (SQN)</p>
@@ -1147,7 +1229,7 @@ export default function Analytics({ selectedAccount }) {
               label: 'Calmar',
               value: calmar != null ? calmar.toFixed(2) : '—',
               valueClass: calmar == null ? 'text-gray-500' : calmar >= 1.0 ? 'text-accent-green' : calmar >= 0.5 ? 'text-accent-yellow' : 'text-accent-red',
-              sub: calmar != null ? calmarRating(calmar) : null,
+              sub: calmar != null ? calmarRating(calmar) : { label: `${returnSampleCount} obs · low sample`, cls: 'text-accent-yellow' },
               shortDesc: 'Consistency of R-multiples relative to variability.',
               tooltipContent: <>
                 <p className="font-bold text-white text-sm mb-2">Calmar Ratio</p>
@@ -1170,8 +1252,9 @@ export default function Analytics({ selectedAccount }) {
         {hasATRData && avgStopEff != null && (
           <StatCardWithTooltip
             label="Avg Stop Efficiency"
-            value={`${(avgStopEff * 100).toFixed(0)}%`}
-            valueClass={avgStopEff <= 0.6 ? 'text-accent-blue' : avgStopEff <= 1.0 ? 'text-accent-green' : 'text-accent-yellow'}
+            value={enoughStopEffSample ? `${(avgStopEff * 100).toFixed(0)}%` : '—'}
+            valueClass={!enoughStopEffSample ? 'text-gray-500' : avgStopEff <= 0.6 ? 'text-accent-blue' : avgStopEff <= 1.0 ? 'text-accent-green' : 'text-accent-yellow'}
+            sub={{ label: enoughStopEffSample ? 'ATR-tagged closed trades' : 'low ATR sample', cls: enoughStopEffSample ? 'text-gray-600' : 'text-accent-yellow' }}
             tooltipContent={<>
               <p className="font-bold text-white text-sm mb-2">Average Stop Efficiency</p>
               <p className="text-gray-400 leading-relaxed mb-3">
@@ -1194,6 +1277,77 @@ export default function Analytics({ selectedAccount }) {
           />
         )}
 
+      </div>
+
+      <div className="card">
+        <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+          <div>
+            <SectionTitle>Edge Quality Control</SectionTitle>
+            <p className="text-xs text-gray-500">Physics-style diagnostics for whether the system is improving or quietly bleeding edge.</p>
+          </div>
+          <span className="text-[11px] text-gray-600">Timeframe-aware and sample-aware</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <StatCardWithTooltip
+            label="Loss Containment"
+            value={lossContainment ? `${lossContainment.avgLoserR.toFixed(2)}R` : '—'}
+            valueClass={!lossContainment ? 'text-gray-500' : lossContainment.avgLoserR > -0.7 ? 'text-accent-green' : lossContainment.avgLoserR > -1 ? 'text-accent-yellow' : 'text-accent-red'}
+            sub={lossContainment ? {
+              label: `${lossContainment.sample} loss trades · ${lossContainment.tailLossRate.toFixed(0)}% worse than -1R`,
+              cls: 'text-gray-600',
+            } : { label: 'Need 8+ R-based losses', cls: 'text-accent-yellow' }}
+            tooltipContent={<>
+              <p className="font-bold text-white text-sm mb-2">Loss Containment</p>
+              <p className="text-gray-400 leading-relaxed mb-3">Average losing trade in R. This is one of the cleanest measures of whether you are cutting losers efficiently.</p>
+              <div className="space-y-1 mb-3">
+                {[['> -0.7R','text-accent-green','Excellent containment'],['-0.7R to -1.0R','text-accent-yellow','Normal'],['< -1.0R','text-accent-red','Slippage / hesitation / rule breaks']].map(([r,c,d]) => (
+                  <div key={r} className="flex gap-2"><span className={`font-semibold w-24 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>
+                ))}
+              </div>
+              <p className="text-gray-600">If this trends upward toward zero over time, your execution discipline is improving even before win rate changes.</p>
+            </>}
+          />
+
+          <StatCardWithTooltip
+            label="Tail Loss Rate"
+            value={lossContainment ? `${lossContainment.tailLossRate.toFixed(1)}%` : '—'}
+            valueClass={!lossContainment ? 'text-gray-500' : lossContainment.tailLossRate < 15 ? 'text-accent-green' : lossContainment.tailLossRate < 30 ? 'text-accent-yellow' : 'text-accent-red'}
+            sub={lossContainment ? {
+              label: `${lossContainment.catastrophicRate.toFixed(0)}% worse than -1.25R`,
+              cls: lossContainment.catastrophicRate < 10 ? 'text-gray-600' : 'text-accent-red',
+            } : { label: 'Need 8+ R-based losses', cls: 'text-accent-yellow' }}
+            tooltipContent={<>
+              <p className="font-bold text-white text-sm mb-2">Tail Loss Rate</p>
+              <p className="text-gray-400 leading-relaxed mb-3">Share of losing trades that exceed -1R. This exposes whether your loss distribution has dangerous fat tails.</p>
+              <div className="space-y-1 mb-3">
+                {[['< 15%','text-accent-green','Tight process'],['15–30%','text-accent-yellow','Watch closely'],['> 30%','text-accent-red','Too many oversized losers']].map(([r,c,d]) => (
+                  <div key={r} className="flex gap-2"><span className={`font-semibold w-16 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>
+                ))}
+              </div>
+              <p className="text-gray-600">A shrinking tail loss rate is often the fastest path to better expectancy.</p>
+            </>}
+          />
+
+          <StatCardWithTooltip
+            label="Edge Drift"
+            value={edgeDrift?.delta != null ? `${edgeDrift.delta >= 0 ? '+' : ''}${edgeDrift.delta.toFixed(2)}R` : '—'}
+            valueClass={!edgeDrift || edgeDrift.delta == null ? 'text-gray-500' : edgeDrift.delta >= 0 ? 'text-accent-green' : 'text-accent-red'}
+            sub={edgeDrift ? {
+              label: `Last 20: ${edgeDrift.lastAvg?.toFixed(2)}R${edgeDrift.prevAvg != null ? ` vs prev 20: ${edgeDrift.prevAvg.toFixed(2)}R` : ''}`,
+              cls: 'text-gray-600',
+            } : { label: 'Need 20+ R-based closed trades', cls: 'text-accent-yellow' }}
+            tooltipContent={<>
+              <p className="font-bold text-white text-sm mb-2">Edge Drift</p>
+              <p className="text-gray-400 leading-relaxed mb-3">Difference between the last 20 trades’ average R and the previous 20. It’s a quick test for whether your edge is strengthening or decaying.</p>
+              <div className="space-y-1 mb-3">
+                {[['> +0.20R','text-accent-green','Improving'],['-0.20R to +0.20R','text-accent-yellow','Stable'],['< -0.20R','text-accent-red','Degrading']].map(([r,c,d]) => (
+                  <div key={r} className="flex gap-2"><span className={`font-semibold w-24 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>
+                ))}
+              </div>
+              <p className="text-gray-600">Negative drift with steady win rate usually means your winners are shrinking or your losers are getting sloppier.</p>
+            </>}
+          />
+        </div>
       </div>
 
       {/* Avg Win vs Loss */}
@@ -1632,7 +1786,7 @@ export default function Analytics({ selectedAccount }) {
           const g = t.processGrade
           if (!byGrade[g]) byGrade[g] = { pl: 0, r: 0, wins: 0, count: 0 }
           byGrade[g].pl    += t.pl || 0
-          byGrade[g].r     += t.rMultiple || 0
+          byGrade[g].r     += t[rField] || 0
           byGrade[g].wins  += t.status === 'Win' ? 1 : 0
           byGrade[g].count += 1
         }
