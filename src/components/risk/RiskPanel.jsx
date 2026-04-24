@@ -578,7 +578,15 @@ function computeWinnerMAEStats(trades) {
   const absMAE = winners.map(t => Math.abs(t.maxAdverseR)).sort((a, b) => a - b)
   const n   = absMAE.length
   const avg = absMAE.reduce((s, v) => s + v, 0) / n
-  function pctile(arr, p) { return arr[Math.min(Math.floor(arr.length * p), arr.length - 1)] }
+  function pctile(arr, p) {
+    if (arr.length === 1) return arr[0]
+    const idx = (arr.length - 1) * p
+    const lo = Math.floor(idx)
+    const hi = Math.ceil(idx)
+    if (lo === hi) return arr[lo]
+    const w = idx - lo
+    return arr[lo] * (1 - w) + arr[hi] * w
+  }
   return {
     n,
     avg:    Math.round(avg                    * 1000) / 1000,
@@ -705,6 +713,7 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
       if (!entry || !origStop) return null
       const riskPerSh = Math.abs(entry - origStop)
       const isLong    = (t.position || 'Long').toLowerCase() !== 'short'
+      const remainingSize = t.remainingShares ?? t.positionSize ?? 0
       const cp        = quotes.get(t.symbol)?.price ?? null
       const liveR     = cp != null && riskPerSh > 0
         ? (isLong ? cp - entry : entry - cp) / riskPerSh
@@ -722,39 +731,83 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
         else zone = absWorstR > 0.75 ? 'alert' : absWorstR > 0.4 ? 'watch' : 'safe'
       }
 
-      const origSize   = t._originalPositionSize ?? t.positionSize ?? 0
-      const trimShares = origSize > 0 ? Math.max(1, Math.round(origSize * trimFrac)) : 0
-      const remShares  = origSize - trimShares
-      const trimPrice  = riskPerSh > 0
+      const trimShares = remainingSize > 0 ? Math.max(1, Math.round(remainingSize * trimFrac)) : 0
+      const remShares  = Math.max(0, remainingSize - trimShares)
+      const thresholdPrice  = riskPerSh > 0
         ? (isLong ? entry - trimTriggerR * riskPerSh : entry + trimTriggerR * riskPerSh)
         : null
-      const lockedPnL  = trimPrice != null
-        ? trimShares * (isLong ? trimPrice - entry : entry - trimPrice)
+      const cutNowPnL  = cp != null
+        ? trimShares * (isLong ? cp - entry : entry - cp)
         : null
-      const origTargetPL = origSize > 0 && riskPerSh > 0
-        ? origSize * riskPerSh * tpMultiplier
+      const origTargetPL = remainingSize > 0 && riskPerSh > 0
+        ? remainingSize * riskPerSh * tpMultiplier
         : null
-      const neededFromRem = origTargetPL != null && lockedPnL != null && remShares > 0
-        ? origTargetPL - lockedPnL
+      const neededFromRem = origTargetPL != null && cutNowPnL != null && remShares > 0
+        ? origTargetPL - cutNowPnL
         : null
       const newTargetPrice = neededFromRem != null && remShares > 0
         ? entry + (isLong ? 1 : -1) * (neededFromRem / remShares)
         : null
-      const breakEvenPrice = lockedPnL != null && remShares > 0
-        ? entry + (isLong ? 1 : -1) * (-lockedPnL / remShares)
+      const breakEvenPrice = cutNowPnL != null && remShares > 0
+        ? entry + (isLong ? 1 : -1) * (-cutNowPnL / remShares)
         : null
       const atrDollar    = atrData?.get(t.symbol)?.atr ?? null
       const newTargetATR = atrDollar && newTargetPrice != null
         ? Math.abs(newTargetPrice - entry) / atrDollar
         : null
+      const thresholdUsagePct = trimTriggerR > 0 && absWorstR != null
+        ? (absWorstR / trimTriggerR) * 100
+        : null
+      const stopUsagePct = absWorstR != null ? absWorstR * 100 : null
+      const overshootR = absWorstR != null ? Math.max(0, absWorstR - trimTriggerR) : null
+      const stopBufferR = liveR != null && liveR < 0 ? Math.max(0, 1 + liveR) : null
+
+      let action = '—'
+      let actionTone = 'neutral'
+      let actionDetail = null
+
+      if (liveR != null && liveR <= -1) {
+        action = 'Stop breached'
+        actionTone = 'exit'
+        actionDetail = 'Exit now and log the rule break.'
+      } else if (zone === 'alert' && liveR != null && liveR < 0) {
+        const shouldExit = liveR <= -0.9 || (thresholdUsagePct != null && thresholdUsagePct >= 135)
+        if (shouldExit) {
+          action = 'Exit now'
+          actionTone = 'exit'
+          actionDetail = stopBufferR != null
+            ? `${stopBufferR.toFixed(2)}R left until full stop`
+            : 'Loser has exceeded your winner-risk budget'
+        } else {
+          action = `Cut ${trimShares} now`
+          actionTone = 'cut'
+          actionDetail = overshootR != null
+            ? `${overshootR.toFixed(2)}R beyond ${maeThreshold.toUpperCase()} winner budget`
+            : 'Loser is outside your historical winner MAE envelope'
+        }
+      } else if (zone === 'alert') {
+        action = `Trim ${trimShares} on weakness`
+        actionTone = 'trim'
+        actionDetail = 'Trade recovered, but risk path is outside your winning sample.'
+      } else if (zone === 'watch' && liveR != null && liveR < 0) {
+        action = 'No adds / tighten'
+        actionTone = 'watch'
+        actionDetail = 'Negative and degrading toward your winner-risk budget.'
+      } else if (zone === 'watch') {
+        action = 'Monitor closely'
+        actionTone = 'watch'
+        actionDetail = 'Adverse excursion is above your average winner.'
+      }
 
       return {
         id: t.id, symbol: t.symbol, isLong,
         entry, origStop, riskPerSh, liveR, worstR, absWorstR,
         worstPrice:    t.maxAdversePrice ?? null,
-        proximityPct:  absWorstR != null ? Math.min(100, absWorstR * 100) : null,
-        zone, origSize, trimShares, remShares, trimPrice,
-        lockedPnL, newTargetPrice, breakEvenPrice, newTargetATR,
+        proximityPct:  thresholdUsagePct != null ? Math.min(160, thresholdUsagePct) : null,
+        thresholdUsagePct, stopUsagePct, overshootR, stopBufferR,
+        zone, remainingSize, trimShares, remShares, thresholdPrice,
+        cutNowPnL, newTargetPrice, breakEvenPrice, newTargetATR,
+        action, actionTone, actionDetail,
         lotNum:    lotNums[t.symbol]?.[t.id] ?? 1,
         totalLots: lotTotals[t.symbol] ?? 1,
       }
@@ -861,8 +914,8 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
             )}
           </h3>
           <p className="text-xs text-gray-500 mt-1 max-w-2xl">
-            Tracks how far each open position has moved against you vs. your historical winner MAE distribution.
-            When a trade goes deeper than {(trimTriggerR * 100).toFixed(0)}% of your winners ever did, consider trimming.
+            Tracks how far each open position has moved against you versus your historical winner MAE distribution.
+            The goal is loss compression: if a trade burns through your winner-risk budget while still negative, cut it faster.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -976,8 +1029,8 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
                 <PlainTh             label="Worst Price"             rk="worstPrice" />
                 <SortTh col="worstR" label="Max Adv R"               rk="worstR" />
                 <SortTh col="liveR"  label="Live R"                  rk="liveR" />
-                <PlainTh             label="Proximity"               rk="proximity" />
-                <PlainTh             label="Trim Plan"  align="left" rk="trimPlan" />
+                <PlainTh             label="Budget Used"             rk="proximity" />
+                <PlainTh             label="Decision"   align="left" rk="trimPlan" />
               </tr>
             </thead>
             <tbody>
@@ -1068,13 +1121,18 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
                       {r.liveR != null ? `${r.liveR >= 0 ? '+' : ''}${r.liveR.toFixed(2)}R` : '—'}
                     </td>
 
-                    {/* Proximity bar */}
+                    {/* Budget used */}
                     <td className="py-2 pr-3">
                       {r.proximityPct != null ? (
                         <div className="flex items-center justify-end gap-2">
-                          <span className={`mono text-xs font-bold ${zoneColor(r.zone)}`}>
-                            {r.proximityPct.toFixed(0)}%
-                          </span>
+                          <div className="text-right leading-tight">
+                            <div className={`mono text-xs font-bold ${zoneColor(r.zone)}`}>
+                              {r.thresholdUsagePct.toFixed(0)}%
+                            </div>
+                            <div className="text-[10px] text-gray-600">
+                              {r.stopUsagePct != null ? `${r.stopUsagePct.toFixed(0)}% stop` : '—'}
+                            </div>
+                          </div>
                           <div className="w-20 h-1.5 bg-surface-300 rounded-full overflow-hidden">
                             <div className={`h-full rounded-full transition-all ${barColor(r.proximityPct)}`}
                               style={{ width: `${Math.min(100, r.proximityPct)}%` }} />
@@ -1085,24 +1143,38 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
                       )}
                     </td>
 
-                    {/* Trim plan */}
+                    {/* Decision */}
                     <td className="py-2 pl-3">
-                      {r.zone === 'alert' && r.trimPrice != null ? (
+                      {r.zone === 'alert' ? (
                         <div className="text-xs leading-tight space-y-0.5">
                           <div className="flex items-center gap-1.5">
                             <Scissors size={10} className="text-accent-red shrink-0" />
-                            <span className="text-accent-red font-semibold">
-                              Trim {r.trimShares} @ ${r.trimPrice.toFixed(2)}
+                            <span className={`font-semibold ${
+                              r.actionTone === 'exit' ? 'text-accent-red' :
+                              r.actionTone === 'cut' ? 'text-accent-yellow' :
+                              'text-accent-blue'
+                            }`}>
+                              {r.action}
                             </span>
-                            {r.lockedPnL != null && (
+                            {r.cutNowPnL != null && (
                               <span className="text-gray-500">
-                                ({r.lockedPnL >= 0 ? '+' : ''}{formatCurrency(r.lockedPnL)})
+                                ({r.cutNowPnL >= 0 ? '+' : ''}{formatCurrency(r.cutNowPnL)})
                               </span>
                             )}
                           </div>
+                          {r.actionDetail && (
+                            <div className="text-gray-400 pl-4">
+                              {r.actionDetail}
+                            </div>
+                          )}
+                          {r.thresholdPrice != null && (
+                            <div className="text-gray-500 pl-4">
+                              Budget breach: <span className="mono text-gray-400">${r.thresholdPrice.toFixed(2)}</span>
+                            </div>
+                          )}
                           {r.newTargetPrice != null && (
                             <div className="flex items-center gap-2 text-gray-400 pl-4">
-                              <span>New target: <span className="text-accent-blue mono">${r.newTargetPrice.toFixed(2)}</span></span>
+                              <span>Post-cut target: <span className="text-accent-blue mono">${r.newTargetPrice.toFixed(2)}</span></span>
                               {r.newTargetATR != null && (
                                 <span className="text-gray-600">{r.newTargetATR.toFixed(2)} ATR</span>
                               )}
@@ -1115,7 +1187,10 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
                           )}
                         </div>
                       ) : r.zone === 'watch' ? (
-                        <span className="text-xs text-accent-yellow">Approaching {(trimTriggerR * 100).toFixed(0)}% threshold</span>
+                        <div className="text-xs leading-tight space-y-0.5">
+                          <span className="text-accent-yellow">{r.action}</span>
+                          {r.actionDetail && <div className="text-gray-500">{r.actionDetail}</div>}
+                        </div>
                       ) : (
                         <span className="text-xs text-gray-700">—</span>
                       )}
@@ -1130,9 +1205,9 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
 
       <p className="text-[11px] text-gray-700 mt-3 leading-relaxed">
         <span className="text-accent-green font-medium">Safe</span> = within avg winner MAE ·{' '}
-        <span className="text-accent-yellow font-medium">Watch</span> = between avg and {maeThreshold.toUpperCase()} threshold ·{' '}
-        <span className="text-accent-red font-medium">Alert</span> = deeper than {(trimTriggerR * 100).toFixed(0)}% of your winners ever went.
-        Trim trigger uses original stop — trailing doesn't corrupt the signal.
+        <span className="text-accent-yellow font-medium">Watch</span> = between avg and the {maeThreshold.toUpperCase()} winner threshold ({trimTriggerR.toFixed(2)}R) ·{' '}
+        <span className="text-accent-red font-medium">Alert</span> = beyond your winning MAE budget.
+        Budget Used compares adverse excursion to the selected winner threshold; stop % compares it to a full 1R stop. Signals always use original stop so trailing doesn’t dilute the read.
       </p>
     </div>
   )
