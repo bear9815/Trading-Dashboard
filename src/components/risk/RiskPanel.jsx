@@ -6,7 +6,7 @@ import { useTradeStore } from '../../store/useTradeStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
-import { buildOpenPositionRisk, calcNEP, calcNER, calcEffectiveExposure } from '../../utils/riskCalcs.js'
+import { buildOpenPositionRisk, calcEffectiveExposure } from '../../utils/riskCalcs.js'
 import { formatCurrency } from '../../utils/formatters.js'
 import { calcWinRate, calcAvgR } from '../../utils/metrics.js'
 import { fetchQuotes, fetchATR14, fetchSectors, computeSchwabMAE } from '../../utils/marketData.js'
@@ -357,7 +357,7 @@ function ClosePositionModal({ position, onClose, onConfirm }) {
              : (ex.amount != null && ex.price ? Math.round(Math.abs(ex.amount) / Math.abs(ex.price)) : 0)
     return sum + sh
   }, 0)
-  const origSize = position._originalPositionSize ?? position.positionSize ?? 0
+  const origSize = position._originalPositionSize ?? ((position.positionSize ?? 0) + alreadyExited)
   const defaultShares = origSize > 0
     ? Math.max(0, Math.round(origSize - alreadyExited))
     : (position.remainingShares ?? position.positionSize ?? 0)
@@ -1501,21 +1501,6 @@ export default function RiskPanel({ selectedAccount }) {
   const [hypoPrice,  setHypoPrice]  = useState('')
   const [hypoSide,   setHypoSide]   = useState('buy') // 'buy' | 'sell'
 
-  // ── Avg loser hold time (for position age flag) ────────────────────────────
-  const avgLossDays = useMemo(() => {
-    const losses = trades.filter(t => t.status === 'Loss')
-    const days = losses.map(t => {
-      if (typeof t.duration === 'number') return t.duration
-      const exits = t.exits?.filter(e => e.exitDate)
-      if (exits?.length) {
-        const last = new Date(Math.max(...exits.map(e => new Date(e.exitDate).getTime())))
-        return (last - new Date(t.entryDate)) / (1000 * 60 * 60 * 24)
-      }
-      return null
-    }).filter(d => d != null && !isNaN(d) && d >= 0)
-    return days.length ? days.reduce((s, d) => s + d, 0) / days.length : null
-  }, [trades])
-
   // ATR / Effective Exposure state
   const defaultBenchmarkAtr = benchmarkSymbol === 'QQQ' ? 1.8 : 1.1
   const [atrData, setAtrData]                 = useState(new Map())
@@ -1573,14 +1558,34 @@ export default function RiskPanel({ selectedAccount }) {
     [excludedSymbols]
   )
 
+  const riskHistoryTrades = useMemo(() => {
+    const scoped = (!selectedAccount || selectedAccount === 'All')
+      ? trades
+      : trades.filter(t => t.account === selectedAccount)
+    return scoped.filter(t => !excludedSet.has((t.symbol || '').toUpperCase()))
+  }, [trades, selectedAccount, excludedSet])
+
+  // ── Avg loser hold time (for position age flag) ────────────────────────────
+  const avgLossDays = useMemo(() => {
+    const losses = riskHistoryTrades.filter(t => t.status === 'Loss')
+    const days = losses.map(t => {
+      if (typeof t.duration === 'number') return t.duration
+      const exits = t.exits?.filter(e => e.exitDate || e.date)
+      if (exits?.length) {
+        const last = new Date(Math.max(...exits.map(e => new Date(e.exitDate || e.date).getTime())))
+        return (last - new Date(t.entryDate)) / (1000 * 60 * 60 * 24)
+      }
+      return null
+    }).filter(d => d != null && !isNaN(d) && d >= 0)
+    return days.length ? days.reduce((s, d) => s + d, 0) / days.length : null
+  }, [riskHistoryTrades])
+
   const openTrades = useMemo(() => {
-    const open = trades.filter(t =>
+    const open = riskHistoryTrades.filter(t =>
       t.status === 'Open' && !excludedSet.has((t.symbol || '').toUpperCase())
     )
-    return (!selectedAccount || selectedAccount === 'All')
-      ? open
-      : open.filter(t => t.account === selectedAccount)
-  }, [trades, selectedAccount, excludedSet])
+    return open
+  }, [riskHistoryTrades, excludedSet])
 
   // ── Real-time balance: static base + unrealized P&L from live quotes ─────
   // unrealizedPL is computed directly from openTrades so there is no circular
@@ -1737,8 +1742,13 @@ export default function RiskPanel({ selectedAccount }) {
     return totalShrs > 0 ? totalCost / totalShrs : null
   }, [hypoShares, hypoPrice, hypoSide])
 
-  const nep = calcNEP(openTrades)
-  const ner = calcNER(openTrades, liveBalance)
+  const nep = useMemo(() => {
+    return groupedPositions.reduce((sum, group) => {
+      const cp = quotes.get(group.symbol)?.price ?? null
+      return sum + (getRowRiskMetrics(group, cp, liveBalance, tpMultiplier, atrData).currentRiskDollar || 0)
+    }, 0)
+  }, [groupedPositions, quotes, liveBalance, tpMultiplier, atrData])
+  const ner = liveBalance > 0 ? (nep / liveBalance) * 100 : 0
 
   // Effective exposure (ATR-weighted)
   const exposure = useMemo(
@@ -1902,12 +1912,12 @@ export default function RiskPanel({ selectedAccount }) {
     setSectorsError(null)
     try {
       const sectorMap = await fetchSectors(symbols)
-      const totalValue = openTrades.reduce((s, t) => s + (((t.remainingShares ?? t.positionSize) || 1) * (t.entryPrice || 0)), 0)
+      const totalValue = openTrades.reduce((s, t) => s + (((t.remainingShares ?? t.positionSize) || 0) * (t.entryPrice || 0)), 0)
 
       const bySector = {}
       for (const t of openTrades) {
         const sect = sectorMap.get(t.symbol)?.sector || 'Unknown'
-        const val  = ((t.remainingShares ?? t.positionSize) || 1) * (t.entryPrice || 0)
+        const val  = ((t.remainingShares ?? t.positionSize) || 0) * (t.entryPrice || 0)
         bySector[sect] = (bySector[sect] || 0) + val
       }
 
@@ -2796,7 +2806,7 @@ export default function RiskPanel({ selectedAccount }) {
 
       {/* ── Position Health & Adaptive Trim ─────────────────────────────── */}
       <PositionHealthPanel
-        allTrades={(!selectedAccount || selectedAccount === 'All') ? trades : trades.filter(t => t.account === selectedAccount)}
+        allTrades={riskHistoryTrades}
         openTrades={openTrades}
         quotes={quotes}
         liveBalance={liveBalance}

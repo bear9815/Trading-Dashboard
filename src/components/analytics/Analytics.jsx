@@ -318,7 +318,7 @@ export default function Analytics({ selectedAccount }) {
   // For each trading day, sums notional value of all open positions.
   // A trade is "open" on day D if: entered on/before D AND (still Open OR last exit >= D).
   const dailyExposure = useMemo(() => {
-    const relevant = trades.filter(t => t.entryDate && t.entryPrice != null && t.positionSize)
+    const relevant = filtered.filter(t => t.entryDate && t.entryPrice != null && (t._originalPositionSize ?? t.positionSize))
     if (!relevant.length) return []
 
     const bal  = accountBalance || 1
@@ -360,9 +360,21 @@ export default function Analytics({ selectedAccount }) {
           }
           if (!open) continue
 
-          const n = Math.abs(t.entryPrice * t.positionSize)
+          const exits = (t.exits || [])
+            .map(e => ({ date: e.exitDate || e.date, shares: e.shares }))
+            .filter(e => e.date)
+            .map(e => ({ ...e, dateStr: new Date(e.date).toISOString().slice(0, 10) }))
+            .sort((a, b) => a.dateStr.localeCompare(b.dateStr))
+          const originalShares = t._originalPositionSize ?? t.positionSize ?? 0
+          const exitedThroughDate = exits
+            .filter(e => e.dateStr < dateStr)
+            .reduce((sum, e) => sum + Math.abs(e.shares || 0), 0)
+          const sharesOnDate = Math.max(0, originalShares - exitedThroughDate)
+          if (sharesOnDate <= 0) continue
+
+          const n = Math.abs(t.entryPrice * sharesOnDate)
           notional += n
-          if (t.stopLoss) risk += Math.abs(t.entryPrice - t.stopLoss) * Math.abs(t.positionSize)
+          if (t.stopLoss) risk += Math.abs(t.entryPrice - t.stopLoss) * Math.abs(sharesOnDate)
 
           // ATR-weighted equivalent (uses current ATR as best available proxy)
           const atrPct = atrMap.get(t.symbol)?.atrPct
@@ -379,7 +391,7 @@ export default function Analytics({ selectedAccount }) {
       cur.setDate(cur.getDate() + 1)
     }
     return result
-  }, [trades, accountBalance, atrMap, benchAtrPct, exposureBench]) // eslint-disable-line
+  }, [filtered, accountBalance, atrMap, benchAtrPct, exposureBench]) // eslint-disable-line
 
   // ── Benchmark price fetch for Exposure vs Market chart ───────────────────
   useEffect(() => {
@@ -886,9 +898,9 @@ export default function Analytics({ selectedAccount }) {
       if (typeof t.duration === 'number') {
         days = t.duration
       } else {
-        const exits = t.exits?.filter(e => e.exitDate)
+        const exits = t.exits?.filter(e => e.exitDate || e.date)
         if (exits?.length) {
-          const lastExit = new Date(Math.max(...exits.map(e => new Date(e.exitDate).getTime())))
+          const lastExit = new Date(Math.max(...exits.map(e => new Date(e.exitDate || e.date).getTime())))
           days = (lastExit - new Date(t.entryDate)) / (1000 * 60 * 60 * 24)
         }
       }
@@ -906,9 +918,9 @@ export default function Analytics({ selectedAccount }) {
   const holdComparison = useMemo(() => {
     const getDays = (t) => {
       if (typeof t.duration === 'number') return t.duration
-      const exits = t.exits?.filter(e => e.exitDate)
+      const exits = t.exits?.filter(e => e.exitDate || e.date)
       if (exits?.length) {
-        const lastExit = new Date(Math.max(...exits.map(e => new Date(e.exitDate).getTime())))
+        const lastExit = new Date(Math.max(...exits.map(e => new Date(e.exitDate || e.date).getTime())))
         return (lastExit - new Date(t.entryDate)) / (1000 * 60 * 60 * 24)
       }
       return null
@@ -930,7 +942,7 @@ export default function Analytics({ selectedAccount }) {
     // Build map: date → daily P&L from closed trades
     const dailyPL = {}
     for (const t of closed) {
-      const d = t.entryDate?.toString().slice(0, 10)
+      const d = getTradeResolutionDate(t)?.toISOString().slice(0, 10)
       if (!d) continue
       dailyPL[d] = (dailyPL[d] || 0) + (t.pl || 0)
     }
