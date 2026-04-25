@@ -12,6 +12,7 @@ import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useAtrBackfill } from '../../hooks/useAtrBackfill.js'
 import { buildEquityCurve } from '../../utils/equityCurve.js'
+import { buildAnchoredRsTradeAnalytics } from '../../utils/anchoredRsTradeAnalytics.js'
 import {
   calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor,
   calcRMultipleDistribution, groupByField, calcAvgWinLoss, calcTotalR,
@@ -20,6 +21,7 @@ import {
 } from '../../utils/metrics.js'
 import { formatCurrency, formatR, formatDate } from '../../utils/formatters.js'
 import { fetchHistory, fetchATR14, fetchQuotes } from '../../utils/marketData.js'
+import { resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
 
 const COLORS = { Win: '#00d084', Loss: '#ff4757', Scratch: '#6b7280' }
 const TT_STYLE       = { backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }
@@ -181,6 +183,19 @@ function getTimeframeCutoff(timeframe) {
   if (timeframe === 'YTD') return new Date(now.getFullYear(), 0, 1)
   if (timeframe === '1Y') { const d = new Date(now); d.setFullYear(d.getFullYear() - 1); return d }
   return null
+}
+
+function toDateKey(value) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date.toISOString().slice(0, 10)
+}
+
+function addDays(value, days) {
+  const date = new Date(value)
+  date.setDate(date.getDate() + days)
+  return date
 }
 
 function getTradeResolutionDate(trade) {
@@ -407,6 +422,7 @@ export default function Analytics({ selectedAccount }) {
     analyticsWinLossMode, setAnalyticsWinLossMode,
     analyticsRiskMode, setAnalyticsRiskMode,
     analyticsSqnMode,  setAnalyticsSqnMode,
+    tradeReviewChartSettings,
     tpMultiplier = 2,
   } = useSettingsStore()
   const { entries: morningEntries } = useMorningStore()
@@ -428,6 +444,10 @@ export default function Analytics({ selectedAccount }) {
   const [strengthMap,     setStrengthMap]     = useState({})
   const [strengthLoading, setStrengthLoading] = useState(false)
   const fetchedIds = useRef(new Set())
+  const [anchoredRsAnalytics, setAnchoredRsAnalytics] = useState(null)
+  const [anchoredRsLoading, setAnchoredRsLoading] = useState(false)
+  const [anchoredRsError, setAnchoredRsError] = useState('')
+  const anchoredRsFetchRef = useRef('')
   const [liveQuotes, setLiveQuotes] = useState(new Map())
   const [liveQuoteLoading, setLiveQuoteLoading] = useState(false)
   const [liveQuoteRefreshNonce, setLiveQuoteRefreshNonce] = useState(0)
@@ -516,6 +536,11 @@ export default function Analytics({ selectedAccount }) {
     [tfFiltered]
   )
 
+  const anchoredRsTradeSample = useMemo(
+    () => [...closedOnly].sort((a, b) => (new Date(a.entryDate).getTime() || 0) - (new Date(b.entryDate).getTime() || 0)),
+    [closedOnly]
+  )
+
   const closed = useMemo(
     () => (tradeMode === 'realtime' ? [...closedOnly, ...realtimeOpenTrades] : closedOnly)
       .filter(t => t.status === 'Win' || t.status === 'Loss'),
@@ -530,6 +555,75 @@ export default function Analytics({ selectedAccount }) {
     () => [...closed].sort((a, b) => (getTradeResolutionDate(a)?.getTime() ?? 0) - (getTradeResolutionDate(b)?.getTime() ?? 0)),
     [closed]
   )
+
+  useEffect(() => {
+    const sample = anchoredRsTradeSample.filter(trade => trade.symbol && trade.entryDate)
+    if (!sample.length) {
+      setAnchoredRsAnalytics(null)
+      setAnchoredRsError('')
+      setAnchoredRsLoading(false)
+      anchoredRsFetchRef.current = ''
+      return
+    }
+
+    const settingsKey = JSON.stringify({
+      benchmarkSymbol: tradeReviewChartSettings?.benchmarkSymbol || 'SPY',
+      anchorDates: tradeReviewChartSettings?.anchorDates || [],
+      dailyAnchoredRs: tradeReviewChartSettings?.dailyAnchoredRs || {},
+    })
+    const sampleKey = sample.map(trade => `${trade.id}:${trade.symbol}:${trade.entryDate}:${trade.status}:${trade[rField] ?? ''}:${trade.pl ?? ''}`).join('|')
+    const fetchKey = `${sampleKey}|${rField}|${settingsKey}`
+    if (anchoredRsFetchRef.current === fetchKey) return
+    anchoredRsFetchRef.current = fetchKey
+
+    let cancelled = false
+    async function run() {
+      setAnchoredRsLoading(true)
+      setAnchoredRsError('')
+      try {
+        const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
+        const entryKeys = sample.map(trade => toDateKey(trade.entryDate)).filter(Boolean).sort()
+        const anchorKeys = sample
+          .map(trade => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates, trade.entryDate))
+          .filter(Boolean)
+          .sort()
+        const firstKey = [entryKeys[0], anchorKeys[0]].filter(Boolean).sort()[0]
+        const lastKey = entryKeys.at(-1)
+        if (!firstKey || !lastKey) throw new Error('No valid trade dates for Anchored RS analytics.')
+
+        const start = addDays(`${firstKey}T00:00:00Z`, -180)
+        const end = addDays(`${lastKey}T00:00:00Z`, 2)
+        const benchmarkBars = await fetchHistory(benchmarkSymbol, start, end)
+        const symbols = [...new Set(sample.map(trade => String(trade.symbol || '').toUpperCase()).filter(Boolean))].sort()
+        const symbolEntries = await Promise.all(symbols.map(async symbol => {
+          try {
+            const bars = await fetchHistory(symbol, start, end)
+            return [symbol, bars]
+          } catch {
+            return [symbol, []]
+          }
+        }))
+        const next = buildAnchoredRsTradeAnalytics({
+          trades: sample,
+          benchmarkBars,
+          symbolBarsBySymbol: Object.fromEntries(symbolEntries),
+          settings: tradeReviewChartSettings,
+          rField,
+        })
+        if (!cancelled) setAnchoredRsAnalytics(next)
+      } catch (err) {
+        if (!cancelled) {
+          setAnchoredRsAnalytics(null)
+          setAnchoredRsError(err.message || 'Anchored RS analytics failed to load.')
+        }
+      } finally {
+        if (!cancelled) setAnchoredRsLoading(false)
+      }
+    }
+
+    run()
+    return () => { cancelled = true }
+  }, [anchoredRsTradeSample, tradeReviewChartSettings, rField])
 
   // ── Strength / Weakness auto-detection ─────────────────────────────────────
   // For each closed trade, compare entry price to the prior day's close.
@@ -1445,8 +1539,32 @@ export default function Analytics({ selectedAccount }) {
 
   if (tfFiltered.length === 0) {
     return (
-      <div className="p-4 flex items-center justify-center h-64">
-        <p className="text-gray-500">No trades in the selected analytics range.</p>
+      <div className="p-4 flex flex-col gap-6">
+        <div className="flex items-center justify-center h-40">
+          <p className="text-gray-500">No trades in the selected analytics range.</p>
+        </div>
+        <div className="card border border-accent-blue/15 bg-gradient-to-br from-accent-blue/5 via-transparent to-accent-green/5">
+          <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+            <div>
+              <SectionTitle>
+                <span className="flex items-center gap-2">
+                  <Target size={14} className="text-accent-blue inline" />
+                  Anchored RS Analytics
+                </span>
+              </SectionTitle>
+              <p className="text-xs text-gray-500">
+                Entry z-score vs {tradeReviewChartSettings?.benchmarkSymbol || 'SPY'}, using your global anchor dates and the current {rBasis === 'atr' ? 'ATR R' : 'stop R'} basis.
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] uppercase tracking-wider text-gray-600">Coverage</p>
+              <p className="text-sm font-semibold mono text-gray-500">—</p>
+            </div>
+          </div>
+          <div className="rounded-lg bg-surface-200 px-4 py-6 text-xs text-gray-500 text-center">
+            No eligible Anchored RS sample yet. Closed trades need symbols, entry dates, enough daily history, and benchmark data.
+          </div>
+        </div>
       </div>
     )
   }
@@ -1912,6 +2030,177 @@ export default function Analytics({ selectedAccount }) {
             </>}
           />
         </div>
+      </div>
+
+      <div className="card border border-accent-blue/15 bg-gradient-to-br from-accent-blue/5 via-transparent to-accent-green/5">
+        <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+          <div>
+            <SectionTitle>
+              <span className="flex items-center gap-2">
+                <Target size={14} className="text-accent-blue inline" />
+                Anchored RS Analytics
+              </span>
+            </SectionTitle>
+            <p className="text-xs text-gray-500">
+              Entry z-score vs {tradeReviewChartSettings?.benchmarkSymbol || 'SPY'}, using your global anchor dates and the current {rBasis === 'atr' ? 'ATR R' : 'stop R'} basis.
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] uppercase tracking-wider text-gray-600">Coverage</p>
+            <p className={`text-sm font-semibold mono ${anchoredRsAnalytics?.coverage?.coveragePct >= 80 ? 'text-accent-green' : anchoredRsAnalytics ? 'text-accent-yellow' : 'text-gray-500'}`}>
+              {anchoredRsLoading ? 'Loading…' : anchoredRsAnalytics ? `${anchoredRsAnalytics.coverage.coveragePct}%` : '—'}
+            </p>
+          </div>
+        </div>
+
+        {anchoredRsError ? (
+          <div className="rounded-lg bg-accent-red/10 border border-accent-red/20 px-4 py-3 text-xs text-accent-red">
+            {anchoredRsError}
+          </div>
+        ) : !anchoredRsAnalytics && anchoredRsLoading ? (
+          <div className="rounded-lg bg-surface-200 px-4 py-6 text-xs text-gray-500 text-center">
+            Loading Anchored RS analytics for the selected trade sample…
+          </div>
+        ) : !anchoredRsAnalytics || anchoredRsAnalytics.rows.length === 0 ? (
+          <div className="rounded-lg bg-surface-200 px-4 py-6 text-xs text-gray-500 text-center">
+            No eligible Anchored RS sample yet. Closed trades need symbols, entry dates, enough daily history, and benchmark data.
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+              {[
+                {
+                  label: 'Best Z Bucket',
+                  value: anchoredRsAnalytics.summary.bestBucket?.label || '—',
+                  sub: anchoredRsAnalytics.summary.bestBucket ? `${anchoredRsAnalytics.summary.bestBucket.count} trades · ${formatR(anchoredRsAnalytics.summary.bestBucket.avgR || 0)} avg` : 'No sample',
+                  color: 'text-accent-green',
+                },
+                {
+                  label: 'Worst Z Bucket',
+                  value: anchoredRsAnalytics.summary.worstBucket?.label || '—',
+                  sub: anchoredRsAnalytics.summary.worstBucket ? `${anchoredRsAnalytics.summary.worstBucket.count} trades · ${formatR(anchoredRsAnalytics.summary.worstBucket.avgR || 0)} avg` : 'No sample',
+                  color: 'text-accent-red',
+                },
+                {
+                  label: 'Winner Entry Z',
+                  value: anchoredRsAnalytics.summary.avgWinnerEntryZ != null ? `${anchoredRsAnalytics.summary.avgWinnerEntryZ >= 0 ? '+' : ''}${anchoredRsAnalytics.summary.avgWinnerEntryZ.toFixed(2)}z` : '—',
+                  sub: `${anchoredRsAnalytics.summary.wins} winning trades`,
+                  color: 'text-accent-green',
+                },
+                {
+                  label: 'Loser Entry Z',
+                  value: anchoredRsAnalytics.summary.avgLoserEntryZ != null ? `${anchoredRsAnalytics.summary.avgLoserEntryZ >= 0 ? '+' : ''}${anchoredRsAnalytics.summary.avgLoserEntryZ.toFixed(2)}z` : '—',
+                  sub: `${anchoredRsAnalytics.summary.losses} losing trades`,
+                  color: 'text-accent-red',
+                },
+              ].map(card => (
+                <div key={card.label} className="bg-surface-200 rounded-lg px-3 py-2.5">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{card.label}</p>
+                  <p className={`text-xl font-bold mono ${card.color}`}>{card.value}</p>
+                  <p className="text-[10px] text-gray-600 mt-0.5">{card.sub}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+              <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                <p className="text-xs font-semibold text-gray-300 mb-2">Entry Z vs Trade R</p>
+                <ResponsiveContainer width="100%" height={240}>
+                  <ScatterChart data={anchoredRsAnalytics.rows} margin={{ top: 8, right: 10, left: -8, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                    <XAxis type="number" dataKey="entryZ" name="Entry Z" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}z`} />
+                    <YAxis type="number" dataKey="rValue" name="Trade R" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}R`} />
+                    <Tooltip
+                      contentStyle={TT_STYLE}
+                      labelStyle={TT_LABEL_STYLE}
+                      itemStyle={TT_ITEM_STYLE}
+                      formatter={(value, name) => [name === 'Trade R' ? `${Number(value).toFixed(2)}R` : `${Number(value).toFixed(2)}z`, name]}
+                      labelFormatter={(_, payload) => {
+                        const row = payload?.[0]?.payload
+                        return row ? `${row.symbol} · ${formatDate(row.entryDate)} · ${row.outcome}` : ''
+                      }}
+                    />
+                    <ReferenceLine x={0} stroke="#ffffff20" strokeDasharray="4 4" />
+                    <ReferenceLine y={0} stroke="#ffffff20" strokeDasharray="4 4" />
+                    <Scatter
+                      dataKey="rValue"
+                      shape={props => {
+                        const { cx, cy, payload } = props
+                        const fill = payload.outcome === 'Win' ? '#00d084' : '#ff4757'
+                        return <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.85} stroke="none" />
+                      }}
+                    />
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                <p className="text-xs font-semibold text-gray-300 mb-2">Z Direction Into Entry</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {anchoredRsAnalytics.trendGroups.map(group => (
+                    <div key={group.key} className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                      <p className="text-xs font-semibold text-gray-300">{group.label}</p>
+                      <p className={`text-2xl font-bold mono mt-2 ${group.avgR == null ? 'text-gray-500' : group.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                        {group.avgR == null ? '—' : formatR(group.avgR)}
+                      </p>
+                      <p className="text-[10px] text-gray-600 mt-1">{group.count} trades · {group.winRate == null ? '—' : `${group.winRate.toFixed(0)}%`} win rate</p>
+                      <p className="text-[10px] text-gray-600">{group.lowSample ? 'low sample' : 'sample ready'} · PF {group.profitFactor === Infinity ? '∞' : group.profitFactor != null ? group.profitFactor.toFixed(2) : '—'}</p>
+                    </div>
+                  ))}
+                </div>
+                {anchoredRsAnalytics.coverage.missingTrades > 0 && (
+                  <div className="mt-3 rounded-lg bg-accent-yellow/10 border border-accent-yellow/15 px-3 py-2 text-[11px] text-accent-yellow">
+                    {anchoredRsAnalytics.coverage.missingTrades} trade{anchoredRsAnalytics.coverage.missingTrades !== 1 ? 's' : ''} excluded for missing/insufficient RS data
+                    {anchoredRsAnalytics.coverage.missingSymbols.length ? `: ${anchoredRsAnalytics.coverage.missingSymbols.slice(0, 8).join(', ')}` : ''}.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-white/10">
+              <table className="w-full min-w-[820px] text-xs">
+                <thead className="bg-white/[0.03] text-gray-500 uppercase tracking-wider">
+                  <tr>
+                    <th className="text-left px-3 py-2">Entry Z Bucket</th>
+                    <th className="text-right px-3 py-2">Trades</th>
+                    <th className="text-right px-3 py-2">Win %</th>
+                    <th className="text-right px-3 py-2">Avg R</th>
+                    <th className="text-right px-3 py-2">Total R</th>
+                    <th className="text-right px-3 py-2">Avg P&amp;L</th>
+                    <th className="text-right px-3 py-2">Profit Factor</th>
+                    <th className="text-right px-3 py-2">Confidence</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/[0.05]">
+                  {anchoredRsAnalytics.buckets.map(bucket => (
+                    <tr key={bucket.key} className="hover:bg-white/[0.02]">
+                      <td className="px-3 py-2.5 font-semibold text-gray-300">{bucket.label}</td>
+                      <td className="px-3 py-2.5 text-right text-gray-400">{bucket.count}</td>
+                      <td className={`px-3 py-2.5 text-right mono ${bucket.winRate == null ? 'text-gray-600' : bucket.winRate >= 50 ? 'text-accent-green' : 'text-accent-red'}`}>
+                        {bucket.winRate == null ? '—' : `${bucket.winRate.toFixed(0)}%`}
+                      </td>
+                      <td className={`px-3 py-2.5 text-right mono ${bucket.avgR == null ? 'text-gray-600' : bucket.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                        {bucket.avgR == null ? '—' : formatR(bucket.avgR)}
+                      </td>
+                      <td className={`px-3 py-2.5 text-right mono ${bucket.totalR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                        {formatR(bucket.totalR)}
+                      </td>
+                      <td className={`px-3 py-2.5 text-right mono ${bucket.avgPL == null ? 'text-gray-600' : bucket.avgPL >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                        {bucket.avgPL == null ? '—' : `${bucket.avgPL >= 0 ? '+' : ''}${formatCurrency(bucket.avgPL, true)}`}
+                      </td>
+                      <td className={`px-3 py-2.5 text-right mono ${bucket.profitFactor == null ? 'text-gray-600' : bucket.profitFactor >= 1.5 ? 'text-accent-green' : bucket.profitFactor >= 1 ? 'text-accent-yellow' : 'text-accent-red'}`}>
+                        {bucket.profitFactor === Infinity ? '∞' : bucket.profitFactor == null ? '—' : bucket.profitFactor.toFixed(2)}
+                      </td>
+                      <td className={`px-3 py-2.5 text-right ${bucket.count === 0 ? 'text-gray-700' : bucket.lowSample ? 'text-accent-yellow' : 'text-accent-green'}`}>
+                        {bucket.count === 0 ? '—' : bucket.lowSample ? 'low sample' : 'ready'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Avg Win vs Loss */}
