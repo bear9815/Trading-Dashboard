@@ -1751,7 +1751,7 @@ export default function Analytics({ selectedAccount }) {
       )}
 
       {/* Summary stats */}
-      <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
 
         <StatCardWithTooltip
           label="Win Rate" value={enoughHeadlineSample ? `${winRate.toFixed(1)}%` : '—'}
@@ -1798,6 +1798,23 @@ export default function Analytics({ selectedAccount }) {
             <p className="text-gray-400 leading-relaxed mb-3">The sum of all R-multiples across the selected sample. A consistent edge shows up as steady, linear growth in Total R over time.</p>
             <p className="text-gray-400 leading-relaxed mb-2">A sudden dip in slope (not just Total R going negative) is often the earliest warning that an edge is degrading — before P&L even shows it clearly.</p>
             <p className="text-gray-600">Use the equity curve to watch Total R grow — it should look like a steady upward trend, not a lottery.</p>
+          </>}
+        />
+
+        <StatCardWithTooltip
+          label="Best Entry Z"
+          value={anchoredRsLoading ? '…' : anchoredRsAnalytics?.summary?.bestBucket?.label || '—'}
+          valueClass={anchoredRsLoading ? 'text-gray-500' : anchoredRsAnalytics?.summary?.bestBucket?.avgR >= 0 ? 'text-accent-green' : 'text-gray-500'}
+          sub={{
+            label: anchoredRsAnalytics?.summary?.bestBucket
+              ? `${anchoredRsAnalytics.summary.bestBucket.count} trades · ${formatR(anchoredRsAnalytics.summary.bestBucket.avgR || 0)} avg`
+              : anchoredRsLoading ? 'loading RS' : 'see Anchored RS',
+            cls: anchoredRsAnalytics?.summary?.bestBucket ? 'text-gray-600' : 'text-accent-yellow',
+          }}
+          tooltipContent={<>
+            <p className="font-bold text-white text-sm mb-2">Anchored RS Entry Z</p>
+            <p className="text-gray-400 leading-relaxed mb-3">This mirrors the Anchored RS Analytics section below. It shows the best-performing entry z-score bucket for the selected timeframe and R basis.</p>
+            <p className="text-gray-600">If this is blank, the sample needs closed trades with symbols, entry dates, benchmark history, and enough daily bars after the selected anchor.</p>
           </>}
         />
 
