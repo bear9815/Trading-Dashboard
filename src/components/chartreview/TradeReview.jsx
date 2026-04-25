@@ -2183,6 +2183,7 @@ function TradeListItem({ trade, selected, onClick }) {
 function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
   const [draft, setDraft] = useState(() => ({
     benchmarkSymbol: settings?.benchmarkSymbol || 'SPY',
+    chartType: settings?.chartType === 'hlc' ? 'hlc' : 'candlestick',
     anchorDates: Array.isArray(settings?.anchorDates) && settings.anchorDates.length ? settings.anchorDates : ['2026-01-01', '2026-04-02'],
     weeklyRs: {
       rollingPeriod: settings?.weeklyRs?.rollingPeriod ?? 13,
@@ -2260,14 +2261,38 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
         </div>
 
         <div className="max-h-[72vh] overflow-y-auto p-4 space-y-5">
-          <div>
-            <p className="label mb-2">Benchmark</p>
-            <input
-              value={draft.benchmarkSymbol}
-              onChange={event => setDraft(current => ({ ...current, benchmarkSymbol: event.target.value }))}
-              className={`${fieldClass} w-28 mono`}
-              placeholder="SPY"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <p className="label mb-2">Benchmark</p>
+              <input
+                value={draft.benchmarkSymbol}
+                onChange={event => setDraft(current => ({ ...current, benchmarkSymbol: event.target.value }))}
+                className={`${fieldClass} w-28 mono`}
+                placeholder="SPY"
+              />
+            </div>
+
+            <div>
+              <p className="label mb-2">Price Style</p>
+              <div className="inline-flex rounded-lg border border-white/10 bg-surface-200 p-1">
+                {[
+                  { value: 'candlestick', label: 'Candles' },
+                  { value: 'hlc', label: 'HLC Bars' },
+                ].map(option => (
+                  <button
+                    key={option.value}
+                    onClick={() => setDraft(current => ({ ...current, chartType: option.value }))}
+                    className={`px-3 py-1.5 text-xs rounded-md border transition-all ${
+                      draft.chartType === option.value
+                        ? 'bg-accent-blue/20 text-accent-blue border-accent-blue/30'
+                        : 'text-gray-400 border-transparent hover:text-white'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           <div>

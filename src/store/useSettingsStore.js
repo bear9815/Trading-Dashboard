@@ -7,6 +7,7 @@ let settingsSessionLoaded = false
 
 const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
+  chartType: 'candlestick',
   anchorDates: ['2026-01-01', '2026-04-02'],
   weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
   dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },

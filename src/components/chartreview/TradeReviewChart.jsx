@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  BarSeries,
   CandlestickSeries,
   HistogramSeries,
   createChart,
@@ -7,6 +8,7 @@ import {
 } from 'lightweight-charts'
 import { fetchHistory } from '../../utils/marketData.js'
 import { buildTradeReviewChartData } from '../../utils/tradeReviewChart.js'
+import { useSettingsStore } from '../../store/useSettingsStore.js'
 
 const CHART_OPTIONS = {
   layout: {
@@ -63,6 +65,18 @@ function addCandles(chart, candles) {
     borderVisible: true,
     wickUpColor: '#2877e3',
     wickDownColor: '#ea4ce7',
+    priceLineVisible: false,
+  })
+  series.setData(candles)
+  return series
+}
+
+function addHlcBars(chart, candles) {
+  const series = chart.addSeries(BarSeries, {
+    upColor: '#2877e3',
+    downColor: '#ea4ce7',
+    openVisible: false,
+    thinBars: false,
     priceLineVisible: false,
   })
   series.setData(candles)
@@ -138,7 +152,7 @@ function drawOverlays(canvas, chart, priceSeries, bands, rsGradient = []) {
   }
 }
 
-function LightweightPane({ data, kind, height }) {
+function LightweightPane({ data, kind, height, chartType }) {
   const containerRef = useRef(null)
   const chartContainerRef = useRef(null)
   const shadeCanvasRef = useRef(null)
@@ -152,7 +166,9 @@ function LightweightPane({ data, kind, height }) {
     })
 
     const candles = kind === 'weekly' ? data.weeklyCandles : data.dailyCandles
-    const candleSeries = addCandles(chart, candles)
+    const candleSeries = chartType === 'hlc'
+      ? addHlcBars(chart, candles)
+      : addCandles(chart, candles)
     const shadeBands = kind === 'weekly' ? data.weeklyKeltnerShades : data.keltnerShades
     const rsGradient = kind === 'weekly' ? data.weeklyRsGradient : data.dailyAnchoredRsGradient
     let redrawShades = () => {
@@ -193,7 +209,7 @@ function LightweightPane({ data, kind, height }) {
       resizeObserver.disconnect()
       chart.remove()
     }
-  }, [data, height, kind])
+  }, [chartType, data, height, kind])
 
   return (
     <div ref={containerRef} className="relative w-full" style={{ height }}>
@@ -208,10 +224,12 @@ function LightweightPane({ data, kind, height }) {
 }
 
 export default function TradeReviewChart({ trade, chartSettings }) {
+  const setTradeReviewChartSettings = useSettingsStore(state => state.setTradeReviewChartSettings)
   const [bars, setBars] = useState([])
   const [benchmarkBars, setBenchmarkBars] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const chartType = chartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'
 
   useEffect(() => {
     let cancelled = false
@@ -261,6 +279,24 @@ export default function TradeReviewChart({ trade, chartSettings }) {
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">
               Anchor {data.dailyRsAnchorDate || '—'}
             </span>
+            <div className="inline-flex rounded-md border border-black/10 bg-white/70 p-0.5">
+              {[
+                { value: 'candlestick', label: 'Candles' },
+                { value: 'hlc', label: 'HLC' },
+              ].map(option => (
+                <button
+                  key={option.value}
+                  onClick={() => setTradeReviewChartSettings({ chartType: option.value })}
+                  className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-colors ${
+                    chartType === option.value
+                      ? 'bg-[#242830] text-white'
+                      : 'text-[#505760] hover:text-[#242830]'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">USD</span>
           </div>
         </div>
@@ -276,14 +312,14 @@ export default function TradeReviewChart({ trade, chartSettings }) {
         <div>
           <div className="relative border-b-4 border-[#242424]">
             <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1W</span>
-            <LightweightPane data={data} kind="weekly" height={190} />
+            <LightweightPane data={data} kind="weekly" height={190} chartType={chartType} />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
               {trade.symbol}
             </div>
           </div>
           <div className="relative">
             <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1D</span>
-            <LightweightPane data={data} kind="daily" height={350} />
+            <LightweightPane data={data} kind="daily" height={350} chartType={chartType} />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
               {trade.symbol}
             </div>
