@@ -121,6 +121,11 @@ function gradientWhiteToGreen(weight, alpha) {
   return `rgba(${redBlue}, ${green}, ${redBlue}, ${alpha})`
 }
 
+function rsVisualAlpha(opacity) {
+  const pineAlpha = (100 - clamp(opacity, 0, 100)) / 100
+  return Math.round(Math.max(pineAlpha, 0.22) * 1000) / 1000
+}
+
 export function calculateKeltnerChannel(bars, period, multiplier = 0.25) {
   const cleaned = cleanBars(bars)
   if (!Number.isFinite(period) || period <= 0) return []
@@ -150,7 +155,7 @@ export function calculateRsGradient(symbolWeeklyBars, benchmarkWeeklyBars, optio
   const lookbackStd = options.lookbackStd ?? 50
   const sensitivity = options.sensitivity ?? 2
   const opacity = options.opacity ?? 85
-  const alpha = Math.round((100 - clamp(opacity, 0, 100)) * 1000 / 100) / 1000
+  const alpha = rsVisualAlpha(opacity)
   const symbolBars = cleanBars(symbolWeeklyBars)
   const benchmarkByTime = new Map(cleanBars(benchmarkWeeklyBars).map(bar => [bar.time, bar]))
   const aligned = symbolBars

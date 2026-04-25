@@ -100,7 +100,7 @@ const rsGradient = calculateRsGradient(rsSymbolWeekly, rsBenchmarkWeekly)
 assert.ok(rsGradient.length > 0)
 assert.ok(rsGradient.at(-1).zScore > 0)
 assert.ok(rsGradient.at(-1).weight > 0)
-assert.match(rsGradient.at(-1).color, /^rgba\(\d+, 255, \d+, 0\.15\)$/)
+assert.match(rsGradient.at(-1).color, /^rgba\(\d+, 255, \d+, 0\.22\)$/)
 
 const preparedWithBenchmark = buildTradeReviewChartData(longBars, trade, longBars)
 assert.ok(Array.isArray(preparedWithBenchmark.weeklyRsGradient))
