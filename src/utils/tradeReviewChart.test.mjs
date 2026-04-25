@@ -3,6 +3,7 @@ import {
   buildTradeReviewChartData,
   aggregateWeeklyBars,
   buildKeltnerShadeBands,
+  calculateRsGradient,
   buildTradeMarkers,
   calculateKeltnerChannel,
 } from './tradeReviewChart.js'
@@ -82,3 +83,24 @@ assert.deepEqual(prepared.weeklyKeltnerShades.map(band => band.period), ['13'])
 assert.equal(prepared.weeklyKeltnerShades[0].fillColor, prepared.keltnerShades[0].fillColor)
 assert.ok(prepared.weeklyCandles.length > 2)
 assert.equal(prepared.markers.length, 2)
+
+const rsSymbolWeekly = Array.from({ length: 80 }, (_, index) => ({
+  time: `2026-${String(Math.floor(index / 4) + 1).padStart(2, '0')}-${String((index % 4) * 7 + 1).padStart(2, '0')}`,
+  open: 100 + index,
+  high: 102 + index,
+  low: 99 + index,
+  close: 100 + index * 1.8,
+  volume: 1000,
+}))
+const rsBenchmarkWeekly = rsSymbolWeekly.map((bar, index) => ({
+  ...bar,
+  close: 100 + index * 0.4,
+}))
+const rsGradient = calculateRsGradient(rsSymbolWeekly, rsBenchmarkWeekly)
+assert.ok(rsGradient.length > 0)
+assert.ok(rsGradient.at(-1).zScore > 0)
+assert.ok(rsGradient.at(-1).weight > 0)
+assert.match(rsGradient.at(-1).color, /^rgba\(\d+, 255, \d+, 0\.15\)$/)
+
+const preparedWithBenchmark = buildTradeReviewChartData(longBars, trade, longBars)
+assert.ok(Array.isArray(preparedWithBenchmark.weeklyRsGradient))

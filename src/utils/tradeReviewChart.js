@@ -103,6 +103,24 @@ function trueRanges(bars) {
   })
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value))
+}
+
+function standardDeviation(values) {
+  const nums = values.filter(Number.isFinite)
+  if (!nums.length) return 0
+  const mean = nums.reduce((sum, value) => sum + value, 0) / nums.length
+  const variance = nums.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / nums.length
+  return Math.sqrt(variance)
+}
+
+function gradientWhiteToGreen(weight, alpha) {
+  const green = 255
+  const redBlue = Math.round(255 * (1 - clamp(weight, 0, 1)))
+  return `rgba(${redBlue}, ${green}, ${redBlue}, ${alpha})`
+}
+
 export function calculateKeltnerChannel(bars, period, multiplier = 0.25) {
   const cleaned = cleanBars(bars)
   if (!Number.isFinite(period) || period <= 0) return []
@@ -122,6 +140,51 @@ export function calculateKeltnerChannel(bars, period, multiplier = 0.25) {
         upper: mid + range * multiplier,
         middle: mid,
         lower: mid - range * multiplier,
+      }
+    })
+    .filter(Boolean)
+}
+
+export function calculateRsGradient(symbolWeeklyBars, benchmarkWeeklyBars, options = {}) {
+  const rollingPeriod = options.rollingPeriod ?? 13
+  const lookbackStd = options.lookbackStd ?? 50
+  const sensitivity = options.sensitivity ?? 2
+  const opacity = options.opacity ?? 85
+  const alpha = Math.round((100 - clamp(opacity, 0, 100)) * 1000 / 100) / 1000
+  const symbolBars = cleanBars(symbolWeeklyBars)
+  const benchmarkByTime = new Map(cleanBars(benchmarkWeeklyBars).map(bar => [bar.time, bar]))
+  const aligned = symbolBars
+    .map(bar => {
+      const benchmark = benchmarkByTime.get(bar.time)
+      if (!benchmark?.close) return null
+      return {
+        time: bar.time,
+        rsRatio: bar.close / benchmark.close,
+      }
+    })
+    .filter(Boolean)
+
+  const rsChanges = aligned.map((row, index) => {
+    const prior = aligned[index - rollingPeriod]
+    return prior ? row.rsRatio - prior.rsRatio : null
+  })
+
+  return aligned
+    .map((row, index) => {
+      const rsChange = rsChanges[index]
+      if (!Number.isFinite(rsChange)) return null
+      const window = rsChanges.slice(Math.max(0, index - lookbackStd + 1), index + 1)
+      if (window.filter(Number.isFinite).length < lookbackStd) return null
+      const ratioStddev = standardDeviation(window)
+      const zScore = ratioStddev !== 0 ? rsChange / ratioStddev : 0
+      const weight = clamp(zScore / sensitivity, -1, 1)
+      return {
+        time: row.time,
+        zScore,
+        weight,
+        color: weight > 0
+          ? gradientWhiteToGreen(weight, alpha)
+          : `rgba(255, 255, 255, ${alpha})`,
       }
     })
     .filter(Boolean)
@@ -185,9 +248,10 @@ export function buildTradeMarkers(trade, bars) {
   return markers.sort((a, b) => a.time.localeCompare(b.time))
 }
 
-export function buildTradeReviewChartData(bars, trade) {
+export function buildTradeReviewChartData(bars, trade, benchmarkBars = []) {
   const daily = cleanBars(bars)
   const weekly = aggregateWeeklyBars(daily)
+  const benchmarkWeekly = aggregateWeeklyBars(benchmarkBars)
   const keltner = {
     13: calculateKeltnerChannel(daily, 13, 0.25),
     34: calculateKeltnerChannel(daily, 34, 0.25),
@@ -208,6 +272,7 @@ export function buildTradeReviewChartData(bars, trade) {
     keltnerShades: buildKeltnerShadeBands(keltner),
     weeklyKeltner,
     weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
+    weeklyRsGradient: calculateRsGradient(weekly, benchmarkWeekly),
     markers: buildTradeMarkers(trade, daily),
   }
 }

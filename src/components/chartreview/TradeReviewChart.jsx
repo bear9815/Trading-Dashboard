@@ -51,7 +51,7 @@ function chartRangeForTrade(trade) {
     : new Date()
 
   const start = new Date(entry)
-  start.setMonth(start.getMonth() - 9)
+  start.setMonth(start.getMonth() - 30)
   end.setDate(end.getDate() + 20)
   return { start, end }
 }
@@ -80,7 +80,27 @@ function fitToData(chart, markers, bars) {
   })
 }
 
-function drawKeltnerShades(canvas, chart, priceSeries, bands) {
+function drawWeeklyRsGradient(ctx, chart, rows, width, height) {
+  if (!rows?.length) return
+  const timeScale = chart.timeScale()
+  const sorted = [...rows].sort((a, b) => a.time.localeCompare(b.time))
+
+  for (let index = 0; index < sorted.length; index += 1) {
+    const row = sorted[index]
+    const x = timeScale.timeToCoordinate(row.time)
+    if (x == null) continue
+
+    const prevX = index > 0 ? timeScale.timeToCoordinate(sorted[index - 1].time) : null
+    const nextX = index < sorted.length - 1 ? timeScale.timeToCoordinate(sorted[index + 1].time) : null
+    const left = prevX == null ? x - 4 : x - Math.abs(x - prevX) / 2
+    const right = nextX == null ? x + Math.abs(x - (prevX ?? x - 8)) / 2 : x + Math.abs(nextX - x) / 2
+
+    ctx.fillStyle = row.color
+    ctx.fillRect(Math.max(0, left), 0, Math.min(width, right) - Math.max(0, left), height)
+  }
+}
+
+function drawOverlays(canvas, chart, priceSeries, bands, rsGradient = []) {
   if (!canvas || !chart || !priceSeries) return
   const rect = canvas.getBoundingClientRect()
   const dpr = window.devicePixelRatio || 1
@@ -90,6 +110,7 @@ function drawKeltnerShades(canvas, chart, priceSeries, bands) {
   const ctx = canvas.getContext('2d')
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, rect.width, rect.height)
+  drawWeeklyRsGradient(ctx, chart, rsGradient, rect.width, rect.height)
 
   const orderedBands = [...(bands || [])].sort((a, b) => Number(b.period) - Number(a.period))
   for (const band of orderedBands) {
@@ -133,9 +154,10 @@ function LightweightPane({ data, kind, height }) {
     const candles = kind === 'weekly' ? data.weeklyCandles : data.dailyCandles
     const candleSeries = addCandles(chart, candles)
     const shadeBands = kind === 'weekly' ? data.weeklyKeltnerShades : data.keltnerShades
+    const rsGradient = kind === 'weekly' ? data.weeklyRsGradient : []
     let redrawShades = () => {
       requestAnimationFrame(() => {
-        drawKeltnerShades(shadeCanvasRef.current, chart, candleSeries, shadeBands)
+        drawOverlays(shadeCanvasRef.current, chart, candleSeries, shadeBands, rsGradient)
       })
     }
 
@@ -187,6 +209,7 @@ function LightweightPane({ data, kind, height }) {
 
 export default function TradeReviewChart({ trade }) {
   const [bars, setBars] = useState([])
+  const [benchmarkBars, setBenchmarkBars] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -196,6 +219,7 @@ export default function TradeReviewChart({ trade }) {
     async function load() {
       if (!trade?.symbol) {
         setBars([])
+        setBenchmarkBars([])
         setLoading(false)
         return
       }
@@ -204,8 +228,14 @@ export default function TradeReviewChart({ trade }) {
       setError('')
       try {
         const { start, end } = chartRangeForTrade(trade)
-        const history = await fetchHistory(trade.symbol, start, end)
-        if (!cancelled) setBars(history)
+        const [history, benchmarkHistory] = await Promise.all([
+          fetchHistory(trade.symbol, start, end),
+          fetchHistory('SPY', start, end),
+        ])
+        if (!cancelled) {
+          setBars(history)
+          setBenchmarkBars(benchmarkHistory)
+        }
       } catch (err) {
         if (!cancelled) setError(err.message || 'Failed to load chart data.')
       } finally {
@@ -217,7 +247,7 @@ export default function TradeReviewChart({ trade }) {
     return () => { cancelled = true }
   }, [trade])
 
-  const data = useMemo(() => buildTradeReviewChartData(bars, trade), [bars, trade])
+  const data = useMemo(() => buildTradeReviewChartData(bars, trade, benchmarkBars), [bars, trade, benchmarkBars])
 
   return (
     <div className="rounded-lg overflow-hidden border border-black/20 bg-[#d7d7d7] shadow-sm">
