@@ -107,6 +107,75 @@ function summarizeTrendGroups(rows) {
   ]
 }
 
+function summarizeSetupGroups(rows) {
+  const groups = [
+    {
+      key: 'positive_rising',
+      label: 'Positive Z + Rising',
+      description: 'Leadership already positive and still improving into entry.',
+      rows: rows.filter(row => row.entryZ >= 0 && Number.isFinite(row.zTrend10) && row.zTrend10 > 0),
+    },
+    {
+      key: 'positive_falling',
+      label: 'Positive Z + Falling',
+      description: 'Leadership positive, but cooling off before entry.',
+      rows: rows.filter(row => row.entryZ >= 0 && Number.isFinite(row.zTrend10) && row.zTrend10 <= 0),
+    },
+    {
+      key: 'negative_improving',
+      label: 'Negative Z + Improving',
+      description: 'Still below benchmark, but RS is turning up.',
+      rows: rows.filter(row => row.entryZ < 0 && Number.isFinite(row.zTrend10) && row.zTrend10 > 0),
+    },
+    {
+      key: 'negative_weakening',
+      label: 'Negative Z + Weakening',
+      description: 'Below benchmark and still deteriorating into entry.',
+      rows: rows.filter(row => row.entryZ < 0 && Number.isFinite(row.zTrend10) && row.zTrend10 <= 0),
+    },
+  ]
+
+  return groups.map(({ rows: groupRows, ...group }) => ({
+    ...group,
+    ...summarizeRows(groupRows),
+  }))
+}
+
+function summarizeSignalGroups(rows) {
+  return [
+    {
+      key: 'above_signal',
+      label: 'Above Signal Line',
+      description: 'Entry z-score was above its 9 EMA signal.',
+      ...summarizeRows(rows.filter(row => Number.isFinite(row.zVsSignal) && row.zVsSignal >= 0)),
+    },
+    {
+      key: 'below_signal',
+      label: 'Below Signal Line',
+      description: 'Entry z-score was below its 9 EMA signal.',
+      ...summarizeRows(rows.filter(row => Number.isFinite(row.zVsSignal) && row.zVsSignal < 0)),
+    },
+  ]
+}
+
+function buildRollingSelection(rows, windowSize = 10) {
+  return [...rows]
+    .sort((a, b) => a.entryDate.localeCompare(b.entryDate) || a.symbol.localeCompare(b.symbol) || String(a.tradeId).localeCompare(String(b.tradeId)))
+    .map((row, index, sortedRows) => {
+      const slice = sortedRows.slice(Math.max(0, index - windowSize + 1), index + 1)
+      const entryZs = slice.map(item => item.entryZ).filter(Number.isFinite)
+      const rValues = slice.map(item => item.rValue).filter(Number.isFinite)
+      return {
+        idx: index + 1,
+        label: `${row.symbol} ${row.entryDate}`,
+        symbol: row.symbol,
+        sample: slice.length,
+        avgEntryZ: entryZs.length ? round(entryZs.reduce((sum, value) => sum + value, 0) / entryZs.length) : null,
+        avgR: rValues.length ? round(rValues.reduce((sum, value) => sum + value, 0) / rValues.length) : null,
+      }
+    })
+}
+
 function averageZ(rows) {
   const values = rows.map(row => row.entryZ).filter(Number.isFinite)
   return values.length ? round(values.reduce((sum, value) => sum + value, 0) / values.length, 3) : null
@@ -205,11 +274,17 @@ export function buildAnchoredRsTradeAnalytics({
 
   const buckets = summarizeBuckets(rows)
   const trendGroups = summarizeTrendGroups(rows)
+  const setupGroups = summarizeSetupGroups(rows)
+  const signalGroups = summarizeSignalGroups(rows)
+  const rollingSelection = buildRollingSelection(rows)
 
   return {
     rows,
     buckets,
     trendGroups,
+    setupGroups,
+    signalGroups,
+    rollingSelection,
     summary: summarize(rows, buckets),
     coverage: {
       totalTrades: eligibleTrades.length,

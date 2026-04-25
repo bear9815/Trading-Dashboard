@@ -2157,6 +2157,76 @@ export default function Analytics({ selectedAccount }) {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+              <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-300">Setup Quality Groups</p>
+                    <p className="text-[11px] text-gray-600 mt-0.5">Combines entry z-score sign with the 10-day RS trend into entry.</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {anchoredRsAnalytics.setupGroups.map(group => (
+                    <div key={group.key} className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                      <p className="text-xs font-semibold text-gray-300">{group.label}</p>
+                      <p className="text-[10px] text-gray-600 mt-1 min-h-[28px]">{group.description}</p>
+                      <div className="flex items-end justify-between gap-3 mt-3">
+                        <div>
+                          <p className={`text-xl font-bold mono ${group.avgR == null ? 'text-gray-500' : group.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                            {group.avgR == null ? '—' : formatR(group.avgR)}
+                          </p>
+                          <p className="text-[10px] text-gray-600">{group.count} trades · {group.winRate == null ? '—' : `${group.winRate.toFixed(0)}%`} win</p>
+                        </div>
+                        <span className={`text-[10px] ${group.count === 0 ? 'text-gray-700' : group.lowSample ? 'text-accent-yellow' : 'text-accent-green'}`}>
+                          {group.count === 0 ? '—' : group.lowSample ? 'low sample' : 'ready'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                <p className="text-xs font-semibold text-gray-300 mb-2">Signal Line Context</p>
+                <p className="text-[11px] text-gray-600 mb-3">Compares entry z-score to its signal EMA, matching the PineScript signal-line idea.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                  {anchoredRsAnalytics.signalGroups.map(group => (
+                    <div key={group.key} className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                      <p className="text-xs font-semibold text-gray-300">{group.label}</p>
+                      <p className="text-[10px] text-gray-600 mt-1">{group.description}</p>
+                      <p className={`text-2xl font-bold mono mt-3 ${group.avgR == null ? 'text-gray-500' : group.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                        {group.avgR == null ? '—' : formatR(group.avgR)}
+                      </p>
+                      <p className="text-[10px] text-gray-600">{group.count} trades · PF {group.profitFactor === Infinity ? '∞' : group.profitFactor != null ? group.profitFactor.toFixed(2) : '—'}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs font-semibold text-gray-300 mb-2">Rolling Selection Quality</p>
+                <ResponsiveContainer width="100%" height={190}>
+                  <LineChart data={anchoredRsAnalytics.rollingSelection} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                    <XAxis dataKey="idx" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                    <YAxis yAxisId="z" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}z`} />
+                    <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}R`} />
+                    <Tooltip
+                      contentStyle={TT_STYLE}
+                      labelStyle={TT_LABEL_STYLE}
+                      itemStyle={TT_ITEM_STYLE}
+                      formatter={(value, name) => [
+                        name === 'Avg Entry Z' ? `${Number(value).toFixed(2)}z` : `${Number(value).toFixed(2)}R`,
+                        name,
+                      ]}
+                      labelFormatter={(_, payload) => payload?.[0]?.payload?.label || ''}
+                    />
+                    <ReferenceLine yAxisId="z" y={0} stroke="#ffffff18" strokeDasharray="4 4" />
+                    <Line yAxisId="z" type="monotone" dataKey="avgEntryZ" name="Avg Entry Z" stroke="#3d84ff" strokeWidth={2} dot={false} connectNulls />
+                    <Line yAxisId="r" type="monotone" dataKey="avgR" name="Avg R" stroke="#00d084" strokeWidth={2} dot={false} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+                <p className="text-[10px] text-gray-600 mt-2">Each point is a rolling 10-trade average, or fewer until 10 samples exist.</p>
+              </div>
+            </div>
+
             <div className="overflow-x-auto rounded-xl border border-white/10">
               <table className="w-full min-w-[820px] text-xs">
                 <thead className="bg-white/[0.03] text-gray-500 uppercase tracking-wider">
