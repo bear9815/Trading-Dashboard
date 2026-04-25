@@ -7,6 +7,11 @@ const KELTNER_SHADE_COLORS = {
   65: 'rgba(219, 91, 143, 0.18)',
 }
 
+export const DEFAULT_ANCHORED_RS_ANCHOR_RULES = [
+  { from: '2026-01-01', to: '2026-03-31', anchor: '2026-01-01' },
+  { from: '2026-04-01', to: '2026-06-30', anchor: '2026-04-02' },
+]
+
 function toDateKey(value) {
   if (!value) return null
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
@@ -195,6 +200,67 @@ export function calculateRsGradient(symbolWeeklyBars, benchmarkWeeklyBars, optio
     .filter(Boolean)
 }
 
+export function resolveAnchoredRsAnchorDate(trade, rules = DEFAULT_ANCHORED_RS_ANCHOR_RULES) {
+  const override = toDateKey(trade?.reviewChartSettings?.dailyRsAnchorDate)
+  if (override) return override
+
+  const entryDate = toDateKey(trade?.entryDate)
+  if (!entryDate) return rules[0]?.anchor || null
+
+  const match = (rules || []).find(rule => {
+    const from = toDateKey(rule.from)
+    const to = toDateKey(rule.to)
+    return (!from || entryDate >= from) && (!to || entryDate <= to)
+  })
+  return toDateKey(match?.anchor) || toDateKey(rules?.[0]?.anchor) || entryDate
+}
+
+export function calculateAnchoredRsGradient(symbolDailyBars, benchmarkDailyBars, anchorDate, options = {}) {
+  const lookback = options.lookback ?? 50
+  const sensitivity = options.sensitivity ?? 2
+  const opacity = options.opacity ?? 85
+  const alpha = rsVisualAlpha(opacity)
+  const anchorKey = toDateKey(anchorDate)
+  if (!anchorKey) return []
+
+  const symbolBars = cleanBars(symbolDailyBars)
+  const benchmarkByTime = new Map(cleanBars(benchmarkDailyBars).map(bar => [bar.time, bar]))
+  const aligned = symbolBars
+    .map(bar => {
+      const benchmark = benchmarkByTime.get(bar.time)
+      if (!benchmark?.close) return null
+      return {
+        time: bar.time,
+        rsRatio: bar.close / benchmark.close,
+      }
+    })
+    .filter(Boolean)
+
+  const anchorRow = aligned.find(row => row.time >= anchorKey)
+  if (!anchorRow) return []
+
+  return aligned
+    .map((row, index) => {
+      if (row.time < anchorRow.time) return null
+      const window = aligned.slice(Math.max(0, index - lookback + 1), index + 1).map(item => item.rsRatio)
+      if (window.filter(Number.isFinite).length < lookback) return null
+      const ratioStddev = standardDeviation(window)
+      const zScore = ratioStddev !== 0 ? (row.rsRatio - anchorRow.rsRatio) / ratioStddev : 0
+      const weight = clamp(zScore / sensitivity, -1, 1)
+      const channel = Math.round(255 * (1 - Math.abs(weight)))
+      const color = weight > 0
+        ? `rgba(${channel}, 255, ${channel}, ${alpha})`
+        : `rgba(255, ${channel}, ${channel}, ${alpha})`
+      return {
+        time: row.time,
+        zScore,
+        weight,
+        color,
+      }
+    })
+    .filter(Boolean)
+}
+
 export function buildKeltnerShadeBands(keltner) {
   return Object.entries(keltner || {})
     .map(([period, rows]) => ({
@@ -257,6 +323,7 @@ export function buildTradeReviewChartData(bars, trade, benchmarkBars = []) {
   const daily = cleanBars(bars)
   const weekly = aggregateWeeklyBars(daily)
   const benchmarkWeekly = aggregateWeeklyBars(benchmarkBars)
+  const dailyRsAnchorDate = resolveAnchoredRsAnchorDate(trade)
   const keltner = {
     13: calculateKeltnerChannel(daily, 13, 0.25),
     34: calculateKeltnerChannel(daily, 34, 0.25),
@@ -278,6 +345,16 @@ export function buildTradeReviewChartData(bars, trade, benchmarkBars = []) {
     weeklyKeltner,
     weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
     weeklyRsGradient: calculateRsGradient(weekly, benchmarkWeekly),
+    dailyRsAnchorDate,
+    dailyAnchoredRsGradient: calculateAnchoredRsGradient(daily, benchmarkBars, dailyRsAnchorDate),
+    dailyAnchorMarkers: dailyRsAnchorDate ? [{
+      time: daily.find(bar => bar.time >= dailyRsAnchorDate)?.time || dailyRsAnchorDate,
+      position: 'belowBar',
+      color: '#ffffff',
+      shape: 'circle',
+      text: 'Anchor',
+      size: 0.8,
+    }] : [],
     markers: buildTradeMarkers(trade, daily),
   }
 }

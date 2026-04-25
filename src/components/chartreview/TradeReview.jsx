@@ -2027,7 +2027,7 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate }) {
       <div>
         <p className="label mb-2">Charts</p>
         <div className="mb-3">
-          <TradeReviewChart trade={trade} />
+          <TradeReviewChart trade={trade} onUpdate={onUpdate} />
         </div>
         <ScreenshotGallery trade={trade} onOpenLightbox={setLightboxIndex} />
       </div>

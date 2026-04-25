@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import {
   buildTradeReviewChartData,
   aggregateWeeklyBars,
+  calculateAnchoredRsGradient,
   buildKeltnerShadeBands,
   calculateRsGradient,
+  resolveAnchoredRsAnchorDate,
   buildTradeMarkers,
   calculateKeltnerChannel,
 } from './tradeReviewChart.js'
@@ -104,3 +106,39 @@ assert.match(rsGradient.at(-1).color, /^rgba\(\d+, 255, \d+, 0\.22\)$/)
 
 const preparedWithBenchmark = buildTradeReviewChartData(longBars, trade, longBars)
 assert.ok(Array.isArray(preparedWithBenchmark.weeklyRsGradient))
+
+const anchorRules = [
+  { from: '2026-01-01', to: '2026-03-31', anchor: '2026-01-01' },
+  { from: '2026-04-01', to: '2026-06-30', anchor: '2026-04-02' },
+]
+assert.equal(resolveAnchoredRsAnchorDate({ entryDate: '2026-04-10T14:00:00Z' }, anchorRules), '2026-04-02')
+assert.equal(
+  resolveAnchoredRsAnchorDate({ entryDate: '2026-04-10T14:00:00Z', reviewChartSettings: { dailyRsAnchorDate: '2026-03-15' } }, anchorRules),
+  '2026-03-15'
+)
+
+const anchoredSymbolDaily = Array.from({ length: 90 }, (_, index) => {
+  const date = new Date('2026-01-01T00:00:00Z')
+  date.setUTCDate(date.getUTCDate() + index)
+  return {
+    time: date.toISOString().slice(0, 10),
+    open: 50 + index * 0.2,
+    high: 51 + index * 0.2,
+    low: 49 + index * 0.2,
+    close: 50 + index * 0.7,
+    volume: 1000,
+  }
+})
+const anchoredBenchmarkDaily = anchoredSymbolDaily.map((bar, index) => ({
+  ...bar,
+  close: 50 + index * 0.15,
+}))
+const anchoredGradient = calculateAnchoredRsGradient(anchoredSymbolDaily, anchoredBenchmarkDaily, '2026-01-10')
+assert.ok(anchoredGradient.length > 0)
+assert.ok(anchoredGradient.every(row => row.time >= '2026-01-10'))
+assert.ok(anchoredGradient.at(-1).zScore > 0)
+assert.match(anchoredGradient.at(-1).color, /^rgba\(\d+, 255, \d+, 0\.22\)$/)
+assert.deepEqual(
+  buildTradeReviewChartData(anchoredSymbolDaily, { ...trade, reviewChartSettings: { dailyRsAnchorDate: '2026-01-10' } }, anchoredBenchmarkDaily).dailyAnchorMarkers.map(marker => marker.text),
+  ['Anchor']
+)

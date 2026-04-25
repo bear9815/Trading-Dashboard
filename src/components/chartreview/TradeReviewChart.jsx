@@ -80,7 +80,7 @@ function fitToData(chart, markers, bars) {
   })
 }
 
-function drawWeeklyRsGradient(ctx, chart, rows, width, height) {
+function drawRsGradient(ctx, chart, rows, width, height) {
   if (!rows?.length) return
   const timeScale = chart.timeScale()
   const sorted = [...rows].sort((a, b) => a.time.localeCompare(b.time))
@@ -110,7 +110,7 @@ function drawOverlays(canvas, chart, priceSeries, bands, rsGradient = []) {
   const ctx = canvas.getContext('2d')
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, rect.width, rect.height)
-  drawWeeklyRsGradient(ctx, chart, rsGradient, rect.width, rect.height)
+  drawRsGradient(ctx, chart, rsGradient, rect.width, rect.height)
 
   const orderedBands = [...(bands || [])].sort((a, b) => Number(b.period) - Number(a.period))
   for (const band of orderedBands) {
@@ -154,7 +154,7 @@ function LightweightPane({ data, kind, height }) {
     const candles = kind === 'weekly' ? data.weeklyCandles : data.dailyCandles
     const candleSeries = addCandles(chart, candles)
     const shadeBands = kind === 'weekly' ? data.weeklyKeltnerShades : data.keltnerShades
-    const rsGradient = kind === 'weekly' ? data.weeklyRsGradient : []
+    const rsGradient = kind === 'weekly' ? data.weeklyRsGradient : data.dailyAnchoredRsGradient
     let redrawShades = () => {
       requestAnimationFrame(() => {
         drawOverlays(shadeCanvasRef.current, chart, candleSeries, shadeBands, rsGradient)
@@ -172,7 +172,7 @@ function LightweightPane({ data, kind, height }) {
       volumeSeries.priceScale().applyOptions({
         scaleMargins: { top: 0.84, bottom: 0 },
       })
-      createSeriesMarkers(candleSeries, data.markers)
+      createSeriesMarkers(candleSeries, [...data.dailyAnchorMarkers, ...data.markers])
       fitToData(chart, data.markers, data.dailyCandles)
       redrawShades()
       chart.timeScale().subscribeVisibleTimeRangeChange(redrawShades)
@@ -207,7 +207,7 @@ function LightweightPane({ data, kind, height }) {
   )
 }
 
-export default function TradeReviewChart({ trade }) {
+export default function TradeReviewChart({ trade, onUpdate }) {
   const [bars, setBars] = useState([])
   const [benchmarkBars, setBenchmarkBars] = useState([])
   const [loading, setLoading] = useState(true)
@@ -249,15 +249,35 @@ export default function TradeReviewChart({ trade }) {
 
   const data = useMemo(() => buildTradeReviewChartData(bars, trade, benchmarkBars), [bars, trade, benchmarkBars])
 
+  function updateAnchorDate(value) {
+    onUpdate?.({
+      reviewChartSettings: {
+        ...(trade.reviewChartSettings || {}),
+        dailyRsAnchorDate: value || null,
+      },
+    })
+  }
+
   return (
     <div className="rounded-lg overflow-hidden border border-black/20 bg-[#d7d7d7] shadow-sm">
       <div className="px-2 py-1.5 border-b border-black/15 text-[#242830]">
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-xs font-semibold mono">{trade.symbol} · Review Chart</p>
-            <p className="text-[10px] text-[#505760]">KC13 · KC34 · KC65 · ATR 0.25</p>
+            <p className="text-[10px] text-[#505760]">Weekly RS · Daily anchored RS · KC13/34/65</p>
           </div>
-          <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">USD</span>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 text-[10px] font-semibold text-[#343941]">
+              Daily anchor
+              <input
+                type="date"
+                value={data.dailyRsAnchorDate || ''}
+                onChange={event => updateAnchorDate(event.target.value)}
+                className="h-6 rounded border border-black/10 bg-white/80 px-1.5 text-[10px] text-[#343941] outline-none"
+              />
+            </label>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">USD</span>
+          </div>
         </div>
       </div>
 
