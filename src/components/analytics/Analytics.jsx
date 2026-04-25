@@ -198,6 +198,14 @@ function addDays(value, days) {
   return date
 }
 
+function getLastExitDateKey(trade) {
+  const explicitExit = toDateKey(trade?.exitDate)
+  const exitKeys = (trade?.exits || [])
+    .map(exit => toDateKey(exit.exitDate || exit.date))
+    .filter(Boolean)
+  return [explicitExit, ...exitKeys].filter(Boolean).sort().at(-1) || null
+}
+
 function getTradeResolutionDate(trade) {
   if (trade?._analyticsResolutionDate) {
     const d = new Date(trade._analyticsResolutionDate)
@@ -571,7 +579,7 @@ export default function Analytics({ selectedAccount }) {
       anchorDates: tradeReviewChartSettings?.anchorDates || [],
       dailyAnchoredRs: tradeReviewChartSettings?.dailyAnchoredRs || {},
     })
-    const sampleKey = sample.map(trade => `${trade.id}:${trade.symbol}:${trade.entryDate}:${trade.status}:${trade[rField] ?? ''}:${trade.pl ?? ''}`).join('|')
+    const sampleKey = sample.map(trade => `${trade.id}:${trade.symbol}:${trade.entryDate}:${getLastExitDateKey(trade) ?? ''}:${trade.status}:${trade[rField] ?? ''}:${trade.pl ?? ''}`).join('|')
     const fetchKey = `${sampleKey}|${rField}|${settingsKey}`
     if (anchoredRsFetchRef.current === fetchKey) return
     anchoredRsFetchRef.current = fetchKey
@@ -583,12 +591,13 @@ export default function Analytics({ selectedAccount }) {
       try {
         const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
         const entryKeys = sample.map(trade => toDateKey(trade.entryDate)).filter(Boolean).sort()
+        const exitKeys = sample.map(getLastExitDateKey).filter(Boolean).sort()
         const anchorKeys = sample
           .map(trade => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates, trade.entryDate))
           .filter(Boolean)
           .sort()
         const firstKey = [entryKeys[0], anchorKeys[0]].filter(Boolean).sort()[0]
-        const lastKey = entryKeys.at(-1)
+        const lastKey = [...entryKeys, ...exitKeys].filter(Boolean).sort().at(-1)
         if (!firstKey || !lastKey) throw new Error('No valid trade dates for Anchored RS analytics.')
 
         const start = addDays(`${firstKey}T00:00:00Z`, -180)
