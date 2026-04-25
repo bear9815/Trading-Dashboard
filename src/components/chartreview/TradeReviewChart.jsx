@@ -132,7 +132,12 @@ function LightweightPane({ data, kind, height }) {
 
     const candles = kind === 'weekly' ? data.weeklyCandles : data.dailyCandles
     const candleSeries = addCandles(chart, candles)
-    let redrawShades = () => {}
+    const shadeBands = kind === 'weekly' ? data.weeklyKeltnerShades : data.keltnerShades
+    let redrawShades = () => {
+      requestAnimationFrame(() => {
+        drawKeltnerShades(shadeCanvasRef.current, chart, candleSeries, shadeBands)
+      })
+    }
 
     if (kind === 'daily') {
       const volumeSeries = chart.addSeries(HistogramSeries, {
@@ -147,15 +152,12 @@ function LightweightPane({ data, kind, height }) {
       })
       createSeriesMarkers(candleSeries, data.markers)
       fitToData(chart, data.markers, data.dailyCandles)
-      redrawShades = () => {
-        requestAnimationFrame(() => {
-          drawKeltnerShades(shadeCanvasRef.current, chart, candleSeries, data.keltnerShades)
-        })
-      }
       redrawShades()
       chart.timeScale().subscribeVisibleTimeRangeChange(redrawShades)
     } else {
       fitToData(chart, data.markers, data.weeklyCandles)
+      redrawShades()
+      chart.timeScale().subscribeVisibleTimeRangeChange(redrawShades)
     }
 
     const resizeObserver = new ResizeObserver(([entry]) => {
@@ -165,7 +167,7 @@ function LightweightPane({ data, kind, height }) {
     resizeObserver.observe(chartContainerRef.current)
 
     return () => {
-      if (kind === 'daily') chart.timeScale().unsubscribeVisibleTimeRangeChange(redrawShades)
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(redrawShades)
       resizeObserver.disconnect()
       chart.remove()
     }
@@ -174,13 +176,11 @@ function LightweightPane({ data, kind, height }) {
   return (
     <div ref={containerRef} className="relative w-full" style={{ height }}>
       <div ref={chartContainerRef} className="absolute inset-0" />
-      {kind === 'daily' && (
-        <canvas
-          ref={shadeCanvasRef}
-          className="pointer-events-none absolute inset-0 z-10 h-full w-full"
-          aria-hidden="true"
-        />
-      )}
+      <canvas
+        ref={shadeCanvasRef}
+        className="pointer-events-none absolute inset-0 z-10 h-full w-full"
+        aria-hidden="true"
+      />
     </div>
   )
 }

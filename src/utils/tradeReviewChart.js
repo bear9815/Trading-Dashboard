@@ -187,14 +187,18 @@ export function buildTradeMarkers(trade, bars) {
 
 export function buildTradeReviewChartData(bars, trade) {
   const daily = cleanBars(bars)
+  const weekly = aggregateWeeklyBars(daily)
   const keltner = {
     13: calculateKeltnerChannel(daily, 13, 0.25),
     34: calculateKeltnerChannel(daily, 34, 0.25),
     65: calculateKeltnerChannel(daily, 65, 0.25),
   }
+  const weeklyKeltner = {
+    13: calculateKeltnerChannel(weekly, 13, 0.25),
+  }
   return {
     dailyCandles: colorizeCandles(daily),
-    weeklyCandles: colorizeCandles(aggregateWeeklyBars(daily)),
+    weeklyCandles: colorizeCandles(weekly),
     volume: daily.map(bar => ({
       time: bar.time,
       value: bar.volume,
@@ -202,6 +206,8 @@ export function buildTradeReviewChartData(bars, trade) {
     })),
     keltner,
     keltnerShades: buildKeltnerShadeBands(keltner),
+    weeklyKeltner,
+    weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
     markers: buildTradeMarkers(trade, daily),
   }
 }

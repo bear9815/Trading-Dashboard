@@ -57,7 +57,7 @@ const legacyMarkers = buildTradeMarkers({
 }, bars)
 assert.deepEqual(legacyMarkers.map(marker => marker.text), ['Entry 12.00', 'Exit 14.00'])
 
-const longBars = Array.from({ length: 80 }, (_, index) => {
+const longBars = Array.from({ length: 110 }, (_, index) => {
   const date = new Date('2026-01-05T00:00:00Z')
   date.setUTCDate(date.getUTCDate() + index)
   const open = 20 + index * 0.25
@@ -77,5 +77,8 @@ assert.equal(prepared.dailyCandles[0].color, '#2877e3')
 assert.equal(prepared.dailyCandles[1].color, '#ea4ce7')
 assert.deepEqual(Object.keys(prepared.keltner), ['13', '34', '65'])
 assert.deepEqual(prepared.keltnerShades.map(band => band.period), ['13', '34', '65'])
+assert.deepEqual(Object.keys(prepared.weeklyKeltner), ['13'])
+assert.deepEqual(prepared.weeklyKeltnerShades.map(band => band.period), ['13'])
+assert.equal(prepared.weeklyKeltnerShades[0].fillColor, prepared.keltnerShades[0].fillColor)
 assert.ok(prepared.weeklyCandles.length > 2)
 assert.equal(prepared.markers.length, 2)
