@@ -1,12 +1,15 @@
 import { useMemo, useRef, useState } from 'react'
 import {
   Brain, Download, ExternalLink, Layers, ListFilter, Pencil,
-  RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network,
+  RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network, TrendingUp,
 } from 'lucide-react'
 import { parseChartMeta } from '../../store/useWatchlistStore.js'
 import { useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
+import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
+import { fetchHistory } from '../../utils/marketData.js'
+import { buildAnchoredRsSnapshot, resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 
 const SORT_OPTIONS = [
@@ -20,7 +23,7 @@ const SORT_OPTIONS = [
 
 const CSV_COLUMNS = [
   'symbol', 'companyName', 'sector', 'ecosystem', 'theme', 'whatTheyDo',
-  'majorCustomers', 'dependencies', 'relatedDriver', 'customerOf', 'supplierTo', 'competesWith',
+  'majorCustomers', 'dependencies', 'relatedDriver', 'anchoredRsZ', 'customerOf', 'supplierTo', 'competesWith',
 ]
 
 const EMPTY_ROW = {
@@ -191,6 +194,35 @@ function StatPill({ label, value }) {
     <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
       <p className="text-[10px] uppercase tracking-wider text-gray-600">{label}</p>
       <p className="text-sm font-semibold text-gray-200 mt-0.5">{value}</p>
+    </div>
+  )
+}
+
+function formatZScore(value) {
+  if (!Number.isFinite(value)) return '—'
+  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}z`
+}
+
+function AnchoredRsCell({ snapshot }) {
+  if (!snapshot) return <span className="text-gray-600">Not loaded</span>
+  if (!Number.isFinite(snapshot.zScore)) return <span className="text-gray-600">No signal</span>
+  const positive = snapshot.zScore > 0
+  const negative = snapshot.zScore < 0
+  return (
+    <div className="space-y-1">
+      <span
+        className={`inline-flex items-center rounded px-2 py-1 text-xs font-semibold border ${
+          positive
+            ? 'text-accent-green border-accent-green/25 bg-accent-green/10'
+            : negative
+              ? 'text-accent-red border-accent-red/25 bg-accent-red/10'
+              : 'text-gray-400 border-white/10 bg-white/[0.03]'
+        }`}
+        style={{ backgroundColor: snapshot.color || undefined }}
+      >
+        {formatZScore(snapshot.zScore)}
+      </span>
+      <p className="text-[10px] text-gray-600">Anchor {snapshot.anchorDate || '—'}</p>
     </div>
   )
 }
@@ -418,6 +450,7 @@ export default function ThemeWatchlist({
   const { themes } = useThematicStore()
   const { sources } = useResearchLibraryStore()
   const { symbols, rowsBySymbol, savedViews, replaceWatchlist, upsertRows, updateRow, removeSymbol, saveView, removeView, clear } = useResearchWatchlistStore()
+  const { tradeReviewChartSettings } = useSettingsStore()
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -428,6 +461,8 @@ export default function ThemeWatchlist({
   const [editingSymbol, setEditingSymbol] = useState(null)
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [viewName, setViewName] = useState('')
+  const [rsBySymbol, setRsBySymbol] = useState({})
+  const [rsLoading, setRsLoading] = useState(false)
   const [page, setPage] = useState(1)
   const pageSize = 40
   const fileRef = useRef(null)
@@ -500,6 +535,48 @@ export default function ThemeWatchlist({
 
   const editingRow = editingSymbol ? rowsBySymbol[editingSymbol] : null
   const selectedRow = selectedSymbol ? rowsBySymbol[selectedSymbol] : null
+  const latestAnchorDate = useMemo(
+    () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
+    [tradeReviewChartSettings?.anchorDates]
+  )
+
+  async function refreshAnchoredRs() {
+    if (!symbols.length) {
+      setError('Import a watchlist first.')
+      return
+    }
+    const anchorDate = resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates)
+    if (!anchorDate) {
+      setError('Add at least one anchor date in Trade Review chart settings.')
+      return
+    }
+
+    setRsLoading(true)
+    setError('')
+    setStatus(`Refreshing anchored RS from ${anchorDate}…`)
+    try {
+      const start = new Date(`${anchorDate}T00:00:00Z`)
+      start.setDate(start.getDate() - 90)
+      const end = new Date()
+      end.setDate(end.getDate() + 1)
+      const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
+      const benchmarkBars = await fetchHistory(benchmarkSymbol, start, end)
+      const entries = await Promise.all(symbols.map(async symbol => {
+        try {
+          const bars = await fetchHistory(symbol, start, end)
+          return [symbol, buildAnchoredRsSnapshot(bars, benchmarkBars, tradeReviewChartSettings)]
+        } catch (err) {
+          return [symbol, { anchorDate, zScore: null, weight: null, color: null, error: err.message || 'Failed' }]
+        }
+      }))
+      setRsBySymbol(Object.fromEntries(entries))
+      setStatus(`Anchored RS refreshed for ${entries.length} symbol${entries.length !== 1 ? 's' : ''}.`)
+    } catch (err) {
+      setError(err.message || 'Anchored RS refresh failed.')
+    } finally {
+      setRsLoading(false)
+    }
+  }
 
   function handleSort(nextKey) {
     if (sortKey === nextKey) setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')
@@ -642,6 +719,14 @@ export default function ThemeWatchlist({
               {rows.length ? 'Refresh Map' : 'Map Watchlist'}
             </button>
             <button
+              onClick={refreshAnchoredRs}
+              disabled={rsLoading || !symbols.length}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/12 border border-accent-blue/20 text-accent-blue text-sm font-medium hover:bg-accent-blue/18 transition-all disabled:opacity-40"
+            >
+              <TrendingUp size={13} className={rsLoading ? 'animate-pulse' : ''} />
+              {rsLoading ? 'RS…' : 'Anchored RS'}
+            </button>
+            <button
               onClick={() => exportCsv(rows)}
               disabled={!rows.length}
               className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all disabled:opacity-40"
@@ -681,7 +766,7 @@ export default function ThemeWatchlist({
           <StatPill label="Mapped Rows" value={rows.length} />
           <StatPill label="Theme Buckets" value={themeGroups.length} />
           <StatPill label="Top Ranked" value={symbols[0] || '—'} />
-          <StatPill label="Library Themes" value={Object.keys(themes).length} />
+          <StatPill label="RS Anchor" value={latestAnchorDate || '—'} />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -776,6 +861,7 @@ export default function ThemeWatchlist({
                     <th className="text-left px-3 py-2">Customers</th>
                     <th className="text-left px-3 py-2">Dependencies</th>
                     <th className="text-left px-3 py-2">Related Driver</th>
+                    <th className="text-left px-3 py-2">Anchored RS</th>
                     <th className="text-left px-3 py-2">Relationship Layer</th>
                     <th className="text-left px-3 py-2">Theme / Library Links</th>
                     <th className="text-left px-3 py-2">Actions</th>
@@ -798,6 +884,7 @@ export default function ThemeWatchlist({
                       <td className="px-3 py-2.5 text-gray-400">{arrayText(row.majorCustomers) || '—'}</td>
                       <td className="px-3 py-2.5 text-gray-400">{arrayText(row.dependencies) || '—'}</td>
                       <td className="px-3 py-2.5 text-accent-yellow">{row.relatedDriver}</td>
+                      <td className="px-3 py-2.5 min-w-[120px]"><AnchoredRsCell snapshot={rsBySymbol[row.symbol]} /></td>
                       <td className="px-3 py-2.5 text-gray-400 min-w-[220px]">
                         <p><span className="text-gray-600">Customer links:</span> {arrayText(layer.customerLinks) || '—'}</p>
                         <p className="mt-1"><span className="text-gray-600">Dependency links:</span> {arrayText(layer.supplierLinks) || '—'}</p>

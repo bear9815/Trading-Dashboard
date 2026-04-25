@@ -227,6 +227,12 @@ export function resolveAnchoredRsAnchorDate(trade, rules = DEFAULT_ANCHORED_RS_A
   return toDateKey(match?.anchor) || toDateKey(rules?.[0]?.anchor) || entryDate
 }
 
+export function resolveLatestAnchorDate(anchorDates = DEFAULT_TRADE_REVIEW_CHART_SETTINGS.anchorDates, asOf = new Date()) {
+  const asOfKey = toDateKey(asOf) || new Date().toISOString().slice(0, 10)
+  const anchors = (anchorDates || []).map(toDateKey).filter(Boolean).sort()
+  return [...anchors].reverse().find(anchor => anchor <= asOfKey) || anchors[0] || null
+}
+
 export function calculateAnchoredRsGradient(symbolDailyBars, benchmarkDailyBars, anchorDate, options = {}) {
   const lookback = options.lookback ?? 50
   const sensitivity = options.sensitivity ?? 2
@@ -271,6 +277,25 @@ export function calculateAnchoredRsGradient(symbolDailyBars, benchmarkDailyBars,
       }
     })
     .filter(Boolean)
+}
+
+export function buildAnchoredRsSnapshot(symbolDailyBars, benchmarkDailyBars, settings = DEFAULT_TRADE_REVIEW_CHART_SETTINGS, asOf = new Date()) {
+  const chartSettings = {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    ...(settings || {}),
+    dailyAnchoredRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyAnchoredRs, ...(settings?.dailyAnchoredRs || {}) },
+  }
+  const anchorDate = resolveLatestAnchorDate(chartSettings.anchorDates, asOf)
+  const gradient = calculateAnchoredRsGradient(symbolDailyBars, benchmarkDailyBars, anchorDate, chartSettings.dailyAnchoredRs)
+  const latest = gradient.at(-1)
+  if (!latest) return { anchorDate, zScore: null, weight: null, color: null, time: null }
+  return {
+    anchorDate,
+    time: latest.time,
+    zScore: latest.zScore,
+    weight: latest.weight,
+    color: latest.color,
+  }
 }
 
 export function buildKeltnerShadeBands(keltner) {

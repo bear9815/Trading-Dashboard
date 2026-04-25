@@ -3,8 +3,10 @@ import {
   buildTradeReviewChartData,
   aggregateWeeklyBars,
   calculateAnchoredRsGradient,
+  buildAnchoredRsSnapshot,
   buildKeltnerShadeBands,
   calculateRsGradient,
+  resolveLatestAnchorDate,
   resolveAnchoredRsAnchorDate,
   buildTradeMarkers,
   calculateKeltnerChannel,
@@ -172,3 +174,12 @@ assert.equal(
   ).dailyRsAnchorDate,
   '2026-01-28'
 )
+
+assert.equal(resolveLatestAnchorDate(['2025-11-24', '2026-01-28', '2026-03-30'], '2026-04-25'), '2026-03-30')
+const anchoredSnapshot = buildAnchoredRsSnapshot(anchoredSymbolDaily, anchoredBenchmarkDaily, {
+  anchorDates: ['2026-01-10'],
+  dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85 },
+})
+assert.equal(anchoredSnapshot.anchorDate, '2026-01-10')
+assert.ok(anchoredSnapshot.zScore > 0)
+assert.ok(anchoredSnapshot.weight > 0)
