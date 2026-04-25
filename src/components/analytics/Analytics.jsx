@@ -5,7 +5,7 @@ import {
   CartesianGrid, LineChart, Line, ReferenceLine, Legend, AreaChart, Area,
   ScatterChart, Scatter, ZAxis, ComposedChart
 } from 'recharts'
-import { RefreshCw, ChevronUp, ChevronDown, Clock, TrendingDown, Brain, AlertTriangle, Maximize2, X, Target } from 'lucide-react'
+import { RefreshCw, ChevronUp, ChevronDown, Clock, TrendingDown, Brain, AlertTriangle, Maximize2, X, Target, BarChart2, Activity, CalendarDays, Shield } from 'lucide-react'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
@@ -39,6 +39,168 @@ const ANALYTICS_START_LABEL = 'Nov 24, 2025'
 
 function SectionTitle({ children }) {
   return <h3 className="text-sm font-semibold text-gray-300 mb-3">{children}</h3>
+}
+
+const ANALYTICS_TABS = [
+  { key: 'snapshot', label: 'Snapshot', desc: 'Headline performance and current edge health.', icon: BarChart2 },
+  { key: 'edge', label: 'Edge', desc: 'Setup quality, distributions, and RS selection.', icon: Target },
+  { key: 'timing', label: 'Timing', desc: 'Calendar, session, and holding-period behavior.', icon: CalendarDays },
+  { key: 'process', label: 'Process', desc: 'Execution discipline, entries, and psychology.', icon: Brain },
+  { key: 'exposure', label: 'Exposure', desc: 'Portfolio sensitivity, drawdowns, and symbols.', icon: Activity },
+  { key: 'projections', label: 'Projections', desc: 'Long-game risk and forward drawdown tools.', icon: Shield },
+]
+
+function AnalyticsHeader({
+  timeframe,
+  setTimeframe,
+  tradeMode,
+  setTradeMode,
+  hasATRData,
+  rBasis,
+  setRBasis,
+  closedTradeCount,
+  realtimeTradeCount,
+  liveQuoteLoading,
+  liveQuoteRefreshNonce,
+  setLiveQuoteRefreshNonce,
+  openForRealtime,
+  atrBackfill,
+  sampleLabel,
+  selectedAccount,
+}) {
+  return (
+    <div className="luxury-panel rounded-2xl p-4 md:p-5 overflow-hidden relative">
+      <div className="absolute inset-y-0 right-0 w-1/2 bg-gradient-to-l from-accent-blue/10 via-accent-purple/5 to-transparent pointer-events-none" />
+      <div className="relative flex items-start justify-between gap-4 flex-wrap mb-4">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-[#9ab3d1] mb-1">Trading Analytics</p>
+          <h1 className="text-2xl md:text-3xl font-semibold tracking-[-0.03em] text-white">Analytics Command Center</h1>
+          <p className="text-xs md:text-sm text-gray-500 mt-1">
+            {sampleLabel} · {selectedAccount && selectedAccount !== 'All' ? selectedAccount : 'All accounts'} · All starts {ANALYTICS_START_LABEL}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap justify-start md:justify-end">
+          {tradeMode === 'realtime' && (
+            <button
+              type="button"
+              onClick={() => setLiveQuoteRefreshNonce(liveQuoteRefreshNonce + 1)}
+              disabled={liveQuoteLoading || openForRealtime.length === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-surface-100 border border-white/10 text-gray-400 hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <RefreshCw size={12} className={liveQuoteLoading ? 'animate-spin' : ''} />
+              Refresh Marks
+            </button>
+          )}
+          {(atrBackfill.running || atrBackfill.filled > 0 || atrBackfill.failed > 0) && (
+            <span className={`text-[10px] px-2.5 py-1.5 rounded-full border ${
+              atrBackfill.running ? 'text-accent-blue border-accent-blue/25 bg-accent-blue/10'
+              : atrBackfill.failed ? 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10'
+              : 'text-accent-green border-accent-green/25 bg-accent-green/10'
+            }`}>
+              ATR backfill {atrBackfill.running ? 'running' : 'complete'} · {atrBackfill.filled}/{atrBackfill.pending} filled{atrBackfill.failed ? ` · ${atrBackfill.failed} failed` : ''}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="relative flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1 rounded-xl bg-surface-100/85 border border-white/10 p-1 overflow-x-auto">
+          {['1M', '3M', '6M', 'YTD', '1Y', 'All'].map(tf => (
+            <button
+              key={tf}
+              onClick={() => setTimeframe(tf)}
+              title={tf === 'All' ? `All reliable stats since ${ANALYTICS_START_LABEL}` : undefined}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                timeframe === tf
+                  ? 'bg-accent-blue text-white shadow-lg shadow-accent-blue/10'
+                  : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+              }`}
+            >
+              {tf}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center bg-surface-100/85 border border-white/10 rounded-xl p-1">
+          {[
+            ['closed', 'Closed'],
+            ['realtime', 'Real Time'],
+          ].map(([mode, label]) => (
+            <button
+              key={mode}
+              onClick={() => setTradeMode(mode)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+                tradeMode === mode ? 'bg-accent-green/20 text-accent-green' : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {hasATRData && (
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-gray-500 font-medium">R Basis</span>
+            <div className="flex items-center bg-surface-100/85 border border-white/10 rounded-xl p-1">
+              {[['stop', 'Stop'], ['atr', 'ATR']].map(([val, label]) => (
+                <button key={val} onClick={() => setRBasis(val)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    rBasis === val ? 'bg-accent-blue/20 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+                  }`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <span className="text-[10px] text-gray-600">
+          {tradeMode === 'realtime'
+            ? `${closedTradeCount} closed + ${realtimeTradeCount} live open${liveQuoteLoading ? ' · refreshing quotes' : ''}`
+            : 'Closed trades only'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function AnalyticsTabs({ activeTab, onTabChange, availability = {} }) {
+  return (
+    <div className="sticky top-0 z-20 -mx-4 px-4 py-2 bg-surface/90 backdrop-blur-xl border-y border-white/5">
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {ANALYTICS_TABS.map(tab => {
+          const Icon = tab.icon
+          const active = activeTab === tab.key
+          const badge = availability[tab.key]
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => onTabChange(tab.key)}
+              className={`group min-w-[148px] md:min-w-[172px] text-left rounded-xl border px-3 py-2.5 transition-all shrink-0 ${
+                active
+                  ? 'bg-accent-blue/15 border-accent-blue/35 text-white shadow-lg shadow-accent-blue/5'
+                  : 'bg-surface-100/75 border-white/8 text-gray-500 hover:text-gray-300 hover:border-white/15'
+              }`}
+            >
+              <span className="flex items-center justify-between gap-2 mb-1">
+                <span className="inline-flex items-center gap-2 text-xs font-semibold">
+                  <Icon size={14} className={active ? 'text-accent-blue' : 'text-gray-500 group-hover:text-gray-300'} />
+                  {tab.label}
+                </span>
+                {badge && (
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full border ${badge.cls}`}>
+                    {badge.label}
+                  </span>
+                )}
+              </span>
+              <span className="block text-[10px] leading-snug text-gray-600">{tab.desc}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 // ── Shared tooltip hook ───────────────────────────────────────────────────────
@@ -430,6 +592,7 @@ export default function Analytics({ selectedAccount }) {
     analyticsWinLossMode, setAnalyticsWinLossMode,
     analyticsRiskMode, setAnalyticsRiskMode,
     analyticsSqnMode,  setAnalyticsSqnMode,
+    analyticsActiveTab, setAnalyticsActiveTab,
     tradeReviewChartSettings,
     tpMultiplier = 2,
   } = useSettingsStore()
@@ -439,6 +602,7 @@ export default function Analytics({ selectedAccount }) {
   const setTimeframe = setAnalyticsTimeframe
   const tradeMode    = analyticsTradeMode ?? 'closed'
   const setTradeMode = setAnalyticsTradeMode
+  const activeTab    = ANALYTICS_TABS.some(tab => tab.key === analyticsActiveTab) ? analyticsActiveTab : 'snapshot'
   const sampleLabel  = tradeMode === 'realtime' ? 'Trades + Live Opens' : 'Closed Trades'
 
   // R-basis toggle: 'stop' = stop-based R (default), 'atr' = ATR-budget R
@@ -1546,9 +1710,51 @@ export default function Analytics({ selectedAccount }) {
     }
   }, [closed])
 
+  const tabAvailability = useMemo(() => ({
+    snapshot: { label: `${closed.length}`, cls: 'border-white/10 bg-white/5 text-gray-400' },
+    edge: anchoredRsLoading
+      ? { label: 'loading', cls: 'border-accent-blue/25 bg-accent-blue/10 text-accent-blue' }
+      : anchoredRsAnalytics?.rows?.length
+        ? { label: `${anchoredRsAnalytics.rows.length}`, cls: 'border-accent-green/25 bg-accent-green/10 text-accent-green' }
+        : { label: 'early', cls: 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow' },
+    timing: monthlyStats.length
+      ? { label: `${monthlyStats.length} mo`, cls: 'border-white/10 bg-white/5 text-gray-400' }
+      : null,
+    process: maeAnalytics
+      ? { label: `${maeAnalytics.withMAE.length}/${maeAnalytics.total}`, cls: 'border-accent-green/25 bg-accent-green/10 text-accent-green' }
+      : { label: 'setup', cls: 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow' },
+    exposure: drawdownData
+      ? { label: 'ready', cls: 'border-accent-green/25 bg-accent-green/10 text-accent-green' }
+      : null,
+    projections: projectionRValues.length
+      ? { label: `${projectionRValues.length}R`, cls: 'border-accent-blue/25 bg-accent-blue/10 text-accent-blue' }
+      : { label: 'early', cls: 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow' },
+  }), [anchoredRsAnalytics, anchoredRsLoading, closed.length, drawdownData, maeAnalytics, monthlyStats.length, projectionRValues.length])
+
+  const tabContentClass = (key) => activeTab === key ? 'contents' : 'hidden'
+
   if (tfFiltered.length === 0) {
     return (
       <div className="p-4 flex flex-col gap-6">
+        <AnalyticsHeader
+          timeframe={timeframe}
+          setTimeframe={setTimeframe}
+          tradeMode={tradeMode}
+          setTradeMode={setTradeMode}
+          hasATRData={hasATRData}
+          rBasis={rBasis}
+          setRBasis={setRBasis}
+          closedTradeCount={closedTradeCount}
+          realtimeTradeCount={realtimeTradeCount}
+          liveQuoteLoading={liveQuoteLoading}
+          liveQuoteRefreshNonce={liveQuoteRefreshNonce}
+          setLiveQuoteRefreshNonce={setLiveQuoteRefreshNonce}
+          openForRealtime={openForRealtime}
+          atrBackfill={atrBackfill}
+          sampleLabel={sampleLabel}
+          selectedAccount={selectedAccount}
+        />
+        <AnalyticsTabs activeTab={activeTab} onTabChange={setAnalyticsActiveTab} availability={tabAvailability} />
         <div className="flex items-center justify-center h-40">
           <p className="text-gray-500">No trades in the selected analytics range.</p>
         </div>
@@ -1581,69 +1787,27 @@ export default function Analytics({ selectedAccount }) {
   return (
     <div className="p-4 flex flex-col gap-6">
 
-      {/* Timeframe + sample filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1">
-          {['1M', '3M', '6M', 'YTD', '1Y', 'All'].map(tf => (
-            <button
-              key={tf}
-              onClick={() => setTimeframe(tf)}
-              title={tf === 'All' ? `All reliable stats since ${ANALYTICS_START_LABEL}` : undefined}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                timeframe === tf
-                  ? 'bg-accent-blue text-white'
-                  : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
-              }`}
-            >
-              {tf}
-            </button>
-          ))}
-        </div>
+      <AnalyticsHeader
+        timeframe={timeframe}
+        setTimeframe={setTimeframe}
+        tradeMode={tradeMode}
+        setTradeMode={setTradeMode}
+        hasATRData={hasATRData}
+        rBasis={rBasis}
+        setRBasis={setRBasis}
+        closedTradeCount={closedTradeCount}
+        realtimeTradeCount={realtimeTradeCount}
+        liveQuoteLoading={liveQuoteLoading}
+        liveQuoteRefreshNonce={liveQuoteRefreshNonce}
+        setLiveQuoteRefreshNonce={setLiveQuoteRefreshNonce}
+        openForRealtime={openForRealtime}
+        atrBackfill={atrBackfill}
+        sampleLabel={sampleLabel}
+        selectedAccount={selectedAccount}
+      />
+      <AnalyticsTabs activeTab={activeTab} onTabChange={setAnalyticsActiveTab} availability={tabAvailability} />
 
-        <div className="flex items-center bg-surface-100 border border-white/10 rounded-lg p-0.5">
-          {[
-            ['closed', 'Closed Trades'],
-            ['realtime', 'Real Time'],
-          ].map(([mode, label]) => (
-            <button
-              key={mode}
-              onClick={() => setTradeMode(mode)}
-              className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
-                tradeMode === mode ? 'bg-accent-green/20 text-accent-green' : 'text-gray-500 hover:text-gray-300'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <span className="text-[10px] text-gray-600">
-          All starts {ANALYTICS_START_LABEL}
-          {tradeMode === 'realtime'
-            ? ` · ${closedTradeCount} closed + ${realtimeTradeCount} live open${liveQuoteLoading ? ' · refreshing quotes' : ''}`
-            : ` · closed trades only`}
-        </span>
-        {tradeMode === 'realtime' && (
-          <button
-            type="button"
-            onClick={() => setLiveQuoteRefreshNonce(n => n + 1)}
-            disabled={liveQuoteLoading || openForRealtime.length === 0}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-gray-500 hover:text-gray-300 hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <RefreshCw size={11} className={liveQuoteLoading ? 'animate-spin' : ''} />
-            Refresh Marks
-          </button>
-        )}
-        {(atrBackfill.running || atrBackfill.filled > 0 || atrBackfill.failed > 0) && (
-          <span className={`text-[10px] px-2 py-1 rounded-full border ${
-            atrBackfill.running ? 'text-accent-blue border-accent-blue/25 bg-accent-blue/10'
-            : atrBackfill.failed ? 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10'
-            : 'text-accent-green border-accent-green/25 bg-accent-green/10'
-          }`}>
-            ATR backfill {atrBackfill.running ? 'running' : 'complete'} · {atrBackfill.filled}/{atrBackfill.pending} filled{atrBackfill.failed ? ` · ${atrBackfill.failed} failed` : ''}
-          </span>
-        )}
-      </div>
+      <div className={tabContentClass('snapshot')}>
 
       {hasATRData && (
         <div className="card border border-accent-blue/15 bg-gradient-to-br from-accent-blue/5 via-transparent to-accent-yellow/5">
@@ -1725,28 +1889,6 @@ export default function Analytics({ selectedAccount }) {
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {/* R-basis toggle — only visible when trades have ATR data */}
-      {hasATRData && (
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-gray-500 font-medium">R Basis:</span>
-          <div className="flex items-center bg-surface-100 border border-white/10 rounded-lg p-0.5">
-            {[['stop', 'Stop Loss'], ['atr', 'ATR Budget']].map(([val, label]) => (
-              <button key={val} onClick={() => setRBasis(val)}
-                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
-                  rBasis === val ? 'bg-accent-blue/20 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
-                }`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <span className="text-[10px] text-gray-600">
-            {rBasis === 'atr'
-              ? 'R calculated vs ATR × position size — your true system risk budget'
-              : 'R calculated vs actual stop distance × position size'}
-          </span>
         </div>
       )}
 
@@ -2057,6 +2199,10 @@ export default function Analytics({ selectedAccount }) {
           />
         </div>
       </div>
+
+      </div>
+
+      <div className={tabContentClass('edge')}>
 
       <div className="card border border-accent-blue/15 bg-gradient-to-br from-accent-blue/5 via-transparent to-accent-green/5">
         <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
@@ -2496,6 +2642,10 @@ export default function Analytics({ selectedAccount }) {
         )}
       </div>
 
+      </div>
+
+      <div className={tabContentClass('snapshot')}>
+
       {/* Avg Win vs Loss */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
@@ -2563,6 +2713,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('timing')}>
+
       {/* Rolling Win Rate */}
       {hasRollingData && (
         <div className="card">
@@ -2622,6 +2776,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('edge')}>
+
       {/* Cumulative R */}
       {cumRData.length >= 2 && (
         <div className="card">
@@ -2648,6 +2806,10 @@ export default function Analytics({ selectedAccount }) {
           </ResponsiveContainer>
         </div>
       )}
+
+      </div>
+
+      <div className={tabContentClass('timing')}>
 
       {/* Monthly Performance Breakdown */}
       {monthlyStats.length > 0 && (
@@ -2757,6 +2919,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('edge')}>
+
       {/* Win/Loss Pie + R Distribution */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Win/Loss Pie */}
@@ -2807,6 +2973,10 @@ export default function Analytics({ selectedAccount }) {
           ) : <p className="text-xs text-gray-500">No R data available</p>}
         </div>
       </div>
+
+      </div>
+
+      <div className={tabContentClass('timing')}>
 
       {/* P&L by Day of Week */}
       <div className="card">
@@ -2888,6 +3058,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('exposure')}>
+
       {/* P&L by Symbol */}
       <div className="card">
         <SectionTitle>P&L by Symbol (Top 10)</SectionTitle>
@@ -2917,6 +3091,10 @@ export default function Analytics({ selectedAccount }) {
           ))}
         </div>
       </div>
+
+      </div>
+
+      <div className={tabContentClass('edge')}>
 
       {/* ── Process Grade vs P&L ────────────────────────────────────────── */}
       {(() => {
@@ -2997,6 +3175,10 @@ export default function Analytics({ selectedAccount }) {
         )
       })()}
 
+      </div>
+
+      <div className={tabContentClass('process')}>
+
       {atrDisciplineStats.sample >= 5 && (
         <div className="card border border-accent-yellow/15 bg-gradient-to-br from-accent-yellow/5 via-transparent to-accent-blue/5">
           <SectionTitle>
@@ -3064,6 +3246,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('edge')}>
+
       {/* Edge Performance */}
       {stratData.length > 0 && (
         <div className="card">
@@ -3110,6 +3296,10 @@ export default function Analytics({ selectedAccount }) {
           </div>
         </div>
       )}
+
+      </div>
+
+      <div className={tabContentClass('timing')}>
 
       {/* Time of Day Analysis */}
       {timeOfDayData.buckets.length > 0 && (
@@ -3230,6 +3420,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('exposure')}>
+
       {/* Drawdown Analysis */}
       {drawdownData && (
         <div className="card">
@@ -3293,6 +3487,10 @@ export default function Analytics({ selectedAccount }) {
           <p className="text-xs text-gray-600 mt-2">Drawdown measured as % decline from running equity peak.</p>
         </div>
       )}
+
+      </div>
+
+      <div className={tabContentClass('process')}>
 
       {/* MAE Analysis — Entry Quality Tracker */}
       <div className="card">
@@ -3612,6 +3810,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('exposure')}>
+
       {/* ── Exposure vs Market ───────────────────────────────────────────── */}
       {/* Shared helpers rendered inline to avoid component remounting */}
       {(() => {
@@ -3755,6 +3957,10 @@ export default function Analytics({ selectedAccount }) {
           </>
         )
       })()}
+
+      </div>
+
+      <div className={tabContentClass('projections')}>
 
       {/* ── Long Game Projection ─────────────────────────────────────────── */}
       <div className="card border border-accent-blue/15 bg-gradient-to-br from-accent-blue/5 via-transparent to-accent-green/5">
@@ -4318,6 +4524,8 @@ export default function Analytics({ selectedAccount }) {
         <p className="text-xs text-gray-600 mt-3">
           Compounding model: each 1R ATR loss removes N% from remaining capital. Your historical avg loss is {formatCurrency(drawdownSim.avgLoss, true)} (win rate: {(drawdownSim.wr * 100).toFixed(0)}%). Bold column = currently selected risk level.
         </p>
+      </div>
+
       </div>
 
     </div>
