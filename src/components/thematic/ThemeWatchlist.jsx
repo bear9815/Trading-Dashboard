@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Brain, Download, ExternalLink, Layers, ListFilter, Pencil,
   RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network, TrendingUp,
@@ -203,8 +203,8 @@ function formatZScore(value) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}z`
 }
 
-function AnchoredRsCell({ snapshot }) {
-  if (!snapshot) return <span className="text-gray-600">Not loaded</span>
+function AnchoredRsCell({ snapshot, loading = false }) {
+  if (!snapshot) return <span className="text-gray-600">{loading ? 'Loading…' : 'Not loaded'}</span>
   if (!Number.isFinite(snapshot.zScore)) return <span className="text-gray-600">No signal</span>
   const positive = snapshot.zScore > 0
   const negative = snapshot.zScore < 0
@@ -222,6 +222,7 @@ function AnchoredRsCell({ snapshot }) {
       >
         {formatZScore(snapshot.zScore)}
       </span>
+      <p className="text-[10px] text-gray-600">EMA {formatZScore(snapshot.signalLine)}</p>
       <p className="text-[10px] text-gray-600">Anchor {snapshot.anchorDate || '—'}</p>
     </div>
   )
@@ -466,6 +467,15 @@ export default function ThemeWatchlist({
   const [page, setPage] = useState(1)
   const pageSize = 40
   const fileRef = useRef(null)
+  const symbolsKey = useMemo(() => symbols.join('|'), [symbols])
+  const anchoredRsSettingsKey = useMemo(
+    () => JSON.stringify({
+      benchmarkSymbol: tradeReviewChartSettings?.benchmarkSymbol || 'SPY',
+      anchorDates: tradeReviewChartSettings?.anchorDates || [],
+      dailyAnchoredRs: tradeReviewChartSettings?.dailyAnchoredRs || {},
+    }),
+    [tradeReviewChartSettings]
+  )
 
   const rows = useMemo(
     () => symbols.map(symbol => rowsBySymbol[symbol]).filter(Boolean),
@@ -540,20 +550,22 @@ export default function ThemeWatchlist({
     [tradeReviewChartSettings?.anchorDates]
   )
 
-  async function refreshAnchoredRs() {
+  const refreshAnchoredRs = useCallback(async ({ silent = false } = {}) => {
     if (!symbols.length) {
-      setError('Import a watchlist first.')
+      if (!silent) setError('Import a watchlist first.')
       return
     }
     const anchorDate = resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates)
     if (!anchorDate) {
-      setError('Add at least one anchor date in Trade Review chart settings.')
+      if (!silent) setError('Add at least one anchor date in Trade Review chart settings.')
       return
     }
 
     setRsLoading(true)
-    setError('')
-    setStatus(`Refreshing anchored RS from ${anchorDate}…`)
+    if (!silent) {
+      setError('')
+      setStatus(`Refreshing anchored RS from ${anchorDate}…`)
+    }
     try {
       const start = new Date(`${anchorDate}T00:00:00Z`)
       start.setDate(start.getDate() - 90)
@@ -572,11 +584,19 @@ export default function ThemeWatchlist({
       setRsBySymbol(Object.fromEntries(entries))
       setStatus(`Anchored RS refreshed for ${entries.length} symbol${entries.length !== 1 ? 's' : ''}.`)
     } catch (err) {
-      setError(err.message || 'Anchored RS refresh failed.')
+      if (!silent) setError(err.message || 'Anchored RS refresh failed.')
     } finally {
       setRsLoading(false)
     }
-  }
+  }, [symbols, tradeReviewChartSettings])
+
+  useEffect(() => {
+    if (!symbols.length) {
+      setRsBySymbol({})
+      return
+    }
+    refreshAnchoredRs({ silent: true })
+  }, [symbolsKey, anchoredRsSettingsKey, refreshAnchoredRs])
 
   function handleSort(nextKey) {
     if (sortKey === nextKey) setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')
@@ -884,7 +904,7 @@ export default function ThemeWatchlist({
                       <td className="px-3 py-2.5 text-gray-400">{arrayText(row.majorCustomers) || '—'}</td>
                       <td className="px-3 py-2.5 text-gray-400">{arrayText(row.dependencies) || '—'}</td>
                       <td className="px-3 py-2.5 text-accent-yellow">{row.relatedDriver}</td>
-                      <td className="px-3 py-2.5 min-w-[120px]"><AnchoredRsCell snapshot={rsBySymbol[row.symbol]} /></td>
+                      <td className="px-3 py-2.5 min-w-[120px]"><AnchoredRsCell snapshot={rsBySymbol[row.symbol]} loading={rsLoading} /></td>
                       <td className="px-3 py-2.5 text-gray-400 min-w-[220px]">
                         <p><span className="text-gray-600">Customer links:</span> {arrayText(layer.customerLinks) || '—'}</p>
                         <p className="mt-1"><span className="text-gray-600">Dependency links:</span> {arrayText(layer.supplierLinks) || '—'}</p>

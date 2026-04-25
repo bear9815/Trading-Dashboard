@@ -16,7 +16,7 @@ export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
   anchorDates: ['2026-01-01', '2026-04-02'],
   weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
-  dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85 },
+  dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
 }
 
 function toDateKey(value) {
@@ -288,13 +288,25 @@ export function buildAnchoredRsSnapshot(symbolDailyBars, benchmarkDailyBars, set
   const anchorDate = resolveLatestAnchorDate(chartSettings.anchorDates, asOf)
   const gradient = calculateAnchoredRsGradient(symbolDailyBars, benchmarkDailyBars, anchorDate, chartSettings.dailyAnchoredRs)
   const latest = gradient.at(-1)
-  if (!latest) return { anchorDate, zScore: null, weight: null, color: null, time: null }
+  if (!latest) return { anchorDate, zScore: null, signalLine: null, weight: null, color: null, time: null }
+
+  const maLen = chartSettings.dailyAnchoredRs.maLen ?? 9
+  const signal = ema(gradient.map(row => row.zScore), maLen)
+  const previous = gradient.at(-2)
+  const isRising = Number.isFinite(previous?.zScore) ? latest.zScore > previous.zScore : null
+
   return {
     anchorDate,
     time: latest.time,
     zScore: latest.zScore,
+    signalLine: signal.at(-1) ?? null,
     weight: latest.weight,
     color: latest.color,
+    momentum: isRising == null
+      ? 'neutral'
+      : latest.zScore >= 0
+        ? (isRising ? 'strengthening' : 'pulling_back')
+        : (isRising ? 'bouncing' : 'weakening'),
   }
 }
 

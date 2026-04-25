@@ -2194,6 +2194,7 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
       lookback: settings?.dailyAnchoredRs?.lookback ?? 50,
       sensitivity: settings?.dailyAnchoredRs?.sensitivity ?? 2,
       opacity: settings?.dailyAnchoredRs?.opacity ?? 85,
+      maLen: settings?.dailyAnchoredRs?.maLen ?? 9,
     },
   }))
 
@@ -2296,6 +2297,7 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
               <p className="label text-white">Daily Anchored RS</p>
               <label className="block text-[10px] text-gray-500 space-y-1">StdDev lookback<input type="number" value={draft.dailyAnchoredRs.lookback} onChange={event => updateNested('dailyAnchoredRs', 'lookback', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">Signal EMA<input type="number" value={draft.dailyAnchoredRs.maLen} onChange={event => updateNested('dailyAnchoredRs', 'maLen', event.target.value)} className={`${fieldClass} w-full`} /></label>
               <label className="block text-[10px] text-gray-500 space-y-1">Sensitivity<input type="number" step="0.1" value={draft.dailyAnchoredRs.sensitivity} onChange={event => updateNested('dailyAnchoredRs', 'sensitivity', event.target.value)} className={`${fieldClass} w-full`} /></label>
               <label className="block text-[10px] text-gray-500 space-y-1">Opacity<input type="number" value={draft.dailyAnchoredRs.opacity} onChange={event => updateNested('dailyAnchoredRs', 'opacity', event.target.value)} className={`${fieldClass} w-full`} /></label>
             </div>
