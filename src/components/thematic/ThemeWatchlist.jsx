@@ -23,7 +23,7 @@ const SORT_OPTIONS = [
 
 const CSV_COLUMNS = [
   'symbol', 'companyName', 'sector', 'ecosystem', 'theme', 'whatTheyDo',
-  'majorCustomers', 'dependencies', 'relatedDriver', 'anchoredRsZ', 'rollingRsZ', 'customerOf', 'supplierTo', 'competesWith',
+  'majorCustomers', 'dependencies', 'relatedDriver', 'anchoredRsZ', 'rollingRsZ', 'finraShortInterest', 'finraDaysToCover', 'finraSettlementDate', 'customerOf', 'supplierTo', 'competesWith',
 ]
 
 const EMPTY_ROW = {
@@ -203,6 +203,19 @@ function formatZScore(value) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}z`
 }
 
+function formatCompactNumber(value) {
+  if (!Number.isFinite(value)) return '—'
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: value >= 1000 ? 1 : 0,
+  }).format(value)
+}
+
+function formatSignedPercent(value) {
+  if (!Number.isFinite(value)) return '—'
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
+}
+
 function RsCell({ snapshot, loading = false, footerLabel = null }) {
   if (!snapshot) return <span className="text-gray-600">{loading ? 'Loading…' : 'Not loaded'}</span>
   if (!Number.isFinite(snapshot.zScore)) return <span className="text-gray-600">No signal</span>
@@ -224,6 +237,34 @@ function RsCell({ snapshot, loading = false, footerLabel = null }) {
       </span>
       <p className="text-[10px] text-gray-600">EMA {formatZScore(snapshot.signalLine)}</p>
       {footerLabel && <p className="text-[10px] text-gray-600">{footerLabel}</p>}
+    </div>
+  )
+}
+
+function FinraShortInterestCell({ snapshot, loading = false }) {
+  if (!snapshot) return <span className="text-gray-600">{loading ? 'Loading…' : 'Not loaded'}</span>
+  if (!snapshot.settlementDate) return <span className="text-gray-600">{loading ? 'Loading…' : 'No FINRA record'}</span>
+
+  const positive = Number.isFinite(snapshot.changePercent) && snapshot.changePercent > 0
+  const negative = Number.isFinite(snapshot.changePercent) && snapshot.changePercent < 0
+  return (
+    <div className="space-y-1">
+      <span
+        className={`inline-flex items-center rounded px-2 py-1 text-xs font-semibold border ${
+          positive
+            ? 'text-accent-red border-accent-red/25 bg-accent-red/10'
+            : negative
+              ? 'text-accent-green border-accent-green/25 bg-accent-green/10'
+              : 'text-gray-300 border-white/10 bg-white/[0.03]'
+        }`}
+      >
+        {formatCompactNumber(snapshot.currentShortPositionQuantity)}
+      </span>
+      <p className="text-[10px] text-gray-600">DTC {Number.isFinite(snapshot.daysToCoverQuantity) ? snapshot.daysToCoverQuantity.toFixed(2) : '—'}</p>
+      <p className={`text-[10px] ${positive ? 'text-accent-red' : negative ? 'text-accent-green' : 'text-gray-600'}`}>
+        {formatSignedPercent(snapshot.changePercent)} vs prior
+      </p>
+      <p className="text-[10px] text-gray-600">{snapshot.settlementDate}</p>
     </div>
   )
 }
@@ -464,8 +505,10 @@ export default function ThemeWatchlist({
   const [viewName, setViewName] = useState('')
   const [anchoredRsBySymbol, setAnchoredRsBySymbol] = useState({})
   const [rollingRsBySymbol, setRollingRsBySymbol] = useState({})
+  const [finraBySymbol, setFinraBySymbol] = useState({})
   const [anchoredRsLoading, setAnchoredRsLoading] = useState(false)
   const [rollingRsLoading, setRollingRsLoading] = useState(false)
+  const [finraLoading, setFinraLoading] = useState(false)
   const [page, setPage] = useState(1)
   const pageSize = 40
   const fileRef = useRef(null)
@@ -485,6 +528,7 @@ export default function ThemeWatchlist({
     }),
     [tradeReviewChartSettings]
   )
+  const finraSettingsKey = useMemo(() => symbols.join('|'), [symbols])
 
   const rows = useMemo(
     () => symbols.map(symbol => rowsBySymbol[symbol]).filter(Boolean),
@@ -636,6 +680,31 @@ export default function ThemeWatchlist({
     }
   }, [rollingRsWindow, symbols, tradeReviewChartSettings])
 
+  const refreshFinraShortInterest = useCallback(async ({ silent = false } = {}) => {
+    if (!symbols.length) {
+      if (!silent) setError('Import a watchlist first.')
+      return
+    }
+
+    setFinraLoading(true)
+    if (!silent) {
+      setError('')
+      setStatus('Refreshing FINRA short interest…')
+    }
+    try {
+      const params = new URLSearchParams({ symbols: symbols.join(',') })
+      const res = await fetch(`/api/finra/short-interest?${params.toString()}`)
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error || 'FINRA short interest refresh failed.')
+      setFinraBySymbol(json?.bySymbol || {})
+      setStatus(`FINRA short interest refreshed for ${symbols.length} symbol${symbols.length !== 1 ? 's' : ''}.`)
+    } catch (err) {
+      if (!silent) setError(err.message || 'FINRA short interest refresh failed.')
+    } finally {
+      setFinraLoading(false)
+    }
+  }, [symbols])
+
   useEffect(() => {
     if (!symbols.length) {
       setAnchoredRsBySymbol({})
@@ -651,6 +720,14 @@ export default function ThemeWatchlist({
     }
     refreshRollingRs({ silent: true })
   }, [symbolsKey, rollingRsSettingsKey, refreshRollingRs])
+
+  useEffect(() => {
+    if (!symbols.length) {
+      setFinraBySymbol({})
+      return
+    }
+    refreshFinraShortInterest({ silent: true })
+  }, [finraSettingsKey, refreshFinraShortInterest])
 
   function handleSort(nextKey) {
     if (sortKey === nextKey) setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')
@@ -809,7 +886,22 @@ export default function ThemeWatchlist({
               {rollingRsLoading ? 'Rolling…' : 'Rolling RS'}
             </button>
             <button
-              onClick={() => exportCsv(rows)}
+              onClick={refreshFinraShortInterest}
+              disabled={finraLoading || !symbols.length}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-gray-300 text-sm font-medium hover:bg-white/[0.08] transition-all disabled:opacity-40"
+            >
+              <RefreshCw size={13} className={finraLoading ? 'animate-spin' : ''} />
+              {finraLoading ? 'FINRA…' : 'FINRA SI'}
+            </button>
+            <button
+              onClick={() => exportCsv(rows.map(row => ({
+                ...row,
+                anchoredRsZ: anchoredRsBySymbol[row.symbol]?.zScore ?? null,
+                rollingRsZ: rollingRsBySymbol[row.symbol]?.zScore ?? null,
+                finraShortInterest: finraBySymbol[row.symbol]?.currentShortPositionQuantity ?? null,
+                finraDaysToCover: finraBySymbol[row.symbol]?.daysToCoverQuantity ?? null,
+                finraSettlementDate: finraBySymbol[row.symbol]?.settlementDate ?? null,
+              })))}
               disabled={!rows.length}
               className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all disabled:opacity-40"
             >
@@ -843,13 +935,18 @@ export default function ThemeWatchlist({
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
           <StatPill label="Imported Symbols" value={symbols.length} />
           <StatPill label="Mapped Rows" value={rows.length} />
           <StatPill label="Theme Buckets" value={themeGroups.length} />
           <StatPill label="Top Ranked" value={symbols[0] || '—'} />
           <StatPill label="RS Anchor" value={latestAnchorDate || '—'} />
           <StatPill label="Rolling Window" value={`${rollingRsWindow}d`} />
+          <StatPill label="FINRA Matches" value={Object.values(finraBySymbol).filter(item => item?.settlementDate).length} />
+        </div>
+
+        <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs text-gray-500">
+          FINRA short interest uses FINRA&apos;s official consolidated short-interest API. Their published Query API dataset is OTC-oriented, so many exchange-listed names may legitimately show no FINRA record here.
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -933,7 +1030,7 @@ export default function ThemeWatchlist({
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-white/10">
-              <table className="w-full min-w-[1740px] text-sm">
+              <table className="w-full min-w-[1880px] text-sm">
                 <thead className="bg-white/[0.03] text-xs uppercase tracking-wider text-gray-500">
                   <tr>
                     <th className="text-left px-3 py-2">Symbol</th>
@@ -946,6 +1043,7 @@ export default function ThemeWatchlist({
                     <th className="text-left px-3 py-2">Related Driver</th>
                     <th className="text-left px-3 py-2">Anchored RS</th>
                     <th className="text-left px-3 py-2">Rolling RS</th>
+                    <th className="text-left px-3 py-2">FINRA Short Interest</th>
                     <th className="text-left px-3 py-2">Relationship Layer</th>
                     <th className="text-left px-3 py-2">Theme / Library Links</th>
                     <th className="text-left px-3 py-2">Actions</th>
@@ -980,6 +1078,12 @@ export default function ThemeWatchlist({
                           snapshot={rollingRsBySymbol[row.symbol]}
                           loading={rollingRsLoading}
                           footerLabel={`Win ${(rollingRsBySymbol[row.symbol]?.rsWindow || rollingRsWindow)}d`}
+                        />
+                      </td>
+                      <td className="px-3 py-2.5 min-w-[150px]">
+                        <FinraShortInterestCell
+                          snapshot={finraBySymbol[row.symbol]}
+                          loading={finraLoading}
                         />
                       </td>
                       <td className="px-3 py-2.5 text-gray-400 min-w-[220px]">
