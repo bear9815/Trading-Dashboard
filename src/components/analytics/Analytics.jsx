@@ -2227,6 +2227,113 @@ export default function Analytics({ selectedAccount }) {
               </div>
             </div>
 
+            {anchoredRsAnalytics.lifecycleSummary.withLifecycle > 0 && (
+              <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 mb-4">
+                <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-300">During-Trade RS Lifecycle</p>
+                    <p className="text-[11px] text-gray-600 mt-0.5">Tracks anchored z-score from entry through final exit.</p>
+                  </div>
+                  <span className="text-[10px] text-gray-600">{anchoredRsAnalytics.lifecycleSummary.withLifecycle} trades with lifecycle data</span>
+                </div>
+
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                  {[
+                    {
+                      label: 'Winner Z Change',
+                      value: anchoredRsAnalytics.lifecycleSummary.winners.avgZChangeDuringTrade,
+                      suffix: 'z',
+                      color: 'text-accent-green',
+                      sub: `${anchoredRsAnalytics.lifecycleSummary.winners.count} winners`,
+                    },
+                    {
+                      label: 'Loser Z Change',
+                      value: anchoredRsAnalytics.lifecycleSummary.losses.avgZChangeDuringTrade,
+                      suffix: 'z',
+                      color: 'text-accent-red',
+                      sub: `${anchoredRsAnalytics.lifecycleSummary.losses.count} losses`,
+                    },
+                    {
+                      label: 'Winner Signal Break',
+                      value: anchoredRsAnalytics.lifecycleSummary.winners.brokeBelowSignalRate,
+                      suffix: '%',
+                      color: anchoredRsAnalytics.lifecycleSummary.winners.brokeBelowSignalRate > 0 ? 'text-accent-yellow' : 'text-accent-green',
+                      sub: 'broke below signal',
+                    },
+                    {
+                      label: 'Loser Signal Break',
+                      value: anchoredRsAnalytics.lifecycleSummary.losses.brokeBelowSignalRate,
+                      suffix: '%',
+                      color: anchoredRsAnalytics.lifecycleSummary.losses.brokeBelowSignalRate > 50 ? 'text-accent-red' : 'text-accent-yellow',
+                      sub: 'broke below signal',
+                    },
+                  ].map(card => (
+                    <div key={card.label} className="bg-surface-200 rounded-lg px-3 py-2.5">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{card.label}</p>
+                      <p className={`text-xl font-bold mono ${card.color}`}>
+                        {card.value == null ? '—' : `${card.value >= 0 ? '+' : ''}${card.value.toFixed(card.suffix === '%' ? 0 : 2)}${card.suffix}`}
+                      </p>
+                      <p className="text-[10px] text-gray-600 mt-0.5">{card.sub}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 mb-4">
+                  {anchoredRsAnalytics.lifecycleBreakdown.map(group => (
+                    <div key={group.key} className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                      <p className="text-xs font-semibold text-gray-300">{group.label}</p>
+                      <p className="text-[10px] text-gray-600 mt-1 min-h-[28px]">{group.description}</p>
+                      <p className={`text-xl font-bold mono mt-3 ${group.avgR == null ? 'text-gray-500' : group.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                        {group.avgR == null ? '—' : formatR(group.avgR)}
+                      </p>
+                      <p className="text-[10px] text-gray-600">{group.count} trades · {group.avgZChangeDuringTrade == null ? '—' : `${group.avgZChangeDuringTrade >= 0 ? '+' : ''}${group.avgZChangeDuringTrade.toFixed(2)}z`} avg z change</p>
+                      <p className="text-[10px] text-gray-600">{group.avgDaysAboveSignalPct == null ? '—' : `${group.avgDaysAboveSignalPct.toFixed(0)}%`} days above signal</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-white/10">
+                  <table className="w-full min-w-[920px] text-xs">
+                    <thead className="bg-white/[0.03] text-gray-500 uppercase tracking-wider">
+                      <tr>
+                        <th className="text-left px-3 py-2">Trade</th>
+                        <th className="text-right px-3 py-2">Entry Z</th>
+                        <th className="text-right px-3 py-2">Exit Z</th>
+                        <th className="text-right px-3 py-2">Z Change</th>
+                        <th className="text-right px-3 py-2">Max Z</th>
+                        <th className="text-right px-3 py-2">Min Z</th>
+                        <th className="text-right px-3 py-2">Above Signal</th>
+                        <th className="text-right px-3 py-2">Signal Break</th>
+                        <th className="text-right px-3 py-2">R</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.05]">
+                      {anchoredRsAnalytics.rows.filter(row => Number.isFinite(row.exitZ)).map(row => (
+                        <tr key={`${row.tradeId}-lifecycle`} className="hover:bg-white/[0.02]">
+                          <td className="px-3 py-2.5">
+                            <p className="font-semibold text-gray-300">{row.symbol}</p>
+                            <p className="text-[10px] text-gray-600">{formatDate(row.entryDate)} to {formatDate(row.exitDate)}</p>
+                          </td>
+                          <td className="px-3 py-2.5 text-right mono text-gray-300">{row.entryZ >= 0 ? '+' : ''}{row.entryZ.toFixed(2)}z</td>
+                          <td className="px-3 py-2.5 text-right mono text-gray-300">{row.exitZ >= 0 ? '+' : ''}{row.exitZ.toFixed(2)}z</td>
+                          <td className={`px-3 py-2.5 text-right mono ${row.zChangeDuringTrade >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                            {row.zChangeDuringTrade >= 0 ? '+' : ''}{row.zChangeDuringTrade.toFixed(2)}z
+                          </td>
+                          <td className="px-3 py-2.5 text-right mono text-gray-400">{row.maxZDuringTrade >= 0 ? '+' : ''}{row.maxZDuringTrade.toFixed(2)}z</td>
+                          <td className="px-3 py-2.5 text-right mono text-gray-400">{row.minZDuringTrade >= 0 ? '+' : ''}{row.minZDuringTrade.toFixed(2)}z</td>
+                          <td className="px-3 py-2.5 text-right mono text-gray-400">{row.daysAboveSignalPct.toFixed(0)}%</td>
+                          <td className={`px-3 py-2.5 text-right ${row.brokeBelowSignalDuringTrade ? 'text-accent-red' : 'text-accent-green'}`}>
+                            {row.brokeBelowSignalDuringTrade ? 'Yes' : 'No'}
+                          </td>
+                          <td className={`px-3 py-2.5 text-right mono ${row.rValue >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{formatR(row.rValue)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             <div className="overflow-x-auto rounded-xl border border-white/10">
               <table className="w-full min-w-[820px] text-xs">
                 <thead className="bg-white/[0.03] text-gray-500 uppercase tracking-wider">

@@ -31,6 +31,7 @@ const trades = [
     id: 'winner',
     symbol: 'LEAD',
     entryDate: '2026-03-10T14:30:00Z',
+    exits: [{ exitDate: '2026-03-20T20:00:00Z', price: 120 }],
     status: 'Win',
     pl: 1200,
     rMultiple: 2.4,
@@ -40,6 +41,7 @@ const trades = [
     id: 'loser',
     symbol: 'LAG',
     entryDate: '2026-03-10T14:30:00Z',
+    exits: [{ exitDate: '2026-03-20T20:00:00Z', price: 60 }],
     status: 'Loss',
     pl: -500,
     rMultiple: -1,
@@ -49,6 +51,7 @@ const trades = [
     id: 'pullback',
     symbol: 'PULL',
     entryDate: '2026-03-10T14:30:00Z',
+    exits: [{ exitDate: '2026-03-20T20:00:00Z', price: 75 }],
     status: 'Loss',
     pl: -300,
     rMultiple: -0.6,
@@ -58,6 +61,7 @@ const trades = [
     id: 'turn',
     symbol: 'TURN',
     entryDate: '2026-03-10T14:30:00Z',
+    exits: [{ exitDate: '2026-03-20T20:00:00Z', price: 70 }],
     status: 'Win',
     pl: 450,
     rMultiple: 0.9,
@@ -111,11 +115,20 @@ assert.ok(winner.zTrend10 > 0)
 assert.ok(winner.zTrend20 > 0)
 assert.equal(winner.rValue, 1.8)
 assert.equal(winner.outcome, 'Win')
+assert.ok(winner.exitZ > winner.entryZ)
+assert.ok(winner.zChangeDuringTrade > 0)
+assert.ok(winner.maxZDuringTrade >= Math.max(winner.entryZ, winner.exitZ))
+assert.ok(winner.minZDuringTrade <= Math.min(winner.entryZ, winner.exitZ))
+assert.equal(winner.daysAboveSignalPct, 100)
+assert.equal(winner.brokeBelowSignalDuringTrade, false)
 
 assert.ok(loser.entryZ < 0)
 assert.ok(loser.zTrend5 < 0)
 assert.equal(loser.rValue, -0.8)
 assert.equal(loser.outcome, 'Loss')
+assert.ok(loser.exitZ < loser.entryZ)
+assert.ok(loser.zChangeDuringTrade < 0)
+assert.equal(loser.brokeBelowSignalDuringTrade, true)
 
 assert.ok(pullback.entryZ > 0)
 assert.ok(pullback.zTrend10 < 0)
@@ -170,3 +183,14 @@ assert.equal(
   result.rollingSelection.at(-1).avgR,
   Number(((winner.rValue + loser.rValue + pullback.rValue + turn.rValue) / 4).toFixed(3))
 )
+
+assert.equal(result.lifecycleSummary.withLifecycle, 4)
+assert.ok(result.lifecycleSummary.winners.avgZChangeDuringTrade > 0)
+assert.ok(result.lifecycleSummary.losses.avgZChangeDuringTrade < 0)
+assert.equal(result.lifecycleSummary.winners.brokeBelowSignalRate, 0)
+assert.ok(result.lifecycleSummary.losses.brokeBelowSignalRate > 0)
+
+assert.deepEqual(result.lifecycleBreakdown.map(group => group.key), ['winners', 'losses', 'held_above_signal', 'broke_below_signal'])
+assert.equal(result.lifecycleBreakdown.find(group => group.key === 'winners').count, 2)
+assert.equal(result.lifecycleBreakdown.find(group => group.key === 'losses').count, 2)
+assert.ok(result.lifecycleBreakdown.find(group => group.key === 'broke_below_signal').count >= 1)

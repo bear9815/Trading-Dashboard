@@ -62,6 +62,16 @@ function findEntryIndex(series, entryDate) {
   return found
 }
 
+function resolveExitDate(trade) {
+  const explicit = toDateKey(trade.exitDate)
+  if (explicit) return explicit
+  const exitDates = (trade.exits || [])
+    .map(exit => toDateKey(exit.exitDate || exit.date))
+    .filter(Boolean)
+    .sort()
+  return exitDates.at(-1) || null
+}
+
 function bucketForZ(zScore) {
   return ANCHORED_RS_Z_BUCKETS.find(bucket => zScore >= bucket.min && zScore < bucket.max) || ANCHORED_RS_Z_BUCKETS[0]
 }
@@ -158,6 +168,65 @@ function summarizeSignalGroups(rows) {
   ]
 }
 
+function summarizeLifecycleRows(rows) {
+  const withLifecycle = rows.filter(row => Number.isFinite(row.exitZ))
+  const avg = field => {
+    const values = withLifecycle.map(row => row[field]).filter(Number.isFinite)
+    return values.length ? round(values.reduce((sum, value) => sum + value, 0) / values.length) : null
+  }
+  return {
+    ...summarizeRows(withLifecycle),
+    avgEntryZ: avg('entryZ'),
+    avgExitZ: avg('exitZ'),
+    avgMaxZDuringTrade: avg('maxZDuringTrade'),
+    avgMinZDuringTrade: avg('minZDuringTrade'),
+    avgZChangeDuringTrade: avg('zChangeDuringTrade'),
+    avgDaysAboveSignalPct: avg('daysAboveSignalPct'),
+    brokeBelowSignalRate: withLifecycle.length
+      ? round((withLifecycle.filter(row => row.brokeBelowSignalDuringTrade).length / withLifecycle.length) * 100, 1)
+      : null,
+  }
+}
+
+function summarizeLifecycle(rows) {
+  const withLifecycle = rows.filter(row => Number.isFinite(row.exitZ))
+  return {
+    withLifecycle: withLifecycle.length,
+    winners: summarizeLifecycleRows(withLifecycle.filter(row => row.outcome === 'Win')),
+    losses: summarizeLifecycleRows(withLifecycle.filter(row => row.outcome === 'Loss')),
+  }
+}
+
+function buildLifecycleBreakdown(rows) {
+  const withLifecycle = rows.filter(row => Number.isFinite(row.exitZ))
+  return [
+    {
+      key: 'winners',
+      label: 'Winners',
+      description: 'RS behavior during winning trades.',
+      ...summarizeLifecycleRows(withLifecycle.filter(row => row.outcome === 'Win')),
+    },
+    {
+      key: 'losses',
+      label: 'Losses',
+      description: 'RS behavior during losing trades.',
+      ...summarizeLifecycleRows(withLifecycle.filter(row => row.outcome === 'Loss')),
+    },
+    {
+      key: 'held_above_signal',
+      label: 'Held Above Signal',
+      description: 'Trades where z-score stayed above signal for the full hold.',
+      ...summarizeLifecycleRows(withLifecycle.filter(row => !row.brokeBelowSignalDuringTrade)),
+    },
+    {
+      key: 'broke_below_signal',
+      label: 'Broke Below Signal',
+      description: 'Trades where z-score fell below its signal line during the hold.',
+      ...summarizeLifecycleRows(withLifecycle.filter(row => row.brokeBelowSignalDuringTrade)),
+    },
+  ]
+}
+
 function buildRollingSelection(rows, windowSize = 10) {
   return [...rows]
     .sort((a, b) => a.entryDate.localeCompare(b.entryDate) || a.symbol.localeCompare(b.symbol) || String(a.tradeId).localeCompare(String(b.tradeId)))
@@ -208,6 +277,17 @@ function buildTradeRow(trade, gradient, anchorDate, rField, maLen) {
   const signal = ema(gradient.map(row => row.zScore), maLen)
   const entry = gradient[entryIndex]
   const signalLine = signal[entryIndex]
+  const exitDate = resolveExitDate(trade)
+  const exitIndex = exitDate ? findEntryIndex(gradient, exitDate) : -1
+  const lifecycle = exitIndex >= entryIndex
+    ? gradient.slice(entryIndex, exitIndex + 1).map((row, offset) => ({
+      ...row,
+      signalLine: signal[entryIndex + offset],
+    }))
+    : []
+  const exit = lifecycle.at(-1)
+  const lifecycleZs = lifecycle.map(row => row.zScore).filter(Number.isFinite)
+  const daysAboveSignal = lifecycle.filter(row => Number.isFinite(row.zScore) && Number.isFinite(row.signalLine) && row.zScore >= row.signalLine).length
   const zTrend = days => {
     const prior = gradient[entryIndex - days]
     return prior ? round(entry.zScore - prior.zScore) : null
@@ -228,6 +308,15 @@ function buildTradeRow(trade, gradient, anchorDate, rField, maLen) {
     zTrend5: zTrend(5),
     zTrend10: zTrend(10),
     zTrend20: zTrend(20),
+    exitDate: exit?.time || null,
+    exitZ: exit ? round(exit.zScore) : null,
+    maxZDuringTrade: lifecycleZs.length ? round(Math.max(...lifecycleZs)) : null,
+    minZDuringTrade: lifecycleZs.length ? round(Math.min(...lifecycleZs)) : null,
+    zChangeDuringTrade: exit ? round(exit.zScore - entry.zScore) : null,
+    daysAboveSignalPct: lifecycle.length ? round((daysAboveSignal / lifecycle.length) * 100, 1) : null,
+    brokeBelowSignalDuringTrade: lifecycle.length
+      ? lifecycle.some(row => Number.isFinite(row.zScore) && Number.isFinite(row.signalLine) && row.zScore < row.signalLine)
+      : null,
     bucketKey: bucket.key,
     bucketLabel: bucket.label,
   }
@@ -277,6 +366,8 @@ export function buildAnchoredRsTradeAnalytics({
   const setupGroups = summarizeSetupGroups(rows)
   const signalGroups = summarizeSignalGroups(rows)
   const rollingSelection = buildRollingSelection(rows)
+  const lifecycleSummary = summarizeLifecycle(rows)
+  const lifecycleBreakdown = buildLifecycleBreakdown(rows)
 
   return {
     rows,
@@ -285,6 +376,8 @@ export function buildAnchoredRsTradeAnalytics({
     setupGroups,
     signalGroups,
     rollingSelection,
+    lifecycleSummary,
+    lifecycleBreakdown,
     summary: summarize(rows, buckets),
     coverage: {
       totalTrades: eligibleTrades.length,
