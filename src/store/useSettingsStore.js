@@ -21,6 +21,7 @@ const CLOUD_FIELDS = [
   'analyticsRiskMode', 'analyticsSqnMode',
   'dashboardNote', 'openPositionsColumns',
   'riskVisibleColumns',
+  'tradeReviewChartSettings',
   'excludedSymbols', 'strategies', 'edges',
   // symbolThemes intentionally excluded — it's a large AI cache, device-local is fine
 ]
@@ -53,6 +54,12 @@ export const useSettingsStore = create(
       maxDrawdownLimit: 10,
       benchmarkSymbol: 'SPY',
       tpMultiplier: 2,
+      tradeReviewChartSettings: {
+        benchmarkSymbol: 'SPY',
+        anchorDates: ['2026-01-01', '2026-04-02'],
+        weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
+        dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85 },
+      },
 
       alpacaApiKey: '',
       alpacaApiSecret: '',
@@ -147,6 +154,17 @@ export const useSettingsStore = create(
       setDailyLossLimit:   (v)             => { set({ dailyLossLimit: Number(v) }); saveToCloud({ ...get(), dailyLossLimit: Number(v) }) },
       setMaxDrawdownLimit: (v)             => { set({ maxDrawdownLimit: Number(v) }); saveToCloud({ ...get(), maxDrawdownLimit: Number(v) }) },
       setBenchmarkSymbol:  (v)             => { set({ benchmarkSymbol: v });    saveToCloud({ ...get(), benchmarkSymbol: v })    },
+      setTradeReviewChartSettings: (settings) => {
+        const current = get().tradeReviewChartSettings || {}
+        const next = {
+          ...current,
+          ...(settings || {}),
+          weeklyRs: { ...(current.weeklyRs || {}), ...(settings?.weeklyRs || {}) },
+          dailyAnchoredRs: { ...(current.dailyAnchoredRs || {}), ...(settings?.dailyAnchoredRs || {}) },
+        }
+        set({ tradeReviewChartSettings: next })
+        saveToCloud({ ...get(), tradeReviewChartSettings: next })
+      },
 
       addAccount: (account) => {
         set(s => ({ accounts: [...s.accounts, account] }))

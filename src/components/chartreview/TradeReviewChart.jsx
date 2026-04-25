@@ -207,7 +207,7 @@ function LightweightPane({ data, kind, height }) {
   )
 }
 
-export default function TradeReviewChart({ trade, onUpdate }) {
+export default function TradeReviewChart({ trade, chartSettings }) {
   const [bars, setBars] = useState([])
   const [benchmarkBars, setBenchmarkBars] = useState([])
   const [loading, setLoading] = useState(true)
@@ -230,7 +230,7 @@ export default function TradeReviewChart({ trade, onUpdate }) {
         const { start, end } = chartRangeForTrade(trade)
         const [history, benchmarkHistory] = await Promise.all([
           fetchHistory(trade.symbol, start, end),
-          fetchHistory('SPY', start, end),
+          fetchHistory(chartSettings?.benchmarkSymbol || 'SPY', start, end),
         ])
         if (!cancelled) {
           setBars(history)
@@ -245,18 +245,9 @@ export default function TradeReviewChart({ trade, onUpdate }) {
 
     load()
     return () => { cancelled = true }
-  }, [trade])
+  }, [trade, chartSettings?.benchmarkSymbol])
 
-  const data = useMemo(() => buildTradeReviewChartData(bars, trade, benchmarkBars), [bars, trade, benchmarkBars])
-
-  function updateAnchorDate(value) {
-    onUpdate?.({
-      reviewChartSettings: {
-        ...(trade.reviewChartSettings || {}),
-        dailyRsAnchorDate: value || null,
-      },
-    })
-  }
+  const data = useMemo(() => buildTradeReviewChartData(bars, trade, benchmarkBars, chartSettings), [bars, trade, benchmarkBars, chartSettings])
 
   return (
     <div className="rounded-lg overflow-hidden border border-black/20 bg-[#d7d7d7] shadow-sm">
@@ -267,15 +258,9 @@ export default function TradeReviewChart({ trade, onUpdate }) {
             <p className="text-[10px] text-[#505760]">Weekly RS · Daily anchored RS · KC13/34/65</p>
           </div>
           <div className="flex items-center gap-2">
-            <label className="flex items-center gap-1 text-[10px] font-semibold text-[#343941]">
-              Daily anchor
-              <input
-                type="date"
-                value={data.dailyRsAnchorDate || ''}
-                onChange={event => updateAnchorDate(event.target.value)}
-                className="h-6 rounded border border-black/10 bg-white/80 px-1.5 text-[10px] text-[#343941] outline-none"
-              />
-            </label>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">
+              Anchor {data.dailyRsAnchorDate || '—'}
+            </span>
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">USD</span>
           </div>
         </div>

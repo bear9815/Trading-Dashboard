@@ -12,6 +12,13 @@ export const DEFAULT_ANCHORED_RS_ANCHOR_RULES = [
   { from: '2026-04-01', to: '2026-06-30', anchor: '2026-04-02' },
 ]
 
+export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
+  benchmarkSymbol: 'SPY',
+  anchorDates: ['2026-01-01', '2026-04-02'],
+  weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
+  dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85 },
+}
+
 function toDateKey(value) {
   if (!value) return null
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
@@ -205,7 +212,12 @@ export function resolveAnchoredRsAnchorDate(trade, rules = DEFAULT_ANCHORED_RS_A
   if (override) return override
 
   const entryDate = toDateKey(trade?.entryDate)
-  if (!entryDate) return rules[0]?.anchor || null
+  if (!entryDate) return toDateKey(rules?.[0]?.anchor || rules?.[0]) || null
+
+  if (Array.isArray(rules) && (typeof rules[0] === 'string' || rules[0] instanceof Date)) {
+    const anchors = rules.map(toDateKey).filter(Boolean).sort()
+    return [...anchors].reverse().find(anchor => anchor <= entryDate) || anchors[0] || entryDate
+  }
 
   const match = (rules || []).find(rule => {
     const from = toDateKey(rule.from)
@@ -319,11 +331,17 @@ export function buildTradeMarkers(trade, bars) {
   return markers.sort((a, b) => a.time.localeCompare(b.time))
 }
 
-export function buildTradeReviewChartData(bars, trade, benchmarkBars = []) {
+export function buildTradeReviewChartData(bars, trade, benchmarkBars = [], settings = DEFAULT_TRADE_REVIEW_CHART_SETTINGS) {
   const daily = cleanBars(bars)
   const weekly = aggregateWeeklyBars(daily)
   const benchmarkWeekly = aggregateWeeklyBars(benchmarkBars)
-  const dailyRsAnchorDate = resolveAnchoredRsAnchorDate(trade)
+  const chartSettings = {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    ...(settings || {}),
+    weeklyRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.weeklyRs, ...(settings?.weeklyRs || {}) },
+    dailyAnchoredRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyAnchoredRs, ...(settings?.dailyAnchoredRs || {}) },
+  }
+  const dailyRsAnchorDate = resolveAnchoredRsAnchorDate({ ...trade, reviewChartSettings: null }, chartSettings.anchorDates)
   const keltner = {
     13: calculateKeltnerChannel(daily, 13, 0.25),
     34: calculateKeltnerChannel(daily, 34, 0.25),
@@ -344,9 +362,9 @@ export function buildTradeReviewChartData(bars, trade, benchmarkBars = []) {
     keltnerShades: buildKeltnerShadeBands(keltner),
     weeklyKeltner,
     weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
-    weeklyRsGradient: calculateRsGradient(weekly, benchmarkWeekly),
+    weeklyRsGradient: calculateRsGradient(weekly, benchmarkWeekly, chartSettings.weeklyRs),
     dailyRsAnchorDate,
-    dailyAnchoredRsGradient: calculateAnchoredRsGradient(daily, benchmarkBars, dailyRsAnchorDate),
+    dailyAnchoredRsGradient: calculateAnchoredRsGradient(daily, benchmarkBars, dailyRsAnchorDate, chartSettings.dailyAnchoredRs),
     dailyAnchorMarkers: dailyRsAnchorDate ? [{
       time: daily.find(bar => bar.time >= dailyRsAnchorDate)?.time || dailyRsAnchorDate,
       position: 'belowBar',

@@ -116,6 +116,27 @@ assert.equal(
   resolveAnchoredRsAnchorDate({ entryDate: '2026-04-10T14:00:00Z', reviewChartSettings: { dailyRsAnchorDate: '2026-03-15' } }, anchorRules),
   '2026-03-15'
 )
+assert.equal(
+  resolveAnchoredRsAnchorDate(
+    { entryDate: '2026-01-10T14:00:00Z' },
+    ['2025-11-24', '2026-01-28', '2026-03-30']
+  ),
+  '2025-11-24'
+)
+assert.equal(
+  resolveAnchoredRsAnchorDate(
+    { entryDate: '2026-02-10T14:00:00Z' },
+    ['2025-11-24', '2026-01-28', '2026-03-30']
+  ),
+  '2026-01-28'
+)
+assert.equal(
+  resolveAnchoredRsAnchorDate(
+    { entryDate: '2026-04-10T14:00:00Z' },
+    ['2025-11-24', '2026-01-28', '2026-03-30']
+  ),
+  '2026-03-30'
+)
 
 const anchoredSymbolDaily = Array.from({ length: 90 }, (_, index) => {
   const date = new Date('2026-01-01T00:00:00Z')
@@ -139,6 +160,15 @@ assert.ok(anchoredGradient.every(row => row.time >= '2026-01-10'))
 assert.ok(anchoredGradient.at(-1).zScore > 0)
 assert.match(anchoredGradient.at(-1).color, /^rgba\(\d+, 255, \d+, 0\.22\)$/)
 assert.deepEqual(
-  buildTradeReviewChartData(anchoredSymbolDaily, { ...trade, reviewChartSettings: { dailyRsAnchorDate: '2026-01-10' } }, anchoredBenchmarkDaily).dailyAnchorMarkers.map(marker => marker.text),
+  buildTradeReviewChartData(anchoredSymbolDaily, trade, anchoredBenchmarkDaily, { anchorDates: ['2026-01-10'] }).dailyAnchorMarkers.map(marker => marker.text),
   ['Anchor']
+)
+assert.equal(
+  buildTradeReviewChartData(
+    anchoredSymbolDaily,
+    { ...trade, entryDate: '2026-02-10T14:00:00Z' },
+    anchoredBenchmarkDaily,
+    { anchorDates: ['2025-11-24', '2026-01-28', '2026-03-30'] }
+  ).dailyRsAnchorDate,
+  '2026-01-28'
 )

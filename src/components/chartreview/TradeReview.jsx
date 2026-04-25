@@ -7,7 +7,7 @@ import { formatCurrency } from '../../utils/formatters.js'
 import { fetchHistory } from '../../utils/marketData.js'
 import { analyzeTradeVoiceReview, generateTradeVoiceFollowUp } from '../../utils/ai.js'
 import TradeReviewChart from './TradeReviewChart.jsx'
-import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, Sparkles, Brain, CircleDot, RotateCcw, Mic, MicOff, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Volume2, Square } from 'lucide-react'
+import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, Sparkles, Brain, CircleDot, RotateCcw, Mic, MicOff, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Volume2, Square, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine } from 'recharts'
 
 // ── Duration helper ───────────────────────────────────────────────────────────
@@ -1943,7 +1943,7 @@ function ReviewNotesSection({ trade, onUpdate }) {
 }
 
 // ── Trade detail panel ────────────────────────────────────────────────────────
-function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate }) {
+function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, chartSettings }) {
   const [lightboxIndex, setLightboxIndex] = useState(null)
 
   const shots = useMemo(() => {
@@ -2027,7 +2027,7 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate }) {
       <div>
         <p className="label mb-2">Charts</p>
         <div className="mb-3">
-          <TradeReviewChart trade={trade} onUpdate={onUpdate} />
+          <TradeReviewChart trade={trade} chartSettings={chartSettings} />
         </div>
         <ScreenshotGallery trade={trade} onOpenLightbox={setLightboxIndex} />
       </div>
@@ -2180,9 +2180,145 @@ function TradeListItem({ trade, selected, onClick }) {
   )
 }
 
+function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
+  const [draft, setDraft] = useState(() => ({
+    benchmarkSymbol: settings?.benchmarkSymbol || 'SPY',
+    anchorDates: Array.isArray(settings?.anchorDates) && settings.anchorDates.length ? settings.anchorDates : ['2026-01-01', '2026-04-02'],
+    weeklyRs: {
+      rollingPeriod: settings?.weeklyRs?.rollingPeriod ?? 13,
+      lookbackStd: settings?.weeklyRs?.lookbackStd ?? 50,
+      sensitivity: settings?.weeklyRs?.sensitivity ?? 2,
+      opacity: settings?.weeklyRs?.opacity ?? 85,
+    },
+    dailyAnchoredRs: {
+      lookback: settings?.dailyAnchoredRs?.lookback ?? 50,
+      sensitivity: settings?.dailyAnchoredRs?.sensitivity ?? 2,
+      opacity: settings?.dailyAnchoredRs?.opacity ?? 85,
+    },
+  }))
+
+  function updateAnchor(index, value) {
+    setDraft(current => ({
+      ...current,
+      anchorDates: current.anchorDates.map((date, i) => i === index ? value : date),
+    }))
+  }
+
+  function addAnchor() {
+    setDraft(current => ({ ...current, anchorDates: [...current.anchorDates, ''] }))
+  }
+
+  function removeAnchor(index) {
+    setDraft(current => ({
+      ...current,
+      anchorDates: current.anchorDates.filter((_, i) => i !== index),
+    }))
+  }
+
+  function updateNested(section, key, value) {
+    const numeric = Number(value)
+    setDraft(current => ({
+      ...current,
+      [section]: {
+        ...current[section],
+        [key]: Number.isFinite(numeric) ? numeric : value,
+      },
+    }))
+  }
+
+  function save() {
+    const anchorDates = [...new Set(draft.anchorDates.filter(Boolean))].sort()
+    onSave({
+      ...draft,
+      benchmarkSymbol: (draft.benchmarkSymbol || 'SPY').trim().toUpperCase(),
+      anchorDates,
+    })
+    onClose()
+  }
+
+  const fieldClass = 'h-8 rounded-lg border border-white/10 bg-surface-200 px-2 text-xs text-gray-200 outline-none focus:border-accent-blue/50'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-xl rounded-xl border border-white/10 bg-surface-50 shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+          <div>
+            <p className="text-sm font-semibold text-white">Trade Review Chart Settings</p>
+            <p className="text-xs text-gray-500">Global anchors and indicator inputs for every review chart</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="max-h-[72vh] overflow-y-auto p-4 space-y-5">
+          <div>
+            <p className="label mb-2">Benchmark</p>
+            <input
+              value={draft.benchmarkSymbol}
+              onChange={event => setDraft(current => ({ ...current, benchmarkSymbol: event.target.value }))}
+              className={`${fieldClass} w-28 mono`}
+              placeholder="SPY"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="label">Daily Anchor Dates</p>
+              <button onClick={addAnchor} className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-accent-blue/15 text-accent-blue border border-accent-blue/25">
+                <Plus size={12} /> Add
+              </button>
+            </div>
+            <div className="space-y-2">
+              {draft.anchorDates.map((date, index) => (
+                <div key={`${date}-${index}`} className="flex items-center gap-2">
+                  <input type="date" value={date} onChange={event => updateAnchor(index, event.target.value)} className={`${fieldClass} flex-1`} />
+                  <button onClick={() => removeAnchor(index)} className="p-2 rounded-lg border border-white/10 text-gray-500 hover:text-accent-red hover:border-accent-red/30">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-gray-500 mt-2">
+              Each trade uses the most recent anchor date on or before its entry date.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
+              <p className="label text-white">Weekly Rolling RS</p>
+              <label className="block text-[10px] text-gray-500 space-y-1">Rolling period<input type="number" value={draft.weeklyRs.rollingPeriod} onChange={event => updateNested('weeklyRs', 'rollingPeriod', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">StdDev lookback<input type="number" value={draft.weeklyRs.lookbackStd} onChange={event => updateNested('weeklyRs', 'lookbackStd', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">Sensitivity<input type="number" step="0.1" value={draft.weeklyRs.sensitivity} onChange={event => updateNested('weeklyRs', 'sensitivity', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">Opacity<input type="number" value={draft.weeklyRs.opacity} onChange={event => updateNested('weeklyRs', 'opacity', event.target.value)} className={`${fieldClass} w-full`} /></label>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
+              <p className="label text-white">Daily Anchored RS</p>
+              <label className="block text-[10px] text-gray-500 space-y-1">StdDev lookback<input type="number" value={draft.dailyAnchoredRs.lookback} onChange={event => updateNested('dailyAnchoredRs', 'lookback', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">Sensitivity<input type="number" step="0.1" value={draft.dailyAnchoredRs.sensitivity} onChange={event => updateNested('dailyAnchoredRs', 'sensitivity', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">Opacity<input type="number" value={draft.dailyAnchoredRs.opacity} onChange={event => updateNested('dailyAnchoredRs', 'opacity', event.target.value)} className={`${fieldClass} w-full`} /></label>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-white/10 px-4 py-3">
+          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-lg border border-white/10 text-gray-400 hover:text-white">
+            Cancel
+          </button>
+          <button onClick={save} className="text-xs px-3 py-1.5 rounded-lg bg-accent-blue/20 text-accent-blue border border-accent-blue/30 hover:bg-accent-blue/30">
+            Save Settings
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function TradeReview({ selectedAccount }) {
   const { trades, updateTrade } = useTradeStore()
+  const { tradeReviewChartSettings, setTradeReviewChartSettings } = useSettingsStore()
   const { entries: morningEntries } = useMorningStore()
   const [selectedId,    setSelectedId]    = useState(null)
   const [statusFilter,  setStatusFilter]  = useState('All')
@@ -2190,6 +2326,7 @@ export default function TradeReview({ selectedAccount }) {
   const [search,        setSearch]        = useState('')
   const [sortBy,        setSortBy]        = useState('date')
   const [showAllTrades, setShowAllTrades] = useState(false)
+  const [chartSettingsOpen, setChartSettingsOpen] = useState(false)
 
   const scopedTrades = useMemo(() => {
     return trades
@@ -2258,6 +2395,13 @@ export default function TradeReview({ selectedAccount }) {
           <div className="flex items-center gap-2">
             <ScanLine size={15} className="text-accent-blue" />
             <h2 className="font-semibold text-white text-sm flex-1">Trade Review</h2>
+            <button
+              onClick={() => setChartSettingsOpen(true)}
+              title="Chart settings"
+              className="p-1.5 rounded-lg border border-white/10 text-gray-400 hover:text-white hover:border-accent-blue/30 hover:bg-accent-blue/10 transition-all"
+            >
+              <SlidersHorizontal size={13} />
+            </button>
             <span className="text-xs text-gray-600 bg-surface-200 rounded px-1.5 py-0.5">{reviewTrades.length}</span>
           </div>
 
@@ -2384,6 +2528,7 @@ export default function TradeReview({ selectedAccount }) {
             hasPrev={currentIdx > 0}
             hasNext={currentIdx < reviewTrades.length - 1}
             onUpdate={handleUpdate}
+            chartSettings={tradeReviewChartSettings}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
@@ -2395,6 +2540,14 @@ export default function TradeReview({ selectedAccount }) {
           </div>
         )}
       </div>
+
+      {chartSettingsOpen && (
+        <TradeReviewChartSettingsModal
+          settings={tradeReviewChartSettings}
+          onSave={setTradeReviewChartSettings}
+          onClose={() => setChartSettingsOpen(false)}
+        />
+      )}
     </div>
   )
 }
