@@ -157,7 +157,7 @@ export function buildTradeMarkers(trade, bars) {
     markers.push({
       time: entryTime,
       position: 'belowBar',
-      color: '#ff2f6d',
+      color: '#16a34a',
       shape: 'arrowUp',
       text: Number.isFinite(entryPrice) ? `Entry ${entryPrice.toFixed(2)}` : 'Entry',
       size: 1.2,

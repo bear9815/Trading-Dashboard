@@ -46,6 +46,8 @@ const markers = buildTradeMarkers(trade, bars)
 assert.deepEqual(markers.map(marker => marker.time), ['2026-01-06', '2026-01-13'])
 assert.equal(markers[0].text, 'Entry 12.00')
 assert.equal(markers[1].text, 'Exit 13.50')
+assert.equal(markers[0].color, '#16a34a')
+assert.equal(markers[1].color, '#ff2f6d')
 
 const legacyMarkers = buildTradeMarkers({
   entryDate: '2026-01-06',
