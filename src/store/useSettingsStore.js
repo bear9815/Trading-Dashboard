@@ -5,6 +5,25 @@ import { supabase } from '../lib/supabase.js'
 // Module-level flag — prevents re-fetching settings more than once per page load
 let settingsSessionLoaded = false
 
+const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
+  benchmarkSymbol: 'SPY',
+  anchorDates: ['2026-01-01', '2026-04-02'],
+  weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
+  dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
+  dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
+}
+
+function normalizeTradeReviewChartSettings(settings) {
+  const current = settings || {}
+  return {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    ...current,
+    weeklyRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.weeklyRs, ...(current.weeklyRs || {}) },
+    dailyAnchoredRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyAnchoredRs, ...(current.dailyAnchoredRs || {}) },
+    dailyRollingRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyRollingRs, ...(current.dailyRollingRs || {}) },
+  }
+}
+
 // Strip any character outside ISO-8859-1 (e.g. zero-width spaces, curly quotes
 // from copy-paste) that would crash fetch() when used in an Authorization header.
 function cleanKey(key) {
@@ -54,12 +73,7 @@ export const useSettingsStore = create(
       maxDrawdownLimit: 10,
       benchmarkSymbol: 'SPY',
       tpMultiplier: 2,
-      tradeReviewChartSettings: {
-        benchmarkSymbol: 'SPY',
-        anchorDates: ['2026-01-01', '2026-04-02'],
-        weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
-        dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
-      },
+      tradeReviewChartSettings: normalizeTradeReviewChartSettings(),
 
       alpacaApiKey: '',
       alpacaApiSecret: '',
@@ -116,7 +130,11 @@ export const useSettingsStore = create(
 
         if (data?.data) {
           // Merge cloud data — only overwrite cloud fields, keep local-only fields (symbolThemes)
-          set(s => ({ ...s, ...data.data }))
+          set(s => ({
+            ...s,
+            ...data.data,
+            tradeReviewChartSettings: normalizeTradeReviewChartSettings(data.data.tradeReviewChartSettings ?? s.tradeReviewChartSettings),
+          }))
         } else {
           // First login — upload current localStorage state to cloud
           await saveToCloud(get())
@@ -158,12 +176,10 @@ export const useSettingsStore = create(
       setBenchmarkSymbol:  (v)             => { set({ benchmarkSymbol: v });    saveToCloud({ ...get(), benchmarkSymbol: v })    },
       setTradeReviewChartSettings: (settings) => {
         const current = get().tradeReviewChartSettings || {}
-        const next = {
+        const next = normalizeTradeReviewChartSettings({
           ...current,
           ...(settings || {}),
-          weeklyRs: { ...(current.weeklyRs || {}), ...(settings?.weeklyRs || {}) },
-          dailyAnchoredRs: { ...(current.dailyAnchoredRs || {}), ...(settings?.dailyAnchoredRs || {}) },
-        }
+        })
         set({ tradeReviewChartSettings: next })
         saveToCloud({ ...get(), tradeReviewChartSettings: next })
       },
@@ -232,6 +248,9 @@ export const useSettingsStore = create(
           merged.researchAiProvider = persistedState?.useLocalLLM ? 'local' : 'gemini'
         }
         merged.useLocalLLM = merged.researchAiProvider === 'local'
+        merged.tradeReviewChartSettings = normalizeTradeReviewChartSettings(
+          persistedState?.tradeReviewChartSettings ?? currentState?.tradeReviewChartSettings
+        )
         return merged
       },
     }

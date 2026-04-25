@@ -2196,6 +2196,13 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
       opacity: settings?.dailyAnchoredRs?.opacity ?? 85,
       maLen: settings?.dailyAnchoredRs?.maLen ?? 9,
     },
+    dailyRollingRs: {
+      rsWindow: settings?.dailyRollingRs?.rsWindow ?? 63,
+      lookback: settings?.dailyRollingRs?.lookback ?? 50,
+      sensitivity: settings?.dailyRollingRs?.sensitivity ?? 2,
+      opacity: settings?.dailyRollingRs?.opacity ?? 85,
+      maLen: settings?.dailyRollingRs?.maLen ?? 9,
+    },
   }))
 
   function updateAnchor(index, value) {
@@ -2285,7 +2292,7 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
               <p className="label text-white">Weekly Rolling RS</p>
               <label className="block text-[10px] text-gray-500 space-y-1">Rolling period<input type="number" value={draft.weeklyRs.rollingPeriod} onChange={event => updateNested('weeklyRs', 'rollingPeriod', event.target.value)} className={`${fieldClass} w-full`} /></label>
@@ -2300,6 +2307,15 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
               <label className="block text-[10px] text-gray-500 space-y-1">Signal EMA<input type="number" value={draft.dailyAnchoredRs.maLen} onChange={event => updateNested('dailyAnchoredRs', 'maLen', event.target.value)} className={`${fieldClass} w-full`} /></label>
               <label className="block text-[10px] text-gray-500 space-y-1">Sensitivity<input type="number" step="0.1" value={draft.dailyAnchoredRs.sensitivity} onChange={event => updateNested('dailyAnchoredRs', 'sensitivity', event.target.value)} className={`${fieldClass} w-full`} /></label>
               <label className="block text-[10px] text-gray-500 space-y-1">Opacity<input type="number" value={draft.dailyAnchoredRs.opacity} onChange={event => updateNested('dailyAnchoredRs', 'opacity', event.target.value)} className={`${fieldClass} w-full`} /></label>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
+              <p className="label text-white">Daily Rolling RS</p>
+              <label className="block text-[10px] text-gray-500 space-y-1">RS window<input type="number" value={draft.dailyRollingRs.rsWindow} onChange={event => updateNested('dailyRollingRs', 'rsWindow', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">StdDev lookback<input type="number" value={draft.dailyRollingRs.lookback} onChange={event => updateNested('dailyRollingRs', 'lookback', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">Signal EMA<input type="number" value={draft.dailyRollingRs.maLen} onChange={event => updateNested('dailyRollingRs', 'maLen', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">Sensitivity<input type="number" step="0.1" value={draft.dailyRollingRs.sensitivity} onChange={event => updateNested('dailyRollingRs', 'sensitivity', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">Opacity<input type="number" value={draft.dailyRollingRs.opacity} onChange={event => updateNested('dailyRollingRs', 'opacity', event.target.value)} className={`${fieldClass} w-full`} /></label>
             </div>
           </div>
         </div>

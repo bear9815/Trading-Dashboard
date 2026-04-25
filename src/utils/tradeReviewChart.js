@@ -17,6 +17,7 @@ export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   anchorDates: ['2026-01-01', '2026-04-02'],
   weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
   dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
+  dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
 }
 
 function toDateKey(value) {
@@ -279,6 +280,50 @@ export function calculateAnchoredRsGradient(symbolDailyBars, benchmarkDailyBars,
     .filter(Boolean)
 }
 
+export function calculateRollingRsGradient(symbolDailyBars, benchmarkDailyBars, options = {}) {
+  const rsWindow = options.rsWindow ?? 63
+  const lookback = options.lookback ?? 50
+  const sensitivity = options.sensitivity ?? 2
+  const opacity = options.opacity ?? 85
+  const alpha = rsVisualAlpha(opacity)
+
+  const symbolBars = cleanBars(symbolDailyBars)
+  const benchmarkByTime = new Map(cleanBars(benchmarkDailyBars).map(bar => [bar.time, bar]))
+  const aligned = symbolBars
+    .map(bar => {
+      const benchmark = benchmarkByTime.get(bar.time)
+      if (!benchmark?.close) return null
+      return {
+        time: bar.time,
+        rsRatio: bar.close / benchmark.close,
+      }
+    })
+    .filter(Boolean)
+
+  return aligned
+    .map((row, index) => {
+      const historical = aligned[index - rsWindow]
+      if (!historical) return null
+      const window = aligned.slice(Math.max(0, index - lookback + 1), index + 1).map(item => item.rsRatio)
+      if (window.filter(Number.isFinite).length < lookback) return null
+      const ratioStddev = standardDeviation(window)
+      const rawPerformance = row.rsRatio - historical.rsRatio
+      const zScore = ratioStddev !== 0 ? rawPerformance / ratioStddev : 0
+      const weight = clamp(zScore / sensitivity, -1, 1)
+      const channel = Math.round(255 * (1 - Math.abs(weight)))
+      const color = weight > 0
+        ? `rgba(${channel}, 255, ${channel}, ${alpha})`
+        : `rgba(255, ${channel}, ${channel}, ${alpha})`
+      return {
+        time: row.time,
+        zScore,
+        weight,
+        color,
+      }
+    })
+    .filter(Boolean)
+}
+
 export function buildAnchoredRsSnapshot(symbolDailyBars, benchmarkDailyBars, settings = DEFAULT_TRADE_REVIEW_CHART_SETTINGS, asOf = new Date()) {
   const chartSettings = {
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
@@ -297,6 +342,36 @@ export function buildAnchoredRsSnapshot(symbolDailyBars, benchmarkDailyBars, set
 
   return {
     anchorDate,
+    time: latest.time,
+    zScore: latest.zScore,
+    signalLine: signal.at(-1) ?? null,
+    weight: latest.weight,
+    color: latest.color,
+    momentum: isRising == null
+      ? 'neutral'
+      : latest.zScore >= 0
+        ? (isRising ? 'strengthening' : 'pulling_back')
+        : (isRising ? 'bouncing' : 'weakening'),
+  }
+}
+
+export function buildRollingRsSnapshot(symbolDailyBars, benchmarkDailyBars, settings = DEFAULT_TRADE_REVIEW_CHART_SETTINGS) {
+  const chartSettings = {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    ...(settings || {}),
+    dailyRollingRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyRollingRs, ...(settings?.dailyRollingRs || {}) },
+  }
+  const gradient = calculateRollingRsGradient(symbolDailyBars, benchmarkDailyBars, chartSettings.dailyRollingRs)
+  const latest = gradient.at(-1)
+  if (!latest) return { rsWindow: chartSettings.dailyRollingRs.rsWindow ?? 63, zScore: null, signalLine: null, weight: null, color: null, time: null }
+
+  const maLen = chartSettings.dailyRollingRs.maLen ?? 9
+  const signal = ema(gradient.map(row => row.zScore), maLen)
+  const previous = gradient.at(-2)
+  const isRising = Number.isFinite(previous?.zScore) ? latest.zScore > previous.zScore : null
+
+  return {
+    rsWindow: chartSettings.dailyRollingRs.rsWindow ?? 63,
     time: latest.time,
     zScore: latest.zScore,
     signalLine: signal.at(-1) ?? null,

@@ -3,7 +3,9 @@ import {
   buildTradeReviewChartData,
   aggregateWeeklyBars,
   calculateAnchoredRsGradient,
+  calculateRollingRsGradient,
   buildAnchoredRsSnapshot,
+  buildRollingRsSnapshot,
   buildKeltnerShadeBands,
   calculateRsGradient,
   resolveLatestAnchorDate,
@@ -184,3 +186,39 @@ assert.equal(anchoredSnapshot.anchorDate, '2026-01-10')
 assert.ok(anchoredSnapshot.zScore > 0)
 assert.ok(anchoredSnapshot.weight > 0)
 assert.ok(Number.isFinite(anchoredSnapshot.signalLine))
+
+const rollingSymbolDaily = Array.from({ length: 170 }, (_, index) => {
+  const date = new Date('2026-01-01T00:00:00Z')
+  date.setUTCDate(date.getUTCDate() + index)
+  const base = index < 100 ? 30 + index * 0.18 : 48 + (index - 100) * 0.55
+  return {
+    time: date.toISOString().slice(0, 10),
+    open: base - 0.2,
+    high: base + 0.5,
+    low: base - 0.5,
+    close: base,
+    volume: 900 + index,
+  }
+})
+const rollingBenchmarkDaily = rollingSymbolDaily.map((bar, index) => ({
+  ...bar,
+  close: 40 + index * 0.08,
+}))
+const rollingGradient = calculateRollingRsGradient(rollingSymbolDaily, rollingBenchmarkDaily, {
+  rsWindow: 63,
+  lookback: 50,
+  sensitivity: 2,
+  opacity: 85,
+})
+assert.ok(rollingGradient.length > 0)
+assert.ok(rollingGradient.at(-1).zScore > 0)
+assert.ok(rollingGradient.at(-1).weight > 0)
+assert.match(rollingGradient.at(-1).color, /^rgba\(\d+, 255, \d+, 0\.22\)$/)
+
+const rollingSnapshot = buildRollingRsSnapshot(rollingSymbolDaily, rollingBenchmarkDaily, {
+  dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
+})
+assert.ok(rollingSnapshot.zScore > 0)
+assert.ok(rollingSnapshot.weight > 0)
+assert.ok(Number.isFinite(rollingSnapshot.signalLine))
+assert.equal(rollingSnapshot.rsWindow, 63)

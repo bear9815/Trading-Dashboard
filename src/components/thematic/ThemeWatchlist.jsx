@@ -9,7 +9,7 @@ import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { fetchHistory } from '../../utils/marketData.js'
-import { buildAnchoredRsSnapshot, resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
+import { buildAnchoredRsSnapshot, buildRollingRsSnapshot, resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 
 const SORT_OPTIONS = [
@@ -23,7 +23,7 @@ const SORT_OPTIONS = [
 
 const CSV_COLUMNS = [
   'symbol', 'companyName', 'sector', 'ecosystem', 'theme', 'whatTheyDo',
-  'majorCustomers', 'dependencies', 'relatedDriver', 'anchoredRsZ', 'customerOf', 'supplierTo', 'competesWith',
+  'majorCustomers', 'dependencies', 'relatedDriver', 'anchoredRsZ', 'rollingRsZ', 'customerOf', 'supplierTo', 'competesWith',
 ]
 
 const EMPTY_ROW = {
@@ -203,7 +203,7 @@ function formatZScore(value) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}z`
 }
 
-function AnchoredRsCell({ snapshot, loading = false }) {
+function RsCell({ snapshot, loading = false, footerLabel = null }) {
   if (!snapshot) return <span className="text-gray-600">{loading ? 'Loading…' : 'Not loaded'}</span>
   if (!Number.isFinite(snapshot.zScore)) return <span className="text-gray-600">No signal</span>
   const positive = snapshot.zScore > 0
@@ -223,7 +223,7 @@ function AnchoredRsCell({ snapshot, loading = false }) {
         {formatZScore(snapshot.zScore)}
       </span>
       <p className="text-[10px] text-gray-600">EMA {formatZScore(snapshot.signalLine)}</p>
-      <p className="text-[10px] text-gray-600">Anchor {snapshot.anchorDate || '—'}</p>
+      {footerLabel && <p className="text-[10px] text-gray-600">{footerLabel}</p>}
     </div>
   )
 }
@@ -462,8 +462,10 @@ export default function ThemeWatchlist({
   const [editingSymbol, setEditingSymbol] = useState(null)
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [viewName, setViewName] = useState('')
-  const [rsBySymbol, setRsBySymbol] = useState({})
-  const [rsLoading, setRsLoading] = useState(false)
+  const [anchoredRsBySymbol, setAnchoredRsBySymbol] = useState({})
+  const [rollingRsBySymbol, setRollingRsBySymbol] = useState({})
+  const [anchoredRsLoading, setAnchoredRsLoading] = useState(false)
+  const [rollingRsLoading, setRollingRsLoading] = useState(false)
   const [page, setPage] = useState(1)
   const pageSize = 40
   const fileRef = useRef(null)
@@ -473,6 +475,13 @@ export default function ThemeWatchlist({
       benchmarkSymbol: tradeReviewChartSettings?.benchmarkSymbol || 'SPY',
       anchorDates: tradeReviewChartSettings?.anchorDates || [],
       dailyAnchoredRs: tradeReviewChartSettings?.dailyAnchoredRs || {},
+    }),
+    [tradeReviewChartSettings]
+  )
+  const rollingRsSettingsKey = useMemo(
+    () => JSON.stringify({
+      benchmarkSymbol: tradeReviewChartSettings?.benchmarkSymbol || 'SPY',
+      dailyRollingRs: tradeReviewChartSettings?.dailyRollingRs || {},
     }),
     [tradeReviewChartSettings]
   )
@@ -549,6 +558,7 @@ export default function ThemeWatchlist({
     () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
     [tradeReviewChartSettings?.anchorDates]
   )
+  const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
 
   const refreshAnchoredRs = useCallback(async ({ silent = false } = {}) => {
     if (!symbols.length) {
@@ -561,7 +571,7 @@ export default function ThemeWatchlist({
       return
     }
 
-    setRsLoading(true)
+    setAnchoredRsLoading(true)
     if (!silent) {
       setError('')
       setStatus(`Refreshing anchored RS from ${anchorDate}…`)
@@ -581,22 +591,66 @@ export default function ThemeWatchlist({
           return [symbol, { anchorDate, zScore: null, weight: null, color: null, error: err.message || 'Failed' }]
         }
       }))
-      setRsBySymbol(Object.fromEntries(entries))
+      setAnchoredRsBySymbol(Object.fromEntries(entries))
       setStatus(`Anchored RS refreshed for ${entries.length} symbol${entries.length !== 1 ? 's' : ''}.`)
     } catch (err) {
       if (!silent) setError(err.message || 'Anchored RS refresh failed.')
     } finally {
-      setRsLoading(false)
+      setAnchoredRsLoading(false)
     }
   }, [symbols, tradeReviewChartSettings])
 
+  const refreshRollingRs = useCallback(async ({ silent = false } = {}) => {
+    if (!symbols.length) {
+      if (!silent) setError('Import a watchlist first.')
+      return
+    }
+
+    setRollingRsLoading(true)
+    if (!silent) {
+      setError('')
+      setStatus(`Refreshing rolling RS (window ${rollingRsWindow})…`)
+    }
+    try {
+      const bufferDays = Math.max(rollingRsWindow + (tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50) + 30, 180)
+      const start = new Date()
+      start.setDate(start.getDate() - bufferDays)
+      const end = new Date()
+      end.setDate(end.getDate() + 1)
+      const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
+      const benchmarkBars = await fetchHistory(benchmarkSymbol, start, end)
+      const entries = await Promise.all(symbols.map(async symbol => {
+        try {
+          const bars = await fetchHistory(symbol, start, end)
+          return [symbol, buildRollingRsSnapshot(bars, benchmarkBars, tradeReviewChartSettings)]
+        } catch (err) {
+          return [symbol, { rsWindow: rollingRsWindow, zScore: null, weight: null, color: null, error: err.message || 'Failed' }]
+        }
+      }))
+      setRollingRsBySymbol(Object.fromEntries(entries))
+      setStatus(`Rolling RS refreshed for ${entries.length} symbol${entries.length !== 1 ? 's' : ''}.`)
+    } catch (err) {
+      if (!silent) setError(err.message || 'Rolling RS refresh failed.')
+    } finally {
+      setRollingRsLoading(false)
+    }
+  }, [rollingRsWindow, symbols, tradeReviewChartSettings])
+
   useEffect(() => {
     if (!symbols.length) {
-      setRsBySymbol({})
+      setAnchoredRsBySymbol({})
       return
     }
     refreshAnchoredRs({ silent: true })
   }, [symbolsKey, anchoredRsSettingsKey, refreshAnchoredRs])
+
+  useEffect(() => {
+    if (!symbols.length) {
+      setRollingRsBySymbol({})
+      return
+    }
+    refreshRollingRs({ silent: true })
+  }, [symbolsKey, rollingRsSettingsKey, refreshRollingRs])
 
   function handleSort(nextKey) {
     if (sortKey === nextKey) setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')
@@ -740,11 +794,19 @@ export default function ThemeWatchlist({
             </button>
             <button
               onClick={refreshAnchoredRs}
-              disabled={rsLoading || !symbols.length}
+              disabled={anchoredRsLoading || !symbols.length}
               className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/12 border border-accent-blue/20 text-accent-blue text-sm font-medium hover:bg-accent-blue/18 transition-all disabled:opacity-40"
             >
-              <TrendingUp size={13} className={rsLoading ? 'animate-pulse' : ''} />
-              {rsLoading ? 'RS…' : 'Anchored RS'}
+              <TrendingUp size={13} className={anchoredRsLoading ? 'animate-pulse' : ''} />
+              {anchoredRsLoading ? 'RS…' : 'Anchored RS'}
+            </button>
+            <button
+              onClick={refreshRollingRs}
+              disabled={rollingRsLoading || !symbols.length}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"
+            >
+              <TrendingUp size={13} className={rollingRsLoading ? 'animate-pulse' : ''} />
+              {rollingRsLoading ? 'Rolling…' : 'Rolling RS'}
             </button>
             <button
               onClick={() => exportCsv(rows)}
@@ -781,12 +843,13 @@ export default function ThemeWatchlist({
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <StatPill label="Imported Symbols" value={symbols.length} />
           <StatPill label="Mapped Rows" value={rows.length} />
           <StatPill label="Theme Buckets" value={themeGroups.length} />
           <StatPill label="Top Ranked" value={symbols[0] || '—'} />
           <StatPill label="RS Anchor" value={latestAnchorDate || '—'} />
+          <StatPill label="Rolling Window" value={`${rollingRsWindow}d`} />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -870,7 +933,7 @@ export default function ThemeWatchlist({
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-white/10">
-              <table className="w-full min-w-[1600px] text-sm">
+              <table className="w-full min-w-[1740px] text-sm">
                 <thead className="bg-white/[0.03] text-xs uppercase tracking-wider text-gray-500">
                   <tr>
                     <th className="text-left px-3 py-2">Symbol</th>
@@ -882,6 +945,7 @@ export default function ThemeWatchlist({
                     <th className="text-left px-3 py-2">Dependencies</th>
                     <th className="text-left px-3 py-2">Related Driver</th>
                     <th className="text-left px-3 py-2">Anchored RS</th>
+                    <th className="text-left px-3 py-2">Rolling RS</th>
                     <th className="text-left px-3 py-2">Relationship Layer</th>
                     <th className="text-left px-3 py-2">Theme / Library Links</th>
                     <th className="text-left px-3 py-2">Actions</th>
@@ -904,7 +968,20 @@ export default function ThemeWatchlist({
                       <td className="px-3 py-2.5 text-gray-400">{arrayText(row.majorCustomers) || '—'}</td>
                       <td className="px-3 py-2.5 text-gray-400">{arrayText(row.dependencies) || '—'}</td>
                       <td className="px-3 py-2.5 text-accent-yellow">{row.relatedDriver}</td>
-                      <td className="px-3 py-2.5 min-w-[120px]"><AnchoredRsCell snapshot={rsBySymbol[row.symbol]} loading={rsLoading} /></td>
+                      <td className="px-3 py-2.5 min-w-[120px]">
+                        <RsCell
+                          snapshot={anchoredRsBySymbol[row.symbol]}
+                          loading={anchoredRsLoading}
+                          footerLabel={`Anchor ${anchoredRsBySymbol[row.symbol]?.anchorDate || '—'}`}
+                        />
+                      </td>
+                      <td className="px-3 py-2.5 min-w-[120px]">
+                        <RsCell
+                          snapshot={rollingRsBySymbol[row.symbol]}
+                          loading={rollingRsLoading}
+                          footerLabel={`Win ${(rollingRsBySymbol[row.symbol]?.rsWindow || rollingRsWindow)}d`}
+                        />
+                      </td>
                       <td className="px-3 py-2.5 text-gray-400 min-w-[220px]">
                         <p><span className="text-gray-600">Customer links:</span> {arrayText(layer.customerLinks) || '—'}</p>
                         <p className="mt-1"><span className="text-gray-600">Dependency links:</span> {arrayText(layer.supplierLinks) || '—'}</p>
