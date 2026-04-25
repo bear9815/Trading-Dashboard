@@ -9,6 +9,7 @@ import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { fetchHistory } from '../../utils/marketData.js'
+import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
 import { buildAnchoredRsSnapshot, buildRollingRsSnapshot, resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 
@@ -23,7 +24,7 @@ const SORT_OPTIONS = [
 
 const CSV_COLUMNS = [
   'symbol', 'companyName', 'sector', 'ecosystem', 'theme', 'whatTheyDo',
-  'majorCustomers', 'dependencies', 'relatedDriver', 'anchoredRsZ', 'rollingRsZ', 'finraShortInterest', 'finraDaysToCover', 'finraSettlementDate', 'customerOf', 'supplierTo', 'competesWith',
+  'majorCustomers', 'dependencies', 'relatedDriver', 'anchoredRsZ', 'rollingRsZ', 'finraShortInterest', 'finraEstimatedShortInterest', 'finraEstimatedChangePct', 'finraEstimatedConfidence', 'finraDaysToCover', 'finraSettlementDate', 'customerOf', 'supplierTo', 'competesWith',
 ]
 
 const EMPTY_ROW = {
@@ -269,6 +270,36 @@ function FinraShortInterestCell({ snapshot, loading = false }) {
   )
 }
 
+function FinraEstimatedShortInterestCell({ estimate, loading = false }) {
+  if (!estimate) return <span className="text-gray-600">{loading ? 'Loading…' : 'Not loaded'}</span>
+  if (!Number.isFinite(estimate.estimatedCurrentShortInterest)) return <span className="text-gray-600">{loading ? 'Loading…' : 'No estimate'}</span>
+
+  const positive = Number.isFinite(estimate.estimatedPercentChangeSinceReport) && estimate.estimatedPercentChangeSinceReport > 0
+  const negative = Number.isFinite(estimate.estimatedPercentChangeSinceReport) && estimate.estimatedPercentChangeSinceReport < 0
+  return (
+    <div className="space-y-1">
+      <span
+        className={`inline-flex items-center rounded px-2 py-1 text-xs font-semibold border ${
+          positive
+            ? 'text-accent-red border-accent-red/25 bg-accent-red/10'
+            : negative
+              ? 'text-accent-green border-accent-green/25 bg-accent-green/10'
+              : 'text-gray-300 border-white/10 bg-white/[0.03]'
+        }`}
+      >
+        {formatCompactNumber(estimate.estimatedCurrentShortInterest)}
+      </span>
+      <p className={`text-[10px] ${positive ? 'text-accent-red' : negative ? 'text-accent-green' : 'text-gray-600'}`}>
+        {formatSignedPercent(estimate.estimatedPercentChangeSinceReport)} vs report
+      </p>
+      <p className="text-[10px] text-gray-600">Conf {estimate.confidenceScore ?? '—'}/100</p>
+      <p className="text-[10px] text-gray-600">
+        {formatCompactNumber(estimate.lowEstimate)}-{formatCompactNumber(estimate.highEstimate)}
+      </p>
+    </div>
+  )
+}
+
 function GroupList({ title, items, empty }) {
   return (
     <div className="bg-white/[0.02] border border-white/10 rounded-xl p-4">
@@ -506,6 +537,7 @@ export default function ThemeWatchlist({
   const [anchoredRsBySymbol, setAnchoredRsBySymbol] = useState({})
   const [rollingRsBySymbol, setRollingRsBySymbol] = useState({})
   const [finraBySymbol, setFinraBySymbol] = useState({})
+  const [finraEstimateBySymbol, setFinraEstimateBySymbol] = useState({})
   const [anchoredRsLoading, setAnchoredRsLoading] = useState(false)
   const [rollingRsLoading, setRollingRsLoading] = useState(false)
   const [finraLoading, setFinraLoading] = useState(false)
@@ -696,7 +728,26 @@ export default function ThemeWatchlist({
       const res = await fetch(`/api/finra/short-interest?${params.toString()}`)
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json?.error || 'FINRA short interest refresh failed.')
-      setFinraBySymbol(json?.bySymbol || {})
+      const nextBySymbol = json?.bySymbol || {}
+      setFinraBySymbol(nextBySymbol)
+
+      const end = new Date()
+      end.setDate(end.getDate() + 1)
+      const start = new Date()
+      start.setDate(start.getDate() - 180)
+      const estimateEntries = await Promise.all(symbols.map(async symbol => {
+        const snapshot = nextBySymbol[symbol]
+        if (!snapshot?.settlementDate || !Number.isFinite(snapshot?.currentShortPositionQuantity)) {
+          return [symbol, null]
+        }
+        try {
+          const bars = await fetchHistory(symbol, start, end)
+          return [symbol, estimateCurrentShortInterest(snapshot, bars, new Date())]
+        } catch {
+          return [symbol, estimateCurrentShortInterest(snapshot, [], new Date())]
+        }
+      }))
+      setFinraEstimateBySymbol(Object.fromEntries(estimateEntries))
       setStatus(`FINRA short interest refreshed for ${symbols.length} symbol${symbols.length !== 1 ? 's' : ''}.`)
     } catch (err) {
       if (!silent) setError(err.message || 'FINRA short interest refresh failed.')
@@ -724,6 +775,7 @@ export default function ThemeWatchlist({
   useEffect(() => {
     if (!symbols.length) {
       setFinraBySymbol({})
+      setFinraEstimateBySymbol({})
       return
     }
     refreshFinraShortInterest({ silent: true })
@@ -899,6 +951,9 @@ export default function ThemeWatchlist({
                 anchoredRsZ: anchoredRsBySymbol[row.symbol]?.zScore ?? null,
                 rollingRsZ: rollingRsBySymbol[row.symbol]?.zScore ?? null,
                 finraShortInterest: finraBySymbol[row.symbol]?.currentShortPositionQuantity ?? null,
+                finraEstimatedShortInterest: finraEstimateBySymbol[row.symbol]?.estimatedCurrentShortInterest ?? null,
+                finraEstimatedChangePct: finraEstimateBySymbol[row.symbol]?.estimatedPercentChangeSinceReport ?? null,
+                finraEstimatedConfidence: finraEstimateBySymbol[row.symbol]?.confidenceScore ?? null,
                 finraDaysToCover: finraBySymbol[row.symbol]?.daysToCoverQuantity ?? null,
                 finraSettlementDate: finraBySymbol[row.symbol]?.settlementDate ?? null,
               })))}
@@ -947,6 +1002,9 @@ export default function ThemeWatchlist({
 
         <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs text-gray-500">
           FINRA short interest uses FINRA&apos;s official consolidated short-interest API. Their published Query API dataset is OTC-oriented, so many exchange-listed names may legitimately show no FINRA record here.
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs text-gray-500">
+          Est. SI Now is a conservative model-based estimate of change since the last official FINRA snapshot. It is not live short interest, and confidence stays low when liquidity or history is weak.
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -1030,7 +1088,7 @@ export default function ThemeWatchlist({
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-white/10">
-              <table className="w-full min-w-[1880px] text-sm">
+              <table className="w-full min-w-[2020px] text-sm">
                 <thead className="bg-white/[0.03] text-xs uppercase tracking-wider text-gray-500">
                   <tr>
                     <th className="text-left px-3 py-2">Symbol</th>
@@ -1043,7 +1101,8 @@ export default function ThemeWatchlist({
                     <th className="text-left px-3 py-2">Related Driver</th>
                     <th className="text-left px-3 py-2">Anchored RS</th>
                     <th className="text-left px-3 py-2">Rolling RS</th>
-                    <th className="text-left px-3 py-2">FINRA Short Interest</th>
+                    <th className="text-left px-3 py-2">Official FINRA SI</th>
+                    <th className="text-left px-3 py-2">Est. SI Now</th>
                     <th className="text-left px-3 py-2">Relationship Layer</th>
                     <th className="text-left px-3 py-2">Theme / Library Links</th>
                     <th className="text-left px-3 py-2">Actions</th>
@@ -1083,6 +1142,12 @@ export default function ThemeWatchlist({
                       <td className="px-3 py-2.5 min-w-[150px]">
                         <FinraShortInterestCell
                           snapshot={finraBySymbol[row.symbol]}
+                          loading={finraLoading}
+                        />
+                      </td>
+                      <td className="px-3 py-2.5 min-w-[170px]">
+                        <FinraEstimatedShortInterestCell
+                          estimate={finraEstimateBySymbol[row.symbol]}
                           loading={finraLoading}
                         />
                       </td>
