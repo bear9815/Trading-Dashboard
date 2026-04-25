@@ -2102,6 +2102,96 @@ export default function Analytics({ selectedAccount }) {
               ))}
             </div>
 
+            {anchoredRsAnalytics.selectionProfile && (
+              <div className="rounded-xl border border-accent-blue/20 bg-accent-blue/[0.04] p-3 mb-4">
+                <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-300">Selection Profile</p>
+                    <p className="text-[11px] text-gray-600 mt-0.5">Turns the Anchored RS history into focus and avoid candidates for this filtered trade sample.</p>
+                  </div>
+                  <span className={`text-[10px] px-2 py-1 rounded border ${
+                    anchoredRsAnalytics.selectionProfile.lowSample
+                      ? 'border-accent-yellow/30 bg-accent-yellow/10 text-accent-yellow'
+                      : 'border-accent-green/30 bg-accent-green/10 text-accent-green'
+                  }`}>
+                    {anchoredRsAnalytics.selectionProfile.lowSample ? 'low sample' : 'sample ready'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-3">
+                  <div className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Focus Zone</p>
+                    <p className="text-lg font-bold mono text-accent-green">
+                      {anchoredRsAnalytics.selectionProfile.focusZone?.label || '—'}
+                    </p>
+                    <p className="text-[10px] text-gray-600 mt-1">
+                      {anchoredRsAnalytics.selectionProfile.focusZone
+                        ? `${anchoredRsAnalytics.selectionProfile.focusZone.count} trades · ${formatR(anchoredRsAnalytics.selectionProfile.focusZone.avgR)} avg · ${anchoredRsAnalytics.selectionProfile.focusZone.winRate?.toFixed(0) ?? '—'}% win`
+                        : 'No positive focus zone yet'}
+                    </p>
+                    <p className="text-[10px] text-gray-600">
+                      PF {anchoredRsAnalytics.selectionProfile.focusZone?.profitFactor === Infinity ? '∞' : anchoredRsAnalytics.selectionProfile.focusZone?.profitFactor != null ? anchoredRsAnalytics.selectionProfile.focusZone.profitFactor.toFixed(2) : '—'}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Best Setup</p>
+                    <p className="text-sm font-semibold text-gray-300">{anchoredRsAnalytics.selectionProfile.bestSetup?.label || '—'}</p>
+                    <p className={`text-xl font-bold mono mt-2 ${
+                      anchoredRsAnalytics.selectionProfile.bestSetup?.avgR == null ? 'text-gray-500' : anchoredRsAnalytics.selectionProfile.bestSetup.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'
+                    }`}>
+                      {anchoredRsAnalytics.selectionProfile.bestSetup?.avgR == null ? '—' : formatR(anchoredRsAnalytics.selectionProfile.bestSetup.avgR)}
+                    </p>
+                    <p className="text-[10px] text-gray-600">{anchoredRsAnalytics.selectionProfile.bestSetup?.count ?? 0} trades</p>
+                  </div>
+
+                  <div className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Avoid Candidates</p>
+                    {anchoredRsAnalytics.selectionProfile.avoidZones.length ? (
+                      <div className="space-y-2">
+                        {anchoredRsAnalytics.selectionProfile.avoidZones.slice(0, 3).map(zone => (
+                          <div key={zone.bucketKey} className="flex items-center justify-between gap-3">
+                            <span className="text-xs font-semibold text-gray-300">{zone.label}</span>
+                            <span className="text-xs mono text-accent-red">{formatR(zone.avgR)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-600">No negative bucket with sub-50% win rate yet.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-3">
+                  {[
+                    { label: 'Signal Preference', group: anchoredRsAnalytics.selectionProfile.signalPreference },
+                    { label: 'Lifecycle Preference', group: anchoredRsAnalytics.selectionProfile.lifecyclePreference },
+                    { label: 'Weakest Setup', group: anchoredRsAnalytics.selectionProfile.weakestSetup },
+                  ].map(item => (
+                    <div key={item.label} className="rounded-lg bg-white/[0.03] px-3 py-2.5 border border-white/8">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">{item.label}</p>
+                      <p className="text-xs font-semibold text-gray-300 mt-1">{item.group?.label || '—'}</p>
+                      <p className={`text-sm font-bold mono mt-1 ${item.group?.avgR == null ? 'text-gray-500' : item.group.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                        {item.group?.avgR == null ? '—' : formatR(item.group.avgR)}
+                        <span className="text-[10px] font-normal text-gray-600 ml-2">{item.group?.count ?? 0} trades</span>
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                {anchoredRsAnalytics.selectionProfile.notes.length > 0 && (
+                  <div className="rounded-lg bg-black/10 border border-white/8 px-3 py-2">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Readout</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">
+                      {anchoredRsAnalytics.selectionProfile.notes.map(note => (
+                        <p key={note} className="text-[11px] text-gray-500 leading-relaxed">{note}</p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
               <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
                 <p className="text-xs font-semibold text-gray-300 mb-2">Entry Z vs Trade R</p>

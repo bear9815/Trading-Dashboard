@@ -245,6 +245,85 @@ function buildRollingSelection(rows, windowSize = 10) {
     })
 }
 
+function bestByAvgR(groups) {
+  const eligible = groups.filter(group => group.count > 0 && Number.isFinite(group.avgR))
+  return eligible.length ? [...eligible].sort((a, b) => b.avgR - a.avgR)[0] : null
+}
+
+function worstByAvgR(groups) {
+  const eligible = groups.filter(group => group.count > 0 && Number.isFinite(group.avgR))
+  return eligible.length ? [...eligible].sort((a, b) => a.avgR - b.avgR)[0] : null
+}
+
+function buildSelectionProfile({ rows, buckets, setupGroups, signalGroups, lifecycleBreakdown }) {
+  const focusCandidates = buckets.filter(bucket =>
+    bucket.count > 0 &&
+    Number.isFinite(bucket.avgR) &&
+    bucket.avgR > 0 &&
+    bucket.profitFactor != null &&
+    bucket.profitFactor > 1.25
+  )
+  const focusBucket = bestByAvgR(focusCandidates) || bestByAvgR(buckets)
+  const avoidZones = buckets
+    .filter(bucket => bucket.count > 0 && Number.isFinite(bucket.avgR) && bucket.avgR < 0 && (bucket.winRate ?? 0) < 50)
+    .map(bucket => ({
+      bucketKey: bucket.key,
+      label: bucket.label,
+      avgR: bucket.avgR,
+      winRate: bucket.winRate,
+      count: bucket.count,
+      lowSample: bucket.lowSample,
+      reason: `${bucket.label} has negative avg R and sub-50% win rate in this sample.`,
+    }))
+  const bestSetup = bestByAvgR(setupGroups)
+  const weakestSetup = worstByAvgR(setupGroups)
+  const signalPreference = bestByAvgR(signalGroups)
+  const lifecyclePreference = bestByAvgR(lifecycleBreakdown.filter(group =>
+    group.key === 'held_above_signal' || group.key === 'broke_below_signal'
+  ))
+  const lowSample = rows.length < 20 || buckets.some(bucket => bucket.count > 0 && bucket.lowSample)
+  const notes = []
+
+  if (focusBucket) {
+    notes.push(`Your best entry z bucket is ${focusBucket.label} with ${focusBucket.count} trade${focusBucket.count !== 1 ? 's' : ''} and ${focusBucket.avgR >= 0 ? '+' : ''}${focusBucket.avgR.toFixed(2)}R average.`)
+  }
+  if (bestSetup) {
+    notes.push(`Your strongest setup profile is ${bestSetup.label}, averaging ${bestSetup.avgR >= 0 ? '+' : ''}${bestSetup.avgR.toFixed(2)}R.`)
+  }
+  if (signalPreference) {
+    notes.push(`Entries ${signalPreference.label.toLowerCase()} have been the better signal-line cohort so far.`)
+  }
+  if (lifecyclePreference) {
+    notes.push(`During the hold, ${lifecyclePreference.label.toLowerCase()} has the best lifecycle outcome profile.`)
+  }
+  if (avoidZones.length) {
+    notes.push(`Current avoid candidates: ${avoidZones.map(zone => zone.label).join(', ')}.`)
+  }
+  if (lowSample) {
+    notes.push('Treat this as low sample until each important bucket has at least 10 trades and the total RS sample reaches roughly 20 trades.')
+  }
+
+  return {
+    sampleSize: rows.length,
+    lowSample,
+    focusZone: focusBucket ? {
+      bucketKey: focusBucket.key,
+      label: focusBucket.label,
+      avgR: focusBucket.avgR,
+      winRate: focusBucket.winRate,
+      count: focusBucket.count,
+      profitFactor: focusBucket.profitFactor,
+      lowSample: focusBucket.lowSample,
+    } : null,
+    avoidZones,
+    bestSetup,
+    weakestSetup,
+    signalPreference,
+    lifecyclePreference,
+    notes,
+  }
+}
+
 function averageZ(rows) {
   const values = rows.map(row => row.entryZ).filter(Number.isFinite)
   return values.length ? round(values.reduce((sum, value) => sum + value, 0) / values.length, 3) : null
@@ -368,6 +447,7 @@ export function buildAnchoredRsTradeAnalytics({
   const rollingSelection = buildRollingSelection(rows)
   const lifecycleSummary = summarizeLifecycle(rows)
   const lifecycleBreakdown = buildLifecycleBreakdown(rows)
+  const selectionProfile = buildSelectionProfile({ rows, buckets, setupGroups, signalGroups, lifecycleBreakdown })
 
   return {
     rows,
@@ -378,6 +458,7 @@ export function buildAnchoredRsTradeAnalytics({
     rollingSelection,
     lifecycleSummary,
     lifecycleBreakdown,
+    selectionProfile,
     summary: summarize(rows, buckets),
     coverage: {
       totalTrades: eligibleTrades.length,
