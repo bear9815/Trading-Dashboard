@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {
   buildTradeReviewChartData,
   aggregateWeeklyBars,
+  buildKeltnerShadeBands,
   buildTradeMarkers,
   calculateKeltnerChannel,
 } from './tradeReviewChart.js'
@@ -27,6 +28,13 @@ assert.equal(kc.at(-1).time, '2026-01-13')
 assert.ok(kc.at(-1).upper > kc.at(-1).middle)
 assert.ok(kc.at(-1).middle > kc.at(-1).lower)
 
+const shadeBands = buildKeltnerShadeBands({ 13: kc })
+assert.equal(shadeBands.length, 1)
+assert.equal(shadeBands[0].period, '13')
+assert.equal(shadeBands[0].rows, kc)
+assert.ok(shadeBands[0].fillColor.startsWith('rgba('))
+assert.equal('lineWidth' in shadeBands[0], false)
+
 const trade = {
   entryDate: '2026-01-06T15:45:00.000Z',
   entryPrice: 12,
@@ -47,9 +55,25 @@ const legacyMarkers = buildTradeMarkers({
 }, bars)
 assert.deepEqual(legacyMarkers.map(marker => marker.text), ['Entry 12.00', 'Exit 14.00'])
 
-const prepared = buildTradeReviewChartData(bars, trade)
+const longBars = Array.from({ length: 80 }, (_, index) => {
+  const date = new Date('2026-01-05T00:00:00Z')
+  date.setUTCDate(date.getUTCDate() + index)
+  const open = 20 + index * 0.25
+  const close = open + (index % 2 === 0 ? 0.4 : -0.25)
+  return {
+    time: date.toISOString().slice(0, 10),
+    open,
+    high: Math.max(open, close) + 1,
+    low: Math.min(open, close) - 1,
+    close,
+    volume: 1000 + index,
+  }
+})
+
+const prepared = buildTradeReviewChartData(longBars, trade)
 assert.equal(prepared.dailyCandles[0].color, '#2877e3')
-assert.equal(prepared.dailyCandles.at(-1).color, '#ea4ce7')
+assert.equal(prepared.dailyCandles[1].color, '#ea4ce7')
 assert.deepEqual(Object.keys(prepared.keltner), ['13', '34', '65'])
-assert.equal(prepared.weeklyCandles.length, 2)
+assert.deepEqual(prepared.keltnerShades.map(band => band.period), ['13', '34', '65'])
+assert.ok(prepared.weeklyCandles.length > 2)
 assert.equal(prepared.markers.length, 2)

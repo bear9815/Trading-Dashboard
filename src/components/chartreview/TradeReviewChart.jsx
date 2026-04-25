@@ -2,18 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   CandlestickSeries,
   HistogramSeries,
-  LineSeries,
   createChart,
   createSeriesMarkers,
 } from 'lightweight-charts'
 import { fetchHistory } from '../../utils/marketData.js'
 import { buildTradeReviewChartData } from '../../utils/tradeReviewChart.js'
-
-const KC_STYLES = {
-  13: { color: 'rgba(69, 207, 219, 0.78)', lineWidth: 2 },
-  34: { color: 'rgba(118, 184, 222, 0.55)', lineWidth: 2 },
-  65: { color: 'rgba(219, 91, 143, 0.45)', lineWidth: 2 },
-}
 
 const CHART_OPTIONS = {
   layout: {
@@ -76,29 +69,6 @@ function addCandles(chart, candles) {
   return series
 }
 
-function addKeltner(chart, keltner) {
-  Object.entries(keltner).forEach(([period, rows]) => {
-    const style = KC_STYLES[period]
-    if (!style || rows.length === 0) return
-
-    const common = {
-      color: style.color,
-      lineWidth: style.lineWidth,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    }
-
-    const upper = chart.addSeries(LineSeries, common)
-    const middle = chart.addSeries(LineSeries, { ...common, lineWidth: 1 })
-    const lower = chart.addSeries(LineSeries, common)
-
-    upper.setData(rows.map(row => ({ time: row.time, value: row.upper })))
-    middle.setData(rows.map(row => ({ time: row.time, value: row.middle })))
-    lower.setData(rows.map(row => ({ time: row.time, value: row.lower })))
-  })
-}
-
 function fitToData(chart, markers, bars) {
   if (!bars.length) return
   const firstMarker = markers[0]?.time
@@ -110,24 +80,61 @@ function fitToData(chart, markers, bars) {
   })
 }
 
+function drawKeltnerShades(canvas, chart, priceSeries, bands) {
+  if (!canvas || !chart || !priceSeries) return
+  const rect = canvas.getBoundingClientRect()
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr))
+  canvas.height = Math.max(1, Math.floor(rect.height * dpr))
+
+  const ctx = canvas.getContext('2d')
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, rect.width, rect.height)
+
+  const orderedBands = [...(bands || [])].sort((a, b) => Number(b.period) - Number(a.period))
+  for (const band of orderedBands) {
+    const upper = []
+    const lower = []
+
+    for (const row of band.rows) {
+      const x = chart.timeScale().timeToCoordinate(row.time)
+      const yUpper = priceSeries.priceToCoordinate(row.upper)
+      const yLower = priceSeries.priceToCoordinate(row.lower)
+      if (x == null || yUpper == null || yLower == null) continue
+      upper.push({ x, y: yUpper })
+      lower.push({ x, y: yLower })
+    }
+
+    if (upper.length < 2 || lower.length < 2) continue
+
+    ctx.beginPath()
+    ctx.moveTo(upper[0].x, upper[0].y)
+    for (const point of upper.slice(1)) ctx.lineTo(point.x, point.y)
+    for (const point of lower.slice().reverse()) ctx.lineTo(point.x, point.y)
+    ctx.closePath()
+    ctx.fillStyle = band.fillColor
+    ctx.fill()
+  }
+}
+
 function LightweightPane({ data, kind, height }) {
   const containerRef = useRef(null)
-  const chartRef = useRef(null)
+  const chartContainerRef = useRef(null)
+  const shadeCanvasRef = useRef(null)
 
   useEffect(() => {
-    if (!containerRef.current) return undefined
-    const chart = createChart(containerRef.current, {
+    if (!chartContainerRef.current) return undefined
+    const chart = createChart(chartContainerRef.current, {
       ...CHART_OPTIONS,
       height,
-      width: containerRef.current.clientWidth,
+      width: chartContainerRef.current.clientWidth,
     })
-    chartRef.current = chart
 
     const candles = kind === 'weekly' ? data.weeklyCandles : data.dailyCandles
     const candleSeries = addCandles(chart, candles)
+    let redrawShades = () => {}
 
     if (kind === 'daily') {
-      addKeltner(chart, data.keltner)
       const volumeSeries = chart.addSeries(HistogramSeries, {
         priceFormat: { type: 'volume' },
         priceScaleId: '',
@@ -140,23 +147,42 @@ function LightweightPane({ data, kind, height }) {
       })
       createSeriesMarkers(candleSeries, data.markers)
       fitToData(chart, data.markers, data.dailyCandles)
+      redrawShades = () => {
+        requestAnimationFrame(() => {
+          drawKeltnerShades(shadeCanvasRef.current, chart, candleSeries, data.keltnerShades)
+        })
+      }
+      redrawShades()
+      chart.timeScale().subscribeVisibleTimeRangeChange(redrawShades)
     } else {
       fitToData(chart, data.markers, data.weeklyCandles)
     }
 
     const resizeObserver = new ResizeObserver(([entry]) => {
       chart.applyOptions({ width: Math.floor(entry.contentRect.width), height })
+      redrawShades()
     })
-    resizeObserver.observe(containerRef.current)
+    resizeObserver.observe(chartContainerRef.current)
 
     return () => {
+      if (kind === 'daily') chart.timeScale().unsubscribeVisibleTimeRangeChange(redrawShades)
       resizeObserver.disconnect()
       chart.remove()
-      chartRef.current = null
     }
   }, [data, height, kind])
 
-  return <div ref={containerRef} className="w-full" style={{ height }} />
+  return (
+    <div ref={containerRef} className="relative w-full" style={{ height }}>
+      <div ref={chartContainerRef} className="absolute inset-0" />
+      {kind === 'daily' && (
+        <canvas
+          ref={shadeCanvasRef}
+          className="pointer-events-none absolute inset-0 z-10 h-full w-full"
+          aria-hidden="true"
+        />
+      )}
+    </div>
+  )
 }
 
 export default function TradeReviewChart({ trade }) {

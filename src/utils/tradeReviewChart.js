@@ -1,6 +1,12 @@
 export const REVIEW_CHART_UP_COLOR = '#2877e3'
 export const REVIEW_CHART_DOWN_COLOR = '#ea4ce7'
 
+const KELTNER_SHADE_COLORS = {
+  13: 'rgba(69, 207, 219, 0.22)',
+  34: 'rgba(118, 184, 222, 0.18)',
+  65: 'rgba(219, 91, 143, 0.18)',
+}
+
 function toDateKey(value) {
   if (!value) return null
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
@@ -121,6 +127,16 @@ export function calculateKeltnerChannel(bars, period, multiplier = 0.25) {
     .filter(Boolean)
 }
 
+export function buildKeltnerShadeBands(keltner) {
+  return Object.entries(keltner || {})
+    .map(([period, rows]) => ({
+      period,
+      fillColor: KELTNER_SHADE_COLORS[period] || 'rgba(80, 140, 180, 0.16)',
+      rows: Array.isArray(rows) ? rows : [],
+    }))
+    .filter(band => band.rows.length > 0)
+}
+
 function nearestBarDate(dateKey, bars) {
   if (!dateKey || !bars.length) return null
   const exact = bars.find(bar => bar.time === dateKey)
@@ -171,6 +187,11 @@ export function buildTradeMarkers(trade, bars) {
 
 export function buildTradeReviewChartData(bars, trade) {
   const daily = cleanBars(bars)
+  const keltner = {
+    13: calculateKeltnerChannel(daily, 13, 0.25),
+    34: calculateKeltnerChannel(daily, 34, 0.25),
+    65: calculateKeltnerChannel(daily, 65, 0.25),
+  }
   return {
     dailyCandles: colorizeCandles(daily),
     weeklyCandles: colorizeCandles(aggregateWeeklyBars(daily)),
@@ -179,11 +200,8 @@ export function buildTradeReviewChartData(bars, trade) {
       value: bar.volume,
       color: bar.close >= bar.open ? REVIEW_CHART_UP_COLOR : REVIEW_CHART_DOWN_COLOR,
     })),
-    keltner: {
-      13: calculateKeltnerChannel(daily, 13, 0.25),
-      34: calculateKeltnerChannel(daily, 34, 0.25),
-      65: calculateKeltnerChannel(daily, 65, 0.25),
-    },
+    keltner,
+    keltnerShades: buildKeltnerShadeBands(keltner),
     markers: buildTradeMarkers(trade, daily),
   }
 }
