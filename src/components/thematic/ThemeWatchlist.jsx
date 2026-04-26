@@ -9,6 +9,9 @@ import {
   ColorType,
   CrosshairMode,
   createChart,
+  HistogramSeries,
+  LineSeries,
+  createSeriesMarkers,
 } from 'lightweight-charts'
 import {
   Brain, Download, ExternalLink, Layers, ListFilter, Pencil,
@@ -21,7 +24,15 @@ import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { fetchHistoryCached } from '../../utils/historyCache.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
-import { buildAnchoredRsSnapshot, buildRollingRsSnapshot, buildYtdAvwapSnapshot, resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
+import {
+  buildAnchoredRsSnapshot,
+  buildAvwapOverlays,
+  buildKeltnerShadeBands,
+  buildRollingRsSnapshot,
+  buildYtdAvwapSnapshot,
+  calculateKeltnerChannel,
+  resolveLatestAnchorDate,
+} from '../../utils/tradeReviewChart.js'
 import { buildWatchlistFitMap, filterAndSortWatchlistRows } from '../../utils/watchlistFitSignal.js'
 import {
   applyColumnPreset,
@@ -443,37 +454,75 @@ function RotationQuadrantLabel(quadrant) {
   }
 }
 
-function EcosystemCompositeChart({ bars = [], chartType = 'candlestick', title = 'Ecosystem', memberCount = 0 }) {
-  const containerRef = useRef(null)
+const ECOSYSTEM_CHART_OPTIONS = {
+  layout: {
+    background: { color: '#d7d7d7' },
+    textColor: '#2b3037',
+    fontFamily: 'Inter, sans-serif',
+  },
+  grid: {
+    vertLines: { color: 'rgba(120, 126, 136, 0.16)' },
+    horzLines: { color: 'rgba(120, 126, 136, 0.22)' },
+  },
+  rightPriceScale: {
+    borderColor: 'rgba(95, 99, 106, 0.22)',
+    scaleMargins: { top: 0.08, bottom: 0.12 },
+  },
+  timeScale: {
+    borderColor: 'rgba(95, 99, 106, 0.22)',
+    timeVisible: false,
+    secondsVisible: false,
+  },
+  crosshair: { mode: CrosshairMode.Normal },
+  handleScroll: true,
+  handleScale: true,
+}
+
+function drawEcosystemShadeBands(canvas, chart, priceSeries, bands) {
+  if (!canvas || !chart || !priceSeries) return
+  const rect = canvas.getBoundingClientRect()
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr))
+  canvas.height = Math.max(1, Math.floor(rect.height * dpr))
+  const ctx = canvas.getContext('2d')
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, rect.width, rect.height)
+
+  for (const band of [...(bands || [])].sort((a, b) => Number(b.period) - Number(a.period))) {
+    const upper = []
+    const lower = []
+    for (const row of band.rows || []) {
+      const x = chart.timeScale().timeToCoordinate(row.time)
+      const yUpper = priceSeries.priceToCoordinate(row.upper)
+      const yLower = priceSeries.priceToCoordinate(row.lower)
+      if (x == null || yUpper == null || yLower == null) continue
+      upper.push({ x, y: yUpper })
+      lower.push({ x, y: yLower })
+    }
+    if (upper.length < 2 || lower.length < 2) continue
+    ctx.beginPath()
+    ctx.moveTo(upper[0].x, upper[0].y)
+    for (const point of upper.slice(1)) ctx.lineTo(point.x, point.y)
+    for (const point of lower.slice().reverse()) ctx.lineTo(point.x, point.y)
+    ctx.closePath()
+    ctx.fillStyle = band.fillColor
+    ctx.fill()
+  }
+}
+
+function EcosystemLightweightPane({ data, kind, height, chartType }) {
+  const chartContainerRef = useRef(null)
+  const shadeCanvasRef = useRef(null)
 
   useEffect(() => {
-    if (!containerRef.current || !bars.length) return undefined
-
-    const chart = createChart(containerRef.current, {
-      autoSize: true,
-      layout: {
-        background: { type: ColorType.Solid, color: '#d7d7d7' },
-        textColor: '#2b3037',
-        fontFamily: 'Inter, sans-serif',
-      },
-      grid: {
-        vertLines: { color: 'rgba(120, 126, 136, 0.16)' },
-        horzLines: { color: 'rgba(120, 126, 136, 0.22)' },
-      },
-      crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: {
-        borderColor: 'rgba(95, 99, 106, 0.22)',
-      },
-      timeScale: {
-        borderColor: 'rgba(95, 99, 106, 0.22)',
-        timeVisible: false,
-        secondsVisible: false,
-      },
-      handleScroll: true,
-      handleScale: true,
+    if (!chartContainerRef.current) return undefined
+    const chart = createChart(chartContainerRef.current, {
+      ...ECOSYSTEM_CHART_OPTIONS,
+      height,
+      width: chartContainerRef.current.clientWidth,
     })
-
-    const series = chart.addSeries(
+    const candles = kind === 'weekly' ? data.weeklyBars : data.dailyBars
+    const priceSeries = chart.addSeries(
       chartType === 'hlc' ? BarSeries : CandlestickSeries,
       chartType === 'hlc'
         ? {
@@ -492,29 +541,139 @@ function EcosystemCompositeChart({ bars = [], chartType = 'candlestick', title =
             priceLineVisible: false,
           }
     )
-    series.setData(bars)
-    chart.timeScale().fitContent()
+    priceSeries.setData(candles)
 
-    return () => chart.remove()
-  }, [bars, chartType])
+    if (kind === 'daily') {
+      const volumeSeries = chart.addSeries(HistogramSeries, {
+        priceFormat: { type: 'volume' },
+        priceScaleId: '',
+        priceLineVisible: false,
+        lastValueVisible: false,
+      })
+      volumeSeries.setData(
+        data.dailyBars.map(bar => ({
+          time: bar.time,
+          value: bar.volume,
+          color: bar.close >= bar.open ? '#2877e3' : '#ea4ce7',
+        }))
+      )
+      volumeSeries.priceScale().applyOptions({
+        scaleMargins: { top: 0.84, bottom: 0 },
+      })
+
+      for (const overlay of data.avwapOverlays || []) {
+        const series = chart.addSeries(LineSeries, {
+          color: overlay.color,
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        })
+        series.setData(overlay.series)
+      }
+
+      createSeriesMarkers(priceSeries, (data.avwapOverlays || []).map(overlay => ({
+        time: overlay.series?.[0]?.time || overlay.anchorDate,
+        position: 'belowBar',
+        color: overlay.color,
+        shape: 'circle',
+        text: overlay.label,
+        size: 0.8,
+      })).filter(marker => marker.time))
+    }
+
+    const bands = kind === 'weekly' ? data.weeklyKeltnerShades : data.keltnerShades
+    const redraw = () => {
+      requestAnimationFrame(() => {
+        drawEcosystemShadeBands(shadeCanvasRef.current, chart, priceSeries, bands)
+      })
+    }
+    chart.timeScale().fitContent()
+    redraw()
+    chart.timeScale().subscribeVisibleTimeRangeChange(redraw)
+
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      chart.applyOptions({ width: Math.floor(entry.contentRect.width), height })
+      redraw()
+    })
+    resizeObserver.observe(chartContainerRef.current)
+
+    return () => {
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(redraw)
+      resizeObserver.disconnect()
+      chart.remove()
+    }
+  }, [chartType, data, height, kind])
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <div>
-          <p className="text-xs font-semibold text-gray-300">{title}</p>
-          <p className="text-[11px] text-gray-600">Synthetic equal-weight ecosystem symbol built from {memberCount} active-list member{memberCount === 1 ? '' : 's'}.</p>
+    <div className="relative w-full" style={{ height }}>
+      <div ref={chartContainerRef} className="absolute inset-0" />
+      <canvas ref={shadeCanvasRef} className="pointer-events-none absolute inset-0 z-10 h-full w-full" aria-hidden="true" />
+    </div>
+  )
+}
+
+function EcosystemCompositeChart({
+  data,
+  chartType = 'candlestick',
+  title = 'Ecosystem',
+  memberCount = 0,
+  ytdEnabled = false,
+  onToggleYtd,
+}) {
+  const hasBars = data?.dailyBars?.length
+  return (
+    <div className="rounded-lg overflow-hidden border border-black/20 bg-[#d7d7d7] shadow-sm">
+      <div className="px-2 py-1.5 border-b border-black/15 text-[#242830]">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold mono">{title} · Ecosystem Symbol</p>
+            <p className="text-[10px] text-[#505760]">KC13/34/65 · YTD AVWAP · {memberCount} members</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onToggleYtd}
+              className={`px-2 py-0.5 text-[10px] font-semibold rounded border transition-colors ${
+                ytdEnabled
+                  ? 'bg-[#f59e0b]/20 border-[#f59e0b]/40 text-[#7a4b00]'
+                  : 'bg-white/70 border-black/10 text-[#505760]'
+              }`}
+            >
+              YTD AVWAP
+            </button>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">Synthetic</span>
+          </div>
         </div>
       </div>
-      {bars.length ? (
-        <div ref={containerRef} className="h-[280px] w-full" />
+      {!hasBars ? (
+        <div className="h-[520px] flex items-center justify-center text-xs text-[#505760]">No chart data for this ecosystem</div>
       ) : (
-        <div className="flex h-[280px] items-center justify-center rounded-lg border border-dashed border-white/10 text-sm text-gray-500">
-          Not enough price history to build the custom ecosystem symbol.
+        <div>
+          <div className="relative border-b-4 border-[#242424]">
+            <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1W</span>
+            <EcosystemLightweightPane data={data} kind="weekly" height={190} chartType={chartType} />
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
+              {title}
+            </div>
+          </div>
+          <div className="relative">
+            <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1D</span>
+            <EcosystemLightweightPane data={data} kind="daily" height={350} chartType={chartType} />
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
+              {title}
+            </div>
+          </div>
         </div>
       )}
     </div>
   )
+}
+
+function toggleYtdAvwap(setTradeReviewChartSettings, chartSettings) {
+  const nextPresets = (chartSettings?.avwapPresets || []).map(preset =>
+    preset.id === 'ytd' ? { ...preset, enabled: !preset.enabled } : preset
+  )
+  setTradeReviewChartSettings({ avwapPresets: nextPresets })
 }
 
 function RelationshipExplorer({ row, rows, rowsBySymbol }) {
@@ -729,7 +888,7 @@ export default function ThemeWatchlist({
     saveThemeAnalyticsSnapshot,
     clear,
   } = useResearchWatchlistStore()
-  const { tradeReviewChartSettings } = useSettingsStore()
+  const { tradeReviewChartSettings, setTradeReviewChartSettings } = useSettingsStore()
   const analyticsMode = mode === 'analytics'
   const activeList = listsById[activeListId]
   const symbols = activeList?.symbols || []
@@ -765,6 +924,7 @@ export default function ThemeWatchlist({
   const [anchoredRsBySymbol, setAnchoredRsBySymbol] = useState({})
   const [rollingRsBySymbol, setRollingRsBySymbol] = useState({})
   const [historyBarsBySymbol, setHistoryBarsBySymbol] = useState({})
+  const [benchmarkHistoryBars, setBenchmarkHistoryBars] = useState([])
   const [ytdAvwapBySymbol, setYtdAvwapBySymbol] = useState({})
   const [finraBySymbol, setFinraBySymbol] = useState({})
   const [finraEstimateBySymbol, setFinraEstimateBySymbol] = useState({})
@@ -825,6 +985,7 @@ export default function ThemeWatchlist({
     () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
     [tradeReviewChartSettings?.anchorDates]
   )
+  const ecosystemYtdEnabled = Boolean(tradeReviewChartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
   const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
 
   const visibleColumnOrder = useMemo(
@@ -938,6 +1099,37 @@ export default function ThemeWatchlist({
     if (!analyticsMode || !selectedThemeGroup) return { dailyBars: [], weeklyBars: [], memberCount: 0 }
     return buildEcosystemCompositeBars(selectedThemeGroup.symbols, historyBarsBySymbol)
   }, [analyticsMode, historyBarsBySymbol, selectedThemeGroup])
+
+  const selectedEcosystemChartData = useMemo(() => {
+    if (!analyticsMode || !selectedThemeGroup || !selectedEcosystemComposite.dailyBars.length) {
+      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    }
+    const avwapOverlays = buildAvwapOverlays(
+      selectedEcosystemComposite.dailyBars,
+      selectedThemeGroup.label,
+      tradeReviewChartSettings,
+      {},
+      new Date(),
+      null
+    )
+    const dailyKeltner = {
+      13: calculateKeltnerChannel(selectedEcosystemComposite.dailyBars, 13, 0.25),
+      34: calculateKeltnerChannel(selectedEcosystemComposite.dailyBars, 34, 0.25),
+      65: calculateKeltnerChannel(selectedEcosystemComposite.dailyBars, 65, 0.25),
+    }
+    const weeklyKeltner = {
+      13: calculateKeltnerChannel(selectedEcosystemComposite.weeklyBars, 13, 0.25),
+      34: calculateKeltnerChannel(selectedEcosystemComposite.weeklyBars, 34, 0.25),
+      65: calculateKeltnerChannel(selectedEcosystemComposite.weeklyBars, 65, 0.25),
+    }
+    return {
+      ...selectedEcosystemComposite,
+      benchmarkBars: benchmarkHistoryBars,
+      avwapOverlays,
+      keltnerShades: buildKeltnerShadeBands(dailyKeltner),
+      weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
+    }
+  }, [analyticsMode, benchmarkHistoryBars, selectedEcosystemComposite, selectedThemeGroup, tradeReviewChartSettings])
 
   const handleColumnVisibilityToggle = useCallback((columnId) => {
     const nextHidden = hiddenColumns.includes(columnId)
@@ -1233,12 +1425,14 @@ export default function ThemeWatchlist({
   const loadHistoryUniverse = useCallback(async () => {
     if (!symbols.length) {
       setHistoryBarsBySymbol({})
+      setBenchmarkHistoryBars([])
       return { benchmarkBars: [], symbolBarsBySymbol: {}, errorsBySymbol: {} }
     }
 
     const current = historyUniverseRef.current
     if (current.key === historyPlan.cacheKey && current.data) {
       setHistoryBarsBySymbol(current.data.symbolBarsBySymbol || {})
+      setBenchmarkHistoryBars(current.data.benchmarkBars || [])
       return current.data
     }
     if (current.key === historyPlan.cacheKey && current.promise) return current.promise
@@ -1271,6 +1465,7 @@ export default function ThemeWatchlist({
 
       const next = { benchmarkBars, symbolBarsBySymbol, errorsBySymbol }
       setHistoryBarsBySymbol(symbolBarsBySymbol)
+      setBenchmarkHistoryBars(benchmarkBars)
       historyUniverseRef.current = { key: historyPlan.cacheKey, data: next, promise: null }
       return next
     })().catch(error => {
@@ -1717,95 +1912,76 @@ export default function ThemeWatchlist({
                 <StatPill label="Top Strength" value={sortedThemeGroups[0]?.currentStrengthScore != null ? formatMetric(sortedThemeGroups[0].currentStrengthScore, '', 0) : '—'} />
                 <StatPill label="Rotation History" value={`${themeAnalyticsHistory[activeGrouping]?.length || 0} pts`} />
               </div>
+              <div className="space-y-4">
+                {selectedThemeGroup ? (
+                  <EcosystemCompositeChart
+                    data={selectedEcosystemChartData}
+                    chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+                    title={`ECO:${String(selectedThemeGroup.label || '').toUpperCase()}`}
+                    memberCount={selectedEcosystemComposite.memberCount}
+                    ytdEnabled={ecosystemYtdEnabled}
+                    onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
+                  />
+                ) : null}
 
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
-                  <p className="text-xs font-semibold text-gray-300 mb-2">Current Strength Ranking</p>
-                  <ResponsiveContainer width="100%" height={280}>
-                    <BarChart data={sortedThemeGroups.slice(0, 8)} layout="vertical" margin={{ top: 4, right: 12, left: 30, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
-                      <XAxis type="number" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
-                      <YAxis type="category" dataKey="label" width={96} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
-                        formatter={(value, name) => [name === 'Strength' ? Number(value).toFixed(1) : `${Number(value).toFixed(0)}%`, name]}
-                      />
-                      <Bar dataKey="currentStrengthScore" name="Strength" radius={[0, 4, 4, 0]}>
-                        {sortedThemeGroups.slice(0, 8).map(group => (
-                          <Cell key={group.key} fill={group.currentStrengthScore >= 20 ? '#00d084' : group.currentStrengthScore >= 5 ? '#fbbf24' : '#ff4757'} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
-                  <p className="text-xs font-semibold text-gray-300 mb-2">Fit Breadth Mix</p>
-                  <ResponsiveContainer width="100%" height={280}>
-                    <BarChart data={sortedThemeGroups.slice(0, 8)} layout="vertical" margin={{ top: 4, right: 12, left: 30, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
-                      <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
-                      <YAxis type="category" dataKey="label" width={96} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
-                        formatter={(value, name) => [`${Number(value).toFixed(0)}%`, name]}
-                      />
-                      <Bar dataKey="greenPct" stackId="fit" name="Green" fill="#00d084" radius={[0, 0, 0, 0]} />
-                      <Bar dataKey="orangePct" stackId="fit" name="Orange" fill="#fbbf24" radius={[0, 0, 0, 0]} />
-                      <Bar dataKey="redPct" stackId="fit" name="Red" fill="#ff4757" radius={[0, 0, 0, 0]} />
-                      <Bar dataKey="needsDataPct" stackId="fit" name="Needs Data" fill="#4b5563" radius={[0, 4, 4, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 xl:grid-cols-[1.3fr_1fr] gap-4">
                 <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
                   <div className="flex items-center justify-between gap-3 mb-3">
-                    <p className="text-xs font-semibold text-gray-300">Group Health Table</p>
+                    <p className="text-xs font-semibold text-gray-300">Ecosystem Table</p>
                     {selectedThemeGroupKey && (
                       <button
                         onClick={() => setSelectedThemeGroupKey('')}
                         className="text-[11px] text-accent-blue hover:underline"
                       >
-                        Clear group filter
+                        Clear selection
                       </button>
                     )}
                   </div>
-                  <div className="space-y-2">
-                    {sortedThemeGroups.slice(0, 8).map(group => (
-                      <button
-                        key={group.key}
-                        onClick={() => setSelectedThemeGroupKey(prev => prev === group.key ? '' : group.key)}
-                        className={`w-full text-left rounded-lg border px-3 py-2.5 transition-all ${
-                          selectedThemeGroupKey === group.key
-                            ? 'border-accent-blue/30 bg-accent-blue/10'
-                            : 'border-white/10 bg-white/[0.02] hover:border-white/20'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-white truncate">{group.label}</p>
-                            <p className="text-[11px] text-gray-600 mt-1">
-                              {group.count} symbols · rolling {formatMetric(group.avgRollingZ, 'z')} · anchored {formatMetric(group.avgAnchoredZ, 'z')}
-                            </p>
-                          </div>
-                          <span className={`text-[10px] px-2 py-1 rounded border ${ThemeHealthTone(group.healthLabel)}`}>
-                            {group.healthLabel}
-                          </span>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-gray-500">
-                          <span>green {group.greenPct?.toFixed(0) ?? '—'}%</span>
-                          <span>above signal {group.rollingAboveSignalPct?.toFixed(0) ?? '—'}%</span>
-                          <span>leader spread {group.leaderSpread != null ? group.leaderSpread.toFixed(2) : '—'}z</span>
-                        </div>
-                      </button>
-                    ))}
+                  <div className="overflow-x-auto rounded-lg border border-white/10">
+                    <table className="w-full min-w-[920px] text-sm">
+                      <thead className="bg-white/[0.03] text-[11px] uppercase tracking-wider text-gray-500">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Ecosystem</th>
+                          <th className="px-3 py-2 text-left">Members</th>
+                          <th className="px-3 py-2 text-left">Strength</th>
+                          <th className="px-3 py-2 text-left">Rolling</th>
+                          <th className="px-3 py-2 text-left">Anchored</th>
+                          <th className="px-3 py-2 text-left">% Green</th>
+                          <th className="px-3 py-2 text-left">% Above Signal</th>
+                          <th className="px-3 py-2 text-left">Leader Spread</th>
+                          <th className="px-3 py-2 text-left">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/[0.05]">
+                        {sortedThemeGroups.map(group => (
+                          <tr
+                            key={group.key}
+                            onClick={() => setSelectedThemeGroupKey(prev => prev === group.key ? '' : group.key)}
+                            className={`cursor-pointer transition-colors hover:bg-white/[0.02] ${
+                              selectedThemeGroupKey === group.key ? 'bg-accent-blue/8' : ''
+                            }`}
+                          >
+                            <td className="px-3 py-2.5 font-semibold text-white">{group.label}</td>
+                            <td className="px-3 py-2.5 text-gray-400">{group.count}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.currentStrengthScore, '', 1)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.avgRollingZ, 'z', 2)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.avgAnchoredZ, 'z', 2)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.greenPct, '%', 0)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.rollingAboveSignalPct, '%', 0)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{group.leaderSpread != null ? `${group.leaderSpread.toFixed(2)}z` : '—'}</td>
+                            <td className="px-3 py-2.5">
+                              <span className={`text-[10px] px-2 py-1 rounded border ${ThemeHealthTone(group.healthLabel)}`}>
+                                {group.healthLabel}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
 
                 <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
-                  <p className="text-xs font-semibold text-gray-300 mb-2">Ecosystem Rotation</p>
+                  <p className="text-xs font-semibold text-gray-300 mb-2">Ecosystem Rotation Map</p>
                   <ResponsiveContainer width="100%" height={280}>
                     <ScatterChart margin={{ top: 8, right: 12, left: -6, bottom: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
@@ -1908,7 +2084,7 @@ export default function ThemeWatchlist({
               <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
                 <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
                   <div>
-                    <p className="text-sm font-semibold text-white">Selected {activeGrouping === 'theme' ? 'Theme' : 'Ecosystem'} Diagnostics</p>
+                    <p className="text-sm font-semibold text-white">Selected Ecosystem Diagnostics</p>
                     <p className="text-xs text-gray-500 mt-1">See whether the move is broadening, which members are driving it, and what recently changed.</p>
                   </div>
                   {selectedThemeRotation && (
@@ -1920,15 +2096,6 @@ export default function ThemeWatchlist({
 
                 {selectedThemeGroup ? (
                   <div className="space-y-4">
-                    {analyticsMode && (
-                      <EcosystemCompositeChart
-                        bars={selectedEcosystemComposite.dailyBars}
-                        chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
-                        title={`ECO:${String(selectedThemeGroup.label || '').toUpperCase()}`}
-                        memberCount={selectedEcosystemComposite.memberCount}
-                      />
-                    )}
-
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <StatPill label="Selection" value={selectedThemeGroup.label} />
                       <StatPill label="Quadrant" value={RotationQuadrantLabel(selectedThemeRotation?.quadrant)} />
