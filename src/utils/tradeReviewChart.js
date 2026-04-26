@@ -15,6 +15,7 @@ export const DEFAULT_ANCHORED_RS_ANCHOR_RULES = [
 export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
   chartType: 'candlestick',
+  showTradeEntryAvwap: false,
   anchorDates: ['2026-01-01', '2026-04-02'],
   avwapPresets: [
     { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
@@ -252,7 +253,8 @@ export function buildAvwapOverlays(
   symbol,
   settings = DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
   manualAnchorsBySymbol = {},
-  asOf = new Date()
+  asOf = new Date(),
+  trade = null
 ) {
   const chartSettings = {
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
@@ -271,8 +273,18 @@ export function buildAvwapOverlays(
     }))
 
   const manualOverlays = activeManualAnchors.filter(anchor => anchor.enabled)
+  const tradeEntryOverlay = chartSettings.showTradeEntryAvwap && toDateKey(trade?.entryDate)
+    ? [{
+      id: 'trade-entry',
+      kind: 'trade-entry',
+      label: 'Entry AVWAP',
+      anchorDate: toDateKey(trade?.entryDate),
+      enabled: true,
+      color: '#16a34a',
+    }]
+    : []
 
-  return [...presetOverlays, ...manualOverlays]
+  return [...tradeEntryOverlay, ...presetOverlays, ...manualOverlays]
     .map(overlay => {
       const anchorDate = toDateKey(overlay.anchorDate)
       if (!anchorDate) return null
@@ -623,7 +635,7 @@ export function buildTradeReviewChartData(
   return {
     dailyCandles: colorizeCandles(daily),
     weeklyCandles: colorizeCandles(weekly),
-    avwapOverlays: buildAvwapOverlays(daily, trade?.symbol, chartSettings, manualAnchorsBySymbol, trade?.entryDate || new Date()),
+    avwapOverlays: buildAvwapOverlays(daily, trade?.symbol, chartSettings, manualAnchorsBySymbol, trade?.entryDate || new Date(), trade),
     volume: daily.map(bar => ({
       time: bar.time,
       value: bar.volume,

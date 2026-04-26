@@ -290,6 +290,7 @@ export default function TradeReviewChart({ trade, chartSettings }) {
     [symbol, tradeReviewManualAnchorsBySymbol]
   )
   const ytdEnabled = Boolean(chartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
+  const tradeEntryAvwapEnabled = Boolean(chartSettings?.showTradeEntryAvwap)
 
   useEffect(() => {
     let cancelled = false
@@ -337,6 +338,10 @@ export default function TradeReviewChart({ trade, chartSettings }) {
     setTradeReviewChartSettings({ avwapPresets: nextPresets })
   }
 
+  function toggleTradeEntryAvwap() {
+    setTradeReviewChartSettings({ showTradeEntryAvwap: !tradeEntryAvwapEnabled })
+  }
+
   function handleChartClick(param, dailyBars) {
     if (!addAnchorMode || !symbol) return
     const anchorDate = nearestDailyBarAtOrBefore(param?.time, dailyBars)
@@ -373,6 +378,16 @@ export default function TradeReviewChart({ trade, chartSettings }) {
               }`}
             >
               YTD AVWAP
+            </button>
+            <button
+              onClick={toggleTradeEntryAvwap}
+              className={`px-2 py-0.5 text-[10px] font-semibold rounded border transition-colors ${
+                tradeEntryAvwapEnabled
+                  ? 'bg-[#16a34a]/20 border-[#16a34a]/40 text-[#14532d]'
+                  : 'bg-white/70 border-black/10 text-[#505760]'
+              }`}
+            >
+              Entry AVWAP
             </button>
             <button
               onClick={() => setAddAnchorMode(current => !current)}

@@ -295,6 +295,22 @@ const avwapPrepared = buildTradeReviewChartData(
 assert.equal(avwapPrepared.avwapOverlays.length, 2)
 assert.ok(avwapPrepared.avwapOverlays.every(overlay => overlay.series.length > 0))
 
+const entryAvwapPrepared = buildTradeReviewChartData(
+  avwapBars,
+  { ...trade, symbol: 'NVDA', entryDate: '2026-01-03T15:45:00.000Z' },
+  [],
+  {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    showTradeEntryAvwap: true,
+    avwapPresets: [],
+  },
+  {}
+)
+const tradeEntryOverlay = entryAvwapPrepared.avwapOverlays.find(overlay => overlay.id === 'trade-entry')
+assert.ok(tradeEntryOverlay)
+assert.equal(tradeEntryOverlay.color, '#16a34a')
+assert.equal(tradeEntryOverlay.anchorDate, '2026-01-03')
+
 const ytdSnapshot = buildYtdAvwapSnapshot(avwapBars, '2026-04-25')
 assert.equal(ytdSnapshot.anchorDate, '2026-01-01')
 assert.equal(Math.round(ytdSnapshot.avwap * 1000) / 1000, 11.667)

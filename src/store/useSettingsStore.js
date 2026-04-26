@@ -8,6 +8,7 @@ let settingsSessionLoaded = false
 const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
   chartType: 'candlestick',
+  showTradeEntryAvwap: false,
   anchorDates: ['2026-01-01', '2026-04-02'],
   avwapPresets: [
     { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
