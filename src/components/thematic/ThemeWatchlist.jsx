@@ -689,6 +689,7 @@ export default function ThemeWatchlist({
   const [rollingRsLoading, setRollingRsLoading] = useState(false)
   const [ytdAvwapLoading, setYtdAvwapLoading] = useState(false)
   const [finraLoading, setFinraLoading] = useState(false)
+  const [finraLoadedKey, setFinraLoadedKey] = useState('')
   const [page, setPage] = useState(1)
   const pageSize = 40
   const fileRef = useRef(null)
@@ -746,6 +747,10 @@ export default function ThemeWatchlist({
   const visibleColumnOrder = useMemo(
     () => buildVisibleColumnOrder({ columnOrder, hiddenColumns }),
     [columnOrder, hiddenColumns]
+  )
+  const finraColumnsVisible = useMemo(
+    () => !analyticsMode && visibleColumnOrder.some(columnId => columnId === 'finraShortInterest' || columnId === 'finraEstimatedShortInterest'),
+    [analyticsMode, visibleColumnOrder]
   )
 
   const themeGroupsAnalytics = useMemo(
@@ -1298,6 +1303,7 @@ export default function ThemeWatchlist({
         return [symbol, estimateCurrentShortInterest(snapshot, symbolBarsBySymbol[symbol] || [], new Date())]
       })
       setFinraEstimateBySymbol(Object.fromEntries(estimateEntries))
+      setFinraLoadedKey(finraSettingsKey)
       setStatus(`FINRA short interest refreshed for ${symbols.length} symbol${symbols.length !== 1 ? 's' : ''}.`)
     } catch (err) {
       if (!silent) setError(err.message || 'FINRA short interest refresh failed.')
@@ -1331,13 +1337,15 @@ export default function ThemeWatchlist({
   }, [symbolsKey, refreshYtdAvwap])
 
   useEffect(() => {
-    if (!symbols.length) {
-      setFinraBySymbol({})
-      setFinraEstimateBySymbol({})
-      return
-    }
+    setFinraBySymbol({})
+    setFinraEstimateBySymbol({})
+    setFinraLoadedKey('')
+  }, [finraSettingsKey])
+
+  useEffect(() => {
+    if (!symbols.length || !finraColumnsVisible || finraLoadedKey === finraSettingsKey) return
     refreshFinraShortInterest({ silent: true })
-  }, [finraSettingsKey, refreshFinraShortInterest])
+  }, [finraColumnsVisible, finraLoadedKey, finraSettingsKey, refreshFinraShortInterest, symbols.length])
 
   useEffect(() => {
     if (selectedThemeGroupKey && !activeThemeGroups.some(group => group.key === selectedThemeGroupKey)) {
