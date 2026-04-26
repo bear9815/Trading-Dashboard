@@ -2183,7 +2183,11 @@ function TradeListItem({ trade, selected, onClick }) {
 function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
   const [draft, setDraft] = useState(() => ({
     benchmarkSymbol: settings?.benchmarkSymbol || 'SPY',
+    chartType: settings?.chartType === 'hlc' ? 'hlc' : 'candlestick',
     anchorDates: Array.isArray(settings?.anchorDates) && settings.anchorDates.length ? settings.anchorDates : ['2026-01-01', '2026-04-02'],
+    avwapPresets: Array.isArray(settings?.avwapPresets) && settings.avwapPresets.length
+      ? settings.avwapPresets
+      : [{ id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' }],
     weeklyRs: {
       rollingPeriod: settings?.weeklyRs?.rollingPeriod ?? 13,
       lookbackStd: settings?.weeklyRs?.lookbackStd ?? 50,
@@ -2195,6 +2199,13 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
       sensitivity: settings?.dailyAnchoredRs?.sensitivity ?? 2,
       opacity: settings?.dailyAnchoredRs?.opacity ?? 85,
       maLen: settings?.dailyAnchoredRs?.maLen ?? 9,
+    },
+    dailyRollingRs: {
+      rsWindow: settings?.dailyRollingRs?.rsWindow ?? 63,
+      lookback: settings?.dailyRollingRs?.lookback ?? 50,
+      sensitivity: settings?.dailyRollingRs?.sensitivity ?? 2,
+      opacity: settings?.dailyRollingRs?.opacity ?? 85,
+      maLen: settings?.dailyRollingRs?.maLen ?? 9,
     },
   }))
 
@@ -2227,12 +2238,38 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
     }))
   }
 
+  function updatePreset(id, updates) {
+    setDraft(current => ({
+      ...current,
+      avwapPresets: current.avwapPresets.map(preset => preset.id === id ? { ...preset, ...updates } : preset),
+    }))
+  }
+
+  function addFixedDatePreset() {
+    const nextId = `fixed-${Date.now()}`
+    setDraft(current => ({
+      ...current,
+      avwapPresets: [
+        ...current.avwapPresets,
+        { id: nextId, kind: 'preset', mode: 'fixed-date', anchorDate: '', label: 'Custom', enabled: false, color: '#38bdf8' },
+      ],
+    }))
+  }
+
+  function removePreset(id) {
+    setDraft(current => ({
+      ...current,
+      avwapPresets: current.avwapPresets.filter(preset => preset.id !== id),
+    }))
+  }
+
   function save() {
     const anchorDates = [...new Set(draft.anchorDates.filter(Boolean))].sort()
     onSave({
       ...draft,
       benchmarkSymbol: (draft.benchmarkSymbol || 'SPY').trim().toUpperCase(),
       anchorDates,
+      avwapPresets: draft.avwapPresets.filter(preset => preset.mode === 'ytd' || preset.anchorDate),
     })
     onClose()
   }
@@ -2253,14 +2290,38 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
         </div>
 
         <div className="max-h-[72vh] overflow-y-auto p-4 space-y-5">
-          <div>
-            <p className="label mb-2">Benchmark</p>
-            <input
-              value={draft.benchmarkSymbol}
-              onChange={event => setDraft(current => ({ ...current, benchmarkSymbol: event.target.value }))}
-              className={`${fieldClass} w-28 mono`}
-              placeholder="SPY"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <p className="label mb-2">Benchmark</p>
+              <input
+                value={draft.benchmarkSymbol}
+                onChange={event => setDraft(current => ({ ...current, benchmarkSymbol: event.target.value }))}
+                className={`${fieldClass} w-28 mono`}
+                placeholder="SPY"
+              />
+            </div>
+
+            <div>
+              <p className="label mb-2">Price Style</p>
+              <div className="inline-flex rounded-lg border border-white/10 bg-surface-200 p-1">
+                {[
+                  { value: 'candlestick', label: 'Candles' },
+                  { value: 'hlc', label: 'HLC Bars' },
+                ].map(option => (
+                  <button
+                    key={option.value}
+                    onClick={() => setDraft(current => ({ ...current, chartType: option.value }))}
+                    className={`px-3 py-1.5 text-xs rounded-md border transition-all ${
+                      draft.chartType === option.value
+                        ? 'bg-accent-blue/20 text-accent-blue border-accent-blue/30'
+                        : 'text-gray-400 border-transparent hover:text-white'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           <div>
@@ -2285,7 +2346,59 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="label">AVWAP Presets</p>
+              <button onClick={addFixedDatePreset} className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-accent-blue/15 text-accent-blue border border-accent-blue/25">
+                <Plus size={12} /> Add Date
+              </button>
+            </div>
+            <div className="space-y-2">
+              {draft.avwapPresets.map(preset => (
+                <div key={preset.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(preset.enabled)}
+                      onChange={event => updatePreset(preset.id, { enabled: event.target.checked })}
+                    />
+                    <input
+                      value={preset.label}
+                      onChange={event => updatePreset(preset.id, { label: event.target.value })}
+                      className={`${fieldClass} flex-1`}
+                      placeholder="Label"
+                    />
+                    <input
+                      type="color"
+                      value={preset.color || '#38bdf8'}
+                      onChange={event => updatePreset(preset.id, { color: event.target.value })}
+                      className="h-8 w-10 rounded bg-transparent"
+                    />
+                    {preset.mode === 'fixed-date' && (
+                      <button onClick={() => removePreset(preset.id)} className="p-2 rounded-lg border border-white/10 text-gray-500 hover:text-accent-red hover:border-accent-red/30">
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-[10px] text-gray-500 uppercase tracking-wide">{preset.mode === 'ytd' ? 'Dynamic' : 'Date'}</span>
+                    {preset.mode === 'fixed-date' ? (
+                      <input
+                        type="date"
+                        value={preset.anchorDate || ''}
+                        onChange={event => updatePreset(preset.id, { anchorDate: event.target.value })}
+                        className={`${fieldClass} w-40`}
+                      />
+                    ) : (
+                      <span className="text-xs text-gray-400">Uses Jan 1 of the current chart year.</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
               <p className="label text-white">Weekly Rolling RS</p>
               <label className="block text-[10px] text-gray-500 space-y-1">Rolling period<input type="number" value={draft.weeklyRs.rollingPeriod} onChange={event => updateNested('weeklyRs', 'rollingPeriod', event.target.value)} className={`${fieldClass} w-full`} /></label>
@@ -2300,6 +2413,15 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
               <label className="block text-[10px] text-gray-500 space-y-1">Signal EMA<input type="number" value={draft.dailyAnchoredRs.maLen} onChange={event => updateNested('dailyAnchoredRs', 'maLen', event.target.value)} className={`${fieldClass} w-full`} /></label>
               <label className="block text-[10px] text-gray-500 space-y-1">Sensitivity<input type="number" step="0.1" value={draft.dailyAnchoredRs.sensitivity} onChange={event => updateNested('dailyAnchoredRs', 'sensitivity', event.target.value)} className={`${fieldClass} w-full`} /></label>
               <label className="block text-[10px] text-gray-500 space-y-1">Opacity<input type="number" value={draft.dailyAnchoredRs.opacity} onChange={event => updateNested('dailyAnchoredRs', 'opacity', event.target.value)} className={`${fieldClass} w-full`} /></label>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
+              <p className="label text-white">Daily Rolling RS</p>
+              <label className="block text-[10px] text-gray-500 space-y-1">RS window<input type="number" value={draft.dailyRollingRs.rsWindow} onChange={event => updateNested('dailyRollingRs', 'rsWindow', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">StdDev lookback<input type="number" value={draft.dailyRollingRs.lookback} onChange={event => updateNested('dailyRollingRs', 'lookback', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">Signal EMA<input type="number" value={draft.dailyRollingRs.maLen} onChange={event => updateNested('dailyRollingRs', 'maLen', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">Sensitivity<input type="number" step="0.1" value={draft.dailyRollingRs.sensitivity} onChange={event => updateNested('dailyRollingRs', 'sensitivity', event.target.value)} className={`${fieldClass} w-full`} /></label>
+              <label className="block text-[10px] text-gray-500 space-y-1">Opacity<input type="number" value={draft.dailyRollingRs.opacity} onChange={event => updateNested('dailyRollingRs', 'opacity', event.target.value)} className={`${fieldClass} w-full`} /></label>
             </div>
           </div>
         </div>

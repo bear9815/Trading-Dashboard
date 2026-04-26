@@ -2,11 +2,18 @@ import assert from 'node:assert/strict'
 import {
   buildTradeReviewChartData,
   aggregateWeeklyBars,
+  calculateAvwapSeries,
   calculateAnchoredRsGradient,
+  calculateRollingRsGradient,
   buildAnchoredRsSnapshot,
+  buildAvwapOverlays,
+  buildYtdAvwapSnapshot,
+  buildRollingRsSnapshot,
   buildKeltnerShadeBands,
   calculateRsGradient,
+  DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
   resolveLatestAnchorDate,
+  resolveAvwapPresetAnchorDate,
   resolveAnchoredRsAnchorDate,
   buildTradeMarkers,
   calculateKeltnerChannel,
@@ -184,3 +191,129 @@ assert.equal(anchoredSnapshot.anchorDate, '2026-01-10')
 assert.ok(anchoredSnapshot.zScore > 0)
 assert.ok(anchoredSnapshot.weight > 0)
 assert.ok(Number.isFinite(anchoredSnapshot.signalLine))
+
+const rollingSymbolDaily = Array.from({ length: 170 }, (_, index) => {
+  const date = new Date('2026-01-01T00:00:00Z')
+  date.setUTCDate(date.getUTCDate() + index)
+  const base = index < 100 ? 30 + index * 0.18 : 48 + (index - 100) * 0.55
+  return {
+    time: date.toISOString().slice(0, 10),
+    open: base - 0.2,
+    high: base + 0.5,
+    low: base - 0.5,
+    close: base,
+    volume: 900 + index,
+  }
+})
+const rollingBenchmarkDaily = rollingSymbolDaily.map((bar, index) => ({
+  ...bar,
+  close: 40 + index * 0.08,
+}))
+const rollingGradient = calculateRollingRsGradient(rollingSymbolDaily, rollingBenchmarkDaily, {
+  rsWindow: 63,
+  lookback: 50,
+  sensitivity: 2,
+  opacity: 85,
+})
+assert.ok(rollingGradient.length > 0)
+assert.ok(rollingGradient.at(-1).zScore > 0)
+assert.ok(rollingGradient.at(-1).weight > 0)
+assert.match(rollingGradient.at(-1).color, /^rgba\(\d+, 255, \d+, 0\.22\)$/)
+
+const rollingSnapshot = buildRollingRsSnapshot(rollingSymbolDaily, rollingBenchmarkDaily, {
+  dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
+})
+assert.ok(rollingSnapshot.zScore > 0)
+assert.ok(rollingSnapshot.weight > 0)
+assert.ok(Number.isFinite(rollingSnapshot.signalLine))
+assert.equal(rollingSnapshot.rsWindow, 63)
+
+const avwapBars = [
+  { time: '2026-01-02', open: 10, high: 12, low: 9, close: 11, volume: 100 },
+  { time: '2026-01-03', open: 11, high: 13, low: 10, close: 12, volume: 100 },
+  { time: '2026-01-04', open: 12, high: 14, low: 11, close: 13, volume: 100 },
+]
+
+const avwapSeries = calculateAvwapSeries(avwapBars, '2026-01-03')
+assert.deepEqual(avwapSeries.map(row => row.time), ['2026-01-03', '2026-01-04'])
+assert.equal(Math.round(avwapSeries[0].value * 1000) / 1000, 11.667)
+assert.equal(Math.round(avwapSeries[1].value * 1000) / 1000, 12.167)
+
+assert.ok(Array.isArray(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets))
+assert.equal(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets[0]?.id, 'ytd')
+assert.equal(
+  resolveAvwapPresetAnchorDate({ mode: 'ytd' }, '2026-04-25'),
+  '2026-01-01'
+)
+assert.equal(
+  resolveAvwapPresetAnchorDate({ mode: 'fixed-date', anchorDate: '2026-04-02' }, '2026-04-25'),
+  '2026-04-02'
+)
+
+const avwapOverlays = buildAvwapOverlays(
+  avwapBars,
+  'NVDA',
+  {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    avwapPresets: [
+      { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: true, color: '#f59e0b' },
+      { id: 'fixed', kind: 'preset', mode: 'fixed-date', anchorDate: '2026-01-03', label: 'Jan 3', enabled: true, color: '#38bdf8' },
+    ],
+  },
+  {
+    NVDA: [{ id: 'manual-1', kind: 'manual', anchorDate: '2026-01-03', label: 'Gap Up', enabled: true, color: '#22c55e' }],
+    AMD: [{ id: 'manual-2', kind: 'manual', anchorDate: '2026-01-04', label: 'Other', enabled: true, color: '#ef4444' }],
+  },
+  '2026-04-25'
+)
+assert.equal(avwapOverlays.length, 3)
+assert.ok(avwapOverlays.every(overlay => overlay.series.length > 0))
+assert.ok(avwapOverlays.every(overlay => overlay.anchorDate))
+assert.equal(
+  buildAvwapOverlays(
+    avwapBars,
+    'AMD',
+    { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS, avwapPresets: [] },
+    { NVDA: [{ id: 'manual-1', kind: 'manual', anchorDate: '2026-01-03', label: 'Gap Up', enabled: true, color: '#22c55e' }] },
+    '2026-04-25'
+  ).length,
+  0
+)
+
+const avwapPrepared = buildTradeReviewChartData(
+  avwapBars,
+  { ...trade, symbol: 'NVDA' },
+  [],
+  {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    avwapPresets: [{ id: 'fixed', kind: 'preset', mode: 'fixed-date', anchorDate: '2026-01-03', label: 'Jan 3', enabled: true, color: '#38bdf8' }],
+  },
+  {
+    NVDA: [{ id: 'manual-1', kind: 'manual', anchorDate: '2026-01-04', label: 'Gap Up', enabled: true, color: '#22c55e' }],
+  }
+)
+assert.equal(avwapPrepared.avwapOverlays.length, 2)
+assert.ok(avwapPrepared.avwapOverlays.every(overlay => overlay.series.length > 0))
+
+const entryAvwapPrepared = buildTradeReviewChartData(
+  avwapBars,
+  { ...trade, symbol: 'NVDA', entryDate: '2026-01-03T15:45:00.000Z' },
+  [],
+  {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    showTradeEntryAvwap: true,
+    avwapPresets: [],
+  },
+  {}
+)
+const tradeEntryOverlay = entryAvwapPrepared.avwapOverlays.find(overlay => overlay.id === 'trade-entry')
+assert.ok(tradeEntryOverlay)
+assert.equal(tradeEntryOverlay.color, '#16a34a')
+assert.equal(tradeEntryOverlay.anchorDate, '2026-01-03')
+
+const ytdSnapshot = buildYtdAvwapSnapshot(avwapBars, '2026-04-25')
+assert.equal(ytdSnapshot.anchorDate, '2026-01-01')
+assert.equal(Math.round(ytdSnapshot.avwap * 1000) / 1000, 11.667)
+assert.equal(ytdSnapshot.close, 13)
+assert.equal(Math.round(ytdSnapshot.distancePct * 100) / 100, 11.43)
+assert.equal(ytdSnapshot.isAbove, true)

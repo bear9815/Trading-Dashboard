@@ -5,6 +5,78 @@ import { supabase } from '../lib/supabase.js'
 // Module-level flag — prevents re-fetching settings more than once per page load
 let settingsSessionLoaded = false
 
+const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
+  benchmarkSymbol: 'SPY',
+  chartType: 'candlestick',
+  showTradeEntryAvwap: false,
+  anchorDates: ['2026-01-01', '2026-04-02'],
+  avwapPresets: [
+    { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
+  ],
+  weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
+  dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
+  dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
+}
+
+function normalizeAvwapPreset(preset, index = 0) {
+  const mode = preset?.mode === 'fixed-date' ? 'fixed-date' : 'ytd'
+  const anchorDate = typeof preset?.anchorDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(preset.anchorDate)
+    ? preset.anchorDate
+    : null
+
+  if (mode === 'fixed-date' && !anchorDate) return null
+
+  return {
+    id: preset?.id || `${mode}-${anchorDate || index}`,
+    kind: 'preset',
+    mode,
+    anchorDate: mode === 'fixed-date' ? anchorDate : null,
+    label: (preset?.label || (mode === 'fixed-date' ? anchorDate : 'YTD') || 'AVWAP').trim(),
+    enabled: Boolean(preset?.enabled),
+    color: preset?.color || '#f59e0b',
+  }
+}
+
+function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol) {
+  return Object.fromEntries(
+    Object.entries(manualAnchorsBySymbol || {})
+      .map(([symbol, anchors]) => [
+        String(symbol || '').trim().toUpperCase(),
+        (anchors || [])
+          .map((anchor, index) => {
+            const anchorDate = typeof anchor?.anchorDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(anchor.anchorDate)
+              ? anchor.anchorDate
+              : null
+            if (!anchorDate) return null
+            return {
+              id: anchor?.id || `manual-${anchorDate}-${index}`,
+              kind: 'manual',
+              anchorDate,
+              label: (anchor?.label || anchorDate).trim(),
+              enabled: anchor?.enabled !== false,
+              color: anchor?.color || '#22c55e',
+            }
+          })
+          .filter(Boolean),
+      ])
+      .filter(([symbol, anchors]) => symbol && anchors.length > 0)
+  )
+}
+
+function normalizeTradeReviewChartSettings(settings) {
+  const current = settings || {}
+  return {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    ...current,
+    avwapPresets: ((current.avwapPresets || []).map(normalizeAvwapPreset).filter(Boolean).length
+      ? (current.avwapPresets || []).map(normalizeAvwapPreset).filter(Boolean)
+      : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets.map(normalizeAvwapPreset).filter(Boolean)),
+    weeklyRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.weeklyRs, ...(current.weeklyRs || {}) },
+    dailyAnchoredRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyAnchoredRs, ...(current.dailyAnchoredRs || {}) },
+    dailyRollingRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyRollingRs, ...(current.dailyRollingRs || {}) },
+  }
+}
+
 // Strip any character outside ISO-8859-1 (e.g. zero-width spaces, curly quotes
 // from copy-paste) that would crash fetch() when used in an Authorization header.
 function cleanKey(key) {
@@ -18,10 +90,11 @@ const CLOUD_FIELDS = [
   'theme', 'accounts', 'dailyLossLimit', 'maxDrawdownLimit',
   'benchmarkSymbol', 'tpMultiplier',
   'equityCurveRange', 'analyticsTimeframe', 'analyticsTradeMode', 'analyticsWinLossMode',
-  'analyticsRiskMode', 'analyticsSqnMode',
+  'analyticsRiskMode', 'analyticsSqnMode', 'analyticsActiveTab',
   'dashboardNote', 'openPositionsColumns',
   'riskVisibleColumns',
   'tradeReviewChartSettings',
+  'tradeReviewManualAnchorsBySymbol',
   'excludedSymbols', 'strategies', 'edges',
   // symbolThemes intentionally excluded — it's a large AI cache, device-local is fine
 ]
@@ -54,12 +127,8 @@ export const useSettingsStore = create(
       maxDrawdownLimit: 10,
       benchmarkSymbol: 'SPY',
       tpMultiplier: 2,
-      tradeReviewChartSettings: {
-        benchmarkSymbol: 'SPY',
-        anchorDates: ['2026-01-01', '2026-04-02'],
-        weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
-        dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
-      },
+      tradeReviewChartSettings: normalizeTradeReviewChartSettings(),
+      tradeReviewManualAnchorsBySymbol: {},
 
       alpacaApiKey: '',
       alpacaApiSecret: '',
@@ -76,6 +145,7 @@ export const useSettingsStore = create(
       analyticsWinLossMode: '$',
       analyticsRiskMode: 'sharpe',
       analyticsSqnMode:  'sqn',
+      analyticsActiveTab: 'snapshot',
       dashboardNote: '',
       openPositionsColumns: ['entryDate', 'held', 'entryPrice', 'stop', 'target', 'riskDollar', 'riskPct', 'sector', 'theme'],
       openPositionsColumnOrder: null,
@@ -115,7 +185,14 @@ export const useSettingsStore = create(
 
         if (data?.data) {
           // Merge cloud data — only overwrite cloud fields, keep local-only fields (symbolThemes)
-          set(s => ({ ...s, ...data.data }))
+          set(s => ({
+            ...s,
+            ...data.data,
+            tradeReviewChartSettings: normalizeTradeReviewChartSettings(data.data.tradeReviewChartSettings ?? s.tradeReviewChartSettings),
+            tradeReviewManualAnchorsBySymbol: normalizeTradeReviewManualAnchorsBySymbol(
+              data.data.tradeReviewManualAnchorsBySymbol ?? s.tradeReviewManualAnchorsBySymbol
+            ),
+          }))
         } else {
           // First login — upload current localStorage state to cloud
           await saveToCloud(get())
@@ -142,6 +219,7 @@ export const useSettingsStore = create(
       setAnalyticsWinLossMode: (v)         => { set({ analyticsWinLossMode: v }); saveToCloud({ ...get(), analyticsWinLossMode: v }) },
       setAnalyticsRiskMode:    (v)         => { set({ analyticsRiskMode: v });    saveToCloud({ ...get(), analyticsRiskMode: v })    },
       setAnalyticsSqnMode:     (v)         => { set({ analyticsSqnMode: v });     saveToCloud({ ...get(), analyticsSqnMode: v })     },
+      setAnalyticsActiveTab:   (v)         => { set({ analyticsActiveTab: v });   saveToCloud({ ...get(), analyticsActiveTab: v })   },
       setDashboardNote:    (v)             => { set({ dashboardNote: v });      saveToCloud({ ...get(), dashboardNote: v })      },
       setOpenPositionsColumns: (cols)      => { set({ openPositionsColumns: cols }); saveToCloud({ ...get(), openPositionsColumns: cols }) },
       setOpenPositionsColumnOrder: (order) => set({ openPositionsColumnOrder: order }),
@@ -156,14 +234,59 @@ export const useSettingsStore = create(
       setBenchmarkSymbol:  (v)             => { set({ benchmarkSymbol: v });    saveToCloud({ ...get(), benchmarkSymbol: v })    },
       setTradeReviewChartSettings: (settings) => {
         const current = get().tradeReviewChartSettings || {}
-        const next = {
+        const next = normalizeTradeReviewChartSettings({
           ...current,
           ...(settings || {}),
-          weeklyRs: { ...(current.weeklyRs || {}), ...(settings?.weeklyRs || {}) },
-          dailyAnchoredRs: { ...(current.dailyAnchoredRs || {}), ...(settings?.dailyAnchoredRs || {}) },
-        }
+        })
         set({ tradeReviewChartSettings: next })
         saveToCloud({ ...get(), tradeReviewChartSettings: next })
+      },
+      setTradeReviewManualAnchorsBySymbol: (manualAnchorsBySymbol) => {
+        const next = normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol)
+        set({ tradeReviewManualAnchorsBySymbol: next })
+        saveToCloud({ ...get(), tradeReviewManualAnchorsBySymbol: next })
+      },
+      addTradeReviewManualAnchor: (symbol, anchor) => {
+        const upperSymbol = String(symbol || '').trim().toUpperCase()
+        if (!upperSymbol) return
+        const current = normalizeTradeReviewManualAnchorsBySymbol(get().tradeReviewManualAnchorsBySymbol)
+        const next = {
+          ...current,
+          [upperSymbol]: [
+            ...(current[upperSymbol] || []),
+            ...normalizeTradeReviewManualAnchorsBySymbol({ [upperSymbol]: [anchor] })[upperSymbol] || [],
+          ],
+        }
+        set({ tradeReviewManualAnchorsBySymbol: next })
+        saveToCloud({ ...get(), tradeReviewManualAnchorsBySymbol: next })
+      },
+      updateTradeReviewManualAnchor: (symbol, anchorId, updates) => {
+        const upperSymbol = String(symbol || '').trim().toUpperCase()
+        if (!upperSymbol || !anchorId) return
+        const current = normalizeTradeReviewManualAnchorsBySymbol(get().tradeReviewManualAnchorsBySymbol)
+        const next = {
+          ...current,
+          [upperSymbol]: (current[upperSymbol] || [])
+            .map(anchor => anchor.id === anchorId ? {
+              ...anchor,
+              ...normalizeTradeReviewManualAnchorsBySymbol({ [upperSymbol]: [{ ...anchor, ...(updates || {}) }] })[upperSymbol]?.[0],
+            } : anchor)
+            .filter(Boolean),
+        }
+        set({ tradeReviewManualAnchorsBySymbol: next })
+        saveToCloud({ ...get(), tradeReviewManualAnchorsBySymbol: next })
+      },
+      removeTradeReviewManualAnchor: (symbol, anchorId) => {
+        const upperSymbol = String(symbol || '').trim().toUpperCase()
+        if (!upperSymbol || !anchorId) return
+        const current = normalizeTradeReviewManualAnchorsBySymbol(get().tradeReviewManualAnchorsBySymbol)
+        const next = {
+          ...current,
+          [upperSymbol]: (current[upperSymbol] || []).filter(anchor => anchor.id !== anchorId),
+        }
+        if (!next[upperSymbol]?.length) delete next[upperSymbol]
+        set({ tradeReviewManualAnchorsBySymbol: next })
+        saveToCloud({ ...get(), tradeReviewManualAnchorsBySymbol: next })
       },
 
       addAccount: (account) => {
@@ -230,6 +353,12 @@ export const useSettingsStore = create(
           merged.researchAiProvider = persistedState?.useLocalLLM ? 'local' : 'gemini'
         }
         merged.useLocalLLM = merged.researchAiProvider === 'local'
+        merged.tradeReviewChartSettings = normalizeTradeReviewChartSettings(
+          persistedState?.tradeReviewChartSettings ?? currentState?.tradeReviewChartSettings
+        )
+        merged.tradeReviewManualAnchorsBySymbol = normalizeTradeReviewManualAnchorsBySymbol(
+          persistedState?.tradeReviewManualAnchorsBySymbol ?? currentState?.tradeReviewManualAnchorsBySymbol
+        )
         return merged
       },
     }

@@ -1,51 +1,170 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import {
+  applyColumnPreset,
+  DEFAULT_WATCHLIST_COLUMN_ORDER,
+  normalizeColumnOrder,
+} from '../utils/watchlistTableConfig.js'
+import { normalizeThemeAnalyticsHistory, upsertThemeAnalyticsSnapshot } from '../utils/themeAnalytics.js'
+
+export const MARKET_LEADERS_LIST_ID = 'market-leaders'
+export const WATCHLIST_LIST_ID = 'watchlist'
+
+const DEFAULT_LIST_ORDER = [MARKET_LEADERS_LIST_ID, WATCHLIST_LIST_ID]
+const DEFAULT_COLUMN_PRESET = applyColumnPreset('compact')
+const DEFAULT_LISTS = {
+  [MARKET_LEADERS_LIST_ID]: {
+    id: MARKET_LEADERS_LIST_ID,
+    name: 'Market Leaders',
+    symbols: [],
+    rowsBySymbol: {},
+    savedViews: [],
+    columnOrder: [...DEFAULT_COLUMN_PRESET.columnOrder],
+    hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
+    activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
+    controlsCollapsed: true,
+    themeAnalyticsHistory: { theme: [], ecosystem: [] },
+    lastUpdated: null,
+  },
+  [WATCHLIST_LIST_ID]: {
+    id: WATCHLIST_LIST_ID,
+    name: 'Watchlist',
+    symbols: [],
+    rowsBySymbol: {},
+    savedViews: [],
+    columnOrder: [...DEFAULT_COLUMN_PRESET.columnOrder],
+    hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
+    activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
+    controlsCollapsed: true,
+    themeAnalyticsHistory: { theme: [], ecosystem: [] },
+    lastUpdated: null,
+  },
+}
+
+function normalizeSymbols(symbols) {
+  return [...new Set((symbols || []).map(s => (s || '').trim().toUpperCase()).filter(Boolean))]
+}
+
+function makeListPatch(list, patch = {}) {
+  const hasPatch = key => Object.prototype.hasOwnProperty.call(patch, key)
+
+  return {
+    ...list,
+    ...patch,
+    symbols: hasPatch('symbols') ? normalizeSymbols(patch.symbols) : (list.symbols ?? []),
+    rowsBySymbol: hasPatch('rowsBySymbol') ? patch.rowsBySymbol : (list.rowsBySymbol ?? {}),
+    savedViews: hasPatch('savedViews') ? patch.savedViews : (list.savedViews ?? []),
+    columnOrder: hasPatch('columnOrder')
+      ? normalizeColumnOrder(patch.columnOrder)
+      : (list.columnOrder ?? DEFAULT_WATCHLIST_COLUMN_ORDER),
+    hiddenColumns: hasPatch('hiddenColumns') ? patch.hiddenColumns : (list.hiddenColumns ?? [...DEFAULT_COLUMN_PRESET.hiddenColumns]),
+    activeColumnPreset: hasPatch('activeColumnPreset') ? patch.activeColumnPreset : (list.activeColumnPreset ?? DEFAULT_COLUMN_PRESET.presetKey),
+    controlsCollapsed: hasPatch('controlsCollapsed') ? patch.controlsCollapsed : (list.controlsCollapsed ?? true),
+    themeAnalyticsHistory: hasPatch('themeAnalyticsHistory')
+      ? normalizeThemeAnalyticsHistory(patch.themeAnalyticsHistory)
+      : (list.themeAnalyticsHistory ?? { theme: [], ecosystem: [] }),
+    lastUpdated: hasPatch('lastUpdated') ? patch.lastUpdated : (list.lastUpdated ?? null),
+  }
+}
+
+function updateActiveList(state, updater) {
+  const activeListId = state.activeListId || MARKET_LEADERS_LIST_ID
+  const current = state.listsById?.[activeListId] || DEFAULT_LISTS[activeListId] || DEFAULT_LISTS[MARKET_LEADERS_LIST_ID]
+  const patch = updater(current)
+  if (!patch || patch === current) return {}
+  const nextList = makeListPatch(current, patch)
+  return {
+    listsById: {
+      ...state.listsById,
+      [activeListId]: nextList,
+    },
+  }
+}
+
+function sameAnalyticsHistory(a, b) {
+  return JSON.stringify(normalizeThemeAnalyticsHistory(a)) === JSON.stringify(normalizeThemeAnalyticsHistory(b))
+}
+
+function ensureWorkspaceShape(state) {
+  const activeListId = state?.activeListId || MARKET_LEADERS_LIST_ID
+
+  if (state?.listsById) {
+    const listsById = {
+      [MARKET_LEADERS_LIST_ID]: makeListPatch(
+        DEFAULT_LISTS[MARKET_LEADERS_LIST_ID],
+        state.listsById[MARKET_LEADERS_LIST_ID] || {}
+      ),
+      [WATCHLIST_LIST_ID]: makeListPatch(
+        DEFAULT_LISTS[WATCHLIST_LIST_ID],
+        state.listsById[WATCHLIST_LIST_ID] || {}
+      ),
+    }
+    return { activeListId, listsById }
+  }
+
+  // Legacy single-watchlist state migrates into Market Leaders.
+  return {
+    activeListId: MARKET_LEADERS_LIST_ID,
+    listsById: {
+      [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {
+        symbols: state?.symbols || [],
+        rowsBySymbol: state?.rowsBySymbol || {},
+        savedViews: state?.savedViews || [],
+        lastUpdated: state?.lastUpdated || null,
+      }),
+      [WATCHLIST_LIST_ID]: { ...DEFAULT_LISTS[WATCHLIST_LIST_ID] },
+    },
+  }
+}
 
 export const useResearchWatchlistStore = create(
   persist(
-    (set) => ({
-      symbols: [],
-      rowsBySymbol: {},
-      savedViews: [],
-      lastUpdated: null,
+    (set, get) => ({
+      activeListId: MARKET_LEADERS_LIST_ID,
+      listsById: { ...DEFAULT_LISTS },
 
-      setSymbols: (symbols) => set({
-        symbols: [...new Set((symbols || []).map(s => (s || '').trim().toUpperCase()).filter(Boolean))],
-      }),
-
-      replaceWatchlist: (symbols) => set({
-        symbols: [...new Set((symbols || []).map(s => (s || '').trim().toUpperCase()).filter(Boolean))],
-        rowsBySymbol: {},
-        lastUpdated: null,
-      }),
-
-      addSymbols: (symbols) => set(state => ({
-        symbols: [...new Set([...state.symbols, ...(symbols || []).map(s => (s || '').trim().toUpperCase())].filter(Boolean))],
+      setActiveList: (listId) => set(state => ({
+        activeListId: state.listsById[listId] ? listId : state.activeListId,
       })),
 
-      upsertRows: (rows) => set(state => {
-        const next = { ...state.rowsBySymbol }
+      setSymbols: (symbols) => set(state => updateActiveList(state, () => ({
+        symbols,
+      }))),
+
+      replaceWatchlist: (symbols) => set(state => updateActiveList(state, () => ({
+        symbols,
+        rowsBySymbol: {},
+        themeAnalyticsHistory: { theme: [], ecosystem: [] },
+        lastUpdated: null,
+      }))),
+
+      addSymbols: (symbols) => set(state => updateActiveList(state, current => ({
+        symbols: [...current.symbols, ...(symbols || [])],
+      }))),
+
+      upsertRows: (rows) => set(state => updateActiveList(state, current => {
+        const next = { ...current.rowsBySymbol }
         for (const row of rows || []) {
           const symbol = (row?.symbol || '').trim().toUpperCase()
           if (!symbol) continue
           next[symbol] = {
-            ...state.rowsBySymbol[symbol],
+            ...current.rowsBySymbol[symbol],
             ...row,
             symbol,
             updatedAt: new Date().toISOString(),
           }
         }
         return { rowsBySymbol: next, lastUpdated: new Date().toISOString() }
-      }),
+      })),
 
-      updateRow: (symbol, updates) => set(state => {
+      updateRow: (symbol, updates) => set(state => updateActiveList(state, current => {
         const key = (symbol || '').trim().toUpperCase()
-        if (!key) return state
+        if (!key) return current
         return {
           rowsBySymbol: {
-            ...state.rowsBySymbol,
+            ...current.rowsBySymbol,
             [key]: {
-              ...state.rowsBySymbol[key],
+              ...current.rowsBySymbol[key],
               ...updates,
               symbol: key,
               updatedAt: new Date().toISOString(),
@@ -54,31 +173,78 @@ export const useResearchWatchlistStore = create(
           },
           lastUpdated: new Date().toISOString(),
         }
-      }),
+      })),
 
-      removeSymbol: (symbol) => set(state => {
+      removeSymbol: (symbol) => set(state => updateActiveList(state, current => {
         const key = (symbol || '').trim().toUpperCase()
-        const { [key]: _, ...rest } = state.rowsBySymbol
+        const { [key]: _, ...rest } = current.rowsBySymbol
         return {
-          symbols: state.symbols.filter(s => s !== key),
+          symbols: current.symbols.filter(s => s !== key),
           rowsBySymbol: rest,
           lastUpdated: new Date().toISOString(),
         }
-      }),
+      })),
 
-      saveView: (view) => set(state => ({
+      saveView: (view) => set(state => updateActiveList(state, current => ({
         savedViews: [
           { id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...view },
-          ...state.savedViews.filter(v => v.name !== view.name),
+          ...current.savedViews.filter(v => v.name !== view.name),
         ],
+      }))),
+
+      updateColumnLayout: ({ columnOrder, hiddenColumns, activeColumnPreset } = {}) => set(state => updateActiveList(state, current => ({
+        columnOrder: columnOrder ?? current.columnOrder,
+        hiddenColumns: hiddenColumns ?? current.hiddenColumns,
+        activeColumnPreset: activeColumnPreset ?? current.activeColumnPreset,
+      }))),
+
+      setControlsCollapsed: (controlsCollapsed) => set(state => updateActiveList(state, () => ({
+        controlsCollapsed,
+      }))),
+
+      saveThemeAnalyticsSnapshot: ({ groupingMode, snapshotDate, groups } = {}) => set(state => updateActiveList(state, current => {
+        const nextHistory = upsertThemeAnalyticsSnapshot({
+          history: current.themeAnalyticsHistory,
+          groupingMode,
+          snapshotDate,
+          groups,
+        })
+
+        if (sameAnalyticsHistory(current.themeAnalyticsHistory, nextHistory)) return current
+        return { themeAnalyticsHistory: nextHistory }
       })),
 
-      removeView: (id) => set(state => ({
-        savedViews: state.savedViews.filter(v => v.id !== id),
-      })),
+      removeView: (id) => set(state => updateActiveList(state, current => ({
+        savedViews: current.savedViews.filter(v => v.id !== id),
+      }))),
 
-      clear: () => set({ symbols: [], rowsBySymbol: {}, savedViews: [], lastUpdated: null }),
+      clear: () => set(state => updateActiveList(state, () => ({
+        symbols: [],
+        rowsBySymbol: {},
+        savedViews: [],
+        themeAnalyticsHistory: { theme: [], ecosystem: [] },
+        lastUpdated: null,
+      }))),
+
+      resetWorkspaceState: () => set({
+        activeListId: MARKET_LEADERS_LIST_ID,
+        listsById: {
+          [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {}),
+          [WATCHLIST_LIST_ID]: makeListPatch(DEFAULT_LISTS[WATCHLIST_LIST_ID], {}),
+        },
+      }),
+
+      getLists: () => DEFAULT_LIST_ORDER.map(id => get().listsById[id]).filter(Boolean),
     }),
-    { name: 'growth-research-watchlist-v1' }
+    {
+      name: 'growth-research-watchlist-v1',
+      merge: (persistedState, currentState) => {
+        const normalized = ensureWorkspaceShape(persistedState)
+        return {
+          ...currentState,
+          ...normalized,
+        }
+      },
+    }
   )
 )

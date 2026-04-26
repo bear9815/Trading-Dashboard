@@ -1,19 +1,54 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
+  ScatterChart, Scatter, ReferenceLine, LineChart, Line, Cell,
+} from 'recharts'
+import {
+  BarSeries,
+  CandlestickSeries,
+  ColorType,
+  CrosshairMode,
+  createChart,
+  HistogramSeries,
+  LineSeries,
+  createSeriesMarkers,
+} from 'lightweight-charts'
+import {
   Brain, Download, ExternalLink, Layers, ListFilter, Pencil,
-  RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network, TrendingUp,
+  RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network, TrendingUp, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { parseChartMeta } from '../../store/useWatchlistStore.js'
-import { useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
+import { MARKET_LEADERS_LIST_ID, useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
-import { fetchHistory } from '../../utils/marketData.js'
-import { buildAnchoredRsSnapshot, resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
+import { fetchHistoryCached } from '../../utils/historyCache.js'
+import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
+import {
+  buildAnchoredRsSnapshot,
+  aggregateWeeklyBars,
+  buildAvwapOverlays,
+  buildKeltnerShadeBands,
+  buildRollingRsSnapshot,
+  buildYtdAvwapSnapshot,
+  calculateKeltnerChannel,
+  resolveLatestAnchorDate,
+} from '../../utils/tradeReviewChart.js'
+import { buildWatchlistFitMap, filterAndSortWatchlistRows } from '../../utils/watchlistFitSignal.js'
+import {
+  applyColumnPreset,
+  buildVisibleColumnOrder,
+  DEFAULT_WATCHLIST_COLUMN_ORDER,
+  moveColumn,
+  WATCHLIST_COLUMN_PRESETS,
+} from '../../utils/watchlistTableConfig.js'
+import { buildEcosystemCompositeBars } from '../../utils/ecosystemCompositeChart.js'
+import { buildThemeGroupMetrics, buildThemeRotationMetrics } from '../../utils/themeAnalytics.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 
 const SORT_OPTIONS = [
   ['momentum', 'Momentum Rank'],
+  ['fit', 'Fit Score'],
   ['symbol', 'Symbol'],
   ['ecosystem', 'Ecosystem'],
   ['theme', 'Theme'],
@@ -21,9 +56,23 @@ const SORT_OPTIONS = [
   ['relatedDriver', 'Driver'],
 ]
 
+const FIT_FILTER_OPTIONS = [
+  ['all', 'All'],
+  ['green', 'Green'],
+  ['orange', 'Orange'],
+  ['red', 'Red'],
+  ['needs_data', 'Needs Data'],
+]
+
+const THEME_SORT_OPTIONS = [
+  ['strength', 'Strength'],
+  ['breadth', 'Breadth'],
+  ['narrow', 'Narrow Leadership'],
+]
+
 const CSV_COLUMNS = [
   'symbol', 'companyName', 'sector', 'ecosystem', 'theme', 'whatTheyDo',
-  'majorCustomers', 'dependencies', 'relatedDriver', 'anchoredRsZ', 'customerOf', 'supplierTo', 'competesWith',
+  'majorCustomers', 'dependencies', 'relatedDriver', 'anchoredRsZ', 'rollingRsZ', 'finraShortInterest', 'finraEstimatedShortInterest', 'finraEstimatedChangePct', 'finraEstimatedConfidence', 'finraDaysToCover', 'finraSettlementDate', 'customerOf', 'supplierTo', 'competesWith',
 ]
 
 const EMPTY_ROW = {
@@ -39,6 +88,64 @@ const EMPTY_ROW = {
   customerOf: [],
   supplierTo: [],
   competesWith: [],
+}
+
+const WATCHLIST_HISTORY_TTL_MS = 6 * 60 * 60 * 1000
+const WATCHLIST_HISTORY_CONCURRENCY = 8
+
+function toDateKey(value) {
+  return new Date(value).toISOString().slice(0, 10)
+}
+
+function normalizeChartBars(bars = []) {
+  return bars
+    .map(bar => {
+      const parsedTime = bar?.time
+      const time = typeof parsedTime === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsedTime)
+        ? parsedTime
+        : parsedTime
+          ? toDateKey(parsedTime)
+          : null
+      const open = Number(bar?.open)
+      const high = Number(bar?.high)
+      const low = Number(bar?.low)
+      const close = Number(bar?.close)
+      const volume = Number(bar?.volume || 0)
+      if (!time || !Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
+        return null
+      }
+      const rising = close >= open
+      const color = rising ? '#16a34a' : '#dc2626'
+      return {
+        time,
+        open,
+        high,
+        low,
+        close,
+        volume,
+        color,
+        wickColor: color,
+        borderColor: color,
+      }
+    })
+    .filter(Boolean)
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length)
+  let cursor = 0
+
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor
+      cursor += 1
+      results[index] = await mapper(items[index], index)
+    }
+  }
+
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length || 1)) }, () => worker())
+  await Promise.all(workers)
+  return results
 }
 
 function parseImportedSymbols(text) {
@@ -203,7 +310,20 @@ function formatZScore(value) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}z`
 }
 
-function AnchoredRsCell({ snapshot, loading = false }) {
+function formatCompactNumber(value) {
+  if (!Number.isFinite(value)) return '—'
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: value >= 1000 ? 1 : 0,
+  }).format(value)
+}
+
+function formatSignedPercent(value) {
+  if (!Number.isFinite(value)) return '—'
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
+}
+
+function RsCell({ snapshot, loading = false, footerLabel = null }) {
   if (!snapshot) return <span className="text-gray-600">{loading ? 'Loading…' : 'Not loaded'}</span>
   if (!Number.isFinite(snapshot.zScore)) return <span className="text-gray-600">No signal</span>
   const positive = snapshot.zScore > 0
@@ -223,7 +343,88 @@ function AnchoredRsCell({ snapshot, loading = false }) {
         {formatZScore(snapshot.zScore)}
       </span>
       <p className="text-[10px] text-gray-600">EMA {formatZScore(snapshot.signalLine)}</p>
-      <p className="text-[10px] text-gray-600">Anchor {snapshot.anchorDate || '—'}</p>
+      {footerLabel && <p className="text-[10px] text-gray-600">{footerLabel}</p>}
+    </div>
+  )
+}
+
+function FinraShortInterestCell({ snapshot, loading = false }) {
+  if (!snapshot) return <span className="text-gray-600">{loading ? 'Loading…' : 'Not loaded'}</span>
+  if (!snapshot.settlementDate) return <span className="text-gray-600">{loading ? 'Loading…' : 'No FINRA record'}</span>
+
+  const positive = Number.isFinite(snapshot.changePercent) && snapshot.changePercent > 0
+  const negative = Number.isFinite(snapshot.changePercent) && snapshot.changePercent < 0
+  return (
+    <div className="space-y-1">
+      <span
+        className={`inline-flex items-center rounded px-2 py-1 text-xs font-semibold border ${
+          positive
+            ? 'text-accent-red border-accent-red/25 bg-accent-red/10'
+            : negative
+              ? 'text-accent-green border-accent-green/25 bg-accent-green/10'
+              : 'text-gray-300 border-white/10 bg-white/[0.03]'
+        }`}
+      >
+        {formatCompactNumber(snapshot.currentShortPositionQuantity)}
+      </span>
+      <p className="text-[10px] text-gray-600">DTC {Number.isFinite(snapshot.daysToCoverQuantity) ? snapshot.daysToCoverQuantity.toFixed(2) : '—'}</p>
+      <p className={`text-[10px] ${positive ? 'text-accent-red' : negative ? 'text-accent-green' : 'text-gray-600'}`}>
+        {formatSignedPercent(snapshot.changePercent)} vs prior
+      </p>
+      <p className="text-[10px] text-gray-600">{snapshot.settlementDate}</p>
+    </div>
+  )
+}
+
+function FinraEstimatedShortInterestCell({ estimate, loading = false }) {
+  if (!estimate) return <span className="text-gray-600">{loading ? 'Loading…' : 'Not loaded'}</span>
+  if (!Number.isFinite(estimate.estimatedCurrentShortInterest)) return <span className="text-gray-600">{loading ? 'Loading…' : 'No estimate'}</span>
+
+  const positive = Number.isFinite(estimate.estimatedPercentChangeSinceReport) && estimate.estimatedPercentChangeSinceReport > 0
+  const negative = Number.isFinite(estimate.estimatedPercentChangeSinceReport) && estimate.estimatedPercentChangeSinceReport < 0
+  return (
+    <div className="space-y-1">
+      <span
+        className={`inline-flex items-center rounded px-2 py-1 text-xs font-semibold border ${
+          positive
+            ? 'text-accent-red border-accent-red/25 bg-accent-red/10'
+            : negative
+              ? 'text-accent-green border-accent-green/25 bg-accent-green/10'
+              : 'text-gray-300 border-white/10 bg-white/[0.03]'
+        }`}
+      >
+        {formatCompactNumber(estimate.estimatedCurrentShortInterest)}
+      </span>
+      <p className={`text-[10px] ${positive ? 'text-accent-red' : negative ? 'text-accent-green' : 'text-gray-600'}`}>
+        {formatSignedPercent(estimate.estimatedPercentChangeSinceReport)} vs report
+      </p>
+      <p className="text-[10px] text-gray-600">Conf {estimate.confidenceScore ?? '—'}/100</p>
+      <p className="text-[10px] text-gray-600">
+        {formatCompactNumber(estimate.lowEstimate)}-{formatCompactNumber(estimate.highEstimate)}
+      </p>
+    </div>
+  )
+}
+
+function YtdAvwapCell({ snapshot, loading = false }) {
+  if (!snapshot) return <span className="text-gray-600">{loading ? 'Loading…' : 'Not loaded'}</span>
+  if (!Number.isFinite(snapshot.distancePct) || snapshot.isAbove == null) return <span className="text-gray-600">{loading ? 'Loading…' : 'No signal'}</span>
+
+  const positive = snapshot.isAbove
+  return (
+    <div className="space-y-1">
+      <span
+        className={`inline-flex items-center rounded px-2 py-1 text-xs font-semibold border ${
+          positive
+            ? 'text-accent-green border-accent-green/25 bg-accent-green/10'
+            : 'text-accent-red border-accent-red/25 bg-accent-red/10'
+        }`}
+      >
+        {positive ? 'Above' : 'Below'}
+      </span>
+      <p className={`text-[10px] ${positive ? 'text-accent-green' : 'text-accent-red'}`}>
+        {formatSignedPercent(snapshot.distancePct)} vs YTD
+      </p>
     </div>
   )
 }
@@ -252,6 +453,265 @@ function GroupList({ title, items, empty }) {
       )}
     </div>
   )
+}
+
+function formatMetric(value, suffix = '', decimals = 1) {
+  if (!Number.isFinite(value)) return '—'
+  return `${value >= 0 ? '+' : ''}${value.toFixed(decimals)}${suffix}`
+}
+
+function ThemeHealthTone(label) {
+  if (label === 'broad leadership') return 'text-accent-green bg-accent-green/10 border-accent-green/20'
+  if (label === 'narrow leadership') return 'text-accent-yellow bg-accent-yellow/10 border-accent-yellow/20'
+  if (label === 'weak / deteriorating') return 'text-accent-red bg-accent-red/10 border-accent-red/20'
+  return 'text-accent-blue bg-accent-blue/10 border-accent-blue/20'
+}
+
+function RotationStatusTone(label) {
+  if (label === 'broadening' || label === 'emerging leadership') return 'text-accent-green bg-accent-green/10 border-accent-green/20'
+  if (label === 'late / crowded') return 'text-accent-yellow bg-accent-yellow/10 border-accent-yellow/20'
+  if (label === 'failing' || label === 'under pressure') return 'text-accent-red bg-accent-red/10 border-accent-red/20'
+  return 'text-accent-blue bg-accent-blue/10 border-accent-blue/20'
+}
+
+function RotationQuadrantLabel(quadrant) {
+  switch (quadrant) {
+    case 'strong_improving':
+      return 'Strong + Improving'
+    case 'strong_fading':
+      return 'Strong + Fading'
+    case 'weak_improving':
+      return 'Weak + Improving'
+    case 'weak_deteriorating':
+      return 'Weak + Deteriorating'
+    default:
+      return 'Insufficient History'
+  }
+}
+
+const ECOSYSTEM_CHART_OPTIONS = {
+  layout: {
+    background: { color: '#d7d7d7' },
+    textColor: '#2b3037',
+    fontFamily: 'Inter, sans-serif',
+  },
+  grid: {
+    vertLines: { color: 'rgba(120, 126, 136, 0.16)' },
+    horzLines: { color: 'rgba(120, 126, 136, 0.22)' },
+  },
+  rightPriceScale: {
+    borderColor: 'rgba(95, 99, 106, 0.22)',
+    scaleMargins: { top: 0.08, bottom: 0.12 },
+  },
+  timeScale: {
+    borderColor: 'rgba(95, 99, 106, 0.22)',
+    timeVisible: false,
+    secondsVisible: false,
+  },
+  crosshair: { mode: CrosshairMode.Normal },
+  handleScroll: true,
+  handleScale: true,
+}
+
+function drawEcosystemShadeBands(canvas, chart, priceSeries, bands) {
+  if (!canvas || !chart || !priceSeries) return
+  const rect = canvas.getBoundingClientRect()
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr))
+  canvas.height = Math.max(1, Math.floor(rect.height * dpr))
+  const ctx = canvas.getContext('2d')
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, rect.width, rect.height)
+
+  for (const band of [...(bands || [])].sort((a, b) => Number(b.period) - Number(a.period))) {
+    const upper = []
+    const lower = []
+    for (const row of band.rows || []) {
+      const x = chart.timeScale().timeToCoordinate(row.time)
+      const yUpper = priceSeries.priceToCoordinate(row.upper)
+      const yLower = priceSeries.priceToCoordinate(row.lower)
+      if (x == null || yUpper == null || yLower == null) continue
+      upper.push({ x, y: yUpper })
+      lower.push({ x, y: yLower })
+    }
+    if (upper.length < 2 || lower.length < 2) continue
+    ctx.beginPath()
+    ctx.moveTo(upper[0].x, upper[0].y)
+    for (const point of upper.slice(1)) ctx.lineTo(point.x, point.y)
+    for (const point of lower.slice().reverse()) ctx.lineTo(point.x, point.y)
+    ctx.closePath()
+    ctx.fillStyle = band.fillColor
+    ctx.fill()
+  }
+}
+
+function EcosystemLightweightPane({ data, kind, height, chartType }) {
+  const chartContainerRef = useRef(null)
+  const shadeCanvasRef = useRef(null)
+
+  useEffect(() => {
+    if (!chartContainerRef.current) return undefined
+    const chart = createChart(chartContainerRef.current, {
+      ...ECOSYSTEM_CHART_OPTIONS,
+      height,
+      width: chartContainerRef.current.clientWidth,
+    })
+    const candles = kind === 'weekly' ? data.weeklyBars : data.dailyBars
+    const priceSeries = chart.addSeries(
+      chartType === 'hlc' ? BarSeries : CandlestickSeries,
+      chartType === 'hlc'
+        ? {
+            upColor: '#2877e3',
+            downColor: '#ea4ce7',
+            openVisible: false,
+            thinBars: false,
+            priceLineVisible: false,
+          }
+        : {
+            upColor: '#2877e3',
+            downColor: '#ea4ce7',
+            borderVisible: true,
+            wickUpColor: '#2877e3',
+            wickDownColor: '#ea4ce7',
+            priceLineVisible: false,
+          }
+    )
+    priceSeries.setData(candles)
+
+    if (kind === 'daily') {
+      const volumeSeries = chart.addSeries(HistogramSeries, {
+        priceFormat: { type: 'volume' },
+        priceScaleId: '',
+        priceLineVisible: false,
+        lastValueVisible: false,
+      })
+      volumeSeries.setData(
+        data.dailyBars.map(bar => ({
+          time: bar.time,
+          value: bar.volume,
+          color: bar.close >= bar.open ? '#2877e3' : '#ea4ce7',
+        }))
+      )
+      volumeSeries.priceScale().applyOptions({
+        scaleMargins: { top: 0.84, bottom: 0 },
+      })
+
+      for (const overlay of data.avwapOverlays || []) {
+        const series = chart.addSeries(LineSeries, {
+          color: overlay.color,
+          lineWidth: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        })
+        series.setData(overlay.series)
+      }
+
+      createSeriesMarkers(priceSeries, (data.avwapOverlays || []).map(overlay => ({
+        time: overlay.series?.[0]?.time || overlay.anchorDate,
+        position: 'belowBar',
+        color: overlay.color,
+        shape: 'circle',
+        text: overlay.label,
+        size: 0.8,
+      })).filter(marker => marker.time))
+    }
+
+    const bands = kind === 'weekly' ? data.weeklyKeltnerShades : data.keltnerShades
+    const redraw = () => {
+      requestAnimationFrame(() => {
+        drawEcosystemShadeBands(shadeCanvasRef.current, chart, priceSeries, bands)
+      })
+    }
+    chart.timeScale().fitContent()
+    redraw()
+    chart.timeScale().subscribeVisibleTimeRangeChange(redraw)
+
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      chart.applyOptions({ width: Math.floor(entry.contentRect.width), height })
+      redraw()
+    })
+    resizeObserver.observe(chartContainerRef.current)
+
+    return () => {
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(redraw)
+      resizeObserver.disconnect()
+      chart.remove()
+    }
+  }, [chartType, data, height, kind])
+
+  return (
+    <div className="relative w-full" style={{ height }}>
+      <div ref={chartContainerRef} className="absolute inset-0" />
+      <canvas ref={shadeCanvasRef} className="pointer-events-none absolute inset-0 z-10 h-full w-full" aria-hidden="true" />
+    </div>
+  )
+}
+
+function EcosystemCompositeChart({
+  data,
+  chartType = 'candlestick',
+  title = 'Ecosystem',
+  memberCount = 0,
+  ytdEnabled = false,
+  onToggleYtd,
+  chartLabel = 'Ecosystem Symbol',
+  badgeLabel = 'Synthetic',
+  emptyLabel = 'No chart data for this ecosystem',
+}) {
+  const hasBars = data?.dailyBars?.length
+  return (
+    <div className="rounded-lg overflow-hidden border border-black/20 bg-[#d7d7d7] shadow-sm">
+      <div className="px-2 py-1.5 border-b border-black/15 text-[#242830]">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold mono">{title} · {chartLabel}</p>
+            <p className="text-[10px] text-[#505760]">KC13/34/65 · YTD AVWAP · {memberCount} member{memberCount === 1 ? '' : 's'}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onToggleYtd}
+              className={`px-2 py-0.5 text-[10px] font-semibold rounded border transition-colors ${
+                ytdEnabled
+                  ? 'bg-[#f59e0b]/20 border-[#f59e0b]/40 text-[#7a4b00]'
+                  : 'bg-white/70 border-black/10 text-[#505760]'
+              }`}
+            >
+              YTD AVWAP
+            </button>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">{badgeLabel}</span>
+          </div>
+        </div>
+      </div>
+      {!hasBars ? (
+        <div className="h-[520px] flex items-center justify-center text-xs text-[#505760]">{emptyLabel}</div>
+      ) : (
+        <div>
+          <div className="relative border-b-4 border-[#242424]">
+            <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1W</span>
+            <EcosystemLightweightPane data={data} kind="weekly" height={190} chartType={chartType} />
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
+              {title}
+            </div>
+          </div>
+          <div className="relative">
+            <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1D</span>
+            <EcosystemLightweightPane data={data} kind="daily" height={350} chartType={chartType} />
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
+              {title}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function toggleYtdAvwap(setTradeReviewChartSettings, chartSettings) {
+  const nextPresets = (chartSettings?.avwapPresets || []).map(preset =>
+    preset.id === 'ytd' ? { ...preset, enabled: !preset.enabled } : preset
+  )
+  setTradeReviewChartSettings({ avwapPresets: nextPresets })
 }
 
 function RelationshipExplorer({ row, rows, rowsBySymbol }) {
@@ -447,11 +907,43 @@ export default function ThemeWatchlist({
   apiKey = '',
   openRouterApiKey = '',
   researchOpenRouterModel = '',
+  mode = 'table',
 }) {
   const { themes } = useThematicStore()
   const { sources } = useResearchLibraryStore()
-  const { symbols, rowsBySymbol, savedViews, replaceWatchlist, upsertRows, updateRow, removeSymbol, saveView, removeView, clear } = useResearchWatchlistStore()
-  const { tradeReviewChartSettings } = useSettingsStore()
+  const {
+    activeListId,
+    listsById,
+    setActiveList,
+    replaceWatchlist,
+    upsertRows,
+    updateRow,
+    removeSymbol,
+    saveView,
+    removeView,
+    updateColumnLayout,
+    setControlsCollapsed,
+    saveThemeAnalyticsSnapshot,
+    clear,
+  } = useResearchWatchlistStore()
+  const { tradeReviewChartSettings, setTradeReviewChartSettings } = useSettingsStore()
+  const analyticsMode = mode === 'analytics'
+  const activeList = listsById[activeListId]
+  const symbols = activeList?.symbols || []
+  const rowsBySymbol = activeList?.rowsBySymbol || {}
+  const savedViews = activeList?.savedViews || []
+  const columnOrder = activeList?.columnOrder || DEFAULT_WATCHLIST_COLUMN_ORDER
+  const hiddenColumns = activeList?.hiddenColumns || []
+  const activeColumnPreset = activeList?.activeColumnPreset || 'compact'
+  const controlsCollapsed = activeList?.controlsCollapsed ?? true
+  const themeAnalyticsHistory = activeList?.themeAnalyticsHistory || { theme: [], ecosystem: [] }
+  const watchlists = useMemo(
+    () => Object.values(listsById || {}).sort((a, b) => {
+      const order = { 'market-leaders': 0, watchlist: 1 }
+      return (order[a.id] ?? 99) - (order[b.id] ?? 99)
+    }),
+    [listsById]
+  )
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -459,11 +951,26 @@ export default function ThemeWatchlist({
   const [error, setError] = useState('')
   const [sortKey, setSortKey] = useState('momentum')
   const [sortDir, setSortDir] = useState('asc')
+  const [fitFilter, setFitFilter] = useState('all')
   const [editingSymbol, setEditingSymbol] = useState(null)
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [viewName, setViewName] = useState('')
-  const [rsBySymbol, setRsBySymbol] = useState({})
-  const [rsLoading, setRsLoading] = useState(false)
+  const [draggedColumnId, setDraggedColumnId] = useState(null)
+  const themeGrouping = 'theme'
+  const [themeSortMode, setThemeSortMode] = useState('strength')
+  const [selectedThemeGroupKey, setSelectedThemeGroupKey] = useState('')
+  const [anchoredRsBySymbol, setAnchoredRsBySymbol] = useState({})
+  const [rollingRsBySymbol, setRollingRsBySymbol] = useState({})
+  const [historyBarsBySymbol, setHistoryBarsBySymbol] = useState({})
+  const [benchmarkHistoryBars, setBenchmarkHistoryBars] = useState([])
+  const [ytdAvwapBySymbol, setYtdAvwapBySymbol] = useState({})
+  const [finraBySymbol, setFinraBySymbol] = useState({})
+  const [finraEstimateBySymbol, setFinraEstimateBySymbol] = useState({})
+  const [anchoredRsLoading, setAnchoredRsLoading] = useState(false)
+  const [rollingRsLoading, setRollingRsLoading] = useState(false)
+  const [ytdAvwapLoading, setYtdAvwapLoading] = useState(false)
+  const [finraLoading, setFinraLoading] = useState(false)
+  const [finraLoadedKey, setFinraLoadedKey] = useState('')
   const [page, setPage] = useState(1)
   const pageSize = 40
   const fileRef = useRef(null)
@@ -476,6 +983,22 @@ export default function ThemeWatchlist({
     }),
     [tradeReviewChartSettings]
   )
+  const rollingRsSettingsKey = useMemo(
+    () => JSON.stringify({
+      benchmarkSymbol: tradeReviewChartSettings?.benchmarkSymbol || 'SPY',
+      dailyRollingRs: tradeReviewChartSettings?.dailyRollingRs || {},
+    }),
+    [tradeReviewChartSettings]
+  )
+  const finraSettingsKey = useMemo(() => symbols.join('|'), [symbols])
+
+  useEffect(() => {
+    setSelectedSymbol(null)
+    setEditingSymbol(null)
+    setPage(1)
+    setStatus('')
+    setError('')
+  }, [activeListId])
 
   const rows = useMemo(
     () => symbols.map(symbol => rowsBySymbol[symbol]).filter(Boolean),
@@ -487,29 +1010,461 @@ export default function ThemeWatchlist({
     [symbols]
   )
 
-  const filteredRows = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const base = !q ? rows : rows.filter(row =>
-      row.symbol?.toLowerCase().includes(q) ||
-      row.companyName?.toLowerCase().includes(q) ||
-      row.ecosystem?.toLowerCase().includes(q) ||
-      row.theme?.toLowerCase().includes(q) ||
-      row.relatedDriver?.toLowerCase().includes(q) ||
-      row.whatTheyDo?.toLowerCase().includes(q)
-    )
+  const fitBySymbol = useMemo(
+    () => buildWatchlistFitMap({
+      symbols,
+      anchoredRsBySymbol,
+      rollingRsBySymbol,
+    }),
+    [symbols, anchoredRsBySymbol, rollingRsBySymbol]
+  )
 
-    return [...base].sort((a, b) => {
-      if (sortKey === 'momentum') {
-        const av = rankBySymbol[a.symbol] ?? Number.MAX_SAFE_INTEGER
-        const bv = rankBySymbol[b.symbol] ?? Number.MAX_SAFE_INTEGER
-        return sortDir === 'asc' ? av - bv : bv - av
-      }
-      const av = arrayText(a[sortKey]).toLowerCase()
-      const bv = arrayText(b[sortKey]).toLowerCase()
-      const result = av.localeCompare(bv)
-      return sortDir === 'asc' ? result : -result
+  const latestAnchorDate = useMemo(
+    () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
+    [tradeReviewChartSettings?.anchorDates]
+  )
+  const ecosystemYtdEnabled = Boolean(tradeReviewChartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
+  const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
+
+  const visibleColumnOrder = useMemo(
+    () => buildVisibleColumnOrder({ columnOrder, hiddenColumns }),
+    [columnOrder, hiddenColumns]
+  )
+  const finraColumnsVisible = useMemo(
+    () => !analyticsMode && visibleColumnOrder.some(columnId => columnId === 'finraShortInterest' || columnId === 'finraEstimatedShortInterest'),
+    [analyticsMode, visibleColumnOrder]
+  )
+
+  const themeGroupsAnalytics = useMemo(
+    () => buildThemeGroupMetrics({
+      rows,
+      groupBy: 'theme',
+      fitBySymbol,
+      rollingRsBySymbol,
+      anchoredRsBySymbol,
+    }),
+    [rows, fitBySymbol, rollingRsBySymbol, anchoredRsBySymbol]
+  )
+
+  const ecosystemGroupsAnalytics = useMemo(
+    () => buildThemeGroupMetrics({
+      rows,
+      groupBy: 'ecosystem',
+      fitBySymbol,
+      rollingRsBySymbol,
+      anchoredRsBySymbol,
+    }),
+    [rows, fitBySymbol, rollingRsBySymbol, anchoredRsBySymbol]
+  )
+
+  const activeGrouping = analyticsMode ? 'ecosystem' : themeGrouping
+  const activeThemeGroups = activeGrouping === 'ecosystem' ? ecosystemGroupsAnalytics : themeGroupsAnalytics
+
+  const sortedThemeGroups = useMemo(() => {
+    const groups = [...activeThemeGroups]
+    if (themeSortMode === 'breadth') {
+      return groups.sort((a, b) => (b.greenPct - a.greenPct) || (b.rollingAboveSignalPct - a.rollingAboveSignalPct) || b.count - a.count)
+    }
+    if (themeSortMode === 'narrow') {
+      return groups.sort((a, b) => (b.leaderSpread ?? -Infinity) - (a.leaderSpread ?? -Infinity) || (b.currentStrengthScore ?? -Infinity) - (a.currentStrengthScore ?? -Infinity))
+    }
+    return groups.sort((a, b) => (b.currentStrengthScore ?? -Infinity) - (a.currentStrengthScore ?? -Infinity) || b.count - a.count)
+  }, [activeThemeGroups, themeSortMode])
+
+  const themeRotationGroups = useMemo(
+    () => buildThemeRotationMetrics({
+      currentGroups: activeThemeGroups,
+      history: themeAnalyticsHistory[activeGrouping] || [],
+    }),
+    [activeGrouping, activeThemeGroups, themeAnalyticsHistory]
+  )
+
+  const rotationLeaderboards = useMemo(() => ({
+    strongImproving: themeRotationGroups
+      .filter(group => group.quadrant === 'strong_improving')
+      .sort((a, b) => (b.deltaStrength5d ?? -Infinity) - (a.deltaStrength5d ?? -Infinity) || (b.deltaGreenPct5d ?? -Infinity) - (a.deltaGreenPct5d ?? -Infinity))
+      .slice(0, 4),
+    strongFading: themeRotationGroups
+      .filter(group => group.quadrant === 'strong_fading')
+      .sort((a, b) => (a.deltaStrength5d ?? Infinity) - (b.deltaStrength5d ?? Infinity) || (a.deltaGreenPct5d ?? Infinity) - (b.deltaGreenPct5d ?? Infinity))
+      .slice(0, 4),
+    weakImproving: themeRotationGroups
+      .filter(group => group.quadrant === 'weak_improving')
+      .sort((a, b) => (b.deltaStrength5d ?? -Infinity) - (a.deltaStrength5d ?? -Infinity) || (b.improvingSymbolCount5d ?? -Infinity) - (a.improvingSymbolCount5d ?? -Infinity))
+      .slice(0, 4),
+    weakDeteriorating: themeRotationGroups
+      .filter(group => group.quadrant === 'weak_deteriorating')
+      .sort((a, b) => (a.deltaStrength5d ?? Infinity) - (b.deltaStrength5d ?? Infinity) || (b.deterioratingSymbolCount5d ?? -Infinity) - (a.deterioratingSymbolCount5d ?? -Infinity))
+      .slice(0, 4),
+  }), [themeRotationGroups])
+
+  const selectedThemeGroup = useMemo(
+    () => activeThemeGroups.find(group => group.key === selectedThemeGroupKey) || sortedThemeGroups[0] || null,
+    [activeThemeGroups, selectedThemeGroupKey, sortedThemeGroups]
+  )
+
+  const selectedThemeRotation = useMemo(
+    () => themeRotationGroups.find(group => group.key === selectedThemeGroup?.key) || null,
+    [themeRotationGroups, selectedThemeGroup]
+  )
+
+  const selectedThemeMembers = useMemo(() => {
+    if (!selectedThemeGroup) return []
+    return selectedThemeGroup.symbols
+      .map(symbol => {
+        const row = rowsBySymbol[symbol]
+        if (!row) return null
+        return {
+          ...row,
+          fit: fitBySymbol[symbol],
+          rolling: rollingRsBySymbol[symbol],
+          anchored: anchoredRsBySymbol[symbol],
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        const af = a.fit?.fitReady ? 1 : 0
+        const bf = b.fit?.fitReady ? 1 : 0
+        if (af !== bf) return bf - af
+        if ((a.fit?.fitScore ?? Number.NEGATIVE_INFINITY) !== (b.fit?.fitScore ?? Number.NEGATIVE_INFINITY)) {
+          return (b.fit?.fitScore ?? Number.NEGATIVE_INFINITY) - (a.fit?.fitScore ?? Number.NEGATIVE_INFINITY)
+        }
+        return (b.rolling?.zScore ?? Number.NEGATIVE_INFINITY) - (a.rolling?.zScore ?? Number.NEGATIVE_INFINITY)
+      })
+  }, [anchoredRsBySymbol, fitBySymbol, rollingRsBySymbol, rowsBySymbol, selectedThemeGroup])
+
+  const selectedEcosystemComposite = useMemo(() => {
+    if (!analyticsMode || !selectedThemeGroup) return { dailyBars: [], weeklyBars: [], memberCount: 0 }
+    return buildEcosystemCompositeBars(selectedThemeGroup.symbols, historyBarsBySymbol)
+  }, [analyticsMode, historyBarsBySymbol, selectedThemeGroup])
+
+  const selectedEcosystemChartData = useMemo(() => {
+    if (!analyticsMode || !selectedThemeGroup || !selectedEcosystemComposite.dailyBars.length) {
+      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    }
+    const avwapOverlays = buildAvwapOverlays(
+      selectedEcosystemComposite.dailyBars,
+      selectedThemeGroup.label,
+      tradeReviewChartSettings,
+      {},
+      new Date(),
+      null
+    )
+    const dailyKeltner = {
+      13: calculateKeltnerChannel(selectedEcosystemComposite.dailyBars, 13, 0.25),
+      34: calculateKeltnerChannel(selectedEcosystemComposite.dailyBars, 34, 0.25),
+      65: calculateKeltnerChannel(selectedEcosystemComposite.dailyBars, 65, 0.25),
+    }
+    const weeklyKeltner = {
+      13: calculateKeltnerChannel(selectedEcosystemComposite.weeklyBars, 13, 0.25),
+      34: calculateKeltnerChannel(selectedEcosystemComposite.weeklyBars, 34, 0.25),
+      65: calculateKeltnerChannel(selectedEcosystemComposite.weeklyBars, 65, 0.25),
+    }
+    return {
+      ...selectedEcosystemComposite,
+      benchmarkBars: benchmarkHistoryBars,
+      avwapOverlays,
+      keltnerShades: buildKeltnerShadeBands(dailyKeltner),
+      weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
+    }
+  }, [analyticsMode, benchmarkHistoryBars, selectedEcosystemComposite, selectedThemeGroup, tradeReviewChartSettings])
+
+  const marketLeadersComposite = useMemo(() => {
+    if (activeListId !== MARKET_LEADERS_LIST_ID) return { dailyBars: [], weeklyBars: [], memberCount: 0 }
+    return buildEcosystemCompositeBars(symbols, historyBarsBySymbol)
+  }, [activeListId, historyBarsBySymbol, symbols])
+
+  const marketLeadersChartData = useMemo(() => {
+    if (activeListId !== MARKET_LEADERS_LIST_ID || !marketLeadersComposite.dailyBars.length) {
+      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    }
+    const avwapOverlays = buildAvwapOverlays(
+      marketLeadersComposite.dailyBars,
+      'Market Leaders',
+      tradeReviewChartSettings,
+      {},
+      new Date(),
+      null
+    )
+    const dailyKeltner = {
+      13: calculateKeltnerChannel(marketLeadersComposite.dailyBars, 13, 0.25),
+      34: calculateKeltnerChannel(marketLeadersComposite.dailyBars, 34, 0.25),
+      65: calculateKeltnerChannel(marketLeadersComposite.dailyBars, 65, 0.25),
+    }
+    const weeklyKeltner = {
+      13: calculateKeltnerChannel(marketLeadersComposite.weeklyBars, 13, 0.25),
+      34: calculateKeltnerChannel(marketLeadersComposite.weeklyBars, 34, 0.25),
+      65: calculateKeltnerChannel(marketLeadersComposite.weeklyBars, 65, 0.25),
+    }
+    return {
+      ...marketLeadersComposite,
+      benchmarkBars: benchmarkHistoryBars,
+      avwapOverlays,
+      keltnerShades: buildKeltnerShadeBands(dailyKeltner),
+      weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
+    }
+  }, [activeListId, benchmarkHistoryBars, marketLeadersComposite, tradeReviewChartSettings])
+
+  const handleColumnVisibilityToggle = useCallback((columnId) => {
+    const nextHidden = hiddenColumns.includes(columnId)
+      ? hiddenColumns.filter(id => id !== columnId)
+      : [...hiddenColumns, columnId]
+    updateColumnLayout({
+      hiddenColumns: nextHidden,
+      activeColumnPreset: 'custom',
     })
-  }, [rows, query, sortKey, sortDir, rankBySymbol])
+  }, [hiddenColumns, updateColumnLayout])
+
+  const handleApplyPreset = useCallback((presetKey) => {
+    const preset = applyColumnPreset(presetKey)
+    updateColumnLayout(preset)
+  }, [updateColumnLayout])
+
+  const handleColumnDrop = useCallback((targetColumnId) => {
+    if (!draggedColumnId || draggedColumnId === targetColumnId) return
+    updateColumnLayout({
+      columnOrder: moveColumn(columnOrder, draggedColumnId, targetColumnId),
+      activeColumnPreset: 'custom',
+    })
+    setDraggedColumnId(null)
+  }, [columnOrder, draggedColumnId, updateColumnLayout])
+
+  const columnDefinitions = useMemo(() => ([
+    {
+      id: 'symbol',
+      label: 'Symbol',
+      cellClassName: 'px-3 py-2.5 pl-2',
+      render: (row) => {
+        const fit = fitBySymbol[row.symbol]
+        const fitBorderClass = fit?.fitColor === 'green'
+          ? 'border-l-accent-green'
+          : fit?.fitColor === 'orange'
+            ? 'border-l-accent-yellow'
+            : fit?.fitColor === 'red'
+              ? 'border-l-accent-red'
+              : 'border-l-white/10'
+        const fitBadgeClass = fit?.fitColor === 'green'
+          ? 'bg-accent-green'
+          : fit?.fitColor === 'orange'
+            ? 'bg-accent-yellow'
+            : fit?.fitColor === 'red'
+              ? 'bg-accent-red'
+              : 'bg-white/15'
+        return (
+          <div className={`font-semibold border-l-2 ${fitBorderClass}`}>
+            <div className="flex items-center gap-2 pl-2">
+              <div className="group relative shrink-0" onClick={e => e.stopPropagation()}>
+                <span
+                  className={`block h-3 w-3 rounded-full ${fitBadgeClass}`}
+                  aria-label={fit?.fitLabel || 'Needs Data'}
+                />
+                <div className="pointer-events-none absolute left-5 top-1/2 z-20 hidden w-56 -translate-y-1/2 rounded-lg border border-white/10 bg-surface-50 px-3 py-2 text-left shadow-xl group-hover:block">
+                  <p className="text-xs font-semibold text-white">{fit?.fitLabel || 'Needs Data'}</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-gray-400">{fit?.fitReason || 'RS data missing.'}</p>
+                </div>
+              </div>
+              <p className="text-accent-blue">{row.symbol}</p>
+            </div>
+          </div>
+        )
+      },
+    },
+    {
+      id: 'companyName',
+      label: 'Company',
+      cellClassName: 'px-3 py-2.5 min-w-[180px]',
+      render: (row) => (
+        <>
+          <p className="text-gray-200">{row.companyName}</p>
+          <p className="text-xs text-gray-600 mt-0.5">{row.sector}</p>
+          {row.manualOverride && <span className="text-[10px] text-accent-green">manual</span>}
+        </>
+      ),
+    },
+    { id: 'ecosystem', label: 'Ecosystem', cellClassName: 'px-3 py-2.5 text-gray-300 min-w-[140px]', render: row => row.ecosystem },
+    { id: 'theme', label: 'Theme', cellClassName: 'px-3 py-2.5 text-gray-300 min-w-[140px]', render: row => row.theme },
+    { id: 'whatTheyDo', label: 'What They Do', cellClassName: 'px-3 py-2.5 text-gray-400 max-w-[260px] min-w-[220px]', render: row => row.whatTheyDo },
+    { id: 'majorCustomers', label: 'Customers', cellClassName: 'px-3 py-2.5 text-gray-400 min-w-[180px]', render: row => arrayText(row.majorCustomers) || '—' },
+    { id: 'dependencies', label: 'Dependencies', cellClassName: 'px-3 py-2.5 text-gray-400 min-w-[180px]', render: row => arrayText(row.dependencies) || '—' },
+    { id: 'relatedDriver', label: 'Related Driver', cellClassName: 'px-3 py-2.5 text-accent-yellow min-w-[150px]', render: row => row.relatedDriver },
+    {
+      id: 'anchoredRs',
+      label: 'Anchored RS',
+      cellClassName: 'px-3 py-2.5 min-w-[120px]',
+      render: (row) => (
+        <RsCell
+          snapshot={anchoredRsBySymbol[row.symbol]}
+          loading={anchoredRsLoading}
+          footerLabel={`Anchor ${anchoredRsBySymbol[row.symbol]?.anchorDate || '—'}`}
+        />
+      ),
+    },
+    {
+      id: 'rollingRs',
+      label: 'Rolling RS',
+      cellClassName: 'px-3 py-2.5 min-w-[120px]',
+      render: (row) => (
+        <RsCell
+          snapshot={rollingRsBySymbol[row.symbol]}
+          loading={rollingRsLoading}
+          footerLabel={`Win ${(rollingRsBySymbol[row.symbol]?.rsWindow || rollingRsWindow)}d`}
+        />
+      ),
+    },
+    {
+      id: 'ytdAvwap',
+      label: 'YTD AVWAP',
+      cellClassName: 'px-3 py-2.5 min-w-[120px]',
+      render: (row) => <YtdAvwapCell snapshot={ytdAvwapBySymbol[row.symbol]} loading={ytdAvwapLoading} />,
+    },
+    {
+      id: 'finraShortInterest',
+      label: 'Official FINRA SI',
+      cellClassName: 'px-3 py-2.5 min-w-[150px]',
+      render: (row) => <FinraShortInterestCell snapshot={finraBySymbol[row.symbol]} loading={finraLoading} />,
+    },
+    {
+      id: 'finraEstimatedShortInterest',
+      label: 'Est. SI Now',
+      cellClassName: 'px-3 py-2.5 min-w-[170px]',
+      render: (row) => <FinraEstimatedShortInterestCell estimate={finraEstimateBySymbol[row.symbol]} loading={finraLoading} />,
+    },
+    {
+      id: 'relationshipLayer',
+      label: 'Relationship Layer',
+      cellClassName: 'px-3 py-2.5 text-gray-400 min-w-[220px]',
+      render: (row) => {
+        const layer = buildRelationshipLayer(row, rows)
+        return (
+          <>
+            <p><span className="text-gray-600">Customer links:</span> {arrayText(layer.customerLinks) || '—'}</p>
+            <p className="mt-1"><span className="text-gray-600">Dependency links:</span> {arrayText(layer.supplierLinks) || '—'}</p>
+            <p className="mt-1"><span className="text-gray-600">Competitive set:</span> {arrayText(layer.competitorLinks) || '—'}</p>
+          </>
+        )
+      },
+    },
+    {
+      id: 'themeLinks',
+      label: 'Theme / Library Links',
+      cellClassName: 'px-3 py-2.5 min-w-[220px]',
+      render: (row) => <MatchChips row={row} themes={themes} sources={sources} onFilter={setQuery} />,
+    },
+    {
+      id: 'actions',
+      label: 'Actions',
+      cellClassName: 'px-3 py-2.5 min-w-[120px]',
+      render: (row) => (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setEditingSymbol(row.symbol)}
+            className="p-1.5 rounded-lg text-gray-500 hover:text-accent-blue hover:bg-accent-blue/10 transition-colors"
+            title="Edit row"
+          >
+            <Pencil size={13} />
+          </button>
+          <button
+            onClick={() => removeSymbol(row.symbol)}
+            className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-400/10 transition-colors"
+            title="Remove symbol"
+          >
+            <Trash2 size={13} />
+          </button>
+          <a
+            href={`https://www.tradingview.com/symbols/${row.symbol}/`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-1.5 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/[0.04] transition-colors"
+            title="Open on TradingView"
+            onClick={e => e.stopPropagation()}
+          >
+            <ExternalLink size={13} />
+          </a>
+        </div>
+      ),
+    },
+  ]), [
+    anchoredRsBySymbol,
+    anchoredRsLoading,
+    finraBySymbol,
+    finraEstimateBySymbol,
+    finraLoading,
+    fitBySymbol,
+    removeSymbol,
+    rollingRsBySymbol,
+    rollingRsLoading,
+    rollingRsWindow,
+    rows,
+    setQuery,
+    sources,
+    themes,
+    ytdAvwapBySymbol,
+    ytdAvwapLoading,
+  ])
+
+  const visibleColumns = useMemo(
+    () => visibleColumnOrder
+      .map(columnId => columnDefinitions.find(column => column.id === columnId))
+      .filter(Boolean),
+    [columnDefinitions, visibleColumnOrder]
+  )
+
+  const filteredRows = useMemo(() => {
+    const themedRows = selectedThemeGroupKey
+      ? rows.filter(row => String(row?.[themeGrouping] || '').trim().toLowerCase().replace(/\s+/g, ' ') === selectedThemeGroupKey)
+      : rows
+    return filterAndSortWatchlistRows({
+      rows: themedRows,
+      query,
+      sortKey,
+      sortDir,
+      rankBySymbol,
+      fitBySymbol,
+      fitFilter,
+    })
+  }, [rows, selectedThemeGroupKey, themeGrouping, query, sortKey, sortDir, rankBySymbol, fitBySymbol, fitFilter])
+
+  const selectedDisplaySymbol = useMemo(() => {
+    if (selectedSymbol && filteredRows.some(row => row.symbol === selectedSymbol)) return selectedSymbol
+    return filteredRows[0]?.symbol || null
+  }, [filteredRows, selectedSymbol])
+
+  const selectedTickerChartData = useMemo(() => {
+    if (analyticsMode || !selectedDisplaySymbol) {
+      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    }
+    const dailyBars = normalizeChartBars(historyBarsBySymbol[selectedDisplaySymbol] || [])
+    if (!dailyBars.length) {
+      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    }
+    const weeklyBars = normalizeChartBars(aggregateWeeklyBars(dailyBars))
+    const avwapOverlays = buildAvwapOverlays(
+      dailyBars,
+      selectedDisplaySymbol,
+      tradeReviewChartSettings,
+      {},
+      new Date(),
+      null
+    )
+    const dailyKeltner = {
+      13: calculateKeltnerChannel(dailyBars, 13, 0.25),
+      34: calculateKeltnerChannel(dailyBars, 34, 0.25),
+      65: calculateKeltnerChannel(dailyBars, 65, 0.25),
+    }
+    const weeklyKeltner = {
+      13: calculateKeltnerChannel(weeklyBars, 13, 0.25),
+      34: calculateKeltnerChannel(weeklyBars, 34, 0.25),
+      65: calculateKeltnerChannel(weeklyBars, 65, 0.25),
+    }
+    return {
+      dailyBars,
+      weeklyBars,
+      benchmarkBars: benchmarkHistoryBars,
+      avwapOverlays,
+      keltnerShades: buildKeltnerShadeBands(dailyKeltner),
+      weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
+    }
+  }, [analyticsMode, benchmarkHistoryBars, historyBarsBySymbol, selectedDisplaySymbol, tradeReviewChartSettings])
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize))
   const pagedRows = useMemo(
@@ -544,11 +1499,99 @@ export default function ThemeWatchlist({
   )
 
   const editingRow = editingSymbol ? rowsBySymbol[editingSymbol] : null
-  const selectedRow = selectedSymbol ? rowsBySymbol[selectedSymbol] : null
-  const latestAnchorDate = useMemo(
-    () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
-    [tradeReviewChartSettings?.anchorDates]
-  )
+  const selectedRow = selectedDisplaySymbol ? rowsBySymbol[selectedDisplaySymbol] : null
+  const historyUniverseRef = useRef({ key: '', data: null, promise: null })
+
+  const historyPlan = useMemo(() => {
+    const end = new Date()
+    end.setDate(end.getDate() + 1)
+
+    const finraStart = new Date()
+    finraStart.setDate(finraStart.getDate() - 180)
+
+    const rollingBufferDays = Math.max(
+      rollingRsWindow + (tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50) + 30,
+      180
+    )
+    const rollingStart = new Date()
+    rollingStart.setDate(rollingStart.getDate() - rollingBufferDays)
+
+    let anchorStart = null
+    if (latestAnchorDate) {
+      anchorStart = new Date(`${latestAnchorDate}T00:00:00Z`)
+      anchorStart.setDate(anchorStart.getDate() - 90)
+    }
+
+    const startCandidates = [finraStart, rollingStart, anchorStart].filter(Boolean)
+    const start = new Date(Math.min(...startCandidates.map(date => date.getTime())))
+    const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
+    const cacheKey = [
+      symbolsKey,
+      benchmarkSymbol,
+      latestAnchorDate || 'none',
+      rollingRsWindow,
+      tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50,
+      toDateKey(start),
+      toDateKey(end),
+    ].join('|')
+
+    return { benchmarkSymbol, start, end, cacheKey }
+  }, [latestAnchorDate, rollingRsWindow, symbolsKey, tradeReviewChartSettings])
+
+  const loadHistoryUniverse = useCallback(async () => {
+    if (!symbols.length) {
+      setHistoryBarsBySymbol({})
+      setBenchmarkHistoryBars([])
+      return { benchmarkBars: [], symbolBarsBySymbol: {}, errorsBySymbol: {} }
+    }
+
+    const current = historyUniverseRef.current
+    if (current.key === historyPlan.cacheKey && current.data) {
+      setHistoryBarsBySymbol(current.data.symbolBarsBySymbol || {})
+      setBenchmarkHistoryBars(current.data.benchmarkBars || [])
+      return current.data
+    }
+    if (current.key === historyPlan.cacheKey && current.promise) return current.promise
+
+    const promise = (async () => {
+      const benchmarkBars = await fetchHistoryCached(
+        historyPlan.benchmarkSymbol,
+        historyPlan.start,
+        historyPlan.end,
+        { ttlMs: WATCHLIST_HISTORY_TTL_MS }
+      )
+
+      const results = await mapWithConcurrency(symbols, WATCHLIST_HISTORY_CONCURRENCY, async symbol => {
+        try {
+          const bars = await fetchHistoryCached(symbol, historyPlan.start, historyPlan.end, {
+            ttlMs: WATCHLIST_HISTORY_TTL_MS,
+          })
+          return [symbol, { bars, error: '' }]
+        } catch (error) {
+          return [symbol, { bars: [], error: error.message || 'Failed' }]
+        }
+      })
+
+      const symbolBarsBySymbol = {}
+      const errorsBySymbol = {}
+      for (const [symbol, payload] of results) {
+        symbolBarsBySymbol[symbol] = payload.bars
+        if (payload.error) errorsBySymbol[symbol] = payload.error
+      }
+
+      const next = { benchmarkBars, symbolBarsBySymbol, errorsBySymbol }
+      setHistoryBarsBySymbol(symbolBarsBySymbol)
+      setBenchmarkHistoryBars(benchmarkBars)
+      historyUniverseRef.current = { key: historyPlan.cacheKey, data: next, promise: null }
+      return next
+    })().catch(error => {
+      historyUniverseRef.current = { key: '', data: null, promise: null }
+      throw error
+    })
+
+    historyUniverseRef.current = { key: historyPlan.cacheKey, data: null, promise }
+    return promise
+  }, [historyPlan, symbols])
 
   const refreshAnchoredRs = useCallback(async ({ silent = false } = {}) => {
     if (!symbols.length) {
@@ -561,48 +1604,235 @@ export default function ThemeWatchlist({
       return
     }
 
-    setRsLoading(true)
+    setAnchoredRsLoading(true)
     if (!silent) {
       setError('')
       setStatus(`Refreshing anchored RS from ${anchorDate}…`)
     }
     try {
-      const start = new Date(`${anchorDate}T00:00:00Z`)
-      start.setDate(start.getDate() - 90)
-      const end = new Date()
-      end.setDate(end.getDate() + 1)
-      const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
-      const benchmarkBars = await fetchHistory(benchmarkSymbol, start, end)
-      const entries = await Promise.all(symbols.map(async symbol => {
-        try {
-          const bars = await fetchHistory(symbol, start, end)
-          return [symbol, buildAnchoredRsSnapshot(bars, benchmarkBars, tradeReviewChartSettings)]
-        } catch (err) {
-          return [symbol, { anchorDate, zScore: null, weight: null, color: null, error: err.message || 'Failed' }]
+      const { benchmarkBars, symbolBarsBySymbol, errorsBySymbol } = await loadHistoryUniverse()
+      const entries = symbols.map(symbol => {
+        const error = errorsBySymbol[symbol]
+        if (error) {
+          return [symbol, { anchorDate, zScore: null, weight: null, color: null, error }]
         }
-      }))
-      setRsBySymbol(Object.fromEntries(entries))
+        return [symbol, buildAnchoredRsSnapshot(symbolBarsBySymbol[symbol], benchmarkBars, tradeReviewChartSettings)]
+      })
+      setAnchoredRsBySymbol(Object.fromEntries(entries))
       setStatus(`Anchored RS refreshed for ${entries.length} symbol${entries.length !== 1 ? 's' : ''}.`)
     } catch (err) {
       if (!silent) setError(err.message || 'Anchored RS refresh failed.')
     } finally {
-      setRsLoading(false)
+      setAnchoredRsLoading(false)
     }
-  }, [symbols, tradeReviewChartSettings])
+  }, [loadHistoryUniverse, symbols, tradeReviewChartSettings])
+
+  const refreshRollingRs = useCallback(async ({ silent = false } = {}) => {
+    if (!symbols.length) {
+      if (!silent) setError('Import a watchlist first.')
+      return
+    }
+
+    setRollingRsLoading(true)
+    if (!silent) {
+      setError('')
+      setStatus(`Refreshing rolling RS (window ${rollingRsWindow})…`)
+    }
+    try {
+      const { benchmarkBars, symbolBarsBySymbol, errorsBySymbol } = await loadHistoryUniverse()
+      const entries = symbols.map(symbol => {
+        const error = errorsBySymbol[symbol]
+        if (error) {
+          return [symbol, { rsWindow: rollingRsWindow, zScore: null, weight: null, color: null, error }]
+        }
+        return [symbol, buildRollingRsSnapshot(symbolBarsBySymbol[symbol], benchmarkBars, tradeReviewChartSettings)]
+      })
+      setRollingRsBySymbol(Object.fromEntries(entries))
+      setStatus(`Rolling RS refreshed for ${entries.length} symbol${entries.length !== 1 ? 's' : ''}.`)
+    } catch (err) {
+      if (!silent) setError(err.message || 'Rolling RS refresh failed.')
+    } finally {
+      setRollingRsLoading(false)
+    }
+  }, [loadHistoryUniverse, rollingRsWindow, symbols, tradeReviewChartSettings])
+
+  const refreshYtdAvwap = useCallback(async ({ silent = false } = {}) => {
+    if (!symbols.length) {
+      if (!silent) setError('Import a watchlist first.')
+      return
+    }
+
+    setYtdAvwapLoading(true)
+    if (!silent) {
+      setError('')
+      setStatus('Refreshing YTD AVWAP…')
+    }
+    try {
+      const { symbolBarsBySymbol } = await loadHistoryUniverse()
+      const entries = symbols.map(symbol => [symbol, buildYtdAvwapSnapshot(symbolBarsBySymbol[symbol] || [], new Date())])
+      setYtdAvwapBySymbol(Object.fromEntries(entries))
+      setStatus(`YTD AVWAP refreshed for ${entries.length} symbol${entries.length !== 1 ? 's' : ''}.`)
+    } catch (err) {
+      if (!silent) setError(err.message || 'YTD AVWAP refresh failed.')
+    } finally {
+      setYtdAvwapLoading(false)
+    }
+  }, [loadHistoryUniverse, symbols])
+
+  const refreshFinraShortInterest = useCallback(async ({ silent = false } = {}) => {
+    if (!symbols.length) {
+      if (!silent) setError('Import a watchlist first.')
+      return
+    }
+
+    setFinraLoading(true)
+    if (!silent) {
+      setError('')
+      setStatus('Refreshing FINRA short interest…')
+    }
+    try {
+      const params = new URLSearchParams({ symbols: symbols.join(',') })
+      const res = await fetch(`/api/finra/short-interest?${params.toString()}`)
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error || 'FINRA short interest refresh failed.')
+      const nextBySymbol = json?.bySymbol || {}
+      setFinraBySymbol(nextBySymbol)
+
+      const { symbolBarsBySymbol } = await loadHistoryUniverse()
+      const estimateEntries = symbols.map(symbol => {
+        const snapshot = nextBySymbol[symbol]
+        if (!snapshot?.settlementDate || !Number.isFinite(snapshot?.currentShortPositionQuantity)) {
+          return [symbol, null]
+        }
+        return [symbol, estimateCurrentShortInterest(snapshot, symbolBarsBySymbol[symbol] || [], new Date())]
+      })
+      setFinraEstimateBySymbol(Object.fromEntries(estimateEntries))
+      setFinraLoadedKey(finraSettingsKey)
+      setStatus(`FINRA short interest refreshed for ${symbols.length} symbol${symbols.length !== 1 ? 's' : ''}.`)
+    } catch (err) {
+      if (!silent) setError(err.message || 'FINRA short interest refresh failed.')
+    } finally {
+      setFinraLoading(false)
+    }
+  }, [loadHistoryUniverse, symbols])
 
   useEffect(() => {
     if (!symbols.length) {
-      setRsBySymbol({})
+      setAnchoredRsBySymbol({})
       return
     }
     refreshAnchoredRs({ silent: true })
   }, [symbolsKey, anchoredRsSettingsKey, refreshAnchoredRs])
 
+  useEffect(() => {
+    if (!symbols.length) {
+      setRollingRsBySymbol({})
+      return
+    }
+    refreshRollingRs({ silent: true })
+  }, [symbolsKey, rollingRsSettingsKey, refreshRollingRs])
+
+  useEffect(() => {
+    if (!symbols.length) {
+      setYtdAvwapBySymbol({})
+      return
+    }
+    refreshYtdAvwap({ silent: true })
+  }, [symbolsKey, refreshYtdAvwap])
+
+  useEffect(() => {
+    setFinraBySymbol({})
+    setFinraEstimateBySymbol({})
+    setFinraLoadedKey('')
+  }, [finraSettingsKey])
+
+  useEffect(() => {
+    if (!symbols.length || !finraColumnsVisible || finraLoadedKey === finraSettingsKey) return
+    refreshFinraShortInterest({ silent: true })
+  }, [finraColumnsVisible, finraLoadedKey, finraSettingsKey, refreshFinraShortInterest, symbols.length])
+
+  useEffect(() => {
+    if (selectedThemeGroupKey && !activeThemeGroups.some(group => group.key === selectedThemeGroupKey)) {
+      setSelectedThemeGroupKey('')
+    }
+  }, [activeThemeGroups, selectedThemeGroupKey])
+
+  useEffect(() => {
+    const isTypingTarget = (target) => {
+      const tagName = target?.tagName?.toLowerCase?.() || ''
+      return target?.isContentEditable || ['input', 'textarea', 'select', 'button'].includes(tagName)
+    }
+
+    if (analyticsMode) {
+      if (!sortedThemeGroups.length) return undefined
+
+      const handler = (event) => {
+        if (isTypingTarget(event.target) || event.code !== 'Space') return
+        event.preventDefault()
+
+        const currentIndex = sortedThemeGroups.findIndex(group => group.key === selectedThemeGroupKey)
+        if (event.shiftKey) {
+          const prevIndex = currentIndex <= 0 ? sortedThemeGroups.length - 1 : currentIndex - 1
+          setSelectedThemeGroupKey(sortedThemeGroups[prevIndex]?.key || '')
+          return
+        }
+
+        const nextIndex = currentIndex < 0 || currentIndex >= sortedThemeGroups.length - 1 ? 0 : currentIndex + 1
+        setSelectedThemeGroupKey(sortedThemeGroups[nextIndex]?.key || '')
+      }
+
+      window.addEventListener('keydown', handler)
+      return () => window.removeEventListener('keydown', handler)
+    }
+
+    const handler = (event) => {
+      if (isTypingTarget(event.target) || event.code !== 'Space' || !filteredRows.length) return
+      event.preventDefault()
+
+      const currentIndex = filteredRows.findIndex(row => row.symbol === selectedDisplaySymbol)
+      if (event.shiftKey) {
+        const prevIndex = currentIndex <= 0 ? filteredRows.length - 1 : currentIndex - 1
+        const prevSymbol = filteredRows[prevIndex]?.symbol
+        if (!prevSymbol) return
+        setSelectedSymbol(prevSymbol)
+        setPage(Math.floor(prevIndex / pageSize) + 1)
+        return
+      }
+
+      const nextIndex = currentIndex < 0 || currentIndex >= filteredRows.length - 1 ? 0 : currentIndex + 1
+      const nextSymbol = filteredRows[nextIndex]?.symbol
+      if (!nextSymbol) return
+      setSelectedSymbol(nextSymbol)
+      setPage(Math.floor(nextIndex / pageSize) + 1)
+    }
+
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [analyticsMode, filteredRows, selectedDisplaySymbol, selectedThemeGroupKey, sortedThemeGroups])
+
+  useEffect(() => {
+    const snapshotDate = new Date().toISOString().slice(0, 10)
+    if (themeGroupsAnalytics.length) {
+      saveThemeAnalyticsSnapshot({
+        groupingMode: 'theme',
+        snapshotDate,
+        groups: themeGroupsAnalytics,
+      })
+    }
+    if (ecosystemGroupsAnalytics.length) {
+      saveThemeAnalyticsSnapshot({
+        groupingMode: 'ecosystem',
+        snapshotDate,
+        groups: ecosystemGroupsAnalytics,
+      })
+    }
+  }, [themeGroupsAnalytics, ecosystemGroupsAnalytics, saveThemeAnalyticsSnapshot])
+
   function handleSort(nextKey) {
     if (sortKey === nextKey) setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')
     else {
       setSortKey(nextKey)
-      setSortDir('asc')
+      setSortDir(nextKey === 'fit' ? 'desc' : 'asc')
     }
     setPage(1)
   }
@@ -619,8 +1849,9 @@ export default function ThemeWatchlist({
     setQuery('')
     setSortKey('momentum')
     setSortDir('asc')
+    setFitFilter('all')
     setError('')
-    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''}. Prior watchlist map cleared.`)
+    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} into ${activeList?.name || 'the active watchlist'}. Prior map for this list was cleared.`)
     setPage(1)
   }
 
@@ -637,8 +1868,9 @@ export default function ThemeWatchlist({
     setQuery('')
     setSortKey('momentum')
     setSortDir('asc')
+    setFitFilter('all')
     setError('')
-    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} from CSV. Prior watchlist map cleared.`)
+    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} from CSV into ${activeList?.name || 'the active watchlist'}. Prior map for this list was cleared.`)
     setPage(1)
   }
 
@@ -672,7 +1904,7 @@ export default function ThemeWatchlist({
         })
         upsertRows(mapped)
       }
-      setStatus(`Mapped ${symbols.length} symbol${symbols.length !== 1 ? 's' : ''}.`)
+      setStatus(`Mapped ${symbols.length} symbol${symbols.length !== 1 ? 's' : ''} in ${activeList?.name || 'the active watchlist'}.`)
     } catch (e) {
       setError(e.message || 'Watchlist mapping failed.')
     } finally {
@@ -683,7 +1915,16 @@ export default function ThemeWatchlist({
   function handleSaveView() {
     const name = viewName.trim()
     if (!name) return
-    saveView({ name, query, sortKey, sortDir })
+    saveView({
+      name,
+      query,
+      sortKey,
+      sortDir,
+      fitFilter,
+      columnOrder,
+      hiddenColumns,
+      activeColumnPreset,
+    })
     setViewName('')
     setStatus(`Saved view: ${name}`)
   }
@@ -692,6 +1933,12 @@ export default function ThemeWatchlist({
     setQuery(view.query || '')
     setSortKey(view.sortKey || 'momentum')
     setSortDir(view.sortDir || 'asc')
+    setFitFilter(view.fitFilter || 'all')
+    updateColumnLayout({
+      columnOrder: view.columnOrder || columnOrder,
+      hiddenColumns: view.hiddenColumns || hiddenColumns,
+      activeColumnPreset: view.activeColumnPreset || 'custom',
+    })
     setPage(1)
   }
 
@@ -700,79 +1947,101 @@ export default function ThemeWatchlist({
       <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3">
         <Table2 size={14} className="text-accent-blue" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white">Watchlist Relationship Map V3</p>
-          <p className="text-xs text-gray-600">Dedicated ecosystem workspace for large watchlists, relationship mapping, and manual research views</p>
+          <p className="text-sm font-semibold text-white">
+            {analyticsMode ? `${activeList?.name || 'Watchlist'} Ecosystem Rotation` : `${activeList?.name || 'Watchlist'} Relationship Map`}
+          </p>
+          <p className="text-xs text-gray-600">
+            {analyticsMode
+              ? 'Broad ecosystem breadth, rotation, and member divergence across your internal watchlist universe'
+              : 'Dedicated ecosystem workspace for large watchlists, relationship mapping, and manual research views'}
+          </p>
         </div>
         {status && <p className="text-xs text-gray-500 truncate">{status}</p>}
       </div>
 
       <div className="p-4 space-y-4">
-        <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_auto] gap-3">
-          <textarea
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            placeholder={'Paste TradingView symbols, URLs, or plain tickers.\nExamples:\nNASDAQ:NVDA\nhttps://www.tradingview.com/chart/.../?symbol=NASDAQ:AMD\nMRVL, ANET, CIEN'}
-            rows={5}
-            className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 resize-none"
-          />
-          <div className="flex xl:flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {watchlists.map(list => (
             <button
-              onClick={handleImport}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/15 border border-accent-blue/25 text-accent-blue text-sm font-medium hover:bg-accent-blue/20 transition-all"
+              key={list.id}
+              onClick={() => setActiveList(list.id)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all ${
+                activeListId === list.id
+                  ? 'border-accent-blue/30 bg-accent-blue/15 text-accent-blue'
+                  : 'border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/20'
+              }`}
             >
-              <Upload size={13} />
-              Import
+              <Bookmark size={12} />
+              {list.name}
+              <span className={`px-1.5 py-0.5 rounded-full ${activeListId === list.id ? 'bg-accent-blue/20 text-accent-blue' : 'bg-white/[0.05] text-gray-500'}`}>
+                {list.symbols.length}
+              </span>
             </button>
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all"
-            >
-              <Upload size={13} />
-              CSV
-            </button>
-            <button
-              onClick={handleAnalyze}
-              disabled={loading || !symbols.length}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"
-            >
-              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-              {rows.length ? 'Refresh Map' : 'Map Watchlist'}
-            </button>
-            <button
-              onClick={refreshAnchoredRs}
-              disabled={rsLoading || !symbols.length}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/12 border border-accent-blue/20 text-accent-blue text-sm font-medium hover:bg-accent-blue/18 transition-all disabled:opacity-40"
-            >
-              <TrendingUp size={13} className={rsLoading ? 'animate-pulse' : ''} />
-              {rsLoading ? 'RS…' : 'Anchored RS'}
-            </button>
-            <button
-              onClick={() => exportCsv(rows)}
-              disabled={!rows.length}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all disabled:opacity-40"
-            >
-              <Download size={13} />
-              Export CSV
-            </button>
-            <button
-              onClick={clear}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all"
-            >
-              <X size={13} />
-              Clear
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={async (e) => {
-                const file = e.target.files?.[0]
-                if (file) await handleCsvFile(file)
-                e.target.value = ''
-              }}
-            />
-          </div>
+          ))}
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
+          <button
+            onClick={() => setControlsCollapsed(!controlsCollapsed)}
+            className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left"
+          >
+            <div>
+              <p className="text-sm font-semibold text-white">Workspace Controls</p>
+              <p className="text-xs text-gray-600">Import symbols, refresh datasets, and export the active list on demand.</p>
+            </div>
+            {controlsCollapsed ? <ChevronDown size={16} className="text-gray-500" /> : <ChevronUp size={16} className="text-gray-500" />}
+          </button>
+          {!controlsCollapsed && (
+            <div className="px-4 pb-4">
+              <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_auto] gap-3">
+                <textarea
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  placeholder={`Paste TradingView symbols, URLs, or plain tickers into ${activeList?.name || 'this watchlist'}.\nExamples:\nNASDAQ:NVDA\nhttps://www.tradingview.com/chart/.../?symbol=NASDAQ:AMD\nMRVL, ANET, CIEN`}
+                  rows={5}
+                  className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 resize-none"
+                />
+                <div className="flex xl:flex-col gap-2">
+                  <button onClick={handleImport} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/15 border border-accent-blue/25 text-accent-blue text-sm font-medium hover:bg-accent-blue/20 transition-all"><Upload size={13} />Import</button>
+                  <button onClick={() => fileRef.current?.click()} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all"><Upload size={13} />CSV</button>
+                  <button onClick={handleAnalyze} disabled={loading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />{rows.length ? 'Refresh Map' : 'Map Watchlist'}</button>
+                  <button onClick={refreshAnchoredRs} disabled={anchoredRsLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/12 border border-accent-blue/20 text-accent-blue text-sm font-medium hover:bg-accent-blue/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={anchoredRsLoading ? 'animate-pulse' : ''} />{anchoredRsLoading ? 'RS…' : 'Anchored RS'}</button>
+                  <button onClick={refreshRollingRs} disabled={rollingRsLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={rollingRsLoading ? 'animate-pulse' : ''} />{rollingRsLoading ? 'Rolling…' : 'Rolling RS'}</button>
+                  <button onClick={refreshYtdAvwap} disabled={ytdAvwapLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-yellow/12 border border-accent-yellow/20 text-accent-yellow text-sm font-medium hover:bg-accent-yellow/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={ytdAvwapLoading ? 'animate-pulse' : ''} />{ytdAvwapLoading ? 'AVWAP…' : 'YTD AVWAP'}</button>
+                  <button onClick={refreshFinraShortInterest} disabled={finraLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-gray-300 text-sm font-medium hover:bg-white/[0.08] transition-all disabled:opacity-40"><RefreshCw size={13} className={finraLoading ? 'animate-spin' : ''} />{finraLoading ? 'FINRA…' : 'FINRA SI'}</button>
+                  <button
+                    onClick={() => exportCsv(rows.map(row => ({
+                      ...row,
+                      anchoredRsZ: anchoredRsBySymbol[row.symbol]?.zScore ?? null,
+                      rollingRsZ: rollingRsBySymbol[row.symbol]?.zScore ?? null,
+                      finraShortInterest: finraBySymbol[row.symbol]?.currentShortPositionQuantity ?? null,
+                      finraEstimatedShortInterest: finraEstimateBySymbol[row.symbol]?.estimatedCurrentShortInterest ?? null,
+                      finraEstimatedChangePct: finraEstimateBySymbol[row.symbol]?.estimatedPercentChangeSinceReport ?? null,
+                      finraEstimatedConfidence: finraEstimateBySymbol[row.symbol]?.confidenceScore ?? null,
+                      finraDaysToCover: finraBySymbol[row.symbol]?.daysToCoverQuantity ?? null,
+                      finraSettlementDate: finraBySymbol[row.symbol]?.settlementDate ?? null,
+                    })))}
+                    disabled={!rows.length}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all disabled:opacity-40"
+                  >
+                    <Download size={13} />
+                    Export CSV
+                  </button>
+                  <button onClick={clear} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all"><X size={13} />Clear</button>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0]
+                      if (file) await handleCsvFile(file)
+                      e.target.value = ''
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -781,12 +2050,369 @@ export default function ThemeWatchlist({
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {analyticsMode && rows.length > 0 && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-accent-blue/15 bg-gradient-to-br from-accent-blue/6 via-transparent to-accent-green/6 p-4">
+              <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+                <div>
+                  <p className="text-sm font-semibold text-white">Ecosystem Breadth + Strength</p>
+                  <p className="text-xs text-gray-500 mt-1">Track what is working inside the active {activeList?.name || 'watchlist'} by ecosystem so you can see which spaces are moving together, broadening, or diverging.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {THEME_SORT_OPTIONS.map(([value, label]) => (
+                    <button
+                      key={value}
+                      onClick={() => setThemeSortMode(value)}
+                      className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
+                        themeSortMode === value
+                          ? 'bg-accent-green/15 border-accent-green/25 text-accent-green'
+                          : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <StatPill label="Tracked Ecosystems" value={activeThemeGroups.length} />
+                <StatPill label="Best Breadth" value={sortedThemeGroups[0]?.label || '—'} />
+                <StatPill label="Top Strength" value={sortedThemeGroups[0]?.currentStrengthScore != null ? formatMetric(sortedThemeGroups[0].currentStrengthScore, '', 0) : '—'} />
+                <StatPill label="Rotation History" value={`${themeAnalyticsHistory[activeGrouping]?.length || 0} pts`} />
+              </div>
+              <div className="mb-4 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-[11px] text-gray-500">
+                Keyboard: press <span className="font-semibold text-gray-300">Space</span> for the next ecosystem, or <span className="font-semibold text-gray-300">Shift + Space</span> to go back.
+              </div>
+              <div className="space-y-4">
+                {activeListId === MARKET_LEADERS_LIST_ID && marketLeadersComposite.memberCount > 0 ? (
+                  <EcosystemCompositeChart
+                    data={marketLeadersChartData}
+                    chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+                    title="MARKET LEADERS"
+                    memberCount={marketLeadersComposite.memberCount}
+                    ytdEnabled={ecosystemYtdEnabled}
+                    onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
+                  />
+                ) : null}
+                {selectedThemeGroup ? (
+                  <EcosystemCompositeChart
+                    data={selectedEcosystemChartData}
+                    chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+                    title={`ECO:${String(selectedThemeGroup.label || '').toUpperCase()}`}
+                    memberCount={selectedEcosystemComposite.memberCount}
+                    ytdEnabled={ecosystemYtdEnabled}
+                    onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
+                  />
+                ) : null}
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <p className="text-xs font-semibold text-gray-300">Ecosystem Table</p>
+                    {selectedThemeGroupKey && (
+                      <button
+                        onClick={() => setSelectedThemeGroupKey('')}
+                        className="text-[11px] text-accent-blue hover:underline"
+                      >
+                        Clear selection
+                      </button>
+                    )}
+                  </div>
+                  <div className="overflow-x-auto rounded-lg border border-white/10">
+                    <table className="w-full min-w-[920px] text-sm">
+                      <thead className="bg-white/[0.03] text-[11px] uppercase tracking-wider text-gray-500">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Ecosystem</th>
+                          <th className="px-3 py-2 text-left">Members</th>
+                          <th className="px-3 py-2 text-left">Strength</th>
+                          <th className="px-3 py-2 text-left">Rolling</th>
+                          <th className="px-3 py-2 text-left">Anchored</th>
+                          <th className="px-3 py-2 text-left">% Green</th>
+                          <th className="px-3 py-2 text-left">% Above Signal</th>
+                          <th className="px-3 py-2 text-left">Leader Spread</th>
+                          <th className="px-3 py-2 text-left">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/[0.05]">
+                        {sortedThemeGroups.map(group => (
+                          <tr
+                            key={group.key}
+                            onClick={() => setSelectedThemeGroupKey(prev => prev === group.key ? '' : group.key)}
+                            className={`cursor-pointer transition-colors hover:bg-white/[0.02] ${
+                              selectedThemeGroupKey === group.key ? 'bg-accent-blue/8' : ''
+                            }`}
+                          >
+                            <td className="px-3 py-2.5 font-semibold text-white">{group.label}</td>
+                            <td className="px-3 py-2.5 text-gray-400">{group.count}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.currentStrengthScore, '', 1)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.avgRollingZ, 'z', 2)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.avgAnchoredZ, 'z', 2)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.greenPct, '%', 0)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.rollingAboveSignalPct, '%', 0)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{group.leaderSpread != null ? `${group.leaderSpread.toFixed(2)}z` : '—'}</td>
+                            <td className="px-3 py-2.5">
+                              <span className={`text-[10px] px-2 py-1 rounded border ${ThemeHealthTone(group.healthLabel)}`}>
+                                {group.healthLabel}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                  <p className="text-xs font-semibold text-gray-300 mb-2">Ecosystem Rotation Map</p>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <ScatterChart margin={{ top: 8, right: 12, left: -6, bottom: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                      <XAxis type="number" dataKey="currentStrengthScore" name="Current Strength" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                      <YAxis type="number" dataKey="deltaStrength5d" name="5d Delta" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                      <Tooltip
+                        cursor={{ strokeDasharray: '3 3' }}
+                        contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+                        formatter={(value, name) => [Number.isFinite(Number(value)) ? Number(value).toFixed(2) : '—', name]}
+                        labelFormatter={(_, payload) => payload?.[0]?.payload?.label || ''}
+                        content={({ active, payload }) => {
+                          const point = active ? payload?.[0]?.payload : null
+                          if (!point) return null
+                          return (
+                            <div className="rounded-lg border border-white/10 bg-surface-50 px-3 py-2 text-xs shadow-xl">
+                              <p className="font-semibold text-white">{point.label}</p>
+                              <p className="mt-1 text-gray-400">Strength {formatMetric(point.currentStrengthScore, '', 1)}</p>
+                              <p className="text-gray-400">5d delta {formatMetric(point.deltaStrength5d, '', 1)}</p>
+                              <p className="text-gray-400">Breadth {formatMetric(point.deltaGreenPct5d, '%', 1)}</p>
+                              <p className="mt-1 text-accent-blue">{point.rotationStatus}</p>
+                            </div>
+                          )
+                        }}
+                      />
+                      <ReferenceLine x={15} stroke="#ffffff18" strokeDasharray="4 4" />
+                      <ReferenceLine y={0} stroke="#ffffff18" strokeDasharray="4 4" />
+                      <Scatter
+                        data={themeRotationGroups}
+                        shape={(props) => {
+                          const { cx, cy, payload } = props
+                          const fill = payload.quadrant === 'strong_improving'
+                            ? '#00d084'
+                            : payload.quadrant === 'strong_fading'
+                              ? '#fbbf24'
+                              : payload.quadrant === 'weak_improving'
+                                ? '#3d84ff'
+                                : '#ff4757'
+                          return <circle cx={cx} cy={cy} r={6} fill={fill} fillOpacity={0.9} stroke="none" />
+                        }}
+                      />
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                  <p className="mt-2 text-[11px] text-gray-600">X = current strength. Y = 5 stored-snapshot change. Upper-right is where durable rotation should begin to cluster.</p>
+                </div>
+              </div>
+
+              {selectedThemeGroupKey && (
+                <div className="mt-4 rounded-lg border border-accent-blue/20 bg-accent-blue/8 px-3 py-2 text-xs text-accent-blue">
+                  Diagnostics focused on the selected ecosystem: <span className="font-semibold">{activeThemeGroups.find(group => group.key === selectedThemeGroupKey)?.label || selectedThemeGroupKey}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.15fr] gap-4">
+              <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Rotation Leaderboards</p>
+                    <p className="text-xs text-gray-500 mt-1">Organize themes by whether they are leading, emerging, fading, or breaking down.</p>
+                  </div>
+                  <p className="text-[11px] text-gray-600">
+                    Using 5d and 10d stored snapshot deltas
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {[
+                    ['Strong + Improving', rotationLeaderboards.strongImproving],
+                    ['Strong + Fading', rotationLeaderboards.strongFading],
+                    ['Weak + Improving', rotationLeaderboards.weakImproving],
+                    ['Weak + Deteriorating', rotationLeaderboards.weakDeteriorating],
+                  ].map(([title, items]) => (
+                    <div key={title} className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                      <p className="text-xs font-semibold text-gray-300 mb-2">{title}</p>
+                      <div className="space-y-2">
+                        {items.length ? items.map(group => (
+                          <button
+                            key={group.key}
+                            onClick={() => setSelectedThemeGroupKey(group.key)}
+                            className="w-full rounded-lg border border-white/10 px-3 py-2 text-left hover:border-white/20 transition-all"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-medium text-white truncate">{group.label}</span>
+                              <span className={`text-[10px] px-2 py-1 rounded border ${RotationStatusTone(group.rotationStatus)}`}>
+                                {group.rotationStatus}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-[11px] text-gray-500">
+                              strength {formatMetric(group.currentStrengthScore, '', 0)} · 5d {formatMetric(group.deltaStrength5d, '', 1)} · flips +{group.improvingSymbolCount5d}/-{group.deterioratingSymbolCount5d}
+                            </div>
+                          </button>
+                        )) : (
+                          <p className="text-xs text-gray-600">No groups in this bucket yet.</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Selected Ecosystem Diagnostics</p>
+                    <p className="text-xs text-gray-500 mt-1">See whether the move is broadening, which members are driving it, and what recently changed.</p>
+                  </div>
+                  {selectedThemeRotation && (
+                    <span className={`text-[10px] px-2 py-1 rounded border ${RotationStatusTone(selectedThemeRotation.rotationStatus)}`}>
+                      {selectedThemeRotation.rotationStatus}
+                    </span>
+                  )}
+                </div>
+
+                {selectedThemeGroup ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <StatPill label="Selection" value={selectedThemeGroup.label} />
+                      <StatPill label="Quadrant" value={RotationQuadrantLabel(selectedThemeRotation?.quadrant)} />
+                      <StatPill label="5d Strength" value={formatMetric(selectedThemeRotation?.deltaStrength5d, '', 1)} />
+                      <StatPill label="10d Strength" value={formatMetric(selectedThemeRotation?.deltaStrength10d, '', 1)} />
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <StatPill label="5d % Green" value={formatMetric(selectedThemeRotation?.deltaGreenPct5d, '%', 1)} />
+                      <StatPill label="5d Above Signal" value={formatMetric(selectedThemeRotation?.deltaRollingAboveSignalPct5d, '%', 1)} />
+                      <StatPill label="Improving Names" value={selectedThemeRotation?.improvingSymbolCount5d ?? '—'} />
+                      <StatPill label="Deteriorating" value={selectedThemeRotation?.deterioratingSymbolCount5d ?? '—'} />
+                    </div>
+
+                    {themeRotationGroups.some(group => group.referenceDate5d) && (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <LineChart
+                          data={(themeAnalyticsHistory[activeGrouping] || []).map(entry => {
+                            const selected = entry.groups.find(group => group.key === selectedThemeGroup.key)
+                            return {
+                              date: entry.date,
+                              strength: selected?.currentStrengthScore ?? null,
+                              greenPct: selected?.greenPct ?? null,
+                              rollingAboveSignalPct: selected?.rollingAboveSignalPct ?? null,
+                            }
+                          })}
+                          margin={{ top: 8, right: 12, left: -10, bottom: 0 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                          <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                          <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                          <Tooltip contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }} />
+                          <Line type="monotone" dataKey="strength" name="Strength" stroke="#3d84ff" strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                          <Line type="monotone" dataKey="greenPct" name="% Green" stroke="#00d084" strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                          <Line type="monotone" dataKey="rollingAboveSignalPct" name="% Above Signal" stroke="#fbbf24" strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                        <p className="text-xs font-semibold text-gray-300 mb-2">Recent Improvement</p>
+                        {selectedThemeRotation?.improvingSymbols5d?.length ? (
+                          <div className="space-y-2">
+                            {selectedThemeRotation.improvingSymbols5d.slice(0, 5).map(item => (
+                              <div key={item.symbol} className="flex items-center justify-between gap-2 text-sm">
+                                <span className="text-white">{item.symbol}</span>
+                                <span className="text-accent-green text-[11px]">{item.from} {'->'} {item.to}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-600">No member-level fit upgrades in the recent window.</p>
+                        )}
+                      </div>
+
+                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                        <p className="text-xs font-semibold text-gray-300 mb-2">Recent Deterioration</p>
+                        {selectedThemeRotation?.deterioratingSymbols5d?.length ? (
+                          <div className="space-y-2">
+                            {selectedThemeRotation.deterioratingSymbols5d.slice(0, 5).map(item => (
+                              <div key={item.symbol} className="flex items-center justify-between gap-2 text-sm">
+                                <span className="text-white">{item.symbol}</span>
+                                <span className="text-accent-red text-[11px]">{item.from} {'->'} {item.to}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-600">No member-level fit downgrades in the recent window.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <p className="text-xs font-semibold text-gray-300">Member Leaders</p>
+                        <button
+                          onClick={() => setSelectedThemeGroupKey(selectedThemeGroup.key)}
+                          className="text-[11px] text-accent-blue hover:underline"
+                        >
+                          Focus diagnostics on this ecosystem
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        {selectedThemeMembers.slice(0, 8).map(member => (
+                          <div key={member.symbol} className="flex items-center justify-between gap-3 rounded-lg border border-white/10 px-3 py-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-white">{member.symbol}</p>
+                              <p className="text-[11px] text-gray-600 truncate">{member.companyName}</p>
+                            </div>
+                            <div className="flex flex-wrap items-center justify-end gap-2 text-[11px]">
+                              <span className={`px-2 py-1 rounded border ${RotationStatusTone(member.fit?.fitColor === 'green' ? 'broadening' : member.fit?.fitColor === 'red' ? 'failing' : 'stabilizing')}`}>
+                                {member.fit?.fitLabel || 'Needs Data'}
+                              </span>
+                              <span className="text-gray-400">fit {Number.isFinite(member.fit?.fitScore) ? member.fit.fitScore.toFixed(0) : '—'}</span>
+                              <span className="text-gray-400">roll {formatMetric(member.rolling?.zScore, 'z')}</span>
+                              <span className="text-gray-400">anch {formatMetric(member.anchored?.zScore, 'z')}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">Map and score a list to unlock group diagnostics.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {analyticsMode && !rows.length && (
+          <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-6 text-center">
+            <Brain size={18} className="mx-auto text-gray-600 mb-2" />
+            <p className="text-sm text-gray-400">Import and map a watchlist first to unlock ecosystem breadth and rotation analytics.</p>
+          </div>
+        )}
+
+        {!analyticsMode && (
+          <>
+        <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
           <StatPill label="Imported Symbols" value={symbols.length} />
           <StatPill label="Mapped Rows" value={rows.length} />
           <StatPill label="Theme Buckets" value={themeGroups.length} />
           <StatPill label="Top Ranked" value={symbols[0] || '—'} />
           <StatPill label="RS Anchor" value={latestAnchorDate || '—'} />
+          <StatPill label="Rolling Window" value={`${rollingRsWindow}d`} />
+          <StatPill label="FINRA Matches" value={Object.values(finraBySymbol).filter(item => item?.settlementDate).length} />
+        </div>
+
+        <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs text-gray-500">
+          FINRA short interest uses FINRA&apos;s official consolidated short-interest API. Their published Query API dataset is OTC-oriented, so many exchange-listed names may legitimately show no FINRA record here.
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs text-gray-500">
+          Est. SI Now is a conservative model-based estimate of change since the last official FINRA snapshot. It is not live short interest, and confidence stays low when liquidity or history is weak.
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -821,7 +2447,9 @@ export default function ThemeWatchlist({
                 <div key={view.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
                   <button onClick={() => applyView(view)} className="text-left min-w-0 flex-1">
                     <p className="text-sm text-gray-300 truncate">{view.name}</p>
-                    <p className="text-xs text-gray-600 truncate">{view.query || 'All symbols'} · {view.sortKey} {view.sortDir}</p>
+                    <p className="text-xs text-gray-600 truncate">
+                      {view.query || 'All symbols'} · {view.sortKey} {view.sortDir} · fit {view.fitFilter || 'all'} · cols {(view.columnOrder || columnOrder).length - (view.hiddenColumns || hiddenColumns).length}
+                    </p>
                   </button>
                   <button onClick={() => removeView(view.id)} className="text-gray-500 hover:text-red-400 transition-colors">
                     <Trash2 size={12} />
@@ -834,6 +2462,35 @@ export default function ThemeWatchlist({
         </div>
 
         <div className="space-y-3">
+          <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-[11px] text-gray-500">
+            Keyboard: press <span className="font-semibold text-gray-300">Space</span> for the next ticker, or <span className="font-semibold text-gray-300">Shift + Space</span> to go back through the filtered table.
+          </div>
+
+          {activeListId === MARKET_LEADERS_LIST_ID && marketLeadersComposite.memberCount > 0 ? (
+            <EcosystemCompositeChart
+              data={marketLeadersChartData}
+              chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+              title="MARKET LEADERS"
+              memberCount={marketLeadersComposite.memberCount}
+              ytdEnabled={ecosystemYtdEnabled}
+              onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
+            />
+          ) : null}
+
+          {selectedRow ? (
+            <EcosystemCompositeChart
+              data={selectedTickerChartData}
+              chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+              title={selectedRow.symbol}
+              memberCount={1}
+              ytdEnabled={ecosystemYtdEnabled}
+              onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
+              chartLabel="Ticker Chart"
+              badgeLabel={activeList?.name || 'Watchlist'}
+              emptyLabel="No chart data for this ticker"
+            />
+          ) : null}
+
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-widest">
               <ListFilter size={12} />
@@ -861,6 +2518,69 @@ export default function ThemeWatchlist({
                 </button>
               ))}
             </div>
+            <div className="flex gap-1 flex-wrap">
+              {FIT_FILTER_OPTIONS.map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => {
+                    setFitFilter(value)
+                    setPage(1)
+                  }}
+                  className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
+                    fitFilter === value
+                      ? 'bg-accent-green/15 border-accent-green/25 text-accent-green'
+                      : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-2 justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-widest text-gray-500">Column Layout</p>
+                <p className="text-xs text-gray-600 mt-1">Drag table headers to reorder columns. Use presets to switch between scan styles, or toggle individual columns below.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {WATCHLIST_COLUMN_PRESETS.map(preset => (
+                  <button
+                    key={preset.key}
+                    onClick={() => handleApplyPreset(preset.key)}
+                    className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
+                      activeColumnPreset === preset.key
+                        ? 'bg-accent-blue/15 border-accent-blue/25 text-accent-blue'
+                        : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                    }`}
+                    title={preset.description}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {DEFAULT_WATCHLIST_COLUMN_ORDER.map(columnId => {
+                const column = columnDefinitions.find(item => item.id === columnId)
+                if (!column) return null
+                const isVisible = !hiddenColumns.includes(columnId)
+                return (
+                  <button
+                    key={columnId}
+                    onClick={() => handleColumnVisibilityToggle(columnId)}
+                    className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
+                      isVisible
+                        ? 'bg-accent-green/12 border-accent-green/25 text-accent-green'
+                        : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                    }`}
+                  >
+                    {isVisible ? 'Shown' : 'Hidden'} · {column.label}
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
           {!rows.length ? (
@@ -870,78 +2590,35 @@ export default function ThemeWatchlist({
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-white/10">
-              <table className="w-full min-w-[1600px] text-sm">
+              <table className="w-full min-w-[2020px] text-sm">
                 <thead className="bg-white/[0.03] text-xs uppercase tracking-wider text-gray-500">
                   <tr>
-                    <th className="text-left px-3 py-2">Symbol</th>
-                    <th className="text-left px-3 py-2">Company</th>
-                    <th className="text-left px-3 py-2">Ecosystem</th>
-                    <th className="text-left px-3 py-2">Theme</th>
-                    <th className="text-left px-3 py-2">What They Do</th>
-                    <th className="text-left px-3 py-2">Customers</th>
-                    <th className="text-left px-3 py-2">Dependencies</th>
-                    <th className="text-left px-3 py-2">Related Driver</th>
-                    <th className="text-left px-3 py-2">Anchored RS</th>
-                    <th className="text-left px-3 py-2">Relationship Layer</th>
-                    <th className="text-left px-3 py-2">Theme / Library Links</th>
-                    <th className="text-left px-3 py-2">Actions</th>
+                    {visibleColumns.map(column => (
+                      <th
+                        key={column.id}
+                        draggable
+                        onDragStart={() => setDraggedColumnId(column.id)}
+                        onDragOver={e => e.preventDefault()}
+                        onDrop={() => handleColumnDrop(column.id)}
+                        onDragEnd={() => setDraggedColumnId(null)}
+                        className={`text-left px-3 py-2 ${draggedColumnId === column.id ? 'opacity-50' : ''}`}
+                      >
+                        {column.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.05]">
                   {pagedRows.map(row => {
-                    const layer = buildRelationshipLayer(row, rows)
                     return (
-                    <tr key={row.symbol} className={`align-top hover:bg-white/[0.02] cursor-pointer ${selectedSymbol === row.symbol ? 'bg-accent-blue/5' : ''}`} onClick={() => setSelectedSymbol(row.symbol)}>
-                      <td className="px-3 py-2.5 font-semibold text-accent-blue">{row.symbol}</td>
-                      <td className="px-3 py-2.5">
-                        <p className="text-gray-200">{row.companyName}</p>
-                        <p className="text-xs text-gray-600 mt-0.5">{row.sector}</p>
-                        {row.manualOverride && <span className="text-[10px] text-accent-green">manual</span>}
-                      </td>
-                      <td className="px-3 py-2.5 text-gray-300">{row.ecosystem}</td>
-                      <td className="px-3 py-2.5 text-gray-300">{row.theme}</td>
-                      <td className="px-3 py-2.5 text-gray-400 max-w-[260px]">{row.whatTheyDo}</td>
-                      <td className="px-3 py-2.5 text-gray-400">{arrayText(row.majorCustomers) || '—'}</td>
-                      <td className="px-3 py-2.5 text-gray-400">{arrayText(row.dependencies) || '—'}</td>
-                      <td className="px-3 py-2.5 text-accent-yellow">{row.relatedDriver}</td>
-                      <td className="px-3 py-2.5 min-w-[120px]"><AnchoredRsCell snapshot={rsBySymbol[row.symbol]} loading={rsLoading} /></td>
-                      <td className="px-3 py-2.5 text-gray-400 min-w-[220px]">
-                        <p><span className="text-gray-600">Customer links:</span> {arrayText(layer.customerLinks) || '—'}</p>
-                        <p className="mt-1"><span className="text-gray-600">Dependency links:</span> {arrayText(layer.supplierLinks) || '—'}</p>
-                        <p className="mt-1"><span className="text-gray-600">Competitive set:</span> {arrayText(layer.competitorLinks) || '—'}</p>
-                      </td>
-                      <td className="px-3 py-2.5 min-w-[220px]">
-                        <MatchChips row={row} themes={themes} sources={sources} onFilter={setQuery} />
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => setEditingSymbol(row.symbol)}
-                            className="p-1.5 rounded-lg text-gray-500 hover:text-accent-blue hover:bg-accent-blue/10 transition-colors"
-                            title="Edit row"
-                          >
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            onClick={() => removeSymbol(row.symbol)}
-                            className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-400/10 transition-colors"
-                            title="Remove symbol"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                          <a
-                            href={`https://www.tradingview.com/symbols/${row.symbol}/`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/[0.04] transition-colors"
-                            title="Open on TradingView"
-                          >
-                            <ExternalLink size={13} />
-                          </a>
-                        </div>
-                      </td>
-                    </tr>
-                  )})}
+                      <tr key={row.symbol} className={`align-top hover:bg-white/[0.02] cursor-pointer ${selectedDisplaySymbol === row.symbol ? 'bg-accent-blue/5' : ''}`} onClick={() => setSelectedSymbol(row.symbol)}>
+                        {visibleColumns.map(column => (
+                          <td key={`${row.symbol}-${column.id}`} className={column.cellClassName}>
+                            {column.render(row)}
+                          </td>
+                        ))}
+                      </tr>
+                    )})}
                 </tbody>
               </table>
             </div>
@@ -971,6 +2648,8 @@ export default function ThemeWatchlist({
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
 
       {editingRow && (

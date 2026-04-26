@@ -5,13 +5,15 @@ import {
   CartesianGrid, LineChart, Line, ReferenceLine, Legend, AreaChart, Area,
   ScatterChart, Scatter, ZAxis, ComposedChart
 } from 'recharts'
-import { RefreshCw, ChevronUp, ChevronDown, Clock, TrendingDown, Brain, AlertTriangle, Maximize2, X, Target } from 'lucide-react'
+import { RefreshCw, ChevronUp, ChevronDown, Clock, TrendingDown, Brain, AlertTriangle, Maximize2, X, Target, BarChart2, Activity, CalendarDays, Shield } from 'lucide-react'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useAtrBackfill } from '../../hooks/useAtrBackfill.js'
 import { buildEquityCurve } from '../../utils/equityCurve.js'
+import { buildAnchoredRsTradeAnalytics } from '../../utils/anchoredRsTradeAnalytics.js'
+import { buildRollingRsTradeAnalytics } from '../../utils/rollingRsTradeAnalytics.js'
 import {
   calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor,
   calcRMultipleDistribution, groupByField, calcAvgWinLoss, calcTotalR,
@@ -20,6 +22,7 @@ import {
 } from '../../utils/metrics.js'
 import { formatCurrency, formatR, formatDate } from '../../utils/formatters.js'
 import { fetchHistory, fetchATR14, fetchQuotes } from '../../utils/marketData.js'
+import { resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
 
 const COLORS = { Win: '#00d084', Loss: '#ff4757', Scratch: '#6b7280' }
 const TT_STYLE       = { backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }
@@ -37,6 +40,581 @@ const ANALYTICS_START_LABEL = 'Nov 24, 2025'
 
 function SectionTitle({ children }) {
   return <h3 className="text-sm font-semibold text-gray-300 mb-3">{children}</h3>
+}
+
+function RsAnalyticsSection({
+  title,
+  intro,
+  analytics,
+  loading,
+  error,
+  emptyMessage,
+  loadingMessage,
+}) {
+  return (
+    <div className="card border border-accent-blue/15 bg-gradient-to-br from-accent-blue/5 via-transparent to-accent-green/5">
+      <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+        <div>
+          <SectionTitle>
+            <span className="flex items-center gap-2">
+              <Target size={14} className="text-accent-blue inline" />
+              {title}
+            </span>
+          </SectionTitle>
+          <p className="text-xs text-gray-500">{intro}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] uppercase tracking-wider text-gray-600">Coverage</p>
+          <p className={`text-sm font-semibold mono ${analytics?.coverage?.coveragePct >= 80 ? 'text-accent-green' : analytics ? 'text-accent-yellow' : 'text-gray-500'}`}>
+            {loading ? 'Loading…' : analytics ? `${analytics.coverage.coveragePct}%` : '—'}
+          </p>
+        </div>
+      </div>
+
+      {error ? (
+        <div className="rounded-lg bg-accent-red/10 border border-accent-red/20 px-4 py-3 text-xs text-accent-red">
+          {error}
+        </div>
+      ) : !analytics && loading ? (
+        <div className="rounded-lg bg-surface-200 px-4 py-6 text-xs text-gray-500 text-center">
+          {loadingMessage}
+        </div>
+      ) : !analytics || analytics.rows.length === 0 ? (
+        <div className="rounded-lg bg-surface-200 px-4 py-6 text-xs text-gray-500 text-center">
+          {emptyMessage}
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            {[
+              {
+                label: 'Best Z Bucket',
+                value: analytics.summary.bestBucket?.label || '—',
+                sub: analytics.summary.bestBucket
+                  ? `${analytics.summary.bestBucket.count} trades · ${formatR(analytics.summary.bestBucket.avgR || 0)} avg`
+                  : `Need ${analytics.summary.bucketSignalMinTrades || 3}+ trades in one bucket`,
+                color: 'text-accent-green',
+              },
+              {
+                label: 'Worst Z Bucket',
+                value: analytics.summary.worstBucket?.label || '—',
+                sub: analytics.summary.worstBucket
+                  ? `${analytics.summary.worstBucket.count} trades · ${formatR(analytics.summary.worstBucket.avgR || 0)} avg`
+                  : `Need ${analytics.summary.bucketSignalMinTrades || 3}+ trades in one bucket`,
+                color: 'text-accent-red',
+              },
+              {
+                label: 'Winner Entry Z',
+                value: analytics.summary.avgWinnerEntryZ != null ? `${analytics.summary.avgWinnerEntryZ >= 0 ? '+' : ''}${analytics.summary.avgWinnerEntryZ.toFixed(2)}z` : '—',
+                sub: `${analytics.summary.wins} winning trades`,
+                color: 'text-accent-green',
+              },
+              {
+                label: 'Loser Entry Z',
+                value: analytics.summary.avgLoserEntryZ != null ? `${analytics.summary.avgLoserEntryZ >= 0 ? '+' : ''}${analytics.summary.avgLoserEntryZ.toFixed(2)}z` : '—',
+                sub: `${analytics.summary.losses} losing trades`,
+                color: 'text-accent-red',
+              },
+            ].map(card => (
+              <div key={card.label} className="bg-surface-200 rounded-lg px-3 py-2.5">
+                <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{card.label}</p>
+                <p className={`text-xl font-bold mono ${card.color}`}>{card.value}</p>
+                <p className="text-[10px] text-gray-600 mt-0.5">{card.sub}</p>
+              </div>
+            ))}
+          </div>
+
+          {analytics.selectionProfile && (
+            <div className="rounded-xl border border-accent-blue/20 bg-accent-blue/[0.04] p-3 mb-4">
+              <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+                <div>
+                  <p className="text-xs font-semibold text-gray-300">Selection Profile</p>
+                  <p className="text-[11px] text-gray-600 mt-0.5">Turns the RS history into focus and avoid candidates for this filtered trade sample, but only promotes buckets once they have enough trades to matter.</p>
+                </div>
+                <span className={`text-[10px] px-2 py-1 rounded border ${
+                  analytics.selectionProfile.lowSample
+                    ? 'border-accent-yellow/30 bg-accent-yellow/10 text-accent-yellow'
+                    : 'border-accent-green/30 bg-accent-green/10 text-accent-green'
+                }`}>
+                  {analytics.selectionProfile.lowSample ? 'low sample' : 'sample ready'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-3">
+                <div className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Focus Zone</p>
+                  <p className="text-lg font-bold mono text-accent-green">
+                    {analytics.selectionProfile.focusZone?.label || '—'}
+                  </p>
+                  <p className="text-[10px] text-gray-600 mt-1">
+                    {analytics.selectionProfile.focusZone
+                      ? `${analytics.selectionProfile.focusZone.count} trades · ${formatR(analytics.selectionProfile.focusZone.avgR)} avg · ${analytics.selectionProfile.focusZone.winRate?.toFixed(0) ?? '—'}% win`
+                      : 'No positive focus zone yet'}
+                  </p>
+                  <p className="text-[10px] text-gray-600">
+                    PF {analytics.selectionProfile.focusZone?.profitFactor === Infinity ? '∞' : analytics.selectionProfile.focusZone?.profitFactor != null ? analytics.selectionProfile.focusZone.profitFactor.toFixed(2) : '—'}
+                  </p>
+                </div>
+
+                <div className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Best Setup</p>
+                  <p className="text-sm font-semibold text-gray-300">{analytics.selectionProfile.bestSetup?.label || '—'}</p>
+                  <p className={`text-xl font-bold mono mt-2 ${
+                    analytics.selectionProfile.bestSetup?.avgR == null ? 'text-gray-500' : analytics.selectionProfile.bestSetup.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'
+                  }`}>
+                    {analytics.selectionProfile.bestSetup?.avgR == null ? '—' : formatR(analytics.selectionProfile.bestSetup.avgR)}
+                  </p>
+                  <p className="text-[10px] text-gray-600">{analytics.selectionProfile.bestSetup?.count ?? 0} trades</p>
+                </div>
+
+                <div className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Avoid Candidates</p>
+                  {analytics.selectionProfile.avoidZones.length ? (
+                    <div className="space-y-2">
+                      {analytics.selectionProfile.avoidZones.slice(0, 3).map(zone => (
+                        <div key={zone.bucketKey} className="flex items-center justify-between gap-3">
+                          <span className="text-xs font-semibold text-gray-300">{zone.label}</span>
+                          <span className="text-xs mono text-accent-red">{formatR(zone.avgR)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-600">No negative bucket with sub-50% win rate yet.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-3">
+                {[
+                  { label: 'Signal Preference', group: analytics.selectionProfile.signalPreference },
+                  { label: 'Lifecycle Preference', group: analytics.selectionProfile.lifecyclePreference },
+                  { label: 'Weakest Setup', group: analytics.selectionProfile.weakestSetup },
+                ].map(item => (
+                  <div key={item.label} className="rounded-lg bg-white/[0.03] px-3 py-2.5 border border-white/8">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">{item.label}</p>
+                    <p className="text-xs font-semibold text-gray-300 mt-1">{item.group?.label || '—'}</p>
+                    <p className={`text-sm font-bold mono mt-1 ${item.group?.avgR == null ? 'text-gray-500' : item.group.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                      {item.group?.avgR == null ? '—' : formatR(item.group.avgR)}
+                      <span className="text-[10px] font-normal text-gray-600 ml-2">{item.group?.count ?? 0} trades</span>
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {analytics.selectionProfile.notes.length > 0 && (
+                <div className="rounded-lg bg-black/10 border border-white/8 px-3 py-2">
+                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Readout</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">
+                    {analytics.selectionProfile.notes.map(note => (
+                      <p key={note} className="text-[11px] text-gray-500 leading-relaxed">{note}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+              <p className="text-xs font-semibold text-gray-300 mb-2">Entry Z vs Trade R</p>
+              <ResponsiveContainer width="100%" height={240}>
+                <ScatterChart data={analytics.rows} margin={{ top: 8, right: 10, left: -8, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                  <XAxis type="number" dataKey="entryZ" name="Entry Z" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}z`} />
+                  <YAxis type="number" dataKey="rValue" name="Trade R" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}R`} />
+                  <Tooltip
+                    contentStyle={TT_STYLE}
+                    labelStyle={TT_LABEL_STYLE}
+                    itemStyle={TT_ITEM_STYLE}
+                    formatter={(value, name) => [name === 'Trade R' ? `${Number(value).toFixed(2)}R` : `${Number(value).toFixed(2)}z`, name]}
+                    labelFormatter={(_, payload) => {
+                      const row = payload?.[0]?.payload
+                      return row ? `${row.symbol} · ${formatDate(row.entryDate)} · ${row.outcome}` : ''
+                    }}
+                  />
+                  <ReferenceLine x={0} stroke="#ffffff20" strokeDasharray="4 4" />
+                  <ReferenceLine y={0} stroke="#ffffff20" strokeDasharray="4 4" />
+                  <Scatter
+                    dataKey="rValue"
+                    shape={props => {
+                      const { cx, cy, payload } = props
+                      const fill = payload.outcome === 'Win' ? '#00d084' : '#ff4757'
+                      return <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.85} stroke="none" />
+                    }}
+                  />
+                </ScatterChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+              <p className="text-xs font-semibold text-gray-300 mb-2">Z Direction Into Entry</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {analytics.trendGroups.map(group => (
+                  <div key={group.key} className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                    <p className="text-xs font-semibold text-gray-300">{group.label}</p>
+                    <p className={`text-2xl font-bold mono mt-2 ${group.avgR == null ? 'text-gray-500' : group.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                      {group.avgR == null ? '—' : formatR(group.avgR)}
+                    </p>
+                    <p className="text-[10px] text-gray-600 mt-1">{group.count} trades · {group.winRate == null ? '—' : `${group.winRate.toFixed(0)}%`} win rate</p>
+                    <p className="text-[10px] text-gray-600">{group.lowSample ? 'low sample' : 'sample ready'} · PF {group.profitFactor === Infinity ? '∞' : group.profitFactor != null ? group.profitFactor.toFixed(2) : '—'}</p>
+                  </div>
+                ))}
+              </div>
+              {analytics.coverage.missingTrades > 0 && (
+                <div className="mt-3 rounded-lg bg-accent-yellow/10 border border-accent-yellow/15 px-3 py-2 text-[11px] text-accent-yellow">
+                  {analytics.coverage.missingTrades} trade{analytics.coverage.missingTrades !== 1 ? 's' : ''} excluded for missing/insufficient RS data
+                  {analytics.coverage.missingSymbols.length ? `: ${analytics.coverage.missingSymbols.slice(0, 8).join(', ')}` : ''}.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <p className="text-xs font-semibold text-gray-300">Setup Quality Groups</p>
+                  <p className="text-[11px] text-gray-600 mt-0.5">Combines entry z-score sign with the 10-day RS trend into entry.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {analytics.setupGroups.map(group => (
+                  <div key={group.key} className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                    <p className="text-xs font-semibold text-gray-300">{group.label}</p>
+                    <p className="text-[10px] text-gray-600 mt-1 min-h-[28px]">{group.description}</p>
+                    <div className="flex items-end justify-between gap-3 mt-3">
+                      <div>
+                        <p className={`text-xl font-bold mono ${group.avgR == null ? 'text-gray-500' : group.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                          {group.avgR == null ? '—' : formatR(group.avgR)}
+                        </p>
+                        <p className="text-[10px] text-gray-600">{group.count} trades · {group.winRate == null ? '—' : `${group.winRate.toFixed(0)}%`} win</p>
+                      </div>
+                      <span className={`text-[10px] ${group.count === 0 ? 'text-gray-700' : group.lowSample ? 'text-accent-yellow' : 'text-accent-green'}`}>
+                        {group.count === 0 ? '—' : group.lowSample ? 'low sample' : 'ready'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+              <p className="text-xs font-semibold text-gray-300 mb-2">Signal Line Context</p>
+              <p className="text-[11px] text-gray-600 mb-3">Compares entry z-score to its signal EMA, matching the PineScript signal-line idea.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                {analytics.signalGroups.map(group => (
+                  <div key={group.key} className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                    <p className="text-xs font-semibold text-gray-300">{group.label}</p>
+                    <p className="text-[10px] text-gray-600 mt-1">{group.description}</p>
+                    <p className={`text-2xl font-bold mono mt-3 ${group.avgR == null ? 'text-gray-500' : group.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                      {group.avgR == null ? '—' : formatR(group.avgR)}
+                    </p>
+                    <p className="text-[10px] text-gray-600">{group.count} trades · PF {group.profitFactor === Infinity ? '∞' : group.profitFactor != null ? group.profitFactor.toFixed(2) : '—'}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs font-semibold text-gray-300 mb-2">Rolling Selection Quality</p>
+              <ResponsiveContainer width="100%" height={190}>
+                <LineChart data={analytics.rollingSelection} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                  <XAxis dataKey="idx" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="z" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}z`} />
+                  <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}R`} />
+                  <Tooltip
+                    contentStyle={TT_STYLE}
+                    labelStyle={TT_LABEL_STYLE}
+                    itemStyle={TT_ITEM_STYLE}
+                    formatter={(value, name) => [
+                      name === 'Avg Entry Z' ? `${Number(value).toFixed(2)}z` : `${Number(value).toFixed(2)}R`,
+                      name,
+                    ]}
+                    labelFormatter={(_, payload) => payload?.[0]?.payload?.label || ''}
+                  />
+                  <ReferenceLine yAxisId="z" y={0} stroke="#ffffff18" strokeDasharray="4 4" />
+                  <Line yAxisId="z" type="monotone" dataKey="avgEntryZ" name="Avg Entry Z" stroke="#3d84ff" strokeWidth={2} dot={false} connectNulls />
+                  <Line yAxisId="r" type="monotone" dataKey="avgR" name="Avg R" stroke="#00d084" strokeWidth={2} dot={false} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+              <p className="text-[10px] text-gray-600 mt-2">Each point is a rolling 10-trade average, or fewer until 10 samples exist.</p>
+            </div>
+          </div>
+
+          {analytics.lifecycleSummary.withLifecycle > 0 && (
+            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 mb-4">
+              <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+                <div>
+                  <p className="text-xs font-semibold text-gray-300">During-Trade RS Lifecycle</p>
+                  <p className="text-[11px] text-gray-600 mt-0.5">Tracks z-score from entry through final exit.</p>
+                </div>
+                <span className="text-[10px] text-gray-600">{analytics.lifecycleSummary.withLifecycle} trades with lifecycle data</span>
+              </div>
+
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                {[
+                  {
+                    label: 'Winner Z Change',
+                    value: analytics.lifecycleSummary.winners.avgZChangeDuringTrade,
+                    suffix: 'z',
+                    color: 'text-accent-green',
+                    sub: `${analytics.lifecycleSummary.winners.count} winners`,
+                  },
+                  {
+                    label: 'Loser Z Change',
+                    value: analytics.lifecycleSummary.losses.avgZChangeDuringTrade,
+                    suffix: 'z',
+                    color: 'text-accent-red',
+                    sub: `${analytics.lifecycleSummary.losses.count} losses`,
+                  },
+                  {
+                    label: 'Winner Signal Break',
+                    value: analytics.lifecycleSummary.winners.brokeBelowSignalRate,
+                    suffix: '%',
+                    color: analytics.lifecycleSummary.winners.brokeBelowSignalRate > 0 ? 'text-accent-yellow' : 'text-accent-green',
+                    sub: 'broke below signal',
+                  },
+                  {
+                    label: 'Loser Signal Break',
+                    value: analytics.lifecycleSummary.losses.brokeBelowSignalRate,
+                    suffix: '%',
+                    color: analytics.lifecycleSummary.losses.brokeBelowSignalRate > 50 ? 'text-accent-red' : 'text-accent-yellow',
+                    sub: 'broke below signal',
+                  },
+                ].map(card => (
+                  <div key={card.label} className="bg-surface-200 rounded-lg px-3 py-2.5">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{card.label}</p>
+                    <p className={`text-xl font-bold mono ${card.color}`}>
+                      {card.value == null ? '—' : `${card.value >= 0 ? '+' : ''}${card.value.toFixed(2)}${card.suffix}`}
+                    </p>
+                    <p className="text-[10px] text-gray-600 mt-0.5">{card.sub}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
+                {analytics.lifecycleBreakdown.map(group => (
+                  <div key={group.key} className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                    <p className="text-xs font-semibold text-gray-300">{group.label}</p>
+                    <p className="text-[10px] text-gray-600 mt-1 min-h-[28px]">{group.description}</p>
+                    <p className={`text-xl font-bold mono mt-3 ${group.avgR == null ? 'text-gray-500' : group.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                      {group.avgR == null ? '—' : formatR(group.avgR)}
+                    </p>
+                    <p className="text-[10px] text-gray-600">{group.count} trades · {group.winRate == null ? '—' : `${group.winRate.toFixed(0)}%`} win</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                <p className="text-xs font-semibold text-gray-300 mb-2">Entry vs Exit Z</p>
+                <ResponsiveContainer width="100%" height={230}>
+                  <ComposedChart data={analytics.rows.filter(row => Number.isFinite(row.exitZ))} margin={{ top: 6, right: 8, left: -12, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                    <XAxis dataKey="symbol" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => `${v}z`} />
+                    <Tooltip
+                      contentStyle={TT_STYLE}
+                      labelStyle={TT_LABEL_STYLE}
+                      itemStyle={TT_ITEM_STYLE}
+                      formatter={(value, name) => [`${Number(value).toFixed(2)}z`, name]}
+                      labelFormatter={(_, payload) => {
+                        const row = payload?.[0]?.payload
+                        return row ? `${row.symbol} · ${formatDate(row.entryDate)}` : ''
+                      }}
+                    />
+                    <ReferenceLine y={0} stroke="#ffffff18" strokeDasharray="4 4" />
+                    <Bar dataKey="entryZ" name="Entry Z" fill="#3d84ff" radius={[4, 4, 0, 0]} />
+                    <Line type="monotone" dataKey="exitZ" name="Exit Z" stroke="#00d084" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+            <p className="text-xs font-semibold text-gray-300 mb-3">Bucket Breakdown</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+              {analytics.buckets.map(bucket => (
+                <div key={bucket.key} className="rounded-lg bg-surface-200 px-3 py-3 border border-white/8">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold text-gray-300">{bucket.label}</p>
+                    <span className={`text-[10px] ${bucket.count === 0 ? 'text-gray-700' : bucket.lowSample ? 'text-accent-yellow' : 'text-accent-green'}`}>
+                      {bucket.count === 0 ? '—' : bucket.lowSample ? 'low sample' : 'ready'}
+                    </span>
+                  </div>
+                  <p className={`text-xl font-bold mono mt-3 ${bucket.avgR == null ? 'text-gray-500' : bucket.avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                    {bucket.avgR == null ? '—' : formatR(bucket.avgR)}
+                  </p>
+                  <p className="text-[10px] text-gray-600 mt-1">{bucket.count} trades · {bucket.winRate == null ? '—' : `${bucket.winRate.toFixed(0)}%`} win</p>
+                  <p className="text-[10px] text-gray-600">PF {bucket.profitFactor === Infinity ? '∞' : bucket.profitFactor != null ? bucket.profitFactor.toFixed(2) : '—'}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+const ANALYTICS_TABS = [
+  { key: 'snapshot', label: 'Snapshot', desc: 'Headline performance and current edge health.', icon: BarChart2 },
+  { key: 'edge', label: 'Edge', desc: 'Setup quality, distributions, and RS selection.', icon: Target },
+  { key: 'timing', label: 'Timing', desc: 'Calendar, session, and holding-period behavior.', icon: CalendarDays },
+  { key: 'process', label: 'Process', desc: 'Execution discipline, entries, and psychology.', icon: Brain },
+  { key: 'exposure', label: 'Exposure', desc: 'Portfolio sensitivity, drawdowns, and symbols.', icon: Activity },
+  { key: 'projections', label: 'Projections', desc: 'Long-game risk and forward drawdown tools.', icon: Shield },
+]
+
+function AnalyticsHeader({
+  timeframe,
+  setTimeframe,
+  tradeMode,
+  setTradeMode,
+  hasATRData,
+  rBasis,
+  setRBasis,
+  closedTradeCount,
+  realtimeTradeCount,
+  liveQuoteLoading,
+  liveQuoteRefreshNonce,
+  setLiveQuoteRefreshNonce,
+  openForRealtime,
+  atrBackfill,
+  sampleLabel,
+  selectedAccount,
+}) {
+  return (
+    <div className="luxury-panel rounded-2xl p-4 md:p-5 overflow-hidden relative">
+      <div className="absolute inset-y-0 right-0 w-1/2 bg-gradient-to-l from-accent-blue/10 via-accent-purple/5 to-transparent pointer-events-none" />
+      <div className="relative flex items-start justify-between gap-4 flex-wrap mb-4">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-[#9ab3d1] mb-1">Trading Analytics</p>
+          <h1 className="text-2xl md:text-3xl font-semibold tracking-[-0.03em] text-white">Analytics Command Center</h1>
+          <p className="text-xs md:text-sm text-gray-500 mt-1">
+            {sampleLabel} · {selectedAccount && selectedAccount !== 'All' ? selectedAccount : 'All accounts'} · All starts {ANALYTICS_START_LABEL}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap justify-start md:justify-end">
+          {tradeMode === 'realtime' && (
+            <button
+              type="button"
+              onClick={() => setLiveQuoteRefreshNonce(liveQuoteRefreshNonce + 1)}
+              disabled={liveQuoteLoading || openForRealtime.length === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-surface-100 border border-white/10 text-gray-400 hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <RefreshCw size={12} className={liveQuoteLoading ? 'animate-spin' : ''} />
+              Refresh Marks
+            </button>
+          )}
+          {(atrBackfill.running || atrBackfill.filled > 0 || atrBackfill.failed > 0) && (
+            <span className={`text-[10px] px-2.5 py-1.5 rounded-full border ${
+              atrBackfill.running ? 'text-accent-blue border-accent-blue/25 bg-accent-blue/10'
+              : atrBackfill.failed ? 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10'
+              : 'text-accent-green border-accent-green/25 bg-accent-green/10'
+            }`}>
+              ATR backfill {atrBackfill.running ? 'running' : 'complete'} · {atrBackfill.filled}/{atrBackfill.pending} filled{atrBackfill.failed ? ` · ${atrBackfill.failed} failed` : ''}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="relative flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1 rounded-xl bg-surface-100/85 border border-white/10 p-1 overflow-x-auto">
+          {['1M', '3M', '6M', 'YTD', '1Y', 'All'].map(tf => (
+            <button
+              key={tf}
+              onClick={() => setTimeframe(tf)}
+              title={tf === 'All' ? `All reliable stats since ${ANALYTICS_START_LABEL}` : undefined}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                timeframe === tf
+                  ? 'bg-accent-blue text-white shadow-lg shadow-accent-blue/10'
+                  : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+              }`}
+            >
+              {tf}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center bg-surface-100/85 border border-white/10 rounded-xl p-1">
+          {[
+            ['closed', 'Closed'],
+            ['realtime', 'Real Time'],
+          ].map(([mode, label]) => (
+            <button
+              key={mode}
+              onClick={() => setTradeMode(mode)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+                tradeMode === mode ? 'bg-accent-green/20 text-accent-green' : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {hasATRData && (
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-gray-500 font-medium">R Basis</span>
+            <div className="flex items-center bg-surface-100/85 border border-white/10 rounded-xl p-1">
+              {[['stop', 'Stop'], ['atr', 'ATR']].map(([val, label]) => (
+                <button key={val} onClick={() => setRBasis(val)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    rBasis === val ? 'bg-accent-blue/20 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+                  }`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <span className="text-[10px] text-gray-600">
+          {tradeMode === 'realtime'
+            ? `${closedTradeCount} closed + ${realtimeTradeCount} live open${liveQuoteLoading ? ' · refreshing quotes' : ''}`
+            : 'Closed trades only'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function AnalyticsTabs({ activeTab, onTabChange, availability = {} }) {
+  return (
+    <div className="sticky top-0 z-20 -mx-4 px-4 py-2 bg-surface/90 backdrop-blur-xl border-y border-white/5">
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {ANALYTICS_TABS.map(tab => {
+          const Icon = tab.icon
+          const active = activeTab === tab.key
+          const badge = availability[tab.key]
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => onTabChange(tab.key)}
+              className={`group min-w-[148px] md:min-w-[172px] text-left rounded-xl border px-3 py-2.5 transition-all shrink-0 ${
+                active
+                  ? 'bg-accent-blue/15 border-accent-blue/35 text-white shadow-lg shadow-accent-blue/5'
+                  : 'bg-surface-100/75 border-white/8 text-gray-500 hover:text-gray-300 hover:border-white/15'
+              }`}
+            >
+              <span className="flex items-center justify-between gap-2 mb-1">
+                <span className="inline-flex items-center gap-2 text-xs font-semibold">
+                  <Icon size={14} className={active ? 'text-accent-blue' : 'text-gray-500 group-hover:text-gray-300'} />
+                  {tab.label}
+                </span>
+                {badge && (
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full border ${badge.cls}`}>
+                    {badge.label}
+                  </span>
+                )}
+              </span>
+              <span className="block text-[10px] leading-snug text-gray-600">{tab.desc}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 // ── Shared tooltip hook ───────────────────────────────────────────────────────
@@ -181,6 +759,27 @@ function getTimeframeCutoff(timeframe) {
   if (timeframe === 'YTD') return new Date(now.getFullYear(), 0, 1)
   if (timeframe === '1Y') { const d = new Date(now); d.setFullYear(d.getFullYear() - 1); return d }
   return null
+}
+
+function toDateKey(value) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date.toISOString().slice(0, 10)
+}
+
+function addDays(value, days) {
+  const date = new Date(value)
+  date.setDate(date.getDate() + days)
+  return date
+}
+
+function getLastExitDateKey(trade) {
+  const explicitExit = toDateKey(trade?.exitDate)
+  const exitKeys = (trade?.exits || [])
+    .map(exit => toDateKey(exit.exitDate || exit.date))
+    .filter(Boolean)
+  return [explicitExit, ...exitKeys].filter(Boolean).sort().at(-1) || null
 }
 
 function getTradeResolutionDate(trade) {
@@ -407,6 +1006,8 @@ export default function Analytics({ selectedAccount }) {
     analyticsWinLossMode, setAnalyticsWinLossMode,
     analyticsRiskMode, setAnalyticsRiskMode,
     analyticsSqnMode,  setAnalyticsSqnMode,
+    analyticsActiveTab, setAnalyticsActiveTab,
+    tradeReviewChartSettings,
     tpMultiplier = 2,
   } = useSettingsStore()
   const { entries: morningEntries } = useMorningStore()
@@ -415,6 +1016,7 @@ export default function Analytics({ selectedAccount }) {
   const setTimeframe = setAnalyticsTimeframe
   const tradeMode    = analyticsTradeMode ?? 'closed'
   const setTradeMode = setAnalyticsTradeMode
+  const activeTab    = ANALYTICS_TABS.some(tab => tab.key === analyticsActiveTab) ? analyticsActiveTab : 'snapshot'
   const sampleLabel  = tradeMode === 'realtime' ? 'Trades + Live Opens' : 'Closed Trades'
 
   // R-basis toggle: 'stop' = stop-based R (default), 'atr' = ATR-budget R
@@ -428,6 +1030,14 @@ export default function Analytics({ selectedAccount }) {
   const [strengthMap,     setStrengthMap]     = useState({})
   const [strengthLoading, setStrengthLoading] = useState(false)
   const fetchedIds = useRef(new Set())
+  const [rollingRsAnalytics, setRollingRsAnalytics] = useState(null)
+  const [rollingRsLoading, setRollingRsLoading] = useState(false)
+  const [rollingRsError, setRollingRsError] = useState('')
+  const rollingRsFetchRef = useRef('')
+  const [anchoredRsAnalytics, setAnchoredRsAnalytics] = useState(null)
+  const [anchoredRsLoading, setAnchoredRsLoading] = useState(false)
+  const [anchoredRsError, setAnchoredRsError] = useState('')
+  const anchoredRsFetchRef = useRef('')
   const [liveQuotes, setLiveQuotes] = useState(new Map())
   const [liveQuoteLoading, setLiveQuoteLoading] = useState(false)
   const [liveQuoteRefreshNonce, setLiveQuoteRefreshNonce] = useState(0)
@@ -516,6 +1126,11 @@ export default function Analytics({ selectedAccount }) {
     [tfFiltered]
   )
 
+  const anchoredRsTradeSample = useMemo(
+    () => [...closedOnly].sort((a, b) => (new Date(a.entryDate).getTime() || 0) - (new Date(b.entryDate).getTime() || 0)),
+    [closedOnly]
+  )
+
   const closed = useMemo(
     () => (tradeMode === 'realtime' ? [...closedOnly, ...realtimeOpenTrades] : closedOnly)
       .filter(t => t.status === 'Win' || t.status === 'Loss'),
@@ -530,6 +1145,146 @@ export default function Analytics({ selectedAccount }) {
     () => [...closed].sort((a, b) => (getTradeResolutionDate(a)?.getTime() ?? 0) - (getTradeResolutionDate(b)?.getTime() ?? 0)),
     [closed]
   )
+
+  useEffect(() => {
+    const sample = anchoredRsTradeSample.filter(trade => trade.symbol && trade.entryDate)
+    if (!sample.length) {
+      setRollingRsAnalytics(null)
+      setRollingRsError('')
+      setRollingRsLoading(false)
+      rollingRsFetchRef.current = ''
+      return
+    }
+
+    const settingsKey = JSON.stringify({
+      benchmarkSymbol: tradeReviewChartSettings?.benchmarkSymbol || 'SPY',
+      dailyRollingRs: tradeReviewChartSettings?.dailyRollingRs || {},
+    })
+    const sampleKey = sample.map(trade => `${trade.id}:${trade.symbol}:${trade.entryDate}:${getLastExitDateKey(trade) ?? ''}:${trade.status}:${trade[rField] ?? ''}:${trade.pl ?? ''}`).join('|')
+    const fetchKey = `${sampleKey}|${rField}|${settingsKey}`
+    if (rollingRsFetchRef.current === fetchKey) return
+    rollingRsFetchRef.current = fetchKey
+
+    let cancelled = false
+    async function run() {
+      setRollingRsLoading(true)
+      setRollingRsError('')
+      try {
+        const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
+        const entryKeys = sample.map(trade => toDateKey(trade.entryDate)).filter(Boolean).sort()
+        const exitKeys = sample.map(getLastExitDateKey).filter(Boolean).sort()
+        const firstKey = entryKeys[0]
+        const lastKey = [...entryKeys, ...exitKeys].filter(Boolean).sort().at(-1)
+        if (!firstKey || !lastKey) throw new Error('No valid trade dates for Rolling RS analytics.')
+
+        const bufferDays = Math.max(
+          (tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63) +
+          (tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50) + 30,
+          180
+        )
+        const start = addDays(`${firstKey}T00:00:00Z`, -bufferDays)
+        const end = addDays(`${lastKey}T00:00:00Z`, 2)
+        const benchmarkBars = await fetchHistory(benchmarkSymbol, start, end)
+        const symbols = [...new Set(sample.map(trade => String(trade.symbol || '').toUpperCase()).filter(Boolean))].sort()
+        const symbolEntries = await Promise.all(symbols.map(async symbol => {
+          try {
+            const bars = await fetchHistory(symbol, start, end)
+            return [symbol, bars]
+          } catch {
+            return [symbol, []]
+          }
+        }))
+        const next = buildRollingRsTradeAnalytics({
+          trades: sample,
+          benchmarkBars,
+          symbolBarsBySymbol: Object.fromEntries(symbolEntries),
+          settings: tradeReviewChartSettings,
+          rField,
+        })
+        if (!cancelled) setRollingRsAnalytics(next)
+      } catch (err) {
+        if (!cancelled) {
+          setRollingRsAnalytics(null)
+          setRollingRsError(err.message || 'Rolling RS analytics failed to load.')
+        }
+      } finally {
+        if (!cancelled) setRollingRsLoading(false)
+      }
+    }
+
+    run()
+    return () => { cancelled = true }
+  }, [anchoredRsTradeSample, tradeReviewChartSettings, rField])
+
+  useEffect(() => {
+    const sample = anchoredRsTradeSample.filter(trade => trade.symbol && trade.entryDate)
+    if (!sample.length) {
+      setAnchoredRsAnalytics(null)
+      setAnchoredRsError('')
+      setAnchoredRsLoading(false)
+      anchoredRsFetchRef.current = ''
+      return
+    }
+
+    const settingsKey = JSON.stringify({
+      benchmarkSymbol: tradeReviewChartSettings?.benchmarkSymbol || 'SPY',
+      anchorDates: tradeReviewChartSettings?.anchorDates || [],
+      dailyAnchoredRs: tradeReviewChartSettings?.dailyAnchoredRs || {},
+    })
+    const sampleKey = sample.map(trade => `${trade.id}:${trade.symbol}:${trade.entryDate}:${getLastExitDateKey(trade) ?? ''}:${trade.status}:${trade[rField] ?? ''}:${trade.pl ?? ''}`).join('|')
+    const fetchKey = `${sampleKey}|${rField}|${settingsKey}`
+    if (anchoredRsFetchRef.current === fetchKey) return
+    anchoredRsFetchRef.current = fetchKey
+
+    let cancelled = false
+    async function run() {
+      setAnchoredRsLoading(true)
+      setAnchoredRsError('')
+      try {
+        const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
+        const entryKeys = sample.map(trade => toDateKey(trade.entryDate)).filter(Boolean).sort()
+        const exitKeys = sample.map(getLastExitDateKey).filter(Boolean).sort()
+        const anchorKeys = sample
+          .map(trade => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates, trade.entryDate))
+          .filter(Boolean)
+          .sort()
+        const firstKey = [entryKeys[0], anchorKeys[0]].filter(Boolean).sort()[0]
+        const lastKey = [...entryKeys, ...exitKeys].filter(Boolean).sort().at(-1)
+        if (!firstKey || !lastKey) throw new Error('No valid trade dates for Anchored RS analytics.')
+
+        const start = addDays(`${firstKey}T00:00:00Z`, -180)
+        const end = addDays(`${lastKey}T00:00:00Z`, 2)
+        const benchmarkBars = await fetchHistory(benchmarkSymbol, start, end)
+        const symbols = [...new Set(sample.map(trade => String(trade.symbol || '').toUpperCase()).filter(Boolean))].sort()
+        const symbolEntries = await Promise.all(symbols.map(async symbol => {
+          try {
+            const bars = await fetchHistory(symbol, start, end)
+            return [symbol, bars]
+          } catch {
+            return [symbol, []]
+          }
+        }))
+        const next = buildAnchoredRsTradeAnalytics({
+          trades: sample,
+          benchmarkBars,
+          symbolBarsBySymbol: Object.fromEntries(symbolEntries),
+          settings: tradeReviewChartSettings,
+          rField,
+        })
+        if (!cancelled) setAnchoredRsAnalytics(next)
+      } catch (err) {
+        if (!cancelled) {
+          setAnchoredRsAnalytics(null)
+          setAnchoredRsError(err.message || 'Anchored RS analytics failed to load.')
+        }
+      } finally {
+        if (!cancelled) setAnchoredRsLoading(false)
+      }
+    }
+
+    run()
+    return () => { cancelled = true }
+  }, [anchoredRsTradeSample, tradeReviewChartSettings, rField])
 
   // ── Strength / Weakness auto-detection ─────────────────────────────────────
   // For each closed trade, compare entry price to the prior day's close.
@@ -1443,10 +2198,72 @@ export default function Analytics({ selectedAccount }) {
     }
   }, [closed])
 
+  const tabAvailability = useMemo(() => ({
+    snapshot: { label: `${closed.length}`, cls: 'border-white/10 bg-white/5 text-gray-400' },
+    edge: (anchoredRsLoading || rollingRsLoading)
+      ? { label: 'loading', cls: 'border-accent-blue/25 bg-accent-blue/10 text-accent-blue' }
+      : Math.max(anchoredRsAnalytics?.rows?.length || 0, rollingRsAnalytics?.rows?.length || 0)
+        ? { label: `${Math.max(anchoredRsAnalytics?.rows?.length || 0, rollingRsAnalytics?.rows?.length || 0)}`, cls: 'border-accent-green/25 bg-accent-green/10 text-accent-green' }
+        : { label: 'early', cls: 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow' },
+    timing: monthlyStats.length
+      ? { label: `${monthlyStats.length} mo`, cls: 'border-white/10 bg-white/5 text-gray-400' }
+      : null,
+    process: maeAnalytics
+      ? { label: `${maeAnalytics.withMAE.length}/${maeAnalytics.total}`, cls: 'border-accent-green/25 bg-accent-green/10 text-accent-green' }
+      : { label: 'setup', cls: 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow' },
+    exposure: drawdownData
+      ? { label: 'ready', cls: 'border-accent-green/25 bg-accent-green/10 text-accent-green' }
+      : null,
+    projections: projectionRValues.length
+      ? { label: `${projectionRValues.length}R`, cls: 'border-accent-blue/25 bg-accent-blue/10 text-accent-blue' }
+      : { label: 'early', cls: 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow' },
+  }), [anchoredRsAnalytics, anchoredRsLoading, closed.length, drawdownData, maeAnalytics, monthlyStats.length, projectionRValues.length, rollingRsAnalytics, rollingRsLoading])
+
+  const tabContentClass = (key) => activeTab === key ? 'contents' : 'hidden'
+
   if (tfFiltered.length === 0) {
     return (
-      <div className="p-4 flex items-center justify-center h-64">
-        <p className="text-gray-500">No trades in the selected analytics range.</p>
+      <div className="p-4 flex flex-col gap-6">
+        <AnalyticsHeader
+          timeframe={timeframe}
+          setTimeframe={setTimeframe}
+          tradeMode={tradeMode}
+          setTradeMode={setTradeMode}
+          hasATRData={hasATRData}
+          rBasis={rBasis}
+          setRBasis={setRBasis}
+          closedTradeCount={closedTradeCount}
+          realtimeTradeCount={realtimeTradeCount}
+          liveQuoteLoading={liveQuoteLoading}
+          liveQuoteRefreshNonce={liveQuoteRefreshNonce}
+          setLiveQuoteRefreshNonce={setLiveQuoteRefreshNonce}
+          openForRealtime={openForRealtime}
+          atrBackfill={atrBackfill}
+          sampleLabel={sampleLabel}
+          selectedAccount={selectedAccount}
+        />
+        <AnalyticsTabs activeTab={activeTab} onTabChange={setAnalyticsActiveTab} availability={tabAvailability} />
+        <div className="flex items-center justify-center h-40">
+          <p className="text-gray-500">No trades in the selected analytics range.</p>
+        </div>
+        <RsAnalyticsSection
+          title="Rolling RS Analytics"
+          intro={`Entry rolling z-score vs ${tradeReviewChartSettings?.benchmarkSymbol || 'SPY'}, using the current ${rBasis === 'atr' ? 'ATR R' : 'stop R'} basis.`}
+          analytics={null}
+          loading={false}
+          error=""
+          loadingMessage=""
+          emptyMessage="No eligible Rolling RS sample yet. Closed trades need symbols, entry dates, enough daily history, and benchmark data."
+        />
+        <RsAnalyticsSection
+          title="Anchored RS Analytics"
+          intro={`Entry z-score vs ${tradeReviewChartSettings?.benchmarkSymbol || 'SPY'}, using your global anchor dates and the current ${rBasis === 'atr' ? 'ATR R' : 'stop R'} basis.`}
+          analytics={null}
+          loading={false}
+          error=""
+          loadingMessage=""
+          emptyMessage="No eligible Anchored RS sample yet. Closed trades need symbols, entry dates, enough daily history, and benchmark data."
+        />
       </div>
     )
   }
@@ -1454,69 +2271,27 @@ export default function Analytics({ selectedAccount }) {
   return (
     <div className="p-4 flex flex-col gap-6">
 
-      {/* Timeframe + sample filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1">
-          {['1M', '3M', '6M', 'YTD', '1Y', 'All'].map(tf => (
-            <button
-              key={tf}
-              onClick={() => setTimeframe(tf)}
-              title={tf === 'All' ? `All reliable stats since ${ANALYTICS_START_LABEL}` : undefined}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                timeframe === tf
-                  ? 'bg-accent-blue text-white'
-                  : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
-              }`}
-            >
-              {tf}
-            </button>
-          ))}
-        </div>
+      <AnalyticsHeader
+        timeframe={timeframe}
+        setTimeframe={setTimeframe}
+        tradeMode={tradeMode}
+        setTradeMode={setTradeMode}
+        hasATRData={hasATRData}
+        rBasis={rBasis}
+        setRBasis={setRBasis}
+        closedTradeCount={closedTradeCount}
+        realtimeTradeCount={realtimeTradeCount}
+        liveQuoteLoading={liveQuoteLoading}
+        liveQuoteRefreshNonce={liveQuoteRefreshNonce}
+        setLiveQuoteRefreshNonce={setLiveQuoteRefreshNonce}
+        openForRealtime={openForRealtime}
+        atrBackfill={atrBackfill}
+        sampleLabel={sampleLabel}
+        selectedAccount={selectedAccount}
+      />
+      <AnalyticsTabs activeTab={activeTab} onTabChange={setAnalyticsActiveTab} availability={tabAvailability} />
 
-        <div className="flex items-center bg-surface-100 border border-white/10 rounded-lg p-0.5">
-          {[
-            ['closed', 'Closed Trades'],
-            ['realtime', 'Real Time'],
-          ].map(([mode, label]) => (
-            <button
-              key={mode}
-              onClick={() => setTradeMode(mode)}
-              className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
-                tradeMode === mode ? 'bg-accent-green/20 text-accent-green' : 'text-gray-500 hover:text-gray-300'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <span className="text-[10px] text-gray-600">
-          All starts {ANALYTICS_START_LABEL}
-          {tradeMode === 'realtime'
-            ? ` · ${closedTradeCount} closed + ${realtimeTradeCount} live open${liveQuoteLoading ? ' · refreshing quotes' : ''}`
-            : ` · closed trades only`}
-        </span>
-        {tradeMode === 'realtime' && (
-          <button
-            type="button"
-            onClick={() => setLiveQuoteRefreshNonce(n => n + 1)}
-            disabled={liveQuoteLoading || openForRealtime.length === 0}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-gray-500 hover:text-gray-300 hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <RefreshCw size={11} className={liveQuoteLoading ? 'animate-spin' : ''} />
-            Refresh Marks
-          </button>
-        )}
-        {(atrBackfill.running || atrBackfill.filled > 0 || atrBackfill.failed > 0) && (
-          <span className={`text-[10px] px-2 py-1 rounded-full border ${
-            atrBackfill.running ? 'text-accent-blue border-accent-blue/25 bg-accent-blue/10'
-            : atrBackfill.failed ? 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10'
-            : 'text-accent-green border-accent-green/25 bg-accent-green/10'
-          }`}>
-            ATR backfill {atrBackfill.running ? 'running' : 'complete'} · {atrBackfill.filled}/{atrBackfill.pending} filled{atrBackfill.failed ? ` · ${atrBackfill.failed} failed` : ''}
-          </span>
-        )}
-      </div>
+      <div className={tabContentClass('snapshot')}>
 
       {hasATRData && (
         <div className="card border border-accent-blue/15 bg-gradient-to-br from-accent-blue/5 via-transparent to-accent-yellow/5">
@@ -1601,30 +2376,8 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
-      {/* R-basis toggle — only visible when trades have ATR data */}
-      {hasATRData && (
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-gray-500 font-medium">R Basis:</span>
-          <div className="flex items-center bg-surface-100 border border-white/10 rounded-lg p-0.5">
-            {[['stop', 'Stop Loss'], ['atr', 'ATR Budget']].map(([val, label]) => (
-              <button key={val} onClick={() => setRBasis(val)}
-                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
-                  rBasis === val ? 'bg-accent-blue/20 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
-                }`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <span className="text-[10px] text-gray-600">
-            {rBasis === 'atr'
-              ? 'R calculated vs ATR × position size — your true system risk budget'
-              : 'R calculated vs actual stop distance × position size'}
-          </span>
-        </div>
-      )}
-
       {/* Summary stats */}
-      <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
+      <div className="grid grid-cols-3 sm:grid-cols-7 gap-3">
 
         <StatCardWithTooltip
           label="Win Rate" value={enoughHeadlineSample ? `${winRate.toFixed(1)}%` : '—'}
@@ -1671,6 +2424,40 @@ export default function Analytics({ selectedAccount }) {
             <p className="text-gray-400 leading-relaxed mb-3">The sum of all R-multiples across the selected sample. A consistent edge shows up as steady, linear growth in Total R over time.</p>
             <p className="text-gray-400 leading-relaxed mb-2">A sudden dip in slope (not just Total R going negative) is often the earliest warning that an edge is degrading — before P&L even shows it clearly.</p>
             <p className="text-gray-600">Use the equity curve to watch Total R grow — it should look like a steady upward trend, not a lottery.</p>
+          </>}
+        />
+
+        <StatCardWithTooltip
+          label="Best Entry Z"
+          value={anchoredRsLoading ? '…' : anchoredRsAnalytics?.summary?.bestBucket?.label || '—'}
+          valueClass={anchoredRsLoading ? 'text-gray-500' : anchoredRsAnalytics?.summary?.bestBucket?.avgR >= 0 ? 'text-accent-green' : 'text-gray-500'}
+          sub={{
+            label: anchoredRsAnalytics?.summary?.bestBucket
+              ? `${anchoredRsAnalytics.summary.bestBucket.count} trades · ${formatR(anchoredRsAnalytics.summary.bestBucket.avgR || 0)} avg`
+              : anchoredRsLoading ? 'loading RS' : 'see Anchored RS',
+            cls: anchoredRsAnalytics?.summary?.bestBucket ? 'text-gray-600' : 'text-accent-yellow',
+          }}
+          tooltipContent={<>
+            <p className="font-bold text-white text-sm mb-2">Anchored RS Entry Z</p>
+            <p className="text-gray-400 leading-relaxed mb-3">This mirrors the Anchored RS Analytics section below. It shows the best-performing entry z-score bucket for the selected timeframe and R basis.</p>
+            <p className="text-gray-600">If this is blank, the sample needs closed trades with symbols, entry dates, benchmark history, and enough daily bars after the selected anchor.</p>
+          </>}
+        />
+
+        <StatCardWithTooltip
+          label="Best Rolling Z"
+          value={rollingRsLoading ? '…' : rollingRsAnalytics?.summary?.bestBucket?.label || '—'}
+          valueClass={rollingRsLoading ? 'text-gray-500' : rollingRsAnalytics?.summary?.bestBucket?.avgR >= 0 ? 'text-accent-green' : 'text-gray-500'}
+          sub={{
+            label: rollingRsAnalytics?.summary?.bestBucket
+              ? `${rollingRsAnalytics.summary.bestBucket.count} trades · ${formatR(rollingRsAnalytics.summary.bestBucket.avgR || 0)} avg`
+              : rollingRsLoading ? 'loading RS' : 'see Rolling RS',
+            cls: rollingRsAnalytics?.summary?.bestBucket ? 'text-gray-600' : 'text-accent-yellow',
+          }}
+          tooltipContent={<>
+            <p className="font-bold text-white text-sm mb-2">Rolling RS Entry Z</p>
+            <p className="text-gray-400 leading-relaxed mb-3">This mirrors the Rolling RS Analytics section below. It shows the best-performing rolling z-score bucket for the selected timeframe and R basis.</p>
+            <p className="text-gray-600">If this is blank, the sample needs closed trades with symbols, entry dates, benchmark history, and enough daily bars to cover the rolling RS window and normalization lookback.</p>
           </>}
         />
 
@@ -1914,6 +2701,32 @@ export default function Analytics({ selectedAccount }) {
         </div>
       </div>
 
+      </div>
+
+      <div className={tabContentClass('edge')}>
+        <RsAnalyticsSection
+          title="Rolling RS Analytics"
+          intro={`Entry rolling z-score vs ${tradeReviewChartSettings?.benchmarkSymbol || 'SPY'}, using the current ${rBasis === 'atr' ? 'ATR R' : 'stop R'} basis.`}
+          analytics={rollingRsAnalytics}
+          loading={rollingRsLoading}
+          error={rollingRsError}
+          loadingMessage="Loading Rolling RS analytics for the selected trade sample…"
+          emptyMessage="No eligible Rolling RS sample yet. Closed trades need symbols, entry dates, enough daily history, and benchmark data."
+        />
+        <RsAnalyticsSection
+          title="Anchored RS Analytics"
+          intro={`Entry z-score vs ${tradeReviewChartSettings?.benchmarkSymbol || 'SPY'}, using your global anchor dates and the current ${rBasis === 'atr' ? 'ATR R' : 'stop R'} basis.`}
+          analytics={anchoredRsAnalytics}
+          loading={anchoredRsLoading}
+          error={anchoredRsError}
+          loadingMessage="Loading Anchored RS analytics for the selected trade sample…"
+          emptyMessage="No eligible Anchored RS sample yet. Closed trades need symbols, entry dates, enough daily history, and benchmark data."
+        />
+
+      </div>
+
+      <div className={tabContentClass('snapshot')}>
+
       {/* Avg Win vs Loss */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
@@ -1981,6 +2794,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('timing')}>
+
       {/* Rolling Win Rate */}
       {hasRollingData && (
         <div className="card">
@@ -2040,6 +2857,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('edge')}>
+
       {/* Cumulative R */}
       {cumRData.length >= 2 && (
         <div className="card">
@@ -2066,6 +2887,10 @@ export default function Analytics({ selectedAccount }) {
           </ResponsiveContainer>
         </div>
       )}
+
+      </div>
+
+      <div className={tabContentClass('timing')}>
 
       {/* Monthly Performance Breakdown */}
       {monthlyStats.length > 0 && (
@@ -2175,6 +3000,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('edge')}>
+
       {/* Win/Loss Pie + R Distribution */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Win/Loss Pie */}
@@ -2225,6 +3054,10 @@ export default function Analytics({ selectedAccount }) {
           ) : <p className="text-xs text-gray-500">No R data available</p>}
         </div>
       </div>
+
+      </div>
+
+      <div className={tabContentClass('timing')}>
 
       {/* P&L by Day of Week */}
       <div className="card">
@@ -2306,6 +3139,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('exposure')}>
+
       {/* P&L by Symbol */}
       <div className="card">
         <SectionTitle>P&L by Symbol (Top 10)</SectionTitle>
@@ -2335,6 +3172,10 @@ export default function Analytics({ selectedAccount }) {
           ))}
         </div>
       </div>
+
+      </div>
+
+      <div className={tabContentClass('edge')}>
 
       {/* ── Process Grade vs P&L ────────────────────────────────────────── */}
       {(() => {
@@ -2415,6 +3256,10 @@ export default function Analytics({ selectedAccount }) {
         )
       })()}
 
+      </div>
+
+      <div className={tabContentClass('process')}>
+
       {atrDisciplineStats.sample >= 5 && (
         <div className="card border border-accent-yellow/15 bg-gradient-to-br from-accent-yellow/5 via-transparent to-accent-blue/5">
           <SectionTitle>
@@ -2482,6 +3327,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('edge')}>
+
       {/* Edge Performance */}
       {stratData.length > 0 && (
         <div className="card">
@@ -2528,6 +3377,10 @@ export default function Analytics({ selectedAccount }) {
           </div>
         </div>
       )}
+
+      </div>
+
+      <div className={tabContentClass('timing')}>
 
       {/* Time of Day Analysis */}
       {timeOfDayData.buckets.length > 0 && (
@@ -2648,6 +3501,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('exposure')}>
+
       {/* Drawdown Analysis */}
       {drawdownData && (
         <div className="card">
@@ -2711,6 +3568,10 @@ export default function Analytics({ selectedAccount }) {
           <p className="text-xs text-gray-600 mt-2">Drawdown measured as % decline from running equity peak.</p>
         </div>
       )}
+
+      </div>
+
+      <div className={tabContentClass('process')}>
 
       {/* MAE Analysis — Entry Quality Tracker */}
       <div className="card">
@@ -3030,6 +3891,10 @@ export default function Analytics({ selectedAccount }) {
         </div>
       )}
 
+      </div>
+
+      <div className={tabContentClass('exposure')}>
+
       {/* ── Exposure vs Market ───────────────────────────────────────────── */}
       {/* Shared helpers rendered inline to avoid component remounting */}
       {(() => {
@@ -3173,6 +4038,10 @@ export default function Analytics({ selectedAccount }) {
           </>
         )
       })()}
+
+      </div>
+
+      <div className={tabContentClass('projections')}>
 
       {/* ── Long Game Projection ─────────────────────────────────────────── */}
       <div className="card border border-accent-blue/15 bg-gradient-to-br from-accent-blue/5 via-transparent to-accent-green/5">
@@ -3736,6 +4605,8 @@ export default function Analytics({ selectedAccount }) {
         <p className="text-xs text-gray-600 mt-3">
           Compounding model: each 1R ATR loss removes N% from remaining capital. Your historical avg loss is {formatCurrency(drawdownSim.avgLoss, true)} (win rate: {(drawdownSim.wr * 100).toFixed(0)}%). Bold column = currently selected risk level.
         </p>
+      </div>
+
       </div>
 
     </div>
