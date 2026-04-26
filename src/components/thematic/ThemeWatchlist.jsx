@@ -10,7 +10,7 @@ import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { fetchHistoryCached } from '../../utils/historyCache.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
-import { buildAnchoredRsSnapshot, buildRollingRsSnapshot, resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
+import { buildAnchoredRsSnapshot, buildRollingRsSnapshot, buildYtdAvwapSnapshot, resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 
 const SORT_OPTIONS = [
@@ -324,6 +324,29 @@ function FinraEstimatedShortInterestCell({ estimate, loading = false }) {
   )
 }
 
+function YtdAvwapCell({ snapshot, loading = false }) {
+  if (!snapshot) return <span className="text-gray-600">{loading ? 'Loading…' : 'Not loaded'}</span>
+  if (!Number.isFinite(snapshot.distancePct) || snapshot.isAbove == null) return <span className="text-gray-600">{loading ? 'Loading…' : 'No signal'}</span>
+
+  const positive = snapshot.isAbove
+  return (
+    <div className="space-y-1">
+      <span
+        className={`inline-flex items-center rounded px-2 py-1 text-xs font-semibold border ${
+          positive
+            ? 'text-accent-green border-accent-green/25 bg-accent-green/10'
+            : 'text-accent-red border-accent-red/25 bg-accent-red/10'
+        }`}
+      >
+        {positive ? 'Above' : 'Below'}
+      </span>
+      <p className={`text-[10px] ${positive ? 'text-accent-green' : 'text-accent-red'}`}>
+        {formatSignedPercent(snapshot.distancePct)} vs YTD
+      </p>
+    </div>
+  )
+}
+
 function GroupList({ title, items, empty }) {
   return (
     <div className="bg-white/[0.02] border border-white/10 rounded-xl p-4">
@@ -582,10 +605,12 @@ export default function ThemeWatchlist({
   const [viewName, setViewName] = useState('')
   const [anchoredRsBySymbol, setAnchoredRsBySymbol] = useState({})
   const [rollingRsBySymbol, setRollingRsBySymbol] = useState({})
+  const [ytdAvwapBySymbol, setYtdAvwapBySymbol] = useState({})
   const [finraBySymbol, setFinraBySymbol] = useState({})
   const [finraEstimateBySymbol, setFinraEstimateBySymbol] = useState({})
   const [anchoredRsLoading, setAnchoredRsLoading] = useState(false)
   const [rollingRsLoading, setRollingRsLoading] = useState(false)
+  const [ytdAvwapLoading, setYtdAvwapLoading] = useState(false)
   const [finraLoading, setFinraLoading] = useState(false)
   const [page, setPage] = useState(1)
   const pageSize = 40
@@ -837,6 +862,29 @@ export default function ThemeWatchlist({
     }
   }, [loadHistoryUniverse, rollingRsWindow, symbols, tradeReviewChartSettings])
 
+  const refreshYtdAvwap = useCallback(async ({ silent = false } = {}) => {
+    if (!symbols.length) {
+      if (!silent) setError('Import a watchlist first.')
+      return
+    }
+
+    setYtdAvwapLoading(true)
+    if (!silent) {
+      setError('')
+      setStatus('Refreshing YTD AVWAP…')
+    }
+    try {
+      const { symbolBarsBySymbol } = await loadHistoryUniverse()
+      const entries = symbols.map(symbol => [symbol, buildYtdAvwapSnapshot(symbolBarsBySymbol[symbol] || [], new Date())])
+      setYtdAvwapBySymbol(Object.fromEntries(entries))
+      setStatus(`YTD AVWAP refreshed for ${entries.length} symbol${entries.length !== 1 ? 's' : ''}.`)
+    } catch (err) {
+      if (!silent) setError(err.message || 'YTD AVWAP refresh failed.')
+    } finally {
+      setYtdAvwapLoading(false)
+    }
+  }, [loadHistoryUniverse, symbols])
+
   const refreshFinraShortInterest = useCallback(async ({ silent = false } = {}) => {
     if (!symbols.length) {
       if (!silent) setError('Import a watchlist first.')
@@ -888,6 +936,14 @@ export default function ThemeWatchlist({
     }
     refreshRollingRs({ silent: true })
   }, [symbolsKey, rollingRsSettingsKey, refreshRollingRs])
+
+  useEffect(() => {
+    if (!symbols.length) {
+      setYtdAvwapBySymbol({})
+      return
+    }
+    refreshYtdAvwap({ silent: true })
+  }, [symbolsKey, refreshYtdAvwap])
 
   useEffect(() => {
     if (!symbols.length) {
@@ -1074,6 +1130,14 @@ export default function ThemeWatchlist({
               {rollingRsLoading ? 'Rolling…' : 'Rolling RS'}
             </button>
             <button
+              onClick={refreshYtdAvwap}
+              disabled={ytdAvwapLoading || !symbols.length}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-yellow/12 border border-accent-yellow/20 text-accent-yellow text-sm font-medium hover:bg-accent-yellow/18 transition-all disabled:opacity-40"
+            >
+              <TrendingUp size={13} className={ytdAvwapLoading ? 'animate-pulse' : ''} />
+              {ytdAvwapLoading ? 'AVWAP…' : 'YTD AVWAP'}
+            </button>
+            <button
               onClick={refreshFinraShortInterest}
               disabled={finraLoading || !symbols.length}
               className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-gray-300 text-sm font-medium hover:bg-white/[0.08] transition-all disabled:opacity-40"
@@ -1237,6 +1301,7 @@ export default function ThemeWatchlist({
                     <th className="text-left px-3 py-2">Related Driver</th>
                     <th className="text-left px-3 py-2">Anchored RS</th>
                     <th className="text-left px-3 py-2">Rolling RS</th>
+                    <th className="text-left px-3 py-2">YTD AVWAP</th>
                     <th className="text-left px-3 py-2">Official FINRA SI</th>
                     <th className="text-left px-3 py-2">Est. SI Now</th>
                     <th className="text-left px-3 py-2">Relationship Layer</th>
@@ -1273,6 +1338,12 @@ export default function ThemeWatchlist({
                           snapshot={rollingRsBySymbol[row.symbol]}
                           loading={rollingRsLoading}
                           footerLabel={`Win ${(rollingRsBySymbol[row.symbol]?.rsWindow || rollingRsWindow)}d`}
+                        />
+                      </td>
+                      <td className="px-3 py-2.5 min-w-[120px]">
+                        <YtdAvwapCell
+                          snapshot={ytdAvwapBySymbol[row.symbol]}
+                          loading={ytdAvwapLoading}
                         />
                       </td>
                       <td className="px-3 py-2.5 min-w-[150px]">

@@ -287,6 +287,33 @@ export function buildAvwapOverlays(
     .filter(Boolean)
 }
 
+export function buildYtdAvwapSnapshot(bars, asOf = new Date()) {
+  const anchorDate = resolveAvwapPresetAnchorDate({ mode: 'ytd' }, asOf)
+  const series = calculateAvwapSeries(bars, anchorDate)
+  const latestAvwap = series.at(-1)?.value
+  const latestBar = cleanBars(bars).at(-1)
+  const latestClose = latestBar?.close
+
+  if (!Number.isFinite(latestAvwap) || !Number.isFinite(latestClose) || latestAvwap <= 0) {
+    return {
+      anchorDate,
+      avwap: null,
+      close: latestClose ?? null,
+      distancePct: null,
+      isAbove: null,
+    }
+  }
+
+  const distancePct = ((latestClose - latestAvwap) / latestAvwap) * 100
+  return {
+    anchorDate,
+    avwap: latestAvwap,
+    close: latestClose,
+    distancePct,
+    isAbove: latestClose >= latestAvwap,
+  }
+}
+
 export function calculateRsGradient(symbolWeeklyBars, benchmarkWeeklyBars, options = {}) {
   const rollingPeriod = options.rollingPeriod ?? 13
   const lookbackStd = options.lookbackStd ?? 50

@@ -211,7 +211,7 @@ function LightweightPane({ data, kind, height, chartType, onChartClick }) {
     const candleSeries = chartType === 'hlc'
       ? addHlcBars(chart, candles)
       : addCandles(chart, candles)
-    addAvwapLines(chart, data.avwapOverlays)
+    if (kind === 'daily') addAvwapLines(chart, data.avwapOverlays)
     const shadeBands = kind === 'weekly' ? data.weeklyKeltnerShades : data.keltnerShades
     const rsGradient = kind === 'weekly' ? data.weeklyRsGradient : data.dailyAnchoredRsGradient
     let redrawShades = () => {

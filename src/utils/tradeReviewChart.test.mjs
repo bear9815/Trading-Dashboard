@@ -7,6 +7,7 @@ import {
   calculateRollingRsGradient,
   buildAnchoredRsSnapshot,
   buildAvwapOverlays,
+  buildYtdAvwapSnapshot,
   buildRollingRsSnapshot,
   buildKeltnerShadeBands,
   calculateRsGradient,
@@ -293,3 +294,10 @@ const avwapPrepared = buildTradeReviewChartData(
 )
 assert.equal(avwapPrepared.avwapOverlays.length, 2)
 assert.ok(avwapPrepared.avwapOverlays.every(overlay => overlay.series.length > 0))
+
+const ytdSnapshot = buildYtdAvwapSnapshot(avwapBars, '2026-04-25')
+assert.equal(ytdSnapshot.anchorDate, '2026-01-01')
+assert.equal(Math.round(ytdSnapshot.avwap * 1000) / 1000, 11.667)
+assert.equal(ytdSnapshot.close, 13)
+assert.equal(Math.round(ytdSnapshot.distancePct * 100) / 100, 11.43)
+assert.equal(ytdSnapshot.isAbove, true)
