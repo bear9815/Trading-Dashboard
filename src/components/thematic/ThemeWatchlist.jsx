@@ -4,6 +4,13 @@ import {
   ScatterChart, Scatter, ReferenceLine, LineChart, Line, Cell,
 } from 'recharts'
 import {
+  BarSeries,
+  CandlestickSeries,
+  ColorType,
+  CrosshairMode,
+  createChart,
+} from 'lightweight-charts'
+import {
   Brain, Download, ExternalLink, Layers, ListFilter, Pencil,
   RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network, TrendingUp, ChevronDown, ChevronUp,
 } from 'lucide-react'
@@ -23,6 +30,7 @@ import {
   moveColumn,
   WATCHLIST_COLUMN_PRESETS,
 } from '../../utils/watchlistTableConfig.js'
+import { buildEcosystemCompositeBars } from '../../utils/ecosystemCompositeChart.js'
 import { buildThemeGroupMetrics, buildThemeRotationMetrics } from '../../utils/themeAnalytics.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 
@@ -435,6 +443,80 @@ function RotationQuadrantLabel(quadrant) {
   }
 }
 
+function EcosystemCompositeChart({ bars = [], chartType = 'candlestick', title = 'Ecosystem', memberCount = 0 }) {
+  const containerRef = useRef(null)
+
+  useEffect(() => {
+    if (!containerRef.current || !bars.length) return undefined
+
+    const chart = createChart(containerRef.current, {
+      autoSize: true,
+      layout: {
+        background: { type: ColorType.Solid, color: '#d7d7d7' },
+        textColor: '#2b3037',
+        fontFamily: 'Inter, sans-serif',
+      },
+      grid: {
+        vertLines: { color: 'rgba(120, 126, 136, 0.16)' },
+        horzLines: { color: 'rgba(120, 126, 136, 0.22)' },
+      },
+      crosshair: { mode: CrosshairMode.Normal },
+      rightPriceScale: {
+        borderColor: 'rgba(95, 99, 106, 0.22)',
+      },
+      timeScale: {
+        borderColor: 'rgba(95, 99, 106, 0.22)',
+        timeVisible: false,
+        secondsVisible: false,
+      },
+      handleScroll: true,
+      handleScale: true,
+    })
+
+    const series = chart.addSeries(
+      chartType === 'hlc' ? BarSeries : CandlestickSeries,
+      chartType === 'hlc'
+        ? {
+            upColor: '#2877e3',
+            downColor: '#ea4ce7',
+            openVisible: false,
+            thinBars: false,
+            priceLineVisible: false,
+          }
+        : {
+            upColor: '#2877e3',
+            downColor: '#ea4ce7',
+            borderVisible: true,
+            wickUpColor: '#2877e3',
+            wickDownColor: '#ea4ce7',
+            priceLineVisible: false,
+          }
+    )
+    series.setData(bars)
+    chart.timeScale().fitContent()
+
+    return () => chart.remove()
+  }, [bars, chartType])
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div>
+          <p className="text-xs font-semibold text-gray-300">{title}</p>
+          <p className="text-[11px] text-gray-600">Synthetic equal-weight ecosystem symbol built from {memberCount} active-list member{memberCount === 1 ? '' : 's'}.</p>
+        </div>
+      </div>
+      {bars.length ? (
+        <div ref={containerRef} className="h-[280px] w-full" />
+      ) : (
+        <div className="flex h-[280px] items-center justify-center rounded-lg border border-dashed border-white/10 text-sm text-gray-500">
+          Not enough price history to build the custom ecosystem symbol.
+        </div>
+      )}
+    </div>
+  )
+}
+
 function RelationshipExplorer({ row, rows, rowsBySymbol }) {
   if (!row) {
     return (
@@ -682,6 +764,7 @@ export default function ThemeWatchlist({
   const [selectedThemeGroupKey, setSelectedThemeGroupKey] = useState('')
   const [anchoredRsBySymbol, setAnchoredRsBySymbol] = useState({})
   const [rollingRsBySymbol, setRollingRsBySymbol] = useState({})
+  const [historyBarsBySymbol, setHistoryBarsBySymbol] = useState({})
   const [ytdAvwapBySymbol, setYtdAvwapBySymbol] = useState({})
   const [finraBySymbol, setFinraBySymbol] = useState({})
   const [finraEstimateBySymbol, setFinraEstimateBySymbol] = useState({})
@@ -850,6 +933,11 @@ export default function ThemeWatchlist({
         return (b.rolling?.zScore ?? Number.NEGATIVE_INFINITY) - (a.rolling?.zScore ?? Number.NEGATIVE_INFINITY)
       })
   }, [anchoredRsBySymbol, fitBySymbol, rollingRsBySymbol, rowsBySymbol, selectedThemeGroup])
+
+  const selectedEcosystemComposite = useMemo(() => {
+    if (!analyticsMode || !selectedThemeGroup) return { dailyBars: [], weeklyBars: [], memberCount: 0 }
+    return buildEcosystemCompositeBars(selectedThemeGroup.symbols, historyBarsBySymbol)
+  }, [analyticsMode, historyBarsBySymbol, selectedThemeGroup])
 
   const handleColumnVisibilityToggle = useCallback((columnId) => {
     const nextHidden = hiddenColumns.includes(columnId)
@@ -1144,11 +1232,15 @@ export default function ThemeWatchlist({
 
   const loadHistoryUniverse = useCallback(async () => {
     if (!symbols.length) {
+      setHistoryBarsBySymbol({})
       return { benchmarkBars: [], symbolBarsBySymbol: {}, errorsBySymbol: {} }
     }
 
     const current = historyUniverseRef.current
-    if (current.key === historyPlan.cacheKey && current.data) return current.data
+    if (current.key === historyPlan.cacheKey && current.data) {
+      setHistoryBarsBySymbol(current.data.symbolBarsBySymbol || {})
+      return current.data
+    }
     if (current.key === historyPlan.cacheKey && current.promise) return current.promise
 
     const promise = (async () => {
@@ -1178,6 +1270,7 @@ export default function ThemeWatchlist({
       }
 
       const next = { benchmarkBars, symbolBarsBySymbol, errorsBySymbol }
+      setHistoryBarsBySymbol(symbolBarsBySymbol)
       historyUniverseRef.current = { key: historyPlan.cacheKey, data: next, promise: null }
       return next
     })().catch(error => {
@@ -1827,6 +1920,15 @@ export default function ThemeWatchlist({
 
                 {selectedThemeGroup ? (
                   <div className="space-y-4">
+                    {analyticsMode && (
+                      <EcosystemCompositeChart
+                        bars={selectedEcosystemComposite.dailyBars}
+                        chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+                        title={`ECO:${String(selectedThemeGroup.label || '').toUpperCase()}`}
+                        memberCount={selectedEcosystemComposite.memberCount}
+                      />
+                    )}
+
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <StatPill label="Selection" value={selectedThemeGroup.label} />
                       <StatPill label="Quadrant" value={RotationQuadrantLabel(selectedThemeRotation?.quadrant)} />
