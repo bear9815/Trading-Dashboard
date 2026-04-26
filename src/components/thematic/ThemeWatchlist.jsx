@@ -1205,43 +1205,6 @@ export default function ThemeWatchlist({
     }
   }, [activeListId, benchmarkHistoryBars, marketLeadersComposite, tradeReviewChartSettings])
 
-  const selectedTickerChartData = useMemo(() => {
-    if (analyticsMode || !selectedDisplaySymbol) {
-      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
-    }
-    const dailyBars = normalizeChartBars(historyBarsBySymbol[selectedDisplaySymbol] || [])
-    if (!dailyBars.length) {
-      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
-    }
-    const weeklyBars = normalizeChartBars(aggregateWeeklyBars(dailyBars))
-    const avwapOverlays = buildAvwapOverlays(
-      dailyBars,
-      selectedDisplaySymbol,
-      tradeReviewChartSettings,
-      {},
-      new Date(),
-      null
-    )
-    const dailyKeltner = {
-      13: calculateKeltnerChannel(dailyBars, 13, 0.25),
-      34: calculateKeltnerChannel(dailyBars, 34, 0.25),
-      65: calculateKeltnerChannel(dailyBars, 65, 0.25),
-    }
-    const weeklyKeltner = {
-      13: calculateKeltnerChannel(weeklyBars, 13, 0.25),
-      34: calculateKeltnerChannel(weeklyBars, 34, 0.25),
-      65: calculateKeltnerChannel(weeklyBars, 65, 0.25),
-    }
-    return {
-      dailyBars,
-      weeklyBars,
-      benchmarkBars: benchmarkHistoryBars,
-      avwapOverlays,
-      keltnerShades: buildKeltnerShadeBands(dailyKeltner),
-      weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
-    }
-  }, [analyticsMode, benchmarkHistoryBars, historyBarsBySymbol, selectedDisplaySymbol, tradeReviewChartSettings])
-
   const handleColumnVisibilityToggle = useCallback((columnId) => {
     const nextHidden = hiddenColumns.includes(columnId)
       ? hiddenColumns.filter(id => id !== columnId)
@@ -1465,6 +1428,43 @@ export default function ThemeWatchlist({
     if (selectedSymbol && filteredRows.some(row => row.symbol === selectedSymbol)) return selectedSymbol
     return filteredRows[0]?.symbol || null
   }, [filteredRows, selectedSymbol])
+
+  const selectedTickerChartData = useMemo(() => {
+    if (analyticsMode || !selectedDisplaySymbol) {
+      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    }
+    const dailyBars = normalizeChartBars(historyBarsBySymbol[selectedDisplaySymbol] || [])
+    if (!dailyBars.length) {
+      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    }
+    const weeklyBars = normalizeChartBars(aggregateWeeklyBars(dailyBars))
+    const avwapOverlays = buildAvwapOverlays(
+      dailyBars,
+      selectedDisplaySymbol,
+      tradeReviewChartSettings,
+      {},
+      new Date(),
+      null
+    )
+    const dailyKeltner = {
+      13: calculateKeltnerChannel(dailyBars, 13, 0.25),
+      34: calculateKeltnerChannel(dailyBars, 34, 0.25),
+      65: calculateKeltnerChannel(dailyBars, 65, 0.25),
+    }
+    const weeklyKeltner = {
+      13: calculateKeltnerChannel(weeklyBars, 13, 0.25),
+      34: calculateKeltnerChannel(weeklyBars, 34, 0.25),
+      65: calculateKeltnerChannel(weeklyBars, 65, 0.25),
+    }
+    return {
+      dailyBars,
+      weeklyBars,
+      benchmarkBars: benchmarkHistoryBars,
+      avwapOverlays,
+      keltnerShades: buildKeltnerShadeBands(dailyKeltner),
+      weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
+    }
+  }, [analyticsMode, benchmarkHistoryBars, historyBarsBySymbol, selectedDisplaySymbol, tradeReviewChartSettings])
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize))
   const pagedRows = useMemo(
