@@ -213,6 +213,14 @@ export const useResearchWatchlistStore = create(
         lastUpdated: null,
       }))),
 
+      resetWorkspaceState: () => set({
+        activeListId: MARKET_LEADERS_LIST_ID,
+        listsById: {
+          [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {}),
+          [WATCHLIST_LIST_ID]: makeListPatch(DEFAULT_LISTS[WATCHLIST_LIST_ID], {}),
+        },
+      }),
+
       getLists: () => DEFAULT_LIST_ORDER.map(id => get().listsById[id]).filter(Boolean),
     }),
     {

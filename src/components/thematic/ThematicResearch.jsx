@@ -1,8 +1,10 @@
-import { useState, useRef, useMemo, useEffect } from 'react'
+import { Component, useState, useRef, useMemo, useEffect } from 'react'
 import { useSettingsStore }        from '../../store/useSettingsStore.js'
 import { useThematicStore }        from '../../store/useThematicStore.js'
 import { useAuthStore }            from '../../store/useAuthStore.js'
-import { useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
+import {
+  useResearchWatchlistStore,
+} from '../../store/useResearchWatchlistStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import ResearchLibrary, { ActiveSignals } from './ResearchLibrary.jsx'
 import ThemeWatchlist from './ThemeWatchlist.jsx'
@@ -102,6 +104,55 @@ const PROVIDER_PILL_STYLES = {
     active: 'bg-accent-green/15 border-accent-green/30 text-accent-green',
     dot: 'bg-accent-green',
   },
+}
+
+class WorkspaceErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error }
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.boundaryKey !== this.props.boundaryKey && this.state.error) {
+      this.setState({ error: null })
+    }
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children
+
+    return (
+      <div className="rounded-xl border border-red-500/20 bg-red-500/8 px-5 py-6">
+        <div className="flex items-start gap-3">
+          <AlertTriangle size={18} className="text-red-400 mt-0.5 shrink-0" />
+          <div className="space-y-3">
+            <div>
+              <p className="text-sm font-semibold text-red-300">Growth Research workspace hit a rendering error.</p>
+              <p className="text-xs text-gray-400 mt-1">{this.state.error?.message || 'Unknown workspace error.'}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={this.props.onRetry}
+                className="px-3 py-2 rounded-lg border border-white/10 text-xs font-semibold text-gray-200 hover:border-white/20 transition-all"
+              >
+                Try Again
+              </button>
+              <button
+                onClick={this.props.onReset}
+                className="px-3 py-2 rounded-lg bg-accent-blue/15 border border-accent-blue/25 text-xs font-semibold text-accent-blue hover:bg-accent-blue/20 transition-all"
+              >
+                Reset Growth Research Workspace
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 }
 
 // ── Sub-components: existing data renderers ───────────────────────────────────
@@ -1348,11 +1399,13 @@ export default function ThematicResearch() {
   const { themes, removeTheme, convictions, setConviction, patchThemeDossier } = useThematicStore()
   const { user }   = useAuthStore()
   const { sources: librarySources, loadSources } = useResearchLibraryStore()
+  const resetWorkspaceState = useResearchWatchlistStore(state => state.resetWorkspaceState)
   const watchlistCount = useResearchWatchlistStore(state =>
     Object.values(state.listsById || {}).reduce((sum, list) => sum + (list?.symbols?.length || 0), 0)
   )
   const provider = researchAiProvider || (useLocalLLM ? 'local' : 'gemini')
   const [modelInput, setModelInput] = useState(researchOpenRouterModel || 'openai/gpt-4o-mini')
+  const [workspaceBoundaryKey, setWorkspaceBoundaryKey] = useState(0)
 
   useEffect(() => {
     if (user?.id) loadSources()
@@ -1363,6 +1416,16 @@ export default function ThematicResearch() {
   const [tabs,       setTabs]       = useState({})
   const [showChat,   setShowChat]   = useState(false)
   const [refreshing, setRefreshing] = useState({}) // { [themeName]: true }
+
+  const handleWorkspaceRetry = () => {
+    setWorkspaceBoundaryKey(prev => prev + 1)
+  }
+
+  const handleWorkspaceReset = () => {
+    resetWorkspaceState()
+    useResearchWatchlistStore.persist?.clearStorage?.()
+    setWorkspaceBoundaryKey(prev => prev + 1)
+  }
 
   const handleRefresh = async (name) => {
     if (provider === 'gemini' && !apiKey) return alert('Add your Gemini API key in Settings first.')
@@ -1492,12 +1555,18 @@ export default function ThematicResearch() {
       )}
 
       {growthTab === 'watchlist' && (
-        <ThemeWatchlist
-          provider={provider}
-          apiKey={apiKey}
-          openRouterApiKey={openRouterApiKey}
-          researchOpenRouterModel={researchOpenRouterModel}
-        />
+        <WorkspaceErrorBoundary
+          boundaryKey={workspaceBoundaryKey}
+          onRetry={handleWorkspaceRetry}
+          onReset={handleWorkspaceReset}
+        >
+          <ThemeWatchlist
+            provider={provider}
+            apiKey={apiKey}
+            openRouterApiKey={openRouterApiKey}
+            researchOpenRouterModel={researchOpenRouterModel}
+          />
+        </WorkspaceErrorBoundary>
       )}
 
       {/* ════════════════════════════════════
