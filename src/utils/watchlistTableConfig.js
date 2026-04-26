@@ -1,0 +1,83 @@
+export const DEFAULT_WATCHLIST_COLUMN_ORDER = [
+  'symbol',
+  'companyName',
+  'ecosystem',
+  'theme',
+  'whatTheyDo',
+  'majorCustomers',
+  'dependencies',
+  'relatedDriver',
+  'anchoredRs',
+  'rollingRs',
+  'ytdAvwap',
+  'finraShortInterest',
+  'finraEstimatedShortInterest',
+  'relationshipLayer',
+  'themeLinks',
+  'actions',
+]
+
+export const WATCHLIST_COLUMN_PRESETS = [
+  {
+    key: 'compact',
+    label: 'Compact',
+    description: 'Fast scan of fit, identity, and core RS signals.',
+    columns: ['symbol', 'companyName', 'ecosystem', 'theme', 'anchoredRs', 'rollingRs', 'ytdAvwap', 'actions'],
+  },
+  {
+    key: 'rs_focus',
+    label: 'RS Focus',
+    description: 'Best for stock selection off your winning-characteristics analytics.',
+    columns: ['symbol', 'companyName', 'anchoredRs', 'rollingRs', 'ytdAvwap', 'relatedDriver', 'themeLinks', 'actions'],
+  },
+  {
+    key: 'research',
+    label: 'Research',
+    description: 'Deeper business context with themes, customers, and dependencies.',
+    columns: ['symbol', 'companyName', 'ecosystem', 'theme', 'whatTheyDo', 'majorCustomers', 'dependencies', 'relatedDriver', 'themeLinks', 'actions'],
+  },
+  {
+    key: 'relationship',
+    label: 'Relationship',
+    description: 'Network view for customer, supplier, competitor, and catalyst work.',
+    columns: ['symbol', 'companyName', 'ecosystem', 'theme', 'majorCustomers', 'dependencies', 'relationshipLayer', 'themeLinks', 'actions'],
+  },
+  {
+    key: 'short_interest',
+    label: 'Short Interest',
+    description: 'FINRA-heavy view for squeeze and crowding context.',
+    columns: ['symbol', 'companyName', 'rollingRs', 'ytdAvwap', 'finraShortInterest', 'finraEstimatedShortInterest', 'actions'],
+  },
+]
+
+export function normalizeColumnOrder(columnOrder = []) {
+  const next = [...new Set([...(columnOrder || []), ...DEFAULT_WATCHLIST_COLUMN_ORDER])]
+  return next.filter(columnId => DEFAULT_WATCHLIST_COLUMN_ORDER.includes(columnId))
+}
+
+export function buildVisibleColumnOrder({ columnOrder = DEFAULT_WATCHLIST_COLUMN_ORDER, hiddenColumns = [] } = {}) {
+  const hidden = new Set(hiddenColumns || [])
+  return normalizeColumnOrder(columnOrder).filter(columnId => !hidden.has(columnId))
+}
+
+export function moveColumn(columnOrder = DEFAULT_WATCHLIST_COLUMN_ORDER, sourceId, targetId) {
+  const normalized = normalizeColumnOrder(columnOrder)
+  if (!sourceId || !targetId || sourceId === targetId) return normalized
+  const sourceIndex = normalized.indexOf(sourceId)
+  const targetIndex = normalized.indexOf(targetId)
+  if (sourceIndex < 0 || targetIndex < 0) return normalized
+
+  const next = [...normalized]
+  const [moved] = next.splice(sourceIndex, 1)
+  next.splice(targetIndex, 0, moved)
+  return next
+}
+
+export function applyColumnPreset(presetKey) {
+  const preset = WATCHLIST_COLUMN_PRESETS.find(item => item.key === presetKey) || WATCHLIST_COLUMN_PRESETS[0]
+  return {
+    presetKey: preset.key,
+    columnOrder: normalizeColumnOrder(preset.columns),
+    hiddenColumns: DEFAULT_WATCHLIST_COLUMN_ORDER.filter(columnId => !preset.columns.includes(columnId)),
+  }
+}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Brain, Download, ExternalLink, Layers, ListFilter, Pencil,
-  RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network, TrendingUp,
+  RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network, TrendingUp, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { parseChartMeta } from '../../store/useWatchlistStore.js'
 import { useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
@@ -12,6 +12,13 @@ import { fetchHistoryCached } from '../../utils/historyCache.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
 import { buildAnchoredRsSnapshot, buildRollingRsSnapshot, buildYtdAvwapSnapshot, resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
 import { buildWatchlistFitMap, filterAndSortWatchlistRows } from '../../utils/watchlistFitSignal.js'
+import {
+  applyColumnPreset,
+  buildVisibleColumnOrder,
+  DEFAULT_WATCHLIST_COLUMN_ORDER,
+  moveColumn,
+  WATCHLIST_COLUMN_PRESETS,
+} from '../../utils/watchlistTableConfig.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 
 const SORT_OPTIONS = [
@@ -589,6 +596,8 @@ export default function ThemeWatchlist({
     removeSymbol,
     saveView,
     removeView,
+    updateColumnLayout,
+    setControlsCollapsed,
     clear,
   } = useResearchWatchlistStore()
   const { tradeReviewChartSettings } = useSettingsStore()
@@ -596,6 +605,10 @@ export default function ThemeWatchlist({
   const symbols = activeList?.symbols || []
   const rowsBySymbol = activeList?.rowsBySymbol || {}
   const savedViews = activeList?.savedViews || []
+  const columnOrder = activeList?.columnOrder || DEFAULT_WATCHLIST_COLUMN_ORDER
+  const hiddenColumns = activeList?.hiddenColumns || []
+  const activeColumnPreset = activeList?.activeColumnPreset || 'compact'
+  const controlsCollapsed = activeList?.controlsCollapsed ?? true
   const watchlists = useMemo(
     () => Object.values(listsById || {}).sort((a, b) => {
       const order = { 'market-leaders': 0, watchlist: 1 }
@@ -614,6 +627,7 @@ export default function ThemeWatchlist({
   const [editingSymbol, setEditingSymbol] = useState(null)
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [viewName, setViewName] = useState('')
+  const [draggedColumnId, setDraggedColumnId] = useState(null)
   const [anchoredRsBySymbol, setAnchoredRsBySymbol] = useState({})
   const [rollingRsBySymbol, setRollingRsBySymbol] = useState({})
   const [ytdAvwapBySymbol, setYtdAvwapBySymbol] = useState({})
@@ -669,6 +683,215 @@ export default function ThemeWatchlist({
       rollingRsBySymbol,
     }),
     [symbols, anchoredRsBySymbol, rollingRsBySymbol]
+  )
+
+  const visibleColumnOrder = useMemo(
+    () => buildVisibleColumnOrder({ columnOrder, hiddenColumns }),
+    [columnOrder, hiddenColumns]
+  )
+
+  const handleColumnVisibilityToggle = useCallback((columnId) => {
+    const nextHidden = hiddenColumns.includes(columnId)
+      ? hiddenColumns.filter(id => id !== columnId)
+      : [...hiddenColumns, columnId]
+    updateColumnLayout({
+      hiddenColumns: nextHidden,
+      activeColumnPreset: 'custom',
+    })
+  }, [hiddenColumns, updateColumnLayout])
+
+  const handleApplyPreset = useCallback((presetKey) => {
+    const preset = applyColumnPreset(presetKey)
+    updateColumnLayout(preset)
+  }, [updateColumnLayout])
+
+  const handleColumnDrop = useCallback((targetColumnId) => {
+    if (!draggedColumnId || draggedColumnId === targetColumnId) return
+    updateColumnLayout({
+      columnOrder: moveColumn(columnOrder, draggedColumnId, targetColumnId),
+      activeColumnPreset: 'custom',
+    })
+    setDraggedColumnId(null)
+  }, [columnOrder, draggedColumnId, updateColumnLayout])
+
+  const columnDefinitions = useMemo(() => ([
+    {
+      id: 'symbol',
+      label: 'Symbol',
+      cellClassName: 'px-3 py-2.5 pl-2',
+      render: (row) => {
+        const fit = fitBySymbol[row.symbol]
+        const fitBorderClass = fit?.fitColor === 'green'
+          ? 'border-l-accent-green'
+          : fit?.fitColor === 'orange'
+            ? 'border-l-accent-yellow'
+            : fit?.fitColor === 'red'
+              ? 'border-l-accent-red'
+              : 'border-l-white/10'
+        const fitBadgeClass = fit?.fitColor === 'green'
+          ? 'bg-accent-green'
+          : fit?.fitColor === 'orange'
+            ? 'bg-accent-yellow'
+            : fit?.fitColor === 'red'
+              ? 'bg-accent-red'
+              : 'bg-white/15'
+        return (
+          <div className={`font-semibold border-l-2 ${fitBorderClass}`}>
+            <div className="flex items-center gap-2 pl-2">
+              <div className="group relative shrink-0" onClick={e => e.stopPropagation()}>
+                <span
+                  className={`block h-3 w-3 rounded-full ${fitBadgeClass}`}
+                  aria-label={fit?.fitLabel || 'Needs Data'}
+                />
+                <div className="pointer-events-none absolute left-5 top-1/2 z-20 hidden w-56 -translate-y-1/2 rounded-lg border border-white/10 bg-surface-50 px-3 py-2 text-left shadow-xl group-hover:block">
+                  <p className="text-xs font-semibold text-white">{fit?.fitLabel || 'Needs Data'}</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-gray-400">{fit?.fitReason || 'RS data missing.'}</p>
+                </div>
+              </div>
+              <p className="text-accent-blue">{row.symbol}</p>
+            </div>
+          </div>
+        )
+      },
+    },
+    {
+      id: 'companyName',
+      label: 'Company',
+      cellClassName: 'px-3 py-2.5 min-w-[180px]',
+      render: (row) => (
+        <>
+          <p className="text-gray-200">{row.companyName}</p>
+          <p className="text-xs text-gray-600 mt-0.5">{row.sector}</p>
+          {row.manualOverride && <span className="text-[10px] text-accent-green">manual</span>}
+        </>
+      ),
+    },
+    { id: 'ecosystem', label: 'Ecosystem', cellClassName: 'px-3 py-2.5 text-gray-300 min-w-[140px]', render: row => row.ecosystem },
+    { id: 'theme', label: 'Theme', cellClassName: 'px-3 py-2.5 text-gray-300 min-w-[140px]', render: row => row.theme },
+    { id: 'whatTheyDo', label: 'What They Do', cellClassName: 'px-3 py-2.5 text-gray-400 max-w-[260px] min-w-[220px]', render: row => row.whatTheyDo },
+    { id: 'majorCustomers', label: 'Customers', cellClassName: 'px-3 py-2.5 text-gray-400 min-w-[180px]', render: row => arrayText(row.majorCustomers) || '—' },
+    { id: 'dependencies', label: 'Dependencies', cellClassName: 'px-3 py-2.5 text-gray-400 min-w-[180px]', render: row => arrayText(row.dependencies) || '—' },
+    { id: 'relatedDriver', label: 'Related Driver', cellClassName: 'px-3 py-2.5 text-accent-yellow min-w-[150px]', render: row => row.relatedDriver },
+    {
+      id: 'anchoredRs',
+      label: 'Anchored RS',
+      cellClassName: 'px-3 py-2.5 min-w-[120px]',
+      render: (row) => (
+        <RsCell
+          snapshot={anchoredRsBySymbol[row.symbol]}
+          loading={anchoredRsLoading}
+          footerLabel={`Anchor ${anchoredRsBySymbol[row.symbol]?.anchorDate || '—'}`}
+        />
+      ),
+    },
+    {
+      id: 'rollingRs',
+      label: 'Rolling RS',
+      cellClassName: 'px-3 py-2.5 min-w-[120px]',
+      render: (row) => (
+        <RsCell
+          snapshot={rollingRsBySymbol[row.symbol]}
+          loading={rollingRsLoading}
+          footerLabel={`Win ${(rollingRsBySymbol[row.symbol]?.rsWindow || rollingRsWindow)}d`}
+        />
+      ),
+    },
+    {
+      id: 'ytdAvwap',
+      label: 'YTD AVWAP',
+      cellClassName: 'px-3 py-2.5 min-w-[120px]',
+      render: (row) => <YtdAvwapCell snapshot={ytdAvwapBySymbol[row.symbol]} loading={ytdAvwapLoading} />,
+    },
+    {
+      id: 'finraShortInterest',
+      label: 'Official FINRA SI',
+      cellClassName: 'px-3 py-2.5 min-w-[150px]',
+      render: (row) => <FinraShortInterestCell snapshot={finraBySymbol[row.symbol]} loading={finraLoading} />,
+    },
+    {
+      id: 'finraEstimatedShortInterest',
+      label: 'Est. SI Now',
+      cellClassName: 'px-3 py-2.5 min-w-[170px]',
+      render: (row) => <FinraEstimatedShortInterestCell estimate={finraEstimateBySymbol[row.symbol]} loading={finraLoading} />,
+    },
+    {
+      id: 'relationshipLayer',
+      label: 'Relationship Layer',
+      cellClassName: 'px-3 py-2.5 text-gray-400 min-w-[220px]',
+      render: (row) => {
+        const layer = buildRelationshipLayer(row, rows)
+        return (
+          <>
+            <p><span className="text-gray-600">Customer links:</span> {arrayText(layer.customerLinks) || '—'}</p>
+            <p className="mt-1"><span className="text-gray-600">Dependency links:</span> {arrayText(layer.supplierLinks) || '—'}</p>
+            <p className="mt-1"><span className="text-gray-600">Competitive set:</span> {arrayText(layer.competitorLinks) || '—'}</p>
+          </>
+        )
+      },
+    },
+    {
+      id: 'themeLinks',
+      label: 'Theme / Library Links',
+      cellClassName: 'px-3 py-2.5 min-w-[220px]',
+      render: (row) => <MatchChips row={row} themes={themes} sources={sources} onFilter={setQuery} />,
+    },
+    {
+      id: 'actions',
+      label: 'Actions',
+      cellClassName: 'px-3 py-2.5 min-w-[120px]',
+      render: (row) => (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setEditingSymbol(row.symbol)}
+            className="p-1.5 rounded-lg text-gray-500 hover:text-accent-blue hover:bg-accent-blue/10 transition-colors"
+            title="Edit row"
+          >
+            <Pencil size={13} />
+          </button>
+          <button
+            onClick={() => removeSymbol(row.symbol)}
+            className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-400/10 transition-colors"
+            title="Remove symbol"
+          >
+            <Trash2 size={13} />
+          </button>
+          <a
+            href={`https://www.tradingview.com/symbols/${row.symbol}/`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-1.5 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/[0.04] transition-colors"
+            title="Open on TradingView"
+            onClick={e => e.stopPropagation()}
+          >
+            <ExternalLink size={13} />
+          </a>
+        </div>
+      ),
+    },
+  ]), [
+    anchoredRsBySymbol,
+    anchoredRsLoading,
+    finraBySymbol,
+    finraEstimateBySymbol,
+    finraLoading,
+    fitBySymbol,
+    removeSymbol,
+    rollingRsBySymbol,
+    rollingRsLoading,
+    rollingRsWindow,
+    rows,
+    setQuery,
+    sources,
+    themes,
+    ytdAvwapBySymbol,
+    ytdAvwapLoading,
+  ])
+
+  const visibleColumns = useMemo(
+    () => visibleColumnOrder
+      .map(columnId => columnDefinitions.find(column => column.id === columnId))
+      .filter(Boolean),
+    [columnDefinitions, visibleColumnOrder]
   )
 
   const filteredRows = useMemo(() => {
@@ -1049,7 +1272,16 @@ export default function ThemeWatchlist({
   function handleSaveView() {
     const name = viewName.trim()
     if (!name) return
-    saveView({ name, query, sortKey, sortDir, fitFilter })
+    saveView({
+      name,
+      query,
+      sortKey,
+      sortDir,
+      fitFilter,
+      columnOrder,
+      hiddenColumns,
+      activeColumnPreset,
+    })
     setViewName('')
     setStatus(`Saved view: ${name}`)
   }
@@ -1059,6 +1291,11 @@ export default function ThemeWatchlist({
     setSortKey(view.sortKey || 'momentum')
     setSortDir(view.sortDir || 'asc')
     setFitFilter(view.fitFilter || 'all')
+    updateColumnLayout({
+      columnOrder: view.columnOrder || columnOrder,
+      hiddenColumns: view.hiddenColumns || hiddenColumns,
+      activeColumnPreset: view.activeColumnPreset || 'custom',
+    })
     setPage(1)
   }
 
@@ -1093,106 +1330,69 @@ export default function ThemeWatchlist({
             </button>
           ))}
         </div>
-        <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_auto] gap-3">
-          <textarea
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            placeholder={`Paste TradingView symbols, URLs, or plain tickers into ${activeList?.name || 'this watchlist'}.\nExamples:\nNASDAQ:NVDA\nhttps://www.tradingview.com/chart/.../?symbol=NASDAQ:AMD\nMRVL, ANET, CIEN`}
-            rows={5}
-            className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 resize-none"
-          />
-          <div className="flex xl:flex-col gap-2">
-            <button
-              onClick={handleImport}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/15 border border-accent-blue/25 text-accent-blue text-sm font-medium hover:bg-accent-blue/20 transition-all"
-            >
-              <Upload size={13} />
-              Import
-            </button>
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all"
-            >
-              <Upload size={13} />
-              CSV
-            </button>
-            <button
-              onClick={handleAnalyze}
-              disabled={loading || !symbols.length}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"
-            >
-              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-              {rows.length ? 'Refresh Map' : 'Map Watchlist'}
-            </button>
-            <button
-              onClick={refreshAnchoredRs}
-              disabled={anchoredRsLoading || !symbols.length}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/12 border border-accent-blue/20 text-accent-blue text-sm font-medium hover:bg-accent-blue/18 transition-all disabled:opacity-40"
-            >
-              <TrendingUp size={13} className={anchoredRsLoading ? 'animate-pulse' : ''} />
-              {anchoredRsLoading ? 'RS…' : 'Anchored RS'}
-            </button>
-            <button
-              onClick={refreshRollingRs}
-              disabled={rollingRsLoading || !symbols.length}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"
-            >
-              <TrendingUp size={13} className={rollingRsLoading ? 'animate-pulse' : ''} />
-              {rollingRsLoading ? 'Rolling…' : 'Rolling RS'}
-            </button>
-            <button
-              onClick={refreshYtdAvwap}
-              disabled={ytdAvwapLoading || !symbols.length}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-yellow/12 border border-accent-yellow/20 text-accent-yellow text-sm font-medium hover:bg-accent-yellow/18 transition-all disabled:opacity-40"
-            >
-              <TrendingUp size={13} className={ytdAvwapLoading ? 'animate-pulse' : ''} />
-              {ytdAvwapLoading ? 'AVWAP…' : 'YTD AVWAP'}
-            </button>
-            <button
-              onClick={refreshFinraShortInterest}
-              disabled={finraLoading || !symbols.length}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-gray-300 text-sm font-medium hover:bg-white/[0.08] transition-all disabled:opacity-40"
-            >
-              <RefreshCw size={13} className={finraLoading ? 'animate-spin' : ''} />
-              {finraLoading ? 'FINRA…' : 'FINRA SI'}
-            </button>
-            <button
-              onClick={() => exportCsv(rows.map(row => ({
-                ...row,
-                anchoredRsZ: anchoredRsBySymbol[row.symbol]?.zScore ?? null,
-                rollingRsZ: rollingRsBySymbol[row.symbol]?.zScore ?? null,
-                finraShortInterest: finraBySymbol[row.symbol]?.currentShortPositionQuantity ?? null,
-                finraEstimatedShortInterest: finraEstimateBySymbol[row.symbol]?.estimatedCurrentShortInterest ?? null,
-                finraEstimatedChangePct: finraEstimateBySymbol[row.symbol]?.estimatedPercentChangeSinceReport ?? null,
-                finraEstimatedConfidence: finraEstimateBySymbol[row.symbol]?.confidenceScore ?? null,
-                finraDaysToCover: finraBySymbol[row.symbol]?.daysToCoverQuantity ?? null,
-                finraSettlementDate: finraBySymbol[row.symbol]?.settlementDate ?? null,
-              })))}
-              disabled={!rows.length}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all disabled:opacity-40"
-            >
-              <Download size={13} />
-              Export CSV
-            </button>
-            <button
-              onClick={clear}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all"
-            >
-              <X size={13} />
-              Clear
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={async (e) => {
-                const file = e.target.files?.[0]
-                if (file) await handleCsvFile(file)
-                e.target.value = ''
-              }}
-            />
-          </div>
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
+          <button
+            onClick={() => setControlsCollapsed(!controlsCollapsed)}
+            className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left"
+          >
+            <div>
+              <p className="text-sm font-semibold text-white">Workspace Controls</p>
+              <p className="text-xs text-gray-600">Import symbols, refresh datasets, and export the active list on demand.</p>
+            </div>
+            {controlsCollapsed ? <ChevronDown size={16} className="text-gray-500" /> : <ChevronUp size={16} className="text-gray-500" />}
+          </button>
+          {!controlsCollapsed && (
+            <div className="px-4 pb-4">
+              <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_auto] gap-3">
+                <textarea
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  placeholder={`Paste TradingView symbols, URLs, or plain tickers into ${activeList?.name || 'this watchlist'}.\nExamples:\nNASDAQ:NVDA\nhttps://www.tradingview.com/chart/.../?symbol=NASDAQ:AMD\nMRVL, ANET, CIEN`}
+                  rows={5}
+                  className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 resize-none"
+                />
+                <div className="flex xl:flex-col gap-2">
+                  <button onClick={handleImport} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/15 border border-accent-blue/25 text-accent-blue text-sm font-medium hover:bg-accent-blue/20 transition-all"><Upload size={13} />Import</button>
+                  <button onClick={() => fileRef.current?.click()} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all"><Upload size={13} />CSV</button>
+                  <button onClick={handleAnalyze} disabled={loading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />{rows.length ? 'Refresh Map' : 'Map Watchlist'}</button>
+                  <button onClick={refreshAnchoredRs} disabled={anchoredRsLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/12 border border-accent-blue/20 text-accent-blue text-sm font-medium hover:bg-accent-blue/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={anchoredRsLoading ? 'animate-pulse' : ''} />{anchoredRsLoading ? 'RS…' : 'Anchored RS'}</button>
+                  <button onClick={refreshRollingRs} disabled={rollingRsLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={rollingRsLoading ? 'animate-pulse' : ''} />{rollingRsLoading ? 'Rolling…' : 'Rolling RS'}</button>
+                  <button onClick={refreshYtdAvwap} disabled={ytdAvwapLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-yellow/12 border border-accent-yellow/20 text-accent-yellow text-sm font-medium hover:bg-accent-yellow/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={ytdAvwapLoading ? 'animate-pulse' : ''} />{ytdAvwapLoading ? 'AVWAP…' : 'YTD AVWAP'}</button>
+                  <button onClick={refreshFinraShortInterest} disabled={finraLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-white/[0.05] border border-white/10 text-gray-300 text-sm font-medium hover:bg-white/[0.08] transition-all disabled:opacity-40"><RefreshCw size={13} className={finraLoading ? 'animate-spin' : ''} />{finraLoading ? 'FINRA…' : 'FINRA SI'}</button>
+                  <button
+                    onClick={() => exportCsv(rows.map(row => ({
+                      ...row,
+                      anchoredRsZ: anchoredRsBySymbol[row.symbol]?.zScore ?? null,
+                      rollingRsZ: rollingRsBySymbol[row.symbol]?.zScore ?? null,
+                      finraShortInterest: finraBySymbol[row.symbol]?.currentShortPositionQuantity ?? null,
+                      finraEstimatedShortInterest: finraEstimateBySymbol[row.symbol]?.estimatedCurrentShortInterest ?? null,
+                      finraEstimatedChangePct: finraEstimateBySymbol[row.symbol]?.estimatedPercentChangeSinceReport ?? null,
+                      finraEstimatedConfidence: finraEstimateBySymbol[row.symbol]?.confidenceScore ?? null,
+                      finraDaysToCover: finraBySymbol[row.symbol]?.daysToCoverQuantity ?? null,
+                      finraSettlementDate: finraBySymbol[row.symbol]?.settlementDate ?? null,
+                    })))}
+                    disabled={!rows.length}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all disabled:opacity-40"
+                  >
+                    <Download size={13} />
+                    Export CSV
+                  </button>
+                  <button onClick={clear} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all"><X size={13} />Clear</button>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0]
+                      if (file) await handleCsvFile(file)
+                      e.target.value = ''
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -1251,7 +1451,7 @@ export default function ThemeWatchlist({
                   <button onClick={() => applyView(view)} className="text-left min-w-0 flex-1">
                     <p className="text-sm text-gray-300 truncate">{view.name}</p>
                     <p className="text-xs text-gray-600 truncate">
-                      {view.query || 'All symbols'} · {view.sortKey} {view.sortDir} · fit {view.fitFilter || 'all'}
+                      {view.query || 'All symbols'} · {view.sortKey} {view.sortDir} · fit {view.fitFilter || 'all'} · cols {(view.columnOrder || columnOrder).length - (view.hiddenColumns || hiddenColumns).length}
                     </p>
                   </button>
                   <button onClick={() => removeView(view.id)} className="text-gray-500 hover:text-red-400 transition-colors">
@@ -1312,6 +1512,51 @@ export default function ThemeWatchlist({
             </div>
           </div>
 
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-2 justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-widest text-gray-500">Column Layout</p>
+                <p className="text-xs text-gray-600 mt-1">Drag table headers to reorder columns. Use presets to switch between scan styles, or toggle individual columns below.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {WATCHLIST_COLUMN_PRESETS.map(preset => (
+                  <button
+                    key={preset.key}
+                    onClick={() => handleApplyPreset(preset.key)}
+                    className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
+                      activeColumnPreset === preset.key
+                        ? 'bg-accent-blue/15 border-accent-blue/25 text-accent-blue'
+                        : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                    }`}
+                    title={preset.description}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {DEFAULT_WATCHLIST_COLUMN_ORDER.map(columnId => {
+                const column = columnDefinitions.find(item => item.id === columnId)
+                if (!column) return null
+                const isVisible = !hiddenColumns.includes(columnId)
+                return (
+                  <button
+                    key={columnId}
+                    onClick={() => handleColumnVisibilityToggle(columnId)}
+                    className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
+                      isVisible
+                        ? 'bg-accent-green/12 border-accent-green/25 text-accent-green'
+                        : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                    }`}
+                  >
+                    {isVisible ? 'Shown' : 'Hidden'} · {column.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
           {!rows.length ? (
             <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-6 text-center">
               <Brain size={18} className="mx-auto text-gray-600 mb-2" />
@@ -1322,139 +1567,32 @@ export default function ThemeWatchlist({
               <table className="w-full min-w-[2020px] text-sm">
                 <thead className="bg-white/[0.03] text-xs uppercase tracking-wider text-gray-500">
                   <tr>
-                    <th className="text-left px-3 py-2">Symbol</th>
-                    <th className="text-left px-3 py-2">Company</th>
-                    <th className="text-left px-3 py-2">Ecosystem</th>
-                    <th className="text-left px-3 py-2">Theme</th>
-                    <th className="text-left px-3 py-2">What They Do</th>
-                    <th className="text-left px-3 py-2">Customers</th>
-                    <th className="text-left px-3 py-2">Dependencies</th>
-                    <th className="text-left px-3 py-2">Related Driver</th>
-                    <th className="text-left px-3 py-2">Anchored RS</th>
-                    <th className="text-left px-3 py-2">Rolling RS</th>
-                    <th className="text-left px-3 py-2">YTD AVWAP</th>
-                    <th className="text-left px-3 py-2">Official FINRA SI</th>
-                    <th className="text-left px-3 py-2">Est. SI Now</th>
-                    <th className="text-left px-3 py-2">Relationship Layer</th>
-                    <th className="text-left px-3 py-2">Theme / Library Links</th>
-                    <th className="text-left px-3 py-2">Actions</th>
+                    {visibleColumns.map(column => (
+                      <th
+                        key={column.id}
+                        draggable
+                        onDragStart={() => setDraggedColumnId(column.id)}
+                        onDragOver={e => e.preventDefault()}
+                        onDrop={() => handleColumnDrop(column.id)}
+                        onDragEnd={() => setDraggedColumnId(null)}
+                        className={`text-left px-3 py-2 ${draggedColumnId === column.id ? 'opacity-50' : ''}`}
+                      >
+                        {column.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.05]">
                   {pagedRows.map(row => {
-                    const layer = buildRelationshipLayer(row, rows)
-                    const fit = fitBySymbol[row.symbol]
-                    const fitBorderClass = fit?.fitColor === 'green'
-                      ? 'border-l-accent-green'
-                      : fit?.fitColor === 'orange'
-                        ? 'border-l-accent-yellow'
-                        : fit?.fitColor === 'red'
-                          ? 'border-l-accent-red'
-                          : 'border-l-white/10'
-                    const fitBadgeClass = fit?.fitColor === 'green'
-                      ? 'bg-accent-green'
-                      : fit?.fitColor === 'orange'
-                        ? 'bg-accent-yellow'
-                        : fit?.fitColor === 'red'
-                          ? 'bg-accent-red'
-                          : 'bg-white/15'
                     return (
-                    <tr key={row.symbol} className={`align-top hover:bg-white/[0.02] cursor-pointer ${selectedSymbol === row.symbol ? 'bg-accent-blue/5' : ''}`} onClick={() => setSelectedSymbol(row.symbol)}>
-                      <td className={`px-3 py-2.5 pl-2 border-l-2 font-semibold ${fitBorderClass}`}>
-                        <div className="flex items-center gap-2">
-                          <div className="group relative shrink-0" onClick={e => e.stopPropagation()}>
-                            <span
-                              className={`block h-3 w-3 rounded-full ${fitBadgeClass}`}
-                              aria-label={fit?.fitLabel || 'Needs Data'}
-                            />
-                            <div className="pointer-events-none absolute left-5 top-1/2 z-20 hidden w-56 -translate-y-1/2 rounded-lg border border-white/10 bg-surface-50 px-3 py-2 text-left shadow-xl group-hover:block">
-                              <p className="text-xs font-semibold text-white">{fit?.fitLabel || 'Needs Data'}</p>
-                              <p className="mt-1 text-[11px] leading-relaxed text-gray-400">{fit?.fitReason || 'RS data missing.'}</p>
-                            </div>
-                          </div>
-                          <p className="text-accent-blue">{row.symbol}</p>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <p className="text-gray-200">{row.companyName}</p>
-                        <p className="text-xs text-gray-600 mt-0.5">{row.sector}</p>
-                        {row.manualOverride && <span className="text-[10px] text-accent-green">manual</span>}
-                      </td>
-                      <td className="px-3 py-2.5 text-gray-300">{row.ecosystem}</td>
-                      <td className="px-3 py-2.5 text-gray-300">{row.theme}</td>
-                      <td className="px-3 py-2.5 text-gray-400 max-w-[260px]">{row.whatTheyDo}</td>
-                      <td className="px-3 py-2.5 text-gray-400">{arrayText(row.majorCustomers) || '—'}</td>
-                      <td className="px-3 py-2.5 text-gray-400">{arrayText(row.dependencies) || '—'}</td>
-                      <td className="px-3 py-2.5 text-accent-yellow">{row.relatedDriver}</td>
-                      <td className="px-3 py-2.5 min-w-[120px]">
-                        <RsCell
-                          snapshot={anchoredRsBySymbol[row.symbol]}
-                          loading={anchoredRsLoading}
-                          footerLabel={`Anchor ${anchoredRsBySymbol[row.symbol]?.anchorDate || '—'}`}
-                        />
-                      </td>
-                      <td className="px-3 py-2.5 min-w-[120px]">
-                        <RsCell
-                          snapshot={rollingRsBySymbol[row.symbol]}
-                          loading={rollingRsLoading}
-                          footerLabel={`Win ${(rollingRsBySymbol[row.symbol]?.rsWindow || rollingRsWindow)}d`}
-                        />
-                      </td>
-                      <td className="px-3 py-2.5 min-w-[120px]">
-                        <YtdAvwapCell
-                          snapshot={ytdAvwapBySymbol[row.symbol]}
-                          loading={ytdAvwapLoading}
-                        />
-                      </td>
-                      <td className="px-3 py-2.5 min-w-[150px]">
-                        <FinraShortInterestCell
-                          snapshot={finraBySymbol[row.symbol]}
-                          loading={finraLoading}
-                        />
-                      </td>
-                      <td className="px-3 py-2.5 min-w-[170px]">
-                        <FinraEstimatedShortInterestCell
-                          estimate={finraEstimateBySymbol[row.symbol]}
-                          loading={finraLoading}
-                        />
-                      </td>
-                      <td className="px-3 py-2.5 text-gray-400 min-w-[220px]">
-                        <p><span className="text-gray-600">Customer links:</span> {arrayText(layer.customerLinks) || '—'}</p>
-                        <p className="mt-1"><span className="text-gray-600">Dependency links:</span> {arrayText(layer.supplierLinks) || '—'}</p>
-                        <p className="mt-1"><span className="text-gray-600">Competitive set:</span> {arrayText(layer.competitorLinks) || '—'}</p>
-                      </td>
-                      <td className="px-3 py-2.5 min-w-[220px]">
-                        <MatchChips row={row} themes={themes} sources={sources} onFilter={setQuery} />
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => setEditingSymbol(row.symbol)}
-                            className="p-1.5 rounded-lg text-gray-500 hover:text-accent-blue hover:bg-accent-blue/10 transition-colors"
-                            title="Edit row"
-                          >
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            onClick={() => removeSymbol(row.symbol)}
-                            className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-400/10 transition-colors"
-                            title="Remove symbol"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                          <a
-                            href={`https://www.tradingview.com/symbols/${row.symbol}/`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-white/[0.04] transition-colors"
-                            title="Open on TradingView"
-                          >
-                            <ExternalLink size={13} />
-                          </a>
-                        </div>
-                      </td>
-                    </tr>
-                  )})}
+                      <tr key={row.symbol} className={`align-top hover:bg-white/[0.02] cursor-pointer ${selectedSymbol === row.symbol ? 'bg-accent-blue/5' : ''}`} onClick={() => setSelectedSymbol(row.symbol)}>
+                        {visibleColumns.map(column => (
+                          <td key={`${row.symbol}-${column.id}`} className={column.cellClassName}>
+                            {column.render(row)}
+                          </td>
+                        ))}
+                      </tr>
+                    )})}
                 </tbody>
               </table>
             </div>

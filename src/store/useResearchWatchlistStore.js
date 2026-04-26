@@ -1,10 +1,16 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import {
+  applyColumnPreset,
+  DEFAULT_WATCHLIST_COLUMN_ORDER,
+  normalizeColumnOrder,
+} from '../utils/watchlistTableConfig.js'
 
 export const MARKET_LEADERS_LIST_ID = 'market-leaders'
 export const WATCHLIST_LIST_ID = 'watchlist'
 
 const DEFAULT_LIST_ORDER = [MARKET_LEADERS_LIST_ID, WATCHLIST_LIST_ID]
+const DEFAULT_COLUMN_PRESET = applyColumnPreset('compact')
 const DEFAULT_LISTS = {
   [MARKET_LEADERS_LIST_ID]: {
     id: MARKET_LEADERS_LIST_ID,
@@ -12,6 +18,10 @@ const DEFAULT_LISTS = {
     symbols: [],
     rowsBySymbol: {},
     savedViews: [],
+    columnOrder: [...DEFAULT_COLUMN_PRESET.columnOrder],
+    hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
+    activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
+    controlsCollapsed: true,
     lastUpdated: null,
   },
   [WATCHLIST_LIST_ID]: {
@@ -20,6 +30,10 @@ const DEFAULT_LISTS = {
     symbols: [],
     rowsBySymbol: {},
     savedViews: [],
+    columnOrder: [...DEFAULT_COLUMN_PRESET.columnOrder],
+    hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
+    activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
+    controlsCollapsed: true,
     lastUpdated: null,
   },
 }
@@ -35,6 +49,10 @@ function makeListPatch(list, patch = {}) {
     symbols: normalizeSymbols(patch.symbols ?? list.symbols ?? []),
     rowsBySymbol: patch.rowsBySymbol ?? list.rowsBySymbol ?? {},
     savedViews: patch.savedViews ?? list.savedViews ?? [],
+    columnOrder: normalizeColumnOrder(patch.columnOrder ?? list.columnOrder ?? DEFAULT_WATCHLIST_COLUMN_ORDER),
+    hiddenColumns: patch.hiddenColumns ?? list.hiddenColumns ?? [...DEFAULT_COLUMN_PRESET.hiddenColumns],
+    activeColumnPreset: patch.activeColumnPreset ?? list.activeColumnPreset ?? DEFAULT_COLUMN_PRESET.presetKey,
+    controlsCollapsed: patch.controlsCollapsed ?? list.controlsCollapsed ?? true,
     lastUpdated: patch.lastUpdated ?? list.lastUpdated ?? null,
   }
 }
@@ -155,6 +173,16 @@ export const useResearchWatchlistStore = create(
           { id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...view },
           ...current.savedViews.filter(v => v.name !== view.name),
         ],
+      }))),
+
+      updateColumnLayout: ({ columnOrder, hiddenColumns, activeColumnPreset } = {}) => set(state => updateActiveList(state, current => ({
+        columnOrder: columnOrder ?? current.columnOrder,
+        hiddenColumns: hiddenColumns ?? current.hiddenColumns,
+        activeColumnPreset: activeColumnPreset ?? current.activeColumnPreset,
+      }))),
+
+      setControlsCollapsed: (controlsCollapsed) => set(state => updateActiveList(state, () => ({
+        controlsCollapsed,
       }))),
 
       removeView: (id) => set(state => updateActiveList(state, current => ({
