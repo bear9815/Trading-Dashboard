@@ -46,33 +46,43 @@ function normalizeSymbols(symbols) {
 }
 
 function makeListPatch(list, patch = {}) {
+  const hasPatch = key => Object.prototype.hasOwnProperty.call(patch, key)
+
   return {
     ...list,
     ...patch,
-    symbols: normalizeSymbols(patch.symbols ?? list.symbols ?? []),
-    rowsBySymbol: patch.rowsBySymbol ?? list.rowsBySymbol ?? {},
-    savedViews: patch.savedViews ?? list.savedViews ?? [],
-    columnOrder: normalizeColumnOrder(patch.columnOrder ?? list.columnOrder ?? DEFAULT_WATCHLIST_COLUMN_ORDER),
-    hiddenColumns: patch.hiddenColumns ?? list.hiddenColumns ?? [...DEFAULT_COLUMN_PRESET.hiddenColumns],
-    activeColumnPreset: patch.activeColumnPreset ?? list.activeColumnPreset ?? DEFAULT_COLUMN_PRESET.presetKey,
-    controlsCollapsed: patch.controlsCollapsed ?? list.controlsCollapsed ?? true,
-    themeAnalyticsHistory: normalizeThemeAnalyticsHistory(
-      patch.themeAnalyticsHistory ?? list.themeAnalyticsHistory ?? { theme: [], ecosystem: [] }
-    ),
-    lastUpdated: patch.lastUpdated ?? list.lastUpdated ?? null,
+    symbols: hasPatch('symbols') ? normalizeSymbols(patch.symbols) : (list.symbols ?? []),
+    rowsBySymbol: hasPatch('rowsBySymbol') ? patch.rowsBySymbol : (list.rowsBySymbol ?? {}),
+    savedViews: hasPatch('savedViews') ? patch.savedViews : (list.savedViews ?? []),
+    columnOrder: hasPatch('columnOrder')
+      ? normalizeColumnOrder(patch.columnOrder)
+      : (list.columnOrder ?? DEFAULT_WATCHLIST_COLUMN_ORDER),
+    hiddenColumns: hasPatch('hiddenColumns') ? patch.hiddenColumns : (list.hiddenColumns ?? [...DEFAULT_COLUMN_PRESET.hiddenColumns]),
+    activeColumnPreset: hasPatch('activeColumnPreset') ? patch.activeColumnPreset : (list.activeColumnPreset ?? DEFAULT_COLUMN_PRESET.presetKey),
+    controlsCollapsed: hasPatch('controlsCollapsed') ? patch.controlsCollapsed : (list.controlsCollapsed ?? true),
+    themeAnalyticsHistory: hasPatch('themeAnalyticsHistory')
+      ? normalizeThemeAnalyticsHistory(patch.themeAnalyticsHistory)
+      : (list.themeAnalyticsHistory ?? { theme: [], ecosystem: [] }),
+    lastUpdated: hasPatch('lastUpdated') ? patch.lastUpdated : (list.lastUpdated ?? null),
   }
 }
 
 function updateActiveList(state, updater) {
   const activeListId = state.activeListId || MARKET_LEADERS_LIST_ID
   const current = state.listsById?.[activeListId] || DEFAULT_LISTS[activeListId] || DEFAULT_LISTS[MARKET_LEADERS_LIST_ID]
-  const nextList = makeListPatch(current, updater(current) || {})
+  const patch = updater(current)
+  if (!patch || patch === current) return {}
+  const nextList = makeListPatch(current, patch)
   return {
     listsById: {
       ...state.listsById,
       [activeListId]: nextList,
     },
   }
+}
+
+function sameAnalyticsHistory(a, b) {
+  return JSON.stringify(normalizeThemeAnalyticsHistory(a)) === JSON.stringify(normalizeThemeAnalyticsHistory(b))
 }
 
 function ensureWorkspaceShape(state) {
@@ -192,14 +202,17 @@ export const useResearchWatchlistStore = create(
         controlsCollapsed,
       }))),
 
-      saveThemeAnalyticsSnapshot: ({ groupingMode, snapshotDate, groups } = {}) => set(state => updateActiveList(state, current => ({
-        themeAnalyticsHistory: upsertThemeAnalyticsSnapshot({
+      saveThemeAnalyticsSnapshot: ({ groupingMode, snapshotDate, groups } = {}) => set(state => updateActiveList(state, current => {
+        const nextHistory = upsertThemeAnalyticsSnapshot({
           history: current.themeAnalyticsHistory,
           groupingMode,
           snapshotDate,
           groups,
-        }),
-      }))),
+        })
+
+        if (sameAnalyticsHistory(current.themeAnalyticsHistory, nextHistory)) return current
+        return { themeAnalyticsHistory: nextHistory }
+      })),
 
       removeView: (id) => set(state => updateActiveList(state, current => ({
         savedViews: current.savedViews.filter(v => v.id !== id),
