@@ -8,7 +8,7 @@ import { useResearchWatchlistStore } from '../../store/useResearchWatchlistStore
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
-import { fetchHistory } from '../../utils/marketData.js'
+import { fetchHistoryCached } from '../../utils/historyCache.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
 import { buildAnchoredRsSnapshot, buildRollingRsSnapshot, resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
@@ -40,6 +40,30 @@ const EMPTY_ROW = {
   customerOf: [],
   supplierTo: [],
   competesWith: [],
+}
+
+const WATCHLIST_HISTORY_TTL_MS = 6 * 60 * 60 * 1000
+const WATCHLIST_HISTORY_CONCURRENCY = 8
+
+function toDateKey(value) {
+  return new Date(value).toISOString().slice(0, 10)
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length)
+  let cursor = 0
+
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor
+      cursor += 1
+      results[index] = await mapper(items[index], index)
+    }
+  }
+
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length || 1)) }, () => worker())
+  await Promise.all(workers)
+  return results
 }
 
 function parseImportedSymbols(text) {
@@ -522,8 +546,30 @@ export default function ThemeWatchlist({
 }) {
   const { themes } = useThematicStore()
   const { sources } = useResearchLibraryStore()
-  const { symbols, rowsBySymbol, savedViews, replaceWatchlist, upsertRows, updateRow, removeSymbol, saveView, removeView, clear } = useResearchWatchlistStore()
+  const {
+    activeListId,
+    listsById,
+    setActiveList,
+    replaceWatchlist,
+    upsertRows,
+    updateRow,
+    removeSymbol,
+    saveView,
+    removeView,
+    clear,
+  } = useResearchWatchlistStore()
   const { tradeReviewChartSettings } = useSettingsStore()
+  const activeList = listsById[activeListId]
+  const symbols = activeList?.symbols || []
+  const rowsBySymbol = activeList?.rowsBySymbol || {}
+  const savedViews = activeList?.savedViews || []
+  const watchlists = useMemo(
+    () => Object.values(listsById || {}).sort((a, b) => {
+      const order = { 'market-leaders': 0, watchlist: 1 }
+      return (order[a.id] ?? 99) - (order[b.id] ?? 99)
+    }),
+    [listsById]
+  )
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -561,6 +607,14 @@ export default function ThemeWatchlist({
     [tradeReviewChartSettings]
   )
   const finraSettingsKey = useMemo(() => symbols.join('|'), [symbols])
+
+  useEffect(() => {
+    setSelectedSymbol(null)
+    setEditingSymbol(null)
+    setPage(1)
+    setStatus('')
+    setError('')
+  }, [activeListId])
 
   const rows = useMemo(
     () => symbols.map(symbol => rowsBySymbol[symbol]).filter(Boolean),
@@ -635,6 +689,90 @@ export default function ThemeWatchlist({
     [tradeReviewChartSettings?.anchorDates]
   )
   const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
+  const historyUniverseRef = useRef({ key: '', data: null, promise: null })
+
+  const historyPlan = useMemo(() => {
+    const end = new Date()
+    end.setDate(end.getDate() + 1)
+
+    const finraStart = new Date()
+    finraStart.setDate(finraStart.getDate() - 180)
+
+    const rollingBufferDays = Math.max(
+      rollingRsWindow + (tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50) + 30,
+      180
+    )
+    const rollingStart = new Date()
+    rollingStart.setDate(rollingStart.getDate() - rollingBufferDays)
+
+    let anchorStart = null
+    if (latestAnchorDate) {
+      anchorStart = new Date(`${latestAnchorDate}T00:00:00Z`)
+      anchorStart.setDate(anchorStart.getDate() - 90)
+    }
+
+    const startCandidates = [finraStart, rollingStart, anchorStart].filter(Boolean)
+    const start = new Date(Math.min(...startCandidates.map(date => date.getTime())))
+    const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
+    const cacheKey = [
+      symbolsKey,
+      benchmarkSymbol,
+      latestAnchorDate || 'none',
+      rollingRsWindow,
+      tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50,
+      toDateKey(start),
+      toDateKey(end),
+    ].join('|')
+
+    return { benchmarkSymbol, start, end, cacheKey }
+  }, [latestAnchorDate, rollingRsWindow, symbolsKey, tradeReviewChartSettings])
+
+  const loadHistoryUniverse = useCallback(async () => {
+    if (!symbols.length) {
+      return { benchmarkBars: [], symbolBarsBySymbol: {}, errorsBySymbol: {} }
+    }
+
+    const current = historyUniverseRef.current
+    if (current.key === historyPlan.cacheKey && current.data) return current.data
+    if (current.key === historyPlan.cacheKey && current.promise) return current.promise
+
+    const promise = (async () => {
+      const benchmarkBars = await fetchHistoryCached(
+        historyPlan.benchmarkSymbol,
+        historyPlan.start,
+        historyPlan.end,
+        { ttlMs: WATCHLIST_HISTORY_TTL_MS }
+      )
+
+      const results = await mapWithConcurrency(symbols, WATCHLIST_HISTORY_CONCURRENCY, async symbol => {
+        try {
+          const bars = await fetchHistoryCached(symbol, historyPlan.start, historyPlan.end, {
+            ttlMs: WATCHLIST_HISTORY_TTL_MS,
+          })
+          return [symbol, { bars, error: '' }]
+        } catch (error) {
+          return [symbol, { bars: [], error: error.message || 'Failed' }]
+        }
+      })
+
+      const symbolBarsBySymbol = {}
+      const errorsBySymbol = {}
+      for (const [symbol, payload] of results) {
+        symbolBarsBySymbol[symbol] = payload.bars
+        if (payload.error) errorsBySymbol[symbol] = payload.error
+      }
+
+      const next = { benchmarkBars, symbolBarsBySymbol, errorsBySymbol }
+      historyUniverseRef.current = { key: historyPlan.cacheKey, data: next, promise: null }
+      return next
+    })().catch(error => {
+      historyUniverseRef.current = { key: '', data: null, promise: null }
+      throw error
+    })
+
+    historyUniverseRef.current = { key: historyPlan.cacheKey, data: null, promise }
+    return promise
+  }, [historyPlan, symbols])
 
   const refreshAnchoredRs = useCallback(async ({ silent = false } = {}) => {
     if (!symbols.length) {
@@ -653,20 +791,14 @@ export default function ThemeWatchlist({
       setStatus(`Refreshing anchored RS from ${anchorDate}…`)
     }
     try {
-      const start = new Date(`${anchorDate}T00:00:00Z`)
-      start.setDate(start.getDate() - 90)
-      const end = new Date()
-      end.setDate(end.getDate() + 1)
-      const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
-      const benchmarkBars = await fetchHistory(benchmarkSymbol, start, end)
-      const entries = await Promise.all(symbols.map(async symbol => {
-        try {
-          const bars = await fetchHistory(symbol, start, end)
-          return [symbol, buildAnchoredRsSnapshot(bars, benchmarkBars, tradeReviewChartSettings)]
-        } catch (err) {
-          return [symbol, { anchorDate, zScore: null, weight: null, color: null, error: err.message || 'Failed' }]
+      const { benchmarkBars, symbolBarsBySymbol, errorsBySymbol } = await loadHistoryUniverse()
+      const entries = symbols.map(symbol => {
+        const error = errorsBySymbol[symbol]
+        if (error) {
+          return [symbol, { anchorDate, zScore: null, weight: null, color: null, error }]
         }
-      }))
+        return [symbol, buildAnchoredRsSnapshot(symbolBarsBySymbol[symbol], benchmarkBars, tradeReviewChartSettings)]
+      })
       setAnchoredRsBySymbol(Object.fromEntries(entries))
       setStatus(`Anchored RS refreshed for ${entries.length} symbol${entries.length !== 1 ? 's' : ''}.`)
     } catch (err) {
@@ -674,7 +806,7 @@ export default function ThemeWatchlist({
     } finally {
       setAnchoredRsLoading(false)
     }
-  }, [symbols, tradeReviewChartSettings])
+  }, [loadHistoryUniverse, symbols, tradeReviewChartSettings])
 
   const refreshRollingRs = useCallback(async ({ silent = false } = {}) => {
     if (!symbols.length) {
@@ -688,21 +820,14 @@ export default function ThemeWatchlist({
       setStatus(`Refreshing rolling RS (window ${rollingRsWindow})…`)
     }
     try {
-      const bufferDays = Math.max(rollingRsWindow + (tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50) + 30, 180)
-      const start = new Date()
-      start.setDate(start.getDate() - bufferDays)
-      const end = new Date()
-      end.setDate(end.getDate() + 1)
-      const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
-      const benchmarkBars = await fetchHistory(benchmarkSymbol, start, end)
-      const entries = await Promise.all(symbols.map(async symbol => {
-        try {
-          const bars = await fetchHistory(symbol, start, end)
-          return [symbol, buildRollingRsSnapshot(bars, benchmarkBars, tradeReviewChartSettings)]
-        } catch (err) {
-          return [symbol, { rsWindow: rollingRsWindow, zScore: null, weight: null, color: null, error: err.message || 'Failed' }]
+      const { benchmarkBars, symbolBarsBySymbol, errorsBySymbol } = await loadHistoryUniverse()
+      const entries = symbols.map(symbol => {
+        const error = errorsBySymbol[symbol]
+        if (error) {
+          return [symbol, { rsWindow: rollingRsWindow, zScore: null, weight: null, color: null, error }]
         }
-      }))
+        return [symbol, buildRollingRsSnapshot(symbolBarsBySymbol[symbol], benchmarkBars, tradeReviewChartSettings)]
+      })
       setRollingRsBySymbol(Object.fromEntries(entries))
       setStatus(`Rolling RS refreshed for ${entries.length} symbol${entries.length !== 1 ? 's' : ''}.`)
     } catch (err) {
@@ -710,7 +835,7 @@ export default function ThemeWatchlist({
     } finally {
       setRollingRsLoading(false)
     }
-  }, [rollingRsWindow, symbols, tradeReviewChartSettings])
+  }, [loadHistoryUniverse, rollingRsWindow, symbols, tradeReviewChartSettings])
 
   const refreshFinraShortInterest = useCallback(async ({ silent = false } = {}) => {
     if (!symbols.length) {
@@ -731,22 +856,14 @@ export default function ThemeWatchlist({
       const nextBySymbol = json?.bySymbol || {}
       setFinraBySymbol(nextBySymbol)
 
-      const end = new Date()
-      end.setDate(end.getDate() + 1)
-      const start = new Date()
-      start.setDate(start.getDate() - 180)
-      const estimateEntries = await Promise.all(symbols.map(async symbol => {
+      const { symbolBarsBySymbol } = await loadHistoryUniverse()
+      const estimateEntries = symbols.map(symbol => {
         const snapshot = nextBySymbol[symbol]
         if (!snapshot?.settlementDate || !Number.isFinite(snapshot?.currentShortPositionQuantity)) {
           return [symbol, null]
         }
-        try {
-          const bars = await fetchHistory(symbol, start, end)
-          return [symbol, estimateCurrentShortInterest(snapshot, bars, new Date())]
-        } catch {
-          return [symbol, estimateCurrentShortInterest(snapshot, [], new Date())]
-        }
-      }))
+        return [symbol, estimateCurrentShortInterest(snapshot, symbolBarsBySymbol[symbol] || [], new Date())]
+      })
       setFinraEstimateBySymbol(Object.fromEntries(estimateEntries))
       setStatus(`FINRA short interest refreshed for ${symbols.length} symbol${symbols.length !== 1 ? 's' : ''}.`)
     } catch (err) {
@@ -754,7 +871,7 @@ export default function ThemeWatchlist({
     } finally {
       setFinraLoading(false)
     }
-  }, [symbols])
+  }, [loadHistoryUniverse, symbols])
 
   useEffect(() => {
     if (!symbols.length) {
@@ -803,7 +920,7 @@ export default function ThemeWatchlist({
     setSortKey('momentum')
     setSortDir('asc')
     setError('')
-    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''}. Prior watchlist map cleared.`)
+    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} into ${activeList?.name || 'the active watchlist'}. Prior map for this list was cleared.`)
     setPage(1)
   }
 
@@ -821,7 +938,7 @@ export default function ThemeWatchlist({
     setSortKey('momentum')
     setSortDir('asc')
     setError('')
-    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} from CSV. Prior watchlist map cleared.`)
+    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} from CSV into ${activeList?.name || 'the active watchlist'}. Prior map for this list was cleared.`)
     setPage(1)
   }
 
@@ -855,7 +972,7 @@ export default function ThemeWatchlist({
         })
         upsertRows(mapped)
       }
-      setStatus(`Mapped ${symbols.length} symbol${symbols.length !== 1 ? 's' : ''}.`)
+      setStatus(`Mapped ${symbols.length} symbol${symbols.length !== 1 ? 's' : ''} in ${activeList?.name || 'the active watchlist'}.`)
     } catch (e) {
       setError(e.message || 'Watchlist mapping failed.')
     } finally {
@@ -883,18 +1000,37 @@ export default function ThemeWatchlist({
       <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3">
         <Table2 size={14} className="text-accent-blue" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white">Watchlist Relationship Map V3</p>
+          <p className="text-sm font-semibold text-white">{activeList?.name || 'Watchlist'} Relationship Map</p>
           <p className="text-xs text-gray-600">Dedicated ecosystem workspace for large watchlists, relationship mapping, and manual research views</p>
         </div>
         {status && <p className="text-xs text-gray-500 truncate">{status}</p>}
       </div>
 
       <div className="p-4 space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          {watchlists.map(list => (
+            <button
+              key={list.id}
+              onClick={() => setActiveList(list.id)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all ${
+                activeListId === list.id
+                  ? 'border-accent-blue/30 bg-accent-blue/15 text-accent-blue'
+                  : 'border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/20'
+              }`}
+            >
+              <Bookmark size={12} />
+              {list.name}
+              <span className={`px-1.5 py-0.5 rounded-full ${activeListId === list.id ? 'bg-accent-blue/20 text-accent-blue' : 'bg-white/[0.05] text-gray-500'}`}>
+                {list.symbols.length}
+              </span>
+            </button>
+          ))}
+        </div>
         <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_auto] gap-3">
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder={'Paste TradingView symbols, URLs, or plain tickers.\nExamples:\nNASDAQ:NVDA\nhttps://www.tradingview.com/chart/.../?symbol=NASDAQ:AMD\nMRVL, ANET, CIEN'}
+            placeholder={`Paste TradingView symbols, URLs, or plain tickers into ${activeList?.name || 'this watchlist'}.\nExamples:\nNASDAQ:NVDA\nhttps://www.tradingview.com/chart/.../?symbol=NASDAQ:AMD\nMRVL, ANET, CIEN`}
             rows={5}
             className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 resize-none"
           />

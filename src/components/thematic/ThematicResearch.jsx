@@ -1348,7 +1348,9 @@ export default function ThematicResearch() {
   const { themes, removeTheme, convictions, setConviction, patchThemeDossier } = useThematicStore()
   const { user }   = useAuthStore()
   const { sources: librarySources, loadSources } = useResearchLibraryStore()
-  const watchlistCount = useResearchWatchlistStore(state => state.symbols.length)
+  const watchlistCount = useResearchWatchlistStore(state =>
+    Object.values(state.listsById || {}).reduce((sum, list) => sum + (list?.symbols?.length || 0), 0)
+  )
   const provider = researchAiProvider || (useLocalLLM ? 'local' : 'gemini')
   const [modelInput, setModelInput] = useState(researchOpenRouterModel || 'openai/gpt-4o-mini')
 
