@@ -26,6 +26,7 @@ import { fetchHistoryCached } from '../../utils/historyCache.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
 import {
   buildAnchoredRsSnapshot,
+  aggregateWeeklyBars,
   buildAvwapOverlays,
   buildKeltnerShadeBands,
   buildRollingRsSnapshot,
@@ -94,6 +95,40 @@ const WATCHLIST_HISTORY_CONCURRENCY = 8
 
 function toDateKey(value) {
   return new Date(value).toISOString().slice(0, 10)
+}
+
+function normalizeChartBars(bars = []) {
+  return bars
+    .map(bar => {
+      const parsedTime = bar?.time
+      const time = typeof parsedTime === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsedTime)
+        ? parsedTime
+        : parsedTime
+          ? toDateKey(parsedTime)
+          : null
+      const open = Number(bar?.open)
+      const high = Number(bar?.high)
+      const low = Number(bar?.low)
+      const close = Number(bar?.close)
+      const volume = Number(bar?.volume || 0)
+      if (!time || !Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
+        return null
+      }
+      const rising = close >= open
+      const color = rising ? '#16a34a' : '#dc2626'
+      return {
+        time,
+        open,
+        high,
+        low,
+        close,
+        volume,
+        color,
+        wickColor: color,
+        borderColor: color,
+      }
+    })
+    .filter(Boolean)
 }
 
 async function mapWithConcurrency(items, limit, mapper) {
@@ -620,6 +655,9 @@ function EcosystemCompositeChart({
   memberCount = 0,
   ytdEnabled = false,
   onToggleYtd,
+  chartLabel = 'Ecosystem Symbol',
+  badgeLabel = 'Synthetic',
+  emptyLabel = 'No chart data for this ecosystem',
 }) {
   const hasBars = data?.dailyBars?.length
   return (
@@ -627,8 +665,8 @@ function EcosystemCompositeChart({
       <div className="px-2 py-1.5 border-b border-black/15 text-[#242830]">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold mono">{title} · Ecosystem Symbol</p>
-            <p className="text-[10px] text-[#505760]">KC13/34/65 · YTD AVWAP · {memberCount} members</p>
+            <p className="text-xs font-semibold mono">{title} · {chartLabel}</p>
+            <p className="text-[10px] text-[#505760]">KC13/34/65 · YTD AVWAP · {memberCount} member{memberCount === 1 ? '' : 's'}</p>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -641,12 +679,12 @@ function EcosystemCompositeChart({
             >
               YTD AVWAP
             </button>
-            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">Synthetic</span>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">{badgeLabel}</span>
           </div>
         </div>
       </div>
       {!hasBars ? (
-        <div className="h-[520px] flex items-center justify-center text-xs text-[#505760]">No chart data for this ecosystem</div>
+        <div className="h-[520px] flex items-center justify-center text-xs text-[#505760]">{emptyLabel}</div>
       ) : (
         <div>
           <div className="relative border-b-4 border-[#242424]">
@@ -1132,12 +1170,12 @@ export default function ThemeWatchlist({
   }, [analyticsMode, benchmarkHistoryBars, selectedEcosystemComposite, selectedThemeGroup, tradeReviewChartSettings])
 
   const marketLeadersComposite = useMemo(() => {
-    if (analyticsMode || activeListId !== MARKET_LEADERS_LIST_ID) return { dailyBars: [], weeklyBars: [], memberCount: 0 }
+    if (activeListId !== MARKET_LEADERS_LIST_ID) return { dailyBars: [], weeklyBars: [], memberCount: 0 }
     return buildEcosystemCompositeBars(symbols, historyBarsBySymbol)
-  }, [activeListId, analyticsMode, historyBarsBySymbol, symbols])
+  }, [activeListId, historyBarsBySymbol, symbols])
 
   const marketLeadersChartData = useMemo(() => {
-    if (analyticsMode || activeListId !== MARKET_LEADERS_LIST_ID || !marketLeadersComposite.dailyBars.length) {
+    if (activeListId !== MARKET_LEADERS_LIST_ID || !marketLeadersComposite.dailyBars.length) {
       return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
     }
     const avwapOverlays = buildAvwapOverlays(
@@ -1165,7 +1203,44 @@ export default function ThemeWatchlist({
       keltnerShades: buildKeltnerShadeBands(dailyKeltner),
       weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
     }
-  }, [activeListId, analyticsMode, benchmarkHistoryBars, marketLeadersComposite, tradeReviewChartSettings])
+  }, [activeListId, benchmarkHistoryBars, marketLeadersComposite, tradeReviewChartSettings])
+
+  const selectedTickerChartData = useMemo(() => {
+    if (analyticsMode || !selectedDisplaySymbol) {
+      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    }
+    const dailyBars = normalizeChartBars(historyBarsBySymbol[selectedDisplaySymbol] || [])
+    if (!dailyBars.length) {
+      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    }
+    const weeklyBars = normalizeChartBars(aggregateWeeklyBars(dailyBars))
+    const avwapOverlays = buildAvwapOverlays(
+      dailyBars,
+      selectedDisplaySymbol,
+      tradeReviewChartSettings,
+      {},
+      new Date(),
+      null
+    )
+    const dailyKeltner = {
+      13: calculateKeltnerChannel(dailyBars, 13, 0.25),
+      34: calculateKeltnerChannel(dailyBars, 34, 0.25),
+      65: calculateKeltnerChannel(dailyBars, 65, 0.25),
+    }
+    const weeklyKeltner = {
+      13: calculateKeltnerChannel(weeklyBars, 13, 0.25),
+      34: calculateKeltnerChannel(weeklyBars, 34, 0.25),
+      65: calculateKeltnerChannel(weeklyBars, 65, 0.25),
+    }
+    return {
+      dailyBars,
+      weeklyBars,
+      benchmarkBars: benchmarkHistoryBars,
+      avwapOverlays,
+      keltnerShades: buildKeltnerShadeBands(dailyKeltner),
+      weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
+    }
+  }, [analyticsMode, benchmarkHistoryBars, historyBarsBySymbol, selectedDisplaySymbol, tradeReviewChartSettings])
 
   const handleColumnVisibilityToggle = useCallback((columnId) => {
     const nextHidden = hiddenColumns.includes(columnId)
@@ -1386,6 +1461,11 @@ export default function ThemeWatchlist({
     })
   }, [rows, selectedThemeGroupKey, themeGrouping, query, sortKey, sortDir, rankBySymbol, fitBySymbol, fitFilter])
 
+  const selectedDisplaySymbol = useMemo(() => {
+    if (selectedSymbol && filteredRows.some(row => row.symbol === selectedSymbol)) return selectedSymbol
+    return filteredRows[0]?.symbol || null
+  }, [filteredRows, selectedSymbol])
+
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize))
   const pagedRows = useMemo(
     () => filteredRows.slice((page - 1) * pageSize, page * pageSize),
@@ -1419,7 +1499,7 @@ export default function ThemeWatchlist({
   )
 
   const editingRow = editingSymbol ? rowsBySymbol[editingSymbol] : null
-  const selectedRow = selectedSymbol ? rowsBySymbol[selectedSymbol] : null
+  const selectedRow = selectedDisplaySymbol ? rowsBySymbol[selectedDisplaySymbol] : null
   const historyUniverseRef = useRef({ key: '', data: null, promise: null })
 
   const historyPlan = useMemo(() => {
@@ -1678,29 +1758,57 @@ export default function ThemeWatchlist({
   }, [activeThemeGroups, selectedThemeGroupKey])
 
   useEffect(() => {
-    if (!analyticsMode || !sortedThemeGroups.length) return undefined
+    const isTypingTarget = (target) => {
+      const tagName = target?.tagName?.toLowerCase?.() || ''
+      return target?.isContentEditable || ['input', 'textarea', 'select', 'button'].includes(tagName)
+    }
+
+    if (analyticsMode) {
+      if (!sortedThemeGroups.length) return undefined
+
+      const handler = (event) => {
+        if (isTypingTarget(event.target) || event.code !== 'Space') return
+        event.preventDefault()
+
+        const currentIndex = sortedThemeGroups.findIndex(group => group.key === selectedThemeGroupKey)
+        if (event.shiftKey) {
+          const prevIndex = currentIndex <= 0 ? sortedThemeGroups.length - 1 : currentIndex - 1
+          setSelectedThemeGroupKey(sortedThemeGroups[prevIndex]?.key || '')
+          return
+        }
+
+        const nextIndex = currentIndex < 0 || currentIndex >= sortedThemeGroups.length - 1 ? 0 : currentIndex + 1
+        setSelectedThemeGroupKey(sortedThemeGroups[nextIndex]?.key || '')
+      }
+
+      window.addEventListener('keydown', handler)
+      return () => window.removeEventListener('keydown', handler)
+    }
 
     const handler = (event) => {
-      const target = event.target
-      const tagName = target?.tagName?.toLowerCase?.() || ''
-      const isTyping = target?.isContentEditable || ['input', 'textarea', 'select', 'button'].includes(tagName)
-      if (isTyping || event.code !== 'Space') return
+      if (isTypingTarget(event.target) || event.code !== 'Space' || !filteredRows.length) return
       event.preventDefault()
 
-      const currentIndex = sortedThemeGroups.findIndex(group => group.key === selectedThemeGroupKey)
+      const currentIndex = filteredRows.findIndex(row => row.symbol === selectedDisplaySymbol)
       if (event.shiftKey) {
-        const prevIndex = currentIndex <= 0 ? sortedThemeGroups.length - 1 : currentIndex - 1
-        setSelectedThemeGroupKey(sortedThemeGroups[prevIndex]?.key || '')
+        const prevIndex = currentIndex <= 0 ? filteredRows.length - 1 : currentIndex - 1
+        const prevSymbol = filteredRows[prevIndex]?.symbol
+        if (!prevSymbol) return
+        setSelectedSymbol(prevSymbol)
+        setPage(Math.floor(prevIndex / pageSize) + 1)
         return
       }
 
-      const nextIndex = currentIndex < 0 || currentIndex >= sortedThemeGroups.length - 1 ? 0 : currentIndex + 1
-      setSelectedThemeGroupKey(sortedThemeGroups[nextIndex]?.key || '')
+      const nextIndex = currentIndex < 0 || currentIndex >= filteredRows.length - 1 ? 0 : currentIndex + 1
+      const nextSymbol = filteredRows[nextIndex]?.symbol
+      if (!nextSymbol) return
+      setSelectedSymbol(nextSymbol)
+      setPage(Math.floor(nextIndex / pageSize) + 1)
     }
 
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [analyticsMode, selectedThemeGroupKey, sortedThemeGroups])
+  }, [analyticsMode, filteredRows, selectedDisplaySymbol, selectedThemeGroupKey, sortedThemeGroups])
 
   useEffect(() => {
     const snapshotDate = new Date().toISOString().slice(0, 10)
@@ -1977,6 +2085,16 @@ export default function ThemeWatchlist({
                 Keyboard: press <span className="font-semibold text-gray-300">Space</span> for the next ecosystem, or <span className="font-semibold text-gray-300">Shift + Space</span> to go back.
               </div>
               <div className="space-y-4">
+                {activeListId === MARKET_LEADERS_LIST_ID && marketLeadersComposite.memberCount > 0 ? (
+                  <EcosystemCompositeChart
+                    data={marketLeadersChartData}
+                    chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+                    title="MARKET LEADERS"
+                    memberCount={marketLeadersComposite.memberCount}
+                    ytdEnabled={ecosystemYtdEnabled}
+                    onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
+                  />
+                ) : null}
                 {selectedThemeGroup ? (
                   <EcosystemCompositeChart
                     data={selectedEcosystemChartData}
@@ -2280,17 +2398,6 @@ export default function ThemeWatchlist({
 
         {!analyticsMode && (
           <>
-        {activeListId === MARKET_LEADERS_LIST_ID && rows.length > 0 && (
-          <EcosystemCompositeChart
-            data={marketLeadersChartData}
-            chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
-            title="MARKET LEADERS"
-            memberCount={marketLeadersComposite.memberCount}
-            ytdEnabled={ecosystemYtdEnabled}
-            onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
-          />
-        )}
-
         <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
           <StatPill label="Imported Symbols" value={symbols.length} />
           <StatPill label="Mapped Rows" value={rows.length} />
@@ -2355,6 +2462,35 @@ export default function ThemeWatchlist({
         </div>
 
         <div className="space-y-3">
+          <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-[11px] text-gray-500">
+            Keyboard: press <span className="font-semibold text-gray-300">Space</span> for the next ticker, or <span className="font-semibold text-gray-300">Shift + Space</span> to go back through the filtered table.
+          </div>
+
+          {activeListId === MARKET_LEADERS_LIST_ID && marketLeadersComposite.memberCount > 0 ? (
+            <EcosystemCompositeChart
+              data={marketLeadersChartData}
+              chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+              title="MARKET LEADERS"
+              memberCount={marketLeadersComposite.memberCount}
+              ytdEnabled={ecosystemYtdEnabled}
+              onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
+            />
+          ) : null}
+
+          {selectedRow ? (
+            <EcosystemCompositeChart
+              data={selectedTickerChartData}
+              chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+              title={selectedRow.symbol}
+              memberCount={1}
+              ytdEnabled={ecosystemYtdEnabled}
+              onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
+              chartLabel="Ticker Chart"
+              badgeLabel={activeList?.name || 'Watchlist'}
+              emptyLabel="No chart data for this ticker"
+            />
+          ) : null}
+
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-widest">
               <ListFilter size={12} />
@@ -2475,7 +2611,7 @@ export default function ThemeWatchlist({
                 <tbody className="divide-y divide-white/[0.05]">
                   {pagedRows.map(row => {
                     return (
-                      <tr key={row.symbol} className={`align-top hover:bg-white/[0.02] cursor-pointer ${selectedSymbol === row.symbol ? 'bg-accent-blue/5' : ''}`} onClick={() => setSelectedSymbol(row.symbol)}>
+                      <tr key={row.symbol} className={`align-top hover:bg-white/[0.02] cursor-pointer ${selectedDisplaySymbol === row.symbol ? 'bg-accent-blue/5' : ''}`} onClick={() => setSelectedSymbol(row.symbol)}>
                         {visibleColumns.map(column => (
                           <td key={`${row.symbol}-${column.id}`} className={column.cellClassName}>
                             {column.render(row)}
