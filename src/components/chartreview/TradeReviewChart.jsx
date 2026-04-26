@@ -273,19 +273,11 @@ function LightweightPane({ data, kind, height, chartType, onChartClick }) {
 }
 
 export default function TradeReviewChart({ trade, chartSettings }) {
-  const {
-    setTradeReviewChartSettings,
-    tradeReviewManualAnchorsBySymbol,
-    addTradeReviewManualAnchor,
-    updateTradeReviewManualAnchor,
-    removeTradeReviewManualAnchor,
-  } = useSettingsStore(state => ({
-    setTradeReviewChartSettings: state.setTradeReviewChartSettings,
-    tradeReviewManualAnchorsBySymbol: state.tradeReviewManualAnchorsBySymbol,
-    addTradeReviewManualAnchor: state.addTradeReviewManualAnchor,
-    updateTradeReviewManualAnchor: state.updateTradeReviewManualAnchor,
-    removeTradeReviewManualAnchor: state.removeTradeReviewManualAnchor,
-  }))
+  const setTradeReviewChartSettings = useSettingsStore(state => state.setTradeReviewChartSettings)
+  const tradeReviewManualAnchorsBySymbol = useSettingsStore(state => state.tradeReviewManualAnchorsBySymbol)
+  const addTradeReviewManualAnchor = useSettingsStore(state => state.addTradeReviewManualAnchor)
+  const updateTradeReviewManualAnchor = useSettingsStore(state => state.updateTradeReviewManualAnchor)
+  const removeTradeReviewManualAnchor = useSettingsStore(state => state.removeTradeReviewManualAnchor)
   const [bars, setBars] = useState([])
   const [benchmarkBars, setBenchmarkBars] = useState([])
   const [loading, setLoading] = useState(true)
