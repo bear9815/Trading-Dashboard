@@ -5,6 +5,7 @@ import {
   DEFAULT_WATCHLIST_COLUMN_ORDER,
   normalizeColumnOrder,
 } from '../utils/watchlistTableConfig.js'
+import { upsertThemeAnalyticsSnapshot } from '../utils/themeAnalytics.js'
 
 export const MARKET_LEADERS_LIST_ID = 'market-leaders'
 export const WATCHLIST_LIST_ID = 'watchlist'
@@ -22,6 +23,7 @@ const DEFAULT_LISTS = {
     hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
     activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
     controlsCollapsed: true,
+    themeAnalyticsHistory: { theme: [], ecosystem: [] },
     lastUpdated: null,
   },
   [WATCHLIST_LIST_ID]: {
@@ -34,6 +36,7 @@ const DEFAULT_LISTS = {
     hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
     activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
     controlsCollapsed: true,
+    themeAnalyticsHistory: { theme: [], ecosystem: [] },
     lastUpdated: null,
   },
 }
@@ -53,6 +56,7 @@ function makeListPatch(list, patch = {}) {
     hiddenColumns: patch.hiddenColumns ?? list.hiddenColumns ?? [...DEFAULT_COLUMN_PRESET.hiddenColumns],
     activeColumnPreset: patch.activeColumnPreset ?? list.activeColumnPreset ?? DEFAULT_COLUMN_PRESET.presetKey,
     controlsCollapsed: patch.controlsCollapsed ?? list.controlsCollapsed ?? true,
+    themeAnalyticsHistory: patch.themeAnalyticsHistory ?? list.themeAnalyticsHistory ?? { theme: [], ecosystem: [] },
     lastUpdated: patch.lastUpdated ?? list.lastUpdated ?? null,
   }
 }
@@ -118,6 +122,7 @@ export const useResearchWatchlistStore = create(
       replaceWatchlist: (symbols) => set(state => updateActiveList(state, () => ({
         symbols,
         rowsBySymbol: {},
+        themeAnalyticsHistory: { theme: [], ecosystem: [] },
         lastUpdated: null,
       }))),
 
@@ -185,6 +190,15 @@ export const useResearchWatchlistStore = create(
         controlsCollapsed,
       }))),
 
+      saveThemeAnalyticsSnapshot: ({ groupingMode, snapshotDate, groups } = {}) => set(state => updateActiveList(state, current => ({
+        themeAnalyticsHistory: upsertThemeAnalyticsSnapshot({
+          history: current.themeAnalyticsHistory,
+          groupingMode,
+          snapshotDate,
+          groups,
+        }),
+      }))),
+
       removeView: (id) => set(state => updateActiveList(state, current => ({
         savedViews: current.savedViews.filter(v => v.id !== id),
       }))),
@@ -193,6 +207,7 @@ export const useResearchWatchlistStore = create(
         symbols: [],
         rowsBySymbol: {},
         savedViews: [],
+        themeAnalyticsHistory: { theme: [], ecosystem: [] },
         lastUpdated: null,
       }))),
 

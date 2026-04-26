@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
+  ScatterChart, Scatter, ReferenceLine, LineChart, Line, Cell,
+} from 'recharts'
+import {
   Brain, Download, ExternalLink, Layers, ListFilter, Pencil,
   RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network, TrendingUp, ChevronDown, ChevronUp,
 } from 'lucide-react'
@@ -19,6 +23,7 @@ import {
   moveColumn,
   WATCHLIST_COLUMN_PRESETS,
 } from '../../utils/watchlistTableConfig.js'
+import { buildThemeGroupMetrics, buildThemeRotationMetrics } from '../../utils/themeAnalytics.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 
 const SORT_OPTIONS = [
@@ -37,6 +42,17 @@ const FIT_FILTER_OPTIONS = [
   ['orange', 'Orange'],
   ['red', 'Red'],
   ['needs_data', 'Needs Data'],
+]
+
+const THEME_GROUPING_OPTIONS = [
+  ['theme', 'Themes'],
+  ['ecosystem', 'Ecosystems'],
+]
+
+const THEME_SORT_OPTIONS = [
+  ['strength', 'Strength'],
+  ['breadth', 'Breadth'],
+  ['narrow', 'Narrow Leadership'],
 ]
 
 const CSV_COLUMNS = [
@@ -390,6 +406,18 @@ function GroupList({ title, items, empty }) {
   )
 }
 
+function formatMetric(value, suffix = '', decimals = 1) {
+  if (!Number.isFinite(value)) return '—'
+  return `${value >= 0 ? '+' : ''}${value.toFixed(decimals)}${suffix}`
+}
+
+function ThemeHealthTone(label) {
+  if (label === 'broad leadership') return 'text-accent-green bg-accent-green/10 border-accent-green/20'
+  if (label === 'narrow leadership') return 'text-accent-yellow bg-accent-yellow/10 border-accent-yellow/20'
+  if (label === 'weak / deteriorating') return 'text-accent-red bg-accent-red/10 border-accent-red/20'
+  return 'text-accent-blue bg-accent-blue/10 border-accent-blue/20'
+}
+
 function RelationshipExplorer({ row, rows, rowsBySymbol }) {
   if (!row) {
     return (
@@ -598,6 +626,7 @@ export default function ThemeWatchlist({
     removeView,
     updateColumnLayout,
     setControlsCollapsed,
+    saveThemeAnalyticsSnapshot,
     clear,
   } = useResearchWatchlistStore()
   const { tradeReviewChartSettings } = useSettingsStore()
@@ -609,6 +638,7 @@ export default function ThemeWatchlist({
   const hiddenColumns = activeList?.hiddenColumns || []
   const activeColumnPreset = activeList?.activeColumnPreset || 'compact'
   const controlsCollapsed = activeList?.controlsCollapsed ?? true
+  const themeAnalyticsHistory = activeList?.themeAnalyticsHistory || { theme: [], ecosystem: [] }
   const watchlists = useMemo(
     () => Object.values(listsById || {}).sort((a, b) => {
       const order = { 'market-leaders': 0, watchlist: 1 }
@@ -628,6 +658,9 @@ export default function ThemeWatchlist({
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [viewName, setViewName] = useState('')
   const [draggedColumnId, setDraggedColumnId] = useState(null)
+  const [themeGrouping, setThemeGrouping] = useState('theme')
+  const [themeSortMode, setThemeSortMode] = useState('strength')
+  const [selectedThemeGroupKey, setSelectedThemeGroupKey] = useState('')
   const [anchoredRsBySymbol, setAnchoredRsBySymbol] = useState({})
   const [rollingRsBySymbol, setRollingRsBySymbol] = useState({})
   const [ytdAvwapBySymbol, setYtdAvwapBySymbol] = useState({})
@@ -694,6 +727,50 @@ export default function ThemeWatchlist({
   const visibleColumnOrder = useMemo(
     () => buildVisibleColumnOrder({ columnOrder, hiddenColumns }),
     [columnOrder, hiddenColumns]
+  )
+
+  const themeGroupsAnalytics = useMemo(
+    () => buildThemeGroupMetrics({
+      rows,
+      groupBy: 'theme',
+      fitBySymbol,
+      rollingRsBySymbol,
+      anchoredRsBySymbol,
+    }),
+    [rows, fitBySymbol, rollingRsBySymbol, anchoredRsBySymbol]
+  )
+
+  const ecosystemGroupsAnalytics = useMemo(
+    () => buildThemeGroupMetrics({
+      rows,
+      groupBy: 'ecosystem',
+      fitBySymbol,
+      rollingRsBySymbol,
+      anchoredRsBySymbol,
+    }),
+    [rows, fitBySymbol, rollingRsBySymbol, anchoredRsBySymbol]
+  )
+
+  const activeThemeGroups = themeGrouping === 'ecosystem' ? ecosystemGroupsAnalytics : themeGroupsAnalytics
+
+  const sortedThemeGroups = useMemo(() => {
+    const groups = [...activeThemeGroups]
+    if (themeSortMode === 'breadth') {
+      return groups.sort((a, b) => (b.greenPct - a.greenPct) || (b.rollingAboveSignalPct - a.rollingAboveSignalPct) || b.count - a.count)
+    }
+    if (themeSortMode === 'narrow') {
+      return groups.sort((a, b) => (b.leaderSpread ?? -Infinity) - (a.leaderSpread ?? -Infinity) || (b.currentStrengthScore ?? -Infinity) - (a.currentStrengthScore ?? -Infinity))
+    }
+    return groups.sort((a, b) => (b.currentStrengthScore ?? -Infinity) - (a.currentStrengthScore ?? -Infinity) || b.count - a.count)
+  }, [activeThemeGroups, themeSortMode])
+
+  const themeRotationGroups = useMemo(
+    () => buildThemeRotationMetrics({
+      currentGroups: activeThemeGroups,
+      history: themeAnalyticsHistory[themeGrouping] || [],
+      lookbackDays: 5,
+    }),
+    [activeThemeGroups, themeAnalyticsHistory, themeGrouping]
   )
 
   const handleColumnVisibilityToggle = useCallback((columnId) => {
@@ -901,8 +978,11 @@ export default function ThemeWatchlist({
   )
 
   const filteredRows = useMemo(() => {
+    const themedRows = selectedThemeGroupKey
+      ? rows.filter(row => String(row?.[themeGrouping] || '').trim().toLowerCase().replace(/\s+/g, ' ') === selectedThemeGroupKey)
+      : rows
     return filterAndSortWatchlistRows({
-      rows,
+      rows: themedRows,
       query,
       sortKey,
       sortDir,
@@ -910,7 +990,7 @@ export default function ThemeWatchlist({
       fitBySymbol,
       fitFilter,
     })
-  }, [rows, query, sortKey, sortDir, rankBySymbol, fitBySymbol, fitFilter])
+  }, [rows, selectedThemeGroupKey, themeGrouping, query, sortKey, sortDir, rankBySymbol, fitBySymbol, fitFilter])
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize))
   const pagedRows = useMemo(
@@ -1186,6 +1266,30 @@ export default function ThemeWatchlist({
     refreshFinraShortInterest({ silent: true })
   }, [finraSettingsKey, refreshFinraShortInterest])
 
+  useEffect(() => {
+    if (selectedThemeGroupKey && !activeThemeGroups.some(group => group.key === selectedThemeGroupKey)) {
+      setSelectedThemeGroupKey('')
+    }
+  }, [activeThemeGroups, selectedThemeGroupKey])
+
+  useEffect(() => {
+    const snapshotDate = new Date().toISOString().slice(0, 10)
+    if (themeGroupsAnalytics.length) {
+      saveThemeAnalyticsSnapshot({
+        groupingMode: 'theme',
+        snapshotDate,
+        groups: themeGroupsAnalytics,
+      })
+    }
+    if (ecosystemGroupsAnalytics.length) {
+      saveThemeAnalyticsSnapshot({
+        groupingMode: 'ecosystem',
+        snapshotDate,
+        groups: ecosystemGroupsAnalytics,
+      })
+    }
+  }, [themeGroupsAnalytics, ecosystemGroupsAnalytics, saveThemeAnalyticsSnapshot])
+
   function handleSort(nextKey) {
     if (sortKey === nextKey) setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')
     else {
@@ -1399,6 +1503,217 @@ export default function ThemeWatchlist({
         {error && (
           <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">
             {error}
+          </div>
+        )}
+
+        {rows.length > 0 && (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-accent-blue/15 bg-gradient-to-br from-accent-blue/6 via-transparent to-accent-green/6 p-4">
+              <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+                <div>
+                  <p className="text-sm font-semibold text-white">Theme Breadth + Strength</p>
+                  <p className="text-xs text-gray-500 mt-1">Track what is working inside the active {activeList?.name || 'watchlist'} by theme or ecosystem using your internal RS and fit signals.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {THEME_GROUPING_OPTIONS.map(([value, label]) => (
+                    <button
+                      key={value}
+                      onClick={() => {
+                        setThemeGrouping(value)
+                        setSelectedThemeGroupKey('')
+                      }}
+                      className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
+                        themeGrouping === value
+                          ? 'bg-accent-blue/15 border-accent-blue/25 text-accent-blue'
+                          : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  {THEME_SORT_OPTIONS.map(([value, label]) => (
+                    <button
+                      key={value}
+                      onClick={() => setThemeSortMode(value)}
+                      className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
+                        themeSortMode === value
+                          ? 'bg-accent-green/15 border-accent-green/25 text-accent-green'
+                          : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <StatPill label={`Tracked ${themeGrouping === 'theme' ? 'Themes' : 'Ecosystems'}`} value={activeThemeGroups.length} />
+                <StatPill label="Best Breadth" value={sortedThemeGroups[0]?.label || '—'} />
+                <StatPill label="Top Strength" value={sortedThemeGroups[0]?.currentStrengthScore != null ? formatMetric(sortedThemeGroups[0].currentStrengthScore, '', 0) : '—'} />
+                <StatPill label="Rotation History" value={`${themeAnalyticsHistory[themeGrouping]?.length || 0} pts`} />
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                  <p className="text-xs font-semibold text-gray-300 mb-2">Current Strength Ranking</p>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={sortedThemeGroups.slice(0, 8)} layout="vertical" margin={{ top: 4, right: 12, left: 30, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                      <XAxis type="number" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                      <YAxis type="category" dataKey="label" width={96} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+                        formatter={(value, name) => [name === 'Strength' ? Number(value).toFixed(1) : `${Number(value).toFixed(0)}%`, name]}
+                      />
+                      <Bar dataKey="currentStrengthScore" name="Strength" radius={[0, 4, 4, 0]}>
+                        {sortedThemeGroups.slice(0, 8).map(group => (
+                          <Cell key={group.key} fill={group.currentStrengthScore >= 20 ? '#00d084' : group.currentStrengthScore >= 5 ? '#fbbf24' : '#ff4757'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                  <p className="text-xs font-semibold text-gray-300 mb-2">Fit Breadth Mix</p>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={sortedThemeGroups.slice(0, 8)} layout="vertical" margin={{ top: 4, right: 12, left: 30, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                      <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                      <YAxis type="category" dataKey="label" width={96} tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+                        formatter={(value, name) => [`${Number(value).toFixed(0)}%`, name]}
+                      />
+                      <Bar dataKey="greenPct" stackId="fit" name="Green" fill="#00d084" radius={[0, 0, 0, 0]} />
+                      <Bar dataKey="orangePct" stackId="fit" name="Orange" fill="#fbbf24" radius={[0, 0, 0, 0]} />
+                      <Bar dataKey="redPct" stackId="fit" name="Red" fill="#ff4757" radius={[0, 0, 0, 0]} />
+                      <Bar dataKey="needsDataPct" stackId="fit" name="Needs Data" fill="#4b5563" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 xl:grid-cols-[1.3fr_1fr] gap-4">
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <p className="text-xs font-semibold text-gray-300">Group Health Table</p>
+                    {selectedThemeGroupKey && (
+                      <button
+                        onClick={() => setSelectedThemeGroupKey('')}
+                        className="text-[11px] text-accent-blue hover:underline"
+                      >
+                        Clear group filter
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {sortedThemeGroups.slice(0, 8).map(group => (
+                      <button
+                        key={group.key}
+                        onClick={() => setSelectedThemeGroupKey(prev => prev === group.key ? '' : group.key)}
+                        className={`w-full text-left rounded-lg border px-3 py-2.5 transition-all ${
+                          selectedThemeGroupKey === group.key
+                            ? 'border-accent-blue/30 bg-accent-blue/10'
+                            : 'border-white/10 bg-white/[0.02] hover:border-white/20'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-white truncate">{group.label}</p>
+                            <p className="text-[11px] text-gray-600 mt-1">
+                              {group.count} symbols · rolling {formatMetric(group.avgRollingZ, 'z')} · anchored {formatMetric(group.avgAnchoredZ, 'z')}
+                            </p>
+                          </div>
+                          <span className={`text-[10px] px-2 py-1 rounded border ${ThemeHealthTone(group.healthLabel)}`}>
+                            {group.healthLabel}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-gray-500">
+                          <span>green {group.greenPct?.toFixed(0) ?? '—'}%</span>
+                          <span>above signal {group.rollingAboveSignalPct?.toFixed(0) ?? '—'}%</span>
+                          <span>leader spread {group.leaderSpread != null ? group.leaderSpread.toFixed(2) : '—'}z</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                  <p className="text-xs font-semibold text-gray-300 mb-2">Theme Rotation</p>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <ScatterChart margin={{ top: 8, right: 12, left: -6, bottom: 8 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                      <XAxis type="number" dataKey="currentStrengthScore" name="Current Strength" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                      <YAxis type="number" dataKey="deltaStrength" name="5d Delta" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                      <Tooltip
+                        cursor={{ strokeDasharray: '3 3' }}
+                        contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+                        formatter={(value, name) => [Number.isFinite(Number(value)) ? Number(value).toFixed(2) : '—', name]}
+                        labelFormatter={(_, payload) => payload?.[0]?.payload?.label || ''}
+                      />
+                      <ReferenceLine x={15} stroke="#ffffff18" strokeDasharray="4 4" />
+                      <ReferenceLine y={0} stroke="#ffffff18" strokeDasharray="4 4" />
+                      <Scatter
+                        data={themeRotationGroups}
+                        shape={(props) => {
+                          const { cx, cy, payload } = props
+                          const fill = payload.quadrant === 'strong_improving'
+                            ? '#00d084'
+                            : payload.quadrant === 'strong_fading'
+                              ? '#fbbf24'
+                              : payload.quadrant === 'weak_improving'
+                                ? '#3d84ff'
+                                : '#ff4757'
+                          return <circle cx={cx} cy={cy} r={6} fill={fill} fillOpacity={0.9} stroke="none" />
+                        }}
+                      />
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {selectedThemeGroupKey && (
+                <div className="mt-4 rounded-lg border border-accent-blue/20 bg-accent-blue/8 px-3 py-2 text-xs text-accent-blue">
+                  Table filtered to the selected {themeGrouping}: <span className="font-semibold">{activeThemeGroups.find(group => group.key === selectedThemeGroupKey)?.label || selectedThemeGroupKey}</span>
+                </div>
+              )}
+            </div>
+
+            {themeRotationGroups.some(group => group.referenceDate) && (
+              <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Selected Group Trend</p>
+                    <p className="text-xs text-gray-500 mt-1">Shows current-strength history from stored daily snapshots so you can see whether a theme is broadening or fading.</p>
+                  </div>
+                  <p className="text-[11px] text-gray-600">
+                    Reference window: 5 stored snapshots
+                  </p>
+                </div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart
+                    data={(themeAnalyticsHistory[themeGrouping] || []).map(entry => {
+                      const selected = entry.groups.find(group => group.key === (selectedThemeGroupKey || sortedThemeGroups[0]?.key))
+                      return {
+                        date: entry.date,
+                        strength: selected?.currentStrengthScore ?? null,
+                        greenPct: selected?.greenPct ?? null,
+                      }
+                    })}
+                    margin={{ top: 8, right: 12, left: -10, bottom: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }} />
+                    <Line type="monotone" dataKey="strength" name="Strength" stroke="#3d84ff" strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                    <Line type="monotone" dataKey="greenPct" name="% Green" stroke="#00d084" strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
         )}
 
