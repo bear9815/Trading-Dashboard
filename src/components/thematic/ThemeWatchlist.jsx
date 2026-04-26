@@ -685,6 +685,12 @@ export default function ThemeWatchlist({
     [symbols, anchoredRsBySymbol, rollingRsBySymbol]
   )
 
+  const latestAnchorDate = useMemo(
+    () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
+    [tradeReviewChartSettings?.anchorDates]
+  )
+  const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
+
   const visibleColumnOrder = useMemo(
     () => buildVisibleColumnOrder({ columnOrder, hiddenColumns }),
     [columnOrder, hiddenColumns]
@@ -940,11 +946,6 @@ export default function ThemeWatchlist({
 
   const editingRow = editingSymbol ? rowsBySymbol[editingSymbol] : null
   const selectedRow = selectedSymbol ? rowsBySymbol[selectedSymbol] : null
-  const latestAnchorDate = useMemo(
-    () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
-    [tradeReviewChartSettings?.anchorDates]
-  )
-  const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
   const historyUniverseRef = useRef({ key: '', data: null, promise: null })
 
   const historyPlan = useMemo(() => {
