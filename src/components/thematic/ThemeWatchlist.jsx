@@ -1049,7 +1049,7 @@ export default function ThemeWatchlist({
   function handleSaveView() {
     const name = viewName.trim()
     if (!name) return
-    saveView({ name, query, sortKey, sortDir })
+    saveView({ name, query, sortKey, sortDir, fitFilter })
     setViewName('')
     setStatus(`Saved view: ${name}`)
   }
@@ -1058,6 +1058,7 @@ export default function ThemeWatchlist({
     setQuery(view.query || '')
     setSortKey(view.sortKey || 'momentum')
     setSortDir(view.sortDir || 'asc')
+    setFitFilter(view.fitFilter || 'all')
     setPage(1)
   }
 
@@ -1249,7 +1250,9 @@ export default function ThemeWatchlist({
                 <div key={view.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
                   <button onClick={() => applyView(view)} className="text-left min-w-0 flex-1">
                     <p className="text-sm text-gray-300 truncate">{view.name}</p>
-                    <p className="text-xs text-gray-600 truncate">{view.query || 'All symbols'} · {view.sortKey} {view.sortDir}</p>
+                    <p className="text-xs text-gray-600 truncate">
+                      {view.query || 'All symbols'} · {view.sortKey} {view.sortDir} · fit {view.fitFilter || 'all'}
+                    </p>
                   </button>
                   <button onClick={() => removeView(view.id)} className="text-gray-500 hover:text-red-400 transition-colors">
                     <Trash2 size={12} />
