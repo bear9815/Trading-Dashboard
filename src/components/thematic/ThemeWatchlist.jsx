@@ -418,6 +418,28 @@ function ThemeHealthTone(label) {
   return 'text-accent-blue bg-accent-blue/10 border-accent-blue/20'
 }
 
+function RotationStatusTone(label) {
+  if (label === 'broadening' || label === 'emerging leadership') return 'text-accent-green bg-accent-green/10 border-accent-green/20'
+  if (label === 'late / crowded') return 'text-accent-yellow bg-accent-yellow/10 border-accent-yellow/20'
+  if (label === 'failing' || label === 'under pressure') return 'text-accent-red bg-accent-red/10 border-accent-red/20'
+  return 'text-accent-blue bg-accent-blue/10 border-accent-blue/20'
+}
+
+function RotationQuadrantLabel(quadrant) {
+  switch (quadrant) {
+    case 'strong_improving':
+      return 'Strong + Improving'
+    case 'strong_fading':
+      return 'Strong + Fading'
+    case 'weak_improving':
+      return 'Weak + Improving'
+    case 'weak_deteriorating':
+      return 'Weak + Deteriorating'
+    default:
+      return 'Insufficient History'
+  }
+}
+
 function RelationshipExplorer({ row, rows, rowsBySymbol }) {
   if (!row) {
     return (
@@ -768,10 +790,63 @@ export default function ThemeWatchlist({
     () => buildThemeRotationMetrics({
       currentGroups: activeThemeGroups,
       history: themeAnalyticsHistory[themeGrouping] || [],
-      lookbackDays: 5,
     }),
     [activeThemeGroups, themeAnalyticsHistory, themeGrouping]
   )
+
+  const rotationLeaderboards = useMemo(() => ({
+    strongImproving: themeRotationGroups
+      .filter(group => group.quadrant === 'strong_improving')
+      .sort((a, b) => (b.deltaStrength5d ?? -Infinity) - (a.deltaStrength5d ?? -Infinity) || (b.deltaGreenPct5d ?? -Infinity) - (a.deltaGreenPct5d ?? -Infinity))
+      .slice(0, 4),
+    strongFading: themeRotationGroups
+      .filter(group => group.quadrant === 'strong_fading')
+      .sort((a, b) => (a.deltaStrength5d ?? Infinity) - (b.deltaStrength5d ?? Infinity) || (a.deltaGreenPct5d ?? Infinity) - (b.deltaGreenPct5d ?? Infinity))
+      .slice(0, 4),
+    weakImproving: themeRotationGroups
+      .filter(group => group.quadrant === 'weak_improving')
+      .sort((a, b) => (b.deltaStrength5d ?? -Infinity) - (a.deltaStrength5d ?? -Infinity) || (b.improvingSymbolCount5d ?? -Infinity) - (a.improvingSymbolCount5d ?? -Infinity))
+      .slice(0, 4),
+    weakDeteriorating: themeRotationGroups
+      .filter(group => group.quadrant === 'weak_deteriorating')
+      .sort((a, b) => (a.deltaStrength5d ?? Infinity) - (b.deltaStrength5d ?? Infinity) || (b.deterioratingSymbolCount5d ?? -Infinity) - (a.deterioratingSymbolCount5d ?? -Infinity))
+      .slice(0, 4),
+  }), [themeRotationGroups])
+
+  const selectedThemeGroup = useMemo(
+    () => activeThemeGroups.find(group => group.key === selectedThemeGroupKey) || sortedThemeGroups[0] || null,
+    [activeThemeGroups, selectedThemeGroupKey, sortedThemeGroups]
+  )
+
+  const selectedThemeRotation = useMemo(
+    () => themeRotationGroups.find(group => group.key === selectedThemeGroup?.key) || null,
+    [themeRotationGroups, selectedThemeGroup]
+  )
+
+  const selectedThemeMembers = useMemo(() => {
+    if (!selectedThemeGroup) return []
+    return selectedThemeGroup.symbols
+      .map(symbol => {
+        const row = rowsBySymbol[symbol]
+        if (!row) return null
+        return {
+          ...row,
+          fit: fitBySymbol[symbol],
+          rolling: rollingRsBySymbol[symbol],
+          anchored: anchoredRsBySymbol[symbol],
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        const af = a.fit?.fitReady ? 1 : 0
+        const bf = b.fit?.fitReady ? 1 : 0
+        if (af !== bf) return bf - af
+        if ((a.fit?.fitScore ?? Number.NEGATIVE_INFINITY) !== (b.fit?.fitScore ?? Number.NEGATIVE_INFINITY)) {
+          return (b.fit?.fitScore ?? Number.NEGATIVE_INFINITY) - (a.fit?.fitScore ?? Number.NEGATIVE_INFINITY)
+        }
+        return (b.rolling?.zScore ?? Number.NEGATIVE_INFINITY) - (a.rolling?.zScore ?? Number.NEGATIVE_INFINITY)
+      })
+  }, [anchoredRsBySymbol, fitBySymbol, rollingRsBySymbol, rowsBySymbol, selectedThemeGroup])
 
   const handleColumnVisibilityToggle = useCallback((columnId) => {
     const nextHidden = hiddenColumns.includes(columnId)
@@ -1646,12 +1721,25 @@ export default function ThemeWatchlist({
                     <ScatterChart margin={{ top: 8, right: 12, left: -6, bottom: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
                       <XAxis type="number" dataKey="currentStrengthScore" name="Current Strength" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
-                      <YAxis type="number" dataKey="deltaStrength" name="5d Delta" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                      <YAxis type="number" dataKey="deltaStrength5d" name="5d Delta" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
                       <Tooltip
                         cursor={{ strokeDasharray: '3 3' }}
                         contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
                         formatter={(value, name) => [Number.isFinite(Number(value)) ? Number(value).toFixed(2) : '—', name]}
                         labelFormatter={(_, payload) => payload?.[0]?.payload?.label || ''}
+                        content={({ active, payload }) => {
+                          const point = active ? payload?.[0]?.payload : null
+                          if (!point) return null
+                          return (
+                            <div className="rounded-lg border border-white/10 bg-surface-50 px-3 py-2 text-xs shadow-xl">
+                              <p className="font-semibold text-white">{point.label}</p>
+                              <p className="mt-1 text-gray-400">Strength {formatMetric(point.currentStrengthScore, '', 1)}</p>
+                              <p className="text-gray-400">5d delta {formatMetric(point.deltaStrength5d, '', 1)}</p>
+                              <p className="text-gray-400">Breadth {formatMetric(point.deltaGreenPct5d, '%', 1)}</p>
+                              <p className="mt-1 text-accent-blue">{point.rotationStatus}</p>
+                            </div>
+                          )
+                        }}
                       />
                       <ReferenceLine x={15} stroke="#ffffff18" strokeDasharray="4 4" />
                       <ReferenceLine y={0} stroke="#ffffff18" strokeDasharray="4 4" />
@@ -1671,6 +1759,7 @@ export default function ThemeWatchlist({
                       />
                     </ScatterChart>
                   </ResponsiveContainer>
+                  <p className="mt-2 text-[11px] text-gray-600">X = current strength. Y = 5 stored-snapshot change. Upper-right is where durable rotation should begin to cluster.</p>
                 </div>
               </div>
 
@@ -1681,39 +1770,175 @@ export default function ThemeWatchlist({
               )}
             </div>
 
-            {themeRotationGroups.some(group => group.referenceDate) && (
+            <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.15fr] gap-4">
               <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
                 <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
                   <div>
-                    <p className="text-sm font-semibold text-white">Selected Group Trend</p>
-                    <p className="text-xs text-gray-500 mt-1">Shows current-strength history from stored daily snapshots so you can see whether a theme is broadening or fading.</p>
+                    <p className="text-sm font-semibold text-white">Rotation Leaderboards</p>
+                    <p className="text-xs text-gray-500 mt-1">Organize themes by whether they are leading, emerging, fading, or breaking down.</p>
                   </div>
                   <p className="text-[11px] text-gray-600">
-                    Reference window: 5 stored snapshots
+                    Using 5d and 10d stored snapshot deltas
                   </p>
                 </div>
-                <ResponsiveContainer width="100%" height={220}>
-                  <LineChart
-                    data={(themeAnalyticsHistory[themeGrouping] || []).map(entry => {
-                      const selected = entry.groups.find(group => group.key === (selectedThemeGroupKey || sortedThemeGroups[0]?.key))
-                      return {
-                        date: entry.date,
-                        strength: selected?.currentStrengthScore ?? null,
-                        greenPct: selected?.greenPct ?? null,
-                      }
-                    })}
-                    margin={{ top: 8, right: 12, left: -10, bottom: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }} />
-                    <Line type="monotone" dataKey="strength" name="Strength" stroke="#3d84ff" strokeWidth={2} dot={{ r: 2 }} connectNulls />
-                    <Line type="monotone" dataKey="greenPct" name="% Green" stroke="#00d084" strokeWidth={2} dot={{ r: 2 }} connectNulls />
-                  </LineChart>
-                </ResponsiveContainer>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {[
+                    ['Strong + Improving', rotationLeaderboards.strongImproving],
+                    ['Strong + Fading', rotationLeaderboards.strongFading],
+                    ['Weak + Improving', rotationLeaderboards.weakImproving],
+                    ['Weak + Deteriorating', rotationLeaderboards.weakDeteriorating],
+                  ].map(([title, items]) => (
+                    <div key={title} className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                      <p className="text-xs font-semibold text-gray-300 mb-2">{title}</p>
+                      <div className="space-y-2">
+                        {items.length ? items.map(group => (
+                          <button
+                            key={group.key}
+                            onClick={() => setSelectedThemeGroupKey(group.key)}
+                            className="w-full rounded-lg border border-white/10 px-3 py-2 text-left hover:border-white/20 transition-all"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-medium text-white truncate">{group.label}</span>
+                              <span className={`text-[10px] px-2 py-1 rounded border ${RotationStatusTone(group.rotationStatus)}`}>
+                                {group.rotationStatus}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-[11px] text-gray-500">
+                              strength {formatMetric(group.currentStrengthScore, '', 0)} · 5d {formatMetric(group.deltaStrength5d, '', 1)} · flips +{group.improvingSymbolCount5d}/-{group.deterioratingSymbolCount5d}
+                            </div>
+                          </button>
+                        )) : (
+                          <p className="text-xs text-gray-600">No groups in this bucket yet.</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            )}
+
+              <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Selected {themeGrouping === 'theme' ? 'Theme' : 'Ecosystem'} Diagnostics</p>
+                    <p className="text-xs text-gray-500 mt-1">See whether the move is broadening, which members are driving it, and what recently changed.</p>
+                  </div>
+                  {selectedThemeRotation && (
+                    <span className={`text-[10px] px-2 py-1 rounded border ${RotationStatusTone(selectedThemeRotation.rotationStatus)}`}>
+                      {selectedThemeRotation.rotationStatus}
+                    </span>
+                  )}
+                </div>
+
+                {selectedThemeGroup ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <StatPill label="Selection" value={selectedThemeGroup.label} />
+                      <StatPill label="Quadrant" value={RotationQuadrantLabel(selectedThemeRotation?.quadrant)} />
+                      <StatPill label="5d Strength" value={formatMetric(selectedThemeRotation?.deltaStrength5d, '', 1)} />
+                      <StatPill label="10d Strength" value={formatMetric(selectedThemeRotation?.deltaStrength10d, '', 1)} />
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <StatPill label="5d % Green" value={formatMetric(selectedThemeRotation?.deltaGreenPct5d, '%', 1)} />
+                      <StatPill label="5d Above Signal" value={formatMetric(selectedThemeRotation?.deltaRollingAboveSignalPct5d, '%', 1)} />
+                      <StatPill label="Improving Names" value={selectedThemeRotation?.improvingSymbolCount5d ?? '—'} />
+                      <StatPill label="Deteriorating" value={selectedThemeRotation?.deterioratingSymbolCount5d ?? '—'} />
+                    </div>
+
+                    {themeRotationGroups.some(group => group.referenceDate5d) && (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <LineChart
+                          data={(themeAnalyticsHistory[themeGrouping] || []).map(entry => {
+                            const selected = entry.groups.find(group => group.key === selectedThemeGroup.key)
+                            return {
+                              date: entry.date,
+                              strength: selected?.currentStrengthScore ?? null,
+                              greenPct: selected?.greenPct ?? null,
+                              rollingAboveSignalPct: selected?.rollingAboveSignalPct ?? null,
+                            }
+                          })}
+                          margin={{ top: 8, right: 12, left: -10, bottom: 0 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                          <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                          <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                          <Tooltip contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }} />
+                          <Line type="monotone" dataKey="strength" name="Strength" stroke="#3d84ff" strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                          <Line type="monotone" dataKey="greenPct" name="% Green" stroke="#00d084" strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                          <Line type="monotone" dataKey="rollingAboveSignalPct" name="% Above Signal" stroke="#fbbf24" strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                        <p className="text-xs font-semibold text-gray-300 mb-2">Recent Improvement</p>
+                        {selectedThemeRotation?.improvingSymbols5d?.length ? (
+                          <div className="space-y-2">
+                            {selectedThemeRotation.improvingSymbols5d.slice(0, 5).map(item => (
+                              <div key={item.symbol} className="flex items-center justify-between gap-2 text-sm">
+                                <span className="text-white">{item.symbol}</span>
+                                <span className="text-accent-green text-[11px]">{item.from} {'->'} {item.to}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-600">No member-level fit upgrades in the recent window.</p>
+                        )}
+                      </div>
+
+                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                        <p className="text-xs font-semibold text-gray-300 mb-2">Recent Deterioration</p>
+                        {selectedThemeRotation?.deterioratingSymbols5d?.length ? (
+                          <div className="space-y-2">
+                            {selectedThemeRotation.deterioratingSymbols5d.slice(0, 5).map(item => (
+                              <div key={item.symbol} className="flex items-center justify-between gap-2 text-sm">
+                                <span className="text-white">{item.symbol}</span>
+                                <span className="text-accent-red text-[11px]">{item.from} {'->'} {item.to}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-600">No member-level fit downgrades in the recent window.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <p className="text-xs font-semibold text-gray-300">Member Leaders</p>
+                        <button
+                          onClick={() => setSelectedThemeGroupKey(selectedThemeGroup.key)}
+                          className="text-[11px] text-accent-blue hover:underline"
+                        >
+                          Filter table to this group
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        {selectedThemeMembers.slice(0, 8).map(member => (
+                          <div key={member.symbol} className="flex items-center justify-between gap-3 rounded-lg border border-white/10 px-3 py-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-white">{member.symbol}</p>
+                              <p className="text-[11px] text-gray-600 truncate">{member.companyName}</p>
+                            </div>
+                            <div className="flex flex-wrap items-center justify-end gap-2 text-[11px]">
+                              <span className={`px-2 py-1 rounded border ${RotationStatusTone(member.fit?.fitColor === 'green' ? 'broadening' : member.fit?.fitColor === 'red' ? 'failing' : 'stabilizing')}`}>
+                                {member.fit?.fitLabel || 'Needs Data'}
+                              </span>
+                              <span className="text-gray-400">fit {Number.isFinite(member.fit?.fitScore) ? member.fit.fitScore.toFixed(0) : '—'}</span>
+                              <span className="text-gray-400">roll {formatMetric(member.rolling?.zScore, 'z')}</span>
+                              <span className="text-gray-400">anch {formatMetric(member.anchored?.zScore, 'z')}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">Map and score a list to unlock group diagnostics.</p>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

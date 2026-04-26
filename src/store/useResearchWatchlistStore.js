@@ -5,7 +5,7 @@ import {
   DEFAULT_WATCHLIST_COLUMN_ORDER,
   normalizeColumnOrder,
 } from '../utils/watchlistTableConfig.js'
-import { upsertThemeAnalyticsSnapshot } from '../utils/themeAnalytics.js'
+import { normalizeThemeAnalyticsHistory, upsertThemeAnalyticsSnapshot } from '../utils/themeAnalytics.js'
 
 export const MARKET_LEADERS_LIST_ID = 'market-leaders'
 export const WATCHLIST_LIST_ID = 'watchlist'
@@ -56,7 +56,9 @@ function makeListPatch(list, patch = {}) {
     hiddenColumns: patch.hiddenColumns ?? list.hiddenColumns ?? [...DEFAULT_COLUMN_PRESET.hiddenColumns],
     activeColumnPreset: patch.activeColumnPreset ?? list.activeColumnPreset ?? DEFAULT_COLUMN_PRESET.presetKey,
     controlsCollapsed: patch.controlsCollapsed ?? list.controlsCollapsed ?? true,
-    themeAnalyticsHistory: patch.themeAnalyticsHistory ?? list.themeAnalyticsHistory ?? { theme: [], ecosystem: [] },
+    themeAnalyticsHistory: normalizeThemeAnalyticsHistory(
+      patch.themeAnalyticsHistory ?? list.themeAnalyticsHistory ?? { theme: [], ecosystem: [] }
+    ),
     lastUpdated: patch.lastUpdated ?? list.lastUpdated ?? null,
   }
 }
