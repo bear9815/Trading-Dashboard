@@ -44,11 +44,6 @@ const FIT_FILTER_OPTIONS = [
   ['needs_data', 'Needs Data'],
 ]
 
-const THEME_GROUPING_OPTIONS = [
-  ['theme', 'Themes'],
-  ['ecosystem', 'Ecosystems'],
-]
-
 const THEME_SORT_OPTIONS = [
   ['strength', 'Strength'],
   ['breadth', 'Breadth'],
@@ -633,6 +628,7 @@ export default function ThemeWatchlist({
   apiKey = '',
   openRouterApiKey = '',
   researchOpenRouterModel = '',
+  mode = 'table',
 }) {
   const { themes } = useThematicStore()
   const { sources } = useResearchLibraryStore()
@@ -652,6 +648,7 @@ export default function ThemeWatchlist({
     clear,
   } = useResearchWatchlistStore()
   const { tradeReviewChartSettings } = useSettingsStore()
+  const analyticsMode = mode === 'analytics'
   const activeList = listsById[activeListId]
   const symbols = activeList?.symbols || []
   const rowsBySymbol = activeList?.rowsBySymbol || {}
@@ -680,7 +677,7 @@ export default function ThemeWatchlist({
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [viewName, setViewName] = useState('')
   const [draggedColumnId, setDraggedColumnId] = useState(null)
-  const [themeGrouping, setThemeGrouping] = useState('theme')
+  const themeGrouping = 'theme'
   const [themeSortMode, setThemeSortMode] = useState('strength')
   const [selectedThemeGroupKey, setSelectedThemeGroupKey] = useState('')
   const [anchoredRsBySymbol, setAnchoredRsBySymbol] = useState({})
@@ -773,7 +770,8 @@ export default function ThemeWatchlist({
     [rows, fitBySymbol, rollingRsBySymbol, anchoredRsBySymbol]
   )
 
-  const activeThemeGroups = themeGrouping === 'ecosystem' ? ecosystemGroupsAnalytics : themeGroupsAnalytics
+  const activeGrouping = analyticsMode ? 'ecosystem' : themeGrouping
+  const activeThemeGroups = activeGrouping === 'ecosystem' ? ecosystemGroupsAnalytics : themeGroupsAnalytics
 
   const sortedThemeGroups = useMemo(() => {
     const groups = [...activeThemeGroups]
@@ -789,9 +787,9 @@ export default function ThemeWatchlist({
   const themeRotationGroups = useMemo(
     () => buildThemeRotationMetrics({
       currentGroups: activeThemeGroups,
-      history: themeAnalyticsHistory[themeGrouping] || [],
+      history: themeAnalyticsHistory[activeGrouping] || [],
     }),
-    [activeThemeGroups, themeAnalyticsHistory, themeGrouping]
+    [activeGrouping, activeThemeGroups, themeAnalyticsHistory]
   )
 
   const rotationLeaderboards = useMemo(() => ({
@@ -1484,8 +1482,14 @@ export default function ThemeWatchlist({
       <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3">
         <Table2 size={14} className="text-accent-blue" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white">{activeList?.name || 'Watchlist'} Relationship Map</p>
-          <p className="text-xs text-gray-600">Dedicated ecosystem workspace for large watchlists, relationship mapping, and manual research views</p>
+          <p className="text-sm font-semibold text-white">
+            {analyticsMode ? `${activeList?.name || 'Watchlist'} Ecosystem Rotation` : `${activeList?.name || 'Watchlist'} Relationship Map`}
+          </p>
+          <p className="text-xs text-gray-600">
+            {analyticsMode
+              ? 'Broad ecosystem breadth, rotation, and member divergence across your internal watchlist universe'
+              : 'Dedicated ecosystem workspace for large watchlists, relationship mapping, and manual research views'}
+          </p>
         </div>
         {status && <p className="text-xs text-gray-500 truncate">{status}</p>}
       </div>
@@ -1581,31 +1585,15 @@ export default function ThemeWatchlist({
           </div>
         )}
 
-        {rows.length > 0 && (
+        {analyticsMode && rows.length > 0 && (
           <div className="space-y-4">
             <div className="rounded-xl border border-accent-blue/15 bg-gradient-to-br from-accent-blue/6 via-transparent to-accent-green/6 p-4">
               <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
                 <div>
-                  <p className="text-sm font-semibold text-white">Theme Breadth + Strength</p>
-                  <p className="text-xs text-gray-500 mt-1">Track what is working inside the active {activeList?.name || 'watchlist'} by theme or ecosystem using your internal RS and fit signals.</p>
+                  <p className="text-sm font-semibold text-white">Ecosystem Breadth + Strength</p>
+                  <p className="text-xs text-gray-500 mt-1">Track what is working inside the active {activeList?.name || 'watchlist'} by ecosystem so you can see which spaces are moving together, broadening, or diverging.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {THEME_GROUPING_OPTIONS.map(([value, label]) => (
-                    <button
-                      key={value}
-                      onClick={() => {
-                        setThemeGrouping(value)
-                        setSelectedThemeGroupKey('')
-                      }}
-                      className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
-                        themeGrouping === value
-                          ? 'bg-accent-blue/15 border-accent-blue/25 text-accent-blue'
-                          : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
                   {THEME_SORT_OPTIONS.map(([value, label]) => (
                     <button
                       key={value}
@@ -1623,10 +1611,10 @@ export default function ThemeWatchlist({
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                <StatPill label={`Tracked ${themeGrouping === 'theme' ? 'Themes' : 'Ecosystems'}`} value={activeThemeGroups.length} />
+                <StatPill label="Tracked Ecosystems" value={activeThemeGroups.length} />
                 <StatPill label="Best Breadth" value={sortedThemeGroups[0]?.label || '—'} />
                 <StatPill label="Top Strength" value={sortedThemeGroups[0]?.currentStrengthScore != null ? formatMetric(sortedThemeGroups[0].currentStrengthScore, '', 0) : '—'} />
-                <StatPill label="Rotation History" value={`${themeAnalyticsHistory[themeGrouping]?.length || 0} pts`} />
+                <StatPill label="Rotation History" value={`${themeAnalyticsHistory[activeGrouping]?.length || 0} pts`} />
               </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -1716,7 +1704,7 @@ export default function ThemeWatchlist({
                 </div>
 
                 <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
-                  <p className="text-xs font-semibold text-gray-300 mb-2">Theme Rotation</p>
+                  <p className="text-xs font-semibold text-gray-300 mb-2">Ecosystem Rotation</p>
                   <ResponsiveContainer width="100%" height={280}>
                     <ScatterChart margin={{ top: 8, right: 12, left: -6, bottom: 8 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
@@ -1765,7 +1753,7 @@ export default function ThemeWatchlist({
 
               {selectedThemeGroupKey && (
                 <div className="mt-4 rounded-lg border border-accent-blue/20 bg-accent-blue/8 px-3 py-2 text-xs text-accent-blue">
-                  Table filtered to the selected {themeGrouping}: <span className="font-semibold">{activeThemeGroups.find(group => group.key === selectedThemeGroupKey)?.label || selectedThemeGroupKey}</span>
+                  Diagnostics focused on the selected ecosystem: <span className="font-semibold">{activeThemeGroups.find(group => group.key === selectedThemeGroupKey)?.label || selectedThemeGroupKey}</span>
                 </div>
               )}
             </div>
@@ -1819,7 +1807,7 @@ export default function ThemeWatchlist({
               <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
                 <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
                   <div>
-                    <p className="text-sm font-semibold text-white">Selected {themeGrouping === 'theme' ? 'Theme' : 'Ecosystem'} Diagnostics</p>
+                    <p className="text-sm font-semibold text-white">Selected {activeGrouping === 'theme' ? 'Theme' : 'Ecosystem'} Diagnostics</p>
                     <p className="text-xs text-gray-500 mt-1">See whether the move is broadening, which members are driving it, and what recently changed.</p>
                   </div>
                   {selectedThemeRotation && (
@@ -1848,7 +1836,7 @@ export default function ThemeWatchlist({
                     {themeRotationGroups.some(group => group.referenceDate5d) && (
                       <ResponsiveContainer width="100%" height={220}>
                         <LineChart
-                          data={(themeAnalyticsHistory[themeGrouping] || []).map(entry => {
+                          data={(themeAnalyticsHistory[activeGrouping] || []).map(entry => {
                             const selected = entry.groups.find(group => group.key === selectedThemeGroup.key)
                             return {
                               date: entry.date,
@@ -1911,7 +1899,7 @@ export default function ThemeWatchlist({
                           onClick={() => setSelectedThemeGroupKey(selectedThemeGroup.key)}
                           className="text-[11px] text-accent-blue hover:underline"
                         >
-                          Filter table to this group
+                          Focus diagnostics on this ecosystem
                         </button>
                       </div>
                       <div className="space-y-2">
@@ -1942,6 +1930,15 @@ export default function ThemeWatchlist({
           </div>
         )}
 
+        {analyticsMode && !rows.length && (
+          <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-6 text-center">
+            <Brain size={18} className="mx-auto text-gray-600 mb-2" />
+            <p className="text-sm text-gray-400">Import and map a watchlist first to unlock ecosystem breadth and rotation analytics.</p>
+          </div>
+        )}
+
+        {!analyticsMode && (
+          <>
         <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
           <StatPill label="Imported Symbols" value={symbols.length} />
           <StatPill label="Mapped Rows" value={rows.length} />
@@ -2163,6 +2160,8 @@ export default function ThemeWatchlist({
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
 
       {editingRow && (

@@ -1403,6 +1403,16 @@ export default function ThematicResearch() {
   const watchlistCount = useResearchWatchlistStore(state =>
     Object.values(state.listsById || {}).reduce((sum, list) => sum + (list?.symbols?.length || 0), 0)
   )
+  const ecosystemCount = useResearchWatchlistStore(state => {
+    const ecosystems = new Set()
+    for (const list of Object.values(state.listsById || {})) {
+      for (const row of Object.values(list?.rowsBySymbol || {})) {
+        const ecosystem = String(row?.ecosystem || '').trim()
+        if (ecosystem && ecosystem !== '—') ecosystems.add(ecosystem)
+      }
+    }
+    return ecosystems.size
+  })
   const provider = researchAiProvider || (useLocalLLM ? 'local' : 'gemini')
   const [modelInput, setModelInput] = useState(researchOpenRouterModel || 'openai/gpt-4o-mini')
   const [workspaceBoundaryKey, setWorkspaceBoundaryKey] = useState(0)
@@ -1411,7 +1421,7 @@ export default function ThematicResearch() {
     if (user?.id) loadSources()
   }, [user?.id])
 
-  const [growthTab,  setGrowthTab]  = useState('watchlist') // 'watchlist' | 'themes' | 'earnings'
+  const [growthTab,  setGrowthTab]  = useState('watchlist') // 'watchlist' | 'ecosystems' | 'themes' | 'earnings'
   const [expanded,   setExpanded]   = useState(null)
   const [tabs,       setTabs]       = useState({})
   const [showChat,   setShowChat]   = useState(false)
@@ -1511,10 +1521,11 @@ export default function ThematicResearch() {
         )}
       </div>
 
-      {/* ── Top-level tab switcher: Watchlist | Themes | Earnings ── */}
+      {/* ── Top-level tab switcher: Watchlist | Ecosystems | Themes | Earnings ── */}
       <div className="flex items-center gap-1 border-b border-white/[0.08] -mb-1">
         {[
           { id: 'watchlist', label: 'Watchlist', count: watchlistCount, desc: 'Relationship map for imported watchlists' },
+          { id: 'ecosystems', label: 'Ecosystems', count: ecosystemCount, desc: 'Breadth, strength, and rotation across broader stock ecosystems' },
           { id: 'themes',   label: 'Themes',   count: themeCount,    desc: 'Thematic dossiers & deep dives' },
           { id: 'earnings', label: 'Earnings', count: earningsCount, desc: 'Earnings calls & company timelines' },
         ].map(({ id, label, count, desc }) => (
@@ -1565,6 +1576,22 @@ export default function ThematicResearch() {
             apiKey={apiKey}
             openRouterApiKey={openRouterApiKey}
             researchOpenRouterModel={researchOpenRouterModel}
+          />
+        </WorkspaceErrorBoundary>
+      )}
+
+      {growthTab === 'ecosystems' && (
+        <WorkspaceErrorBoundary
+          boundaryKey={`ecosystems-${workspaceBoundaryKey}`}
+          onRetry={handleWorkspaceRetry}
+          onReset={handleWorkspaceReset}
+        >
+          <ThemeWatchlist
+            provider={provider}
+            apiKey={apiKey}
+            openRouterApiKey={openRouterApiKey}
+            researchOpenRouterModel={researchOpenRouterModel}
+            mode="analytics"
           />
         </WorkspaceErrorBoundary>
       )}
