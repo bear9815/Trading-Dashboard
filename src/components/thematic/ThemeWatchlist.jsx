@@ -11,15 +11,25 @@ import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { fetchHistoryCached } from '../../utils/historyCache.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
 import { buildAnchoredRsSnapshot, buildRollingRsSnapshot, buildYtdAvwapSnapshot, resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
+import { buildWatchlistFitMap, filterAndSortWatchlistRows } from '../../utils/watchlistFitSignal.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 
 const SORT_OPTIONS = [
   ['momentum', 'Momentum Rank'],
+  ['fit', 'Fit Score'],
   ['symbol', 'Symbol'],
   ['ecosystem', 'Ecosystem'],
   ['theme', 'Theme'],
   ['sector', 'Sector'],
   ['relatedDriver', 'Driver'],
+]
+
+const FIT_FILTER_OPTIONS = [
+  ['all', 'All'],
+  ['green', 'Green'],
+  ['orange', 'Orange'],
+  ['red', 'Red'],
+  ['needs_data', 'Needs Data'],
 ]
 
 const CSV_COLUMNS = [
@@ -600,6 +610,7 @@ export default function ThemeWatchlist({
   const [error, setError] = useState('')
   const [sortKey, setSortKey] = useState('momentum')
   const [sortDir, setSortDir] = useState('asc')
+  const [fitFilter, setFitFilter] = useState('all')
   const [editingSymbol, setEditingSymbol] = useState(null)
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [viewName, setViewName] = useState('')
@@ -651,29 +662,26 @@ export default function ThemeWatchlist({
     [symbols]
   )
 
-  const filteredRows = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const base = !q ? rows : rows.filter(row =>
-      row.symbol?.toLowerCase().includes(q) ||
-      row.companyName?.toLowerCase().includes(q) ||
-      row.ecosystem?.toLowerCase().includes(q) ||
-      row.theme?.toLowerCase().includes(q) ||
-      row.relatedDriver?.toLowerCase().includes(q) ||
-      row.whatTheyDo?.toLowerCase().includes(q)
-    )
+  const fitBySymbol = useMemo(
+    () => buildWatchlistFitMap({
+      symbols,
+      anchoredRsBySymbol,
+      rollingRsBySymbol,
+    }),
+    [symbols, anchoredRsBySymbol, rollingRsBySymbol]
+  )
 
-    return [...base].sort((a, b) => {
-      if (sortKey === 'momentum') {
-        const av = rankBySymbol[a.symbol] ?? Number.MAX_SAFE_INTEGER
-        const bv = rankBySymbol[b.symbol] ?? Number.MAX_SAFE_INTEGER
-        return sortDir === 'asc' ? av - bv : bv - av
-      }
-      const av = arrayText(a[sortKey]).toLowerCase()
-      const bv = arrayText(b[sortKey]).toLowerCase()
-      const result = av.localeCompare(bv)
-      return sortDir === 'asc' ? result : -result
+  const filteredRows = useMemo(() => {
+    return filterAndSortWatchlistRows({
+      rows,
+      query,
+      sortKey,
+      sortDir,
+      rankBySymbol,
+      fitBySymbol,
+      fitFilter,
     })
-  }, [rows, query, sortKey, sortDir, rankBySymbol])
+  }, [rows, query, sortKey, sortDir, rankBySymbol, fitBySymbol, fitFilter])
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize))
   const pagedRows = useMemo(
@@ -958,7 +966,7 @@ export default function ThemeWatchlist({
     if (sortKey === nextKey) setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')
     else {
       setSortKey(nextKey)
-      setSortDir('asc')
+      setSortDir(nextKey === 'fit' ? 'desc' : 'asc')
     }
     setPage(1)
   }
@@ -975,6 +983,7 @@ export default function ThemeWatchlist({
     setQuery('')
     setSortKey('momentum')
     setSortDir('asc')
+    setFitFilter('all')
     setError('')
     setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} into ${activeList?.name || 'the active watchlist'}. Prior map for this list was cleared.`)
     setPage(1)
@@ -993,6 +1002,7 @@ export default function ThemeWatchlist({
     setQuery('')
     setSortKey('momentum')
     setSortDir('asc')
+    setFitFilter('all')
     setError('')
     setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} from CSV into ${activeList?.name || 'the active watchlist'}. Prior map for this list was cleared.`)
     setPage(1)
@@ -1279,6 +1289,24 @@ export default function ThemeWatchlist({
                 </button>
               ))}
             </div>
+            <div className="flex gap-1 flex-wrap">
+              {FIT_FILTER_OPTIONS.map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => {
+                    setFitFilter(value)
+                    setPage(1)
+                  }}
+                  className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
+                    fitFilter === value
+                      ? 'bg-accent-green/15 border-accent-green/25 text-accent-green'
+                      : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {!rows.length ? (
@@ -1312,9 +1340,30 @@ export default function ThemeWatchlist({
                 <tbody className="divide-y divide-white/[0.05]">
                   {pagedRows.map(row => {
                     const layer = buildRelationshipLayer(row, rows)
+                    const fit = fitBySymbol[row.symbol]
+                    const fitBorderClass = fit?.fitColor === 'green'
+                      ? 'border-l-accent-green'
+                      : fit?.fitColor === 'orange'
+                        ? 'border-l-accent-yellow'
+                        : fit?.fitColor === 'red'
+                          ? 'border-l-accent-red'
+                          : 'border-l-white/10'
+                    const fitTextClass = fit?.fitColor === 'green'
+                      ? 'text-accent-green'
+                      : fit?.fitColor === 'orange'
+                        ? 'text-accent-yellow'
+                        : fit?.fitColor === 'red'
+                          ? 'text-accent-red'
+                          : 'text-gray-600'
                     return (
                     <tr key={row.symbol} className={`align-top hover:bg-white/[0.02] cursor-pointer ${selectedSymbol === row.symbol ? 'bg-accent-blue/5' : ''}`} onClick={() => setSelectedSymbol(row.symbol)}>
-                      <td className="px-3 py-2.5 font-semibold text-accent-blue">{row.symbol}</td>
+                      <td className={`px-3 py-2.5 pl-2 border-l-2 font-semibold ${fitBorderClass}`} title={fit?.fitReason || 'Fit signal unavailable'}>
+                        <div className="space-y-1">
+                          <p className="text-accent-blue">{row.symbol}</p>
+                          <p className={`text-[10px] leading-tight ${fitTextClass}`}>{fit?.fitLabel || 'Needs Data'}</p>
+                          <p className="text-[10px] text-gray-600 leading-tight max-w-[140px]">{fit?.fitReason || 'RS data missing.'}</p>
+                        </div>
+                      </td>
                       <td className="px-3 py-2.5">
                         <p className="text-gray-200">{row.companyName}</p>
                         <p className="text-xs text-gray-600 mt-0.5">{row.sector}</p>
