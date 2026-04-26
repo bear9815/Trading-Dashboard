@@ -18,7 +18,7 @@ import {
   RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network, TrendingUp, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { parseChartMeta } from '../../store/useWatchlistStore.js'
-import { useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
+import { MARKET_LEADERS_LIST_ID, useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
@@ -1131,6 +1131,42 @@ export default function ThemeWatchlist({
     }
   }, [analyticsMode, benchmarkHistoryBars, selectedEcosystemComposite, selectedThemeGroup, tradeReviewChartSettings])
 
+  const marketLeadersComposite = useMemo(() => {
+    if (analyticsMode || activeListId !== MARKET_LEADERS_LIST_ID) return { dailyBars: [], weeklyBars: [], memberCount: 0 }
+    return buildEcosystemCompositeBars(symbols, historyBarsBySymbol)
+  }, [activeListId, analyticsMode, historyBarsBySymbol, symbols])
+
+  const marketLeadersChartData = useMemo(() => {
+    if (analyticsMode || activeListId !== MARKET_LEADERS_LIST_ID || !marketLeadersComposite.dailyBars.length) {
+      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    }
+    const avwapOverlays = buildAvwapOverlays(
+      marketLeadersComposite.dailyBars,
+      'Market Leaders',
+      tradeReviewChartSettings,
+      {},
+      new Date(),
+      null
+    )
+    const dailyKeltner = {
+      13: calculateKeltnerChannel(marketLeadersComposite.dailyBars, 13, 0.25),
+      34: calculateKeltnerChannel(marketLeadersComposite.dailyBars, 34, 0.25),
+      65: calculateKeltnerChannel(marketLeadersComposite.dailyBars, 65, 0.25),
+    }
+    const weeklyKeltner = {
+      13: calculateKeltnerChannel(marketLeadersComposite.weeklyBars, 13, 0.25),
+      34: calculateKeltnerChannel(marketLeadersComposite.weeklyBars, 34, 0.25),
+      65: calculateKeltnerChannel(marketLeadersComposite.weeklyBars, 65, 0.25),
+    }
+    return {
+      ...marketLeadersComposite,
+      benchmarkBars: benchmarkHistoryBars,
+      avwapOverlays,
+      keltnerShades: buildKeltnerShadeBands(dailyKeltner),
+      weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
+    }
+  }, [activeListId, analyticsMode, benchmarkHistoryBars, marketLeadersComposite, tradeReviewChartSettings])
+
   const handleColumnVisibilityToggle = useCallback((columnId) => {
     const nextHidden = hiddenColumns.includes(columnId)
       ? hiddenColumns.filter(id => id !== columnId)
@@ -1642,6 +1678,31 @@ export default function ThemeWatchlist({
   }, [activeThemeGroups, selectedThemeGroupKey])
 
   useEffect(() => {
+    if (!analyticsMode || !sortedThemeGroups.length) return undefined
+
+    const handler = (event) => {
+      const target = event.target
+      const tagName = target?.tagName?.toLowerCase?.() || ''
+      const isTyping = target?.isContentEditable || ['input', 'textarea', 'select', 'button'].includes(tagName)
+      if (isTyping || event.code !== 'Space') return
+      event.preventDefault()
+
+      const currentIndex = sortedThemeGroups.findIndex(group => group.key === selectedThemeGroupKey)
+      if (event.shiftKey) {
+        const prevIndex = currentIndex <= 0 ? sortedThemeGroups.length - 1 : currentIndex - 1
+        setSelectedThemeGroupKey(sortedThemeGroups[prevIndex]?.key || '')
+        return
+      }
+
+      const nextIndex = currentIndex < 0 || currentIndex >= sortedThemeGroups.length - 1 ? 0 : currentIndex + 1
+      setSelectedThemeGroupKey(sortedThemeGroups[nextIndex]?.key || '')
+    }
+
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [analyticsMode, selectedThemeGroupKey, sortedThemeGroups])
+
+  useEffect(() => {
     const snapshotDate = new Date().toISOString().slice(0, 10)
     if (themeGroupsAnalytics.length) {
       saveThemeAnalyticsSnapshot({
@@ -1911,6 +1972,9 @@ export default function ThemeWatchlist({
                 <StatPill label="Best Breadth" value={sortedThemeGroups[0]?.label || '—'} />
                 <StatPill label="Top Strength" value={sortedThemeGroups[0]?.currentStrengthScore != null ? formatMetric(sortedThemeGroups[0].currentStrengthScore, '', 0) : '—'} />
                 <StatPill label="Rotation History" value={`${themeAnalyticsHistory[activeGrouping]?.length || 0} pts`} />
+              </div>
+              <div className="mb-4 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-[11px] text-gray-500">
+                Keyboard: press <span className="font-semibold text-gray-300">Space</span> for the next ecosystem, or <span className="font-semibold text-gray-300">Shift + Space</span> to go back.
               </div>
               <div className="space-y-4">
                 {selectedThemeGroup ? (
@@ -2216,6 +2280,17 @@ export default function ThemeWatchlist({
 
         {!analyticsMode && (
           <>
+        {activeListId === MARKET_LEADERS_LIST_ID && rows.length > 0 && (
+          <EcosystemCompositeChart
+            data={marketLeadersChartData}
+            chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+            title="MARKET LEADERS"
+            memberCount={marketLeadersComposite.memberCount}
+            ytdEnabled={ecosystemYtdEnabled}
+            onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
+          />
+        )}
+
         <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
           <StatPill label="Imported Symbols" value={symbols.length} />
           <StatPill label="Mapped Rows" value={rows.length} />
