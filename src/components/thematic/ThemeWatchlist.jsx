@@ -1351,20 +1351,28 @@ export default function ThemeWatchlist({
                         : fit?.fitColor === 'red'
                           ? 'border-l-accent-red'
                           : 'border-l-white/10'
-                    const fitTextClass = fit?.fitColor === 'green'
-                      ? 'text-accent-green'
+                    const fitBadgeClass = fit?.fitColor === 'green'
+                      ? 'bg-accent-green'
                       : fit?.fitColor === 'orange'
-                        ? 'text-accent-yellow'
+                        ? 'bg-accent-yellow'
                         : fit?.fitColor === 'red'
-                          ? 'text-accent-red'
-                          : 'text-gray-600'
+                          ? 'bg-accent-red'
+                          : 'bg-white/15'
                     return (
                     <tr key={row.symbol} className={`align-top hover:bg-white/[0.02] cursor-pointer ${selectedSymbol === row.symbol ? 'bg-accent-blue/5' : ''}`} onClick={() => setSelectedSymbol(row.symbol)}>
-                      <td className={`px-3 py-2.5 pl-2 border-l-2 font-semibold ${fitBorderClass}`} title={fit?.fitReason || 'Fit signal unavailable'}>
-                        <div className="space-y-1">
+                      <td className={`px-3 py-2.5 pl-2 border-l-2 font-semibold ${fitBorderClass}`}>
+                        <div className="flex items-center gap-2">
+                          <div className="group relative shrink-0" onClick={e => e.stopPropagation()}>
+                            <span
+                              className={`block h-3 w-3 rounded-full ${fitBadgeClass}`}
+                              aria-label={fit?.fitLabel || 'Needs Data'}
+                            />
+                            <div className="pointer-events-none absolute left-5 top-1/2 z-20 hidden w-56 -translate-y-1/2 rounded-lg border border-white/10 bg-surface-50 px-3 py-2 text-left shadow-xl group-hover:block">
+                              <p className="text-xs font-semibold text-white">{fit?.fitLabel || 'Needs Data'}</p>
+                              <p className="mt-1 text-[11px] leading-relaxed text-gray-400">{fit?.fitReason || 'RS data missing.'}</p>
+                            </div>
+                          </div>
                           <p className="text-accent-blue">{row.symbol}</p>
-                          <p className={`text-[10px] leading-tight ${fitTextClass}`}>{fit?.fitLabel || 'Needs Data'}</p>
-                          <p className="text-[10px] text-gray-600 leading-tight max-w-[140px]">{fit?.fitReason || 'RS data missing.'}</p>
                         </div>
                       </td>
                       <td className="px-3 py-2.5">
