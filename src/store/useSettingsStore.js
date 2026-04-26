@@ -9,9 +9,57 @@ const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
   chartType: 'candlestick',
   anchorDates: ['2026-01-01', '2026-04-02'],
+  avwapPresets: [
+    { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
+  ],
   weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
   dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
   dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
+}
+
+function normalizeAvwapPreset(preset, index = 0) {
+  const mode = preset?.mode === 'fixed-date' ? 'fixed-date' : 'ytd'
+  const anchorDate = typeof preset?.anchorDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(preset.anchorDate)
+    ? preset.anchorDate
+    : null
+
+  if (mode === 'fixed-date' && !anchorDate) return null
+
+  return {
+    id: preset?.id || `${mode}-${anchorDate || index}`,
+    kind: 'preset',
+    mode,
+    anchorDate: mode === 'fixed-date' ? anchorDate : null,
+    label: (preset?.label || (mode === 'fixed-date' ? anchorDate : 'YTD') || 'AVWAP').trim(),
+    enabled: Boolean(preset?.enabled),
+    color: preset?.color || '#f59e0b',
+  }
+}
+
+function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol) {
+  return Object.fromEntries(
+    Object.entries(manualAnchorsBySymbol || {})
+      .map(([symbol, anchors]) => [
+        String(symbol || '').trim().toUpperCase(),
+        (anchors || [])
+          .map((anchor, index) => {
+            const anchorDate = typeof anchor?.anchorDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(anchor.anchorDate)
+              ? anchor.anchorDate
+              : null
+            if (!anchorDate) return null
+            return {
+              id: anchor?.id || `manual-${anchorDate}-${index}`,
+              kind: 'manual',
+              anchorDate,
+              label: (anchor?.label || anchorDate).trim(),
+              enabled: anchor?.enabled !== false,
+              color: anchor?.color || '#22c55e',
+            }
+          })
+          .filter(Boolean),
+      ])
+      .filter(([symbol, anchors]) => symbol && anchors.length > 0)
+  )
 }
 
 function normalizeTradeReviewChartSettings(settings) {
@@ -19,6 +67,9 @@ function normalizeTradeReviewChartSettings(settings) {
   return {
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
     ...current,
+    avwapPresets: ((current.avwapPresets || []).map(normalizeAvwapPreset).filter(Boolean).length
+      ? (current.avwapPresets || []).map(normalizeAvwapPreset).filter(Boolean)
+      : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets.map(normalizeAvwapPreset).filter(Boolean)),
     weeklyRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.weeklyRs, ...(current.weeklyRs || {}) },
     dailyAnchoredRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyAnchoredRs, ...(current.dailyAnchoredRs || {}) },
     dailyRollingRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyRollingRs, ...(current.dailyRollingRs || {}) },
@@ -42,6 +93,7 @@ const CLOUD_FIELDS = [
   'dashboardNote', 'openPositionsColumns',
   'riskVisibleColumns',
   'tradeReviewChartSettings',
+  'tradeReviewManualAnchorsBySymbol',
   'excludedSymbols', 'strategies', 'edges',
   // symbolThemes intentionally excluded — it's a large AI cache, device-local is fine
 ]
@@ -75,6 +127,7 @@ export const useSettingsStore = create(
       benchmarkSymbol: 'SPY',
       tpMultiplier: 2,
       tradeReviewChartSettings: normalizeTradeReviewChartSettings(),
+      tradeReviewManualAnchorsBySymbol: {},
 
       alpacaApiKey: '',
       alpacaApiSecret: '',
@@ -135,6 +188,9 @@ export const useSettingsStore = create(
             ...s,
             ...data.data,
             tradeReviewChartSettings: normalizeTradeReviewChartSettings(data.data.tradeReviewChartSettings ?? s.tradeReviewChartSettings),
+            tradeReviewManualAnchorsBySymbol: normalizeTradeReviewManualAnchorsBySymbol(
+              data.data.tradeReviewManualAnchorsBySymbol ?? s.tradeReviewManualAnchorsBySymbol
+            ),
           }))
         } else {
           // First login — upload current localStorage state to cloud
@@ -183,6 +239,53 @@ export const useSettingsStore = create(
         })
         set({ tradeReviewChartSettings: next })
         saveToCloud({ ...get(), tradeReviewChartSettings: next })
+      },
+      setTradeReviewManualAnchorsBySymbol: (manualAnchorsBySymbol) => {
+        const next = normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol)
+        set({ tradeReviewManualAnchorsBySymbol: next })
+        saveToCloud({ ...get(), tradeReviewManualAnchorsBySymbol: next })
+      },
+      addTradeReviewManualAnchor: (symbol, anchor) => {
+        const upperSymbol = String(symbol || '').trim().toUpperCase()
+        if (!upperSymbol) return
+        const current = normalizeTradeReviewManualAnchorsBySymbol(get().tradeReviewManualAnchorsBySymbol)
+        const next = {
+          ...current,
+          [upperSymbol]: [
+            ...(current[upperSymbol] || []),
+            ...normalizeTradeReviewManualAnchorsBySymbol({ [upperSymbol]: [anchor] })[upperSymbol] || [],
+          ],
+        }
+        set({ tradeReviewManualAnchorsBySymbol: next })
+        saveToCloud({ ...get(), tradeReviewManualAnchorsBySymbol: next })
+      },
+      updateTradeReviewManualAnchor: (symbol, anchorId, updates) => {
+        const upperSymbol = String(symbol || '').trim().toUpperCase()
+        if (!upperSymbol || !anchorId) return
+        const current = normalizeTradeReviewManualAnchorsBySymbol(get().tradeReviewManualAnchorsBySymbol)
+        const next = {
+          ...current,
+          [upperSymbol]: (current[upperSymbol] || [])
+            .map(anchor => anchor.id === anchorId ? {
+              ...anchor,
+              ...normalizeTradeReviewManualAnchorsBySymbol({ [upperSymbol]: [{ ...anchor, ...(updates || {}) }] })[upperSymbol]?.[0],
+            } : anchor)
+            .filter(Boolean),
+        }
+        set({ tradeReviewManualAnchorsBySymbol: next })
+        saveToCloud({ ...get(), tradeReviewManualAnchorsBySymbol: next })
+      },
+      removeTradeReviewManualAnchor: (symbol, anchorId) => {
+        const upperSymbol = String(symbol || '').trim().toUpperCase()
+        if (!upperSymbol || !anchorId) return
+        const current = normalizeTradeReviewManualAnchorsBySymbol(get().tradeReviewManualAnchorsBySymbol)
+        const next = {
+          ...current,
+          [upperSymbol]: (current[upperSymbol] || []).filter(anchor => anchor.id !== anchorId),
+        }
+        if (!next[upperSymbol]?.length) delete next[upperSymbol]
+        set({ tradeReviewManualAnchorsBySymbol: next })
+        saveToCloud({ ...get(), tradeReviewManualAnchorsBySymbol: next })
       },
 
       addAccount: (account) => {
@@ -251,6 +354,9 @@ export const useSettingsStore = create(
         merged.useLocalLLM = merged.researchAiProvider === 'local'
         merged.tradeReviewChartSettings = normalizeTradeReviewChartSettings(
           persistedState?.tradeReviewChartSettings ?? currentState?.tradeReviewChartSettings
+        )
+        merged.tradeReviewManualAnchorsBySymbol = normalizeTradeReviewManualAnchorsBySymbol(
+          persistedState?.tradeReviewManualAnchorsBySymbol ?? currentState?.tradeReviewManualAnchorsBySymbol
         )
         return merged
       },

@@ -16,6 +16,9 @@ export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
   chartType: 'candlestick',
   anchorDates: ['2026-01-01', '2026-04-02'],
+  avwapPresets: [
+    { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
+  ],
   weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
   dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
   dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
@@ -71,6 +74,53 @@ function colorizeCandles(bars) {
       borderColor: color,
     }
   })
+}
+
+function normalizeAvwapPreset(preset, index = 0) {
+  const anchorDate = toDateKey(preset?.anchorDate)
+  const mode = preset?.mode === 'fixed-date' ? 'fixed-date' : 'ytd'
+  return {
+    id: preset?.id || `${mode}-${anchorDate || index}`,
+    kind: 'preset',
+    mode,
+    anchorDate: mode === 'fixed-date' ? anchorDate : null,
+    label: (preset?.label || (mode === 'fixed-date' ? anchorDate : 'YTD') || 'AVWAP').trim(),
+    enabled: Boolean(preset?.enabled),
+    color: preset?.color || '#f59e0b',
+  }
+}
+
+function normalizeManualAnchor(anchor, index = 0) {
+  const anchorDate = toDateKey(anchor?.anchorDate)
+  if (!anchorDate) return null
+  return {
+    id: anchor?.id || `manual-${anchorDate}-${index}`,
+    kind: 'manual',
+    anchorDate,
+    label: (anchor?.label || anchorDate).trim(),
+    enabled: anchor?.enabled !== false,
+    color: anchor?.color || '#22c55e',
+  }
+}
+
+export function normalizeAvwapPresets(presets = DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets) {
+  const normalized = (presets || [])
+    .map((preset, index) => normalizeAvwapPreset(preset, index))
+    .filter(preset => preset.mode === 'ytd' || preset.anchorDate)
+  return normalized.length ? normalized : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets.map(normalizeAvwapPreset)
+}
+
+export function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol = {}) {
+  return Object.fromEntries(
+    Object.entries(manualAnchorsBySymbol || {})
+      .map(([symbol, anchors]) => [
+        String(symbol || '').trim().toUpperCase(),
+        (anchors || [])
+          .map((anchor, index) => normalizeManualAnchor(anchor, index))
+          .filter(Boolean),
+      ])
+      .filter(([symbol, anchors]) => symbol && anchors.length > 0)
+  )
 }
 
 export function aggregateWeeklyBars(bars) {
@@ -159,6 +209,79 @@ export function calculateKeltnerChannel(bars, period, multiplier = 0.25) {
         upper: mid + range * multiplier,
         middle: mid,
         lower: mid - range * multiplier,
+      }
+    })
+    .filter(Boolean)
+}
+
+export function resolveAvwapPresetAnchorDate(preset, asOf = new Date()) {
+  const mode = preset?.mode === 'fixed-date' ? 'fixed-date' : 'ytd'
+  if (mode === 'fixed-date') return toDateKey(preset?.anchorDate)
+
+  const asOfKey = toDateKey(asOf)
+  if (!asOfKey) return null
+  return `${asOfKey.slice(0, 4)}-01-01`
+}
+
+export function calculateAvwapSeries(bars, anchorDate) {
+  const cleaned = cleanBars(bars)
+  const anchorKey = toDateKey(anchorDate)
+  if (!anchorKey) return []
+
+  const startIndex = cleaned.findIndex(bar => bar.time >= anchorKey)
+  if (startIndex < 0) return []
+
+  let numerator = 0
+  let denominator = 0
+
+  return cleaned.slice(startIndex).flatMap(bar => {
+    if (!Number.isFinite(bar.volume) || bar.volume <= 0) return []
+    const typicalPrice = (bar.high + bar.low + bar.close) / 3
+    numerator += typicalPrice * bar.volume
+    denominator += bar.volume
+    if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) return []
+    return [{
+      time: bar.time,
+      value: numerator / denominator,
+    }]
+  })
+}
+
+export function buildAvwapOverlays(
+  bars,
+  symbol,
+  settings = DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+  manualAnchorsBySymbol = {},
+  asOf = new Date()
+) {
+  const chartSettings = {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    ...(settings || {}),
+    avwapPresets: normalizeAvwapPresets(settings?.avwapPresets),
+  }
+  const normalizedManualAnchors = normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol)
+  const upperSymbol = String(symbol || '').trim().toUpperCase()
+  const activeManualAnchors = normalizedManualAnchors[upperSymbol] || []
+
+  const presetOverlays = chartSettings.avwapPresets
+    .filter(preset => preset.enabled)
+    .map(preset => ({
+      ...preset,
+      anchorDate: resolveAvwapPresetAnchorDate(preset, asOf),
+    }))
+
+  const manualOverlays = activeManualAnchors.filter(anchor => anchor.enabled)
+
+  return [...presetOverlays, ...manualOverlays]
+    .map(overlay => {
+      const anchorDate = toDateKey(overlay.anchorDate)
+      if (!anchorDate) return null
+      const series = calculateAvwapSeries(bars, anchorDate)
+      if (!series.length) return null
+      return {
+        ...overlay,
+        anchorDate,
+        series,
       }
     })
     .filter(Boolean)
@@ -444,13 +567,20 @@ export function buildTradeMarkers(trade, bars) {
   return markers.sort((a, b) => a.time.localeCompare(b.time))
 }
 
-export function buildTradeReviewChartData(bars, trade, benchmarkBars = [], settings = DEFAULT_TRADE_REVIEW_CHART_SETTINGS) {
+export function buildTradeReviewChartData(
+  bars,
+  trade,
+  benchmarkBars = [],
+  settings = DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+  manualAnchorsBySymbol = {}
+) {
   const daily = cleanBars(bars)
   const weekly = aggregateWeeklyBars(daily)
   const benchmarkWeekly = aggregateWeeklyBars(benchmarkBars)
   const chartSettings = {
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
     ...(settings || {}),
+    avwapPresets: normalizeAvwapPresets(settings?.avwapPresets),
     weeklyRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.weeklyRs, ...(settings?.weeklyRs || {}) },
     dailyAnchoredRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyAnchoredRs, ...(settings?.dailyAnchoredRs || {}) },
   }
@@ -466,6 +596,7 @@ export function buildTradeReviewChartData(bars, trade, benchmarkBars = [], setti
   return {
     dailyCandles: colorizeCandles(daily),
     weeklyCandles: colorizeCandles(weekly),
+    avwapOverlays: buildAvwapOverlays(daily, trade?.symbol, chartSettings, manualAnchorsBySymbol, trade?.entryDate || new Date()),
     volume: daily.map(bar => ({
       time: bar.time,
       value: bar.volume,

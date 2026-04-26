@@ -2185,6 +2185,9 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
     benchmarkSymbol: settings?.benchmarkSymbol || 'SPY',
     chartType: settings?.chartType === 'hlc' ? 'hlc' : 'candlestick',
     anchorDates: Array.isArray(settings?.anchorDates) && settings.anchorDates.length ? settings.anchorDates : ['2026-01-01', '2026-04-02'],
+    avwapPresets: Array.isArray(settings?.avwapPresets) && settings.avwapPresets.length
+      ? settings.avwapPresets
+      : [{ id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' }],
     weeklyRs: {
       rollingPeriod: settings?.weeklyRs?.rollingPeriod ?? 13,
       lookbackStd: settings?.weeklyRs?.lookbackStd ?? 50,
@@ -2235,12 +2238,38 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
     }))
   }
 
+  function updatePreset(id, updates) {
+    setDraft(current => ({
+      ...current,
+      avwapPresets: current.avwapPresets.map(preset => preset.id === id ? { ...preset, ...updates } : preset),
+    }))
+  }
+
+  function addFixedDatePreset() {
+    const nextId = `fixed-${Date.now()}`
+    setDraft(current => ({
+      ...current,
+      avwapPresets: [
+        ...current.avwapPresets,
+        { id: nextId, kind: 'preset', mode: 'fixed-date', anchorDate: '', label: 'Custom', enabled: false, color: '#38bdf8' },
+      ],
+    }))
+  }
+
+  function removePreset(id) {
+    setDraft(current => ({
+      ...current,
+      avwapPresets: current.avwapPresets.filter(preset => preset.id !== id),
+    }))
+  }
+
   function save() {
     const anchorDates = [...new Set(draft.anchorDates.filter(Boolean))].sort()
     onSave({
       ...draft,
       benchmarkSymbol: (draft.benchmarkSymbol || 'SPY').trim().toUpperCase(),
       anchorDates,
+      avwapPresets: draft.avwapPresets.filter(preset => preset.mode === 'ytd' || preset.anchorDate),
     })
     onClose()
   }
@@ -2315,6 +2344,58 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
             <p className="text-[11px] text-gray-500 mt-2">
               Each trade uses the most recent anchor date on or before its entry date.
             </p>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="label">AVWAP Presets</p>
+              <button onClick={addFixedDatePreset} className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-accent-blue/15 text-accent-blue border border-accent-blue/25">
+                <Plus size={12} /> Add Date
+              </button>
+            </div>
+            <div className="space-y-2">
+              {draft.avwapPresets.map(preset => (
+                <div key={preset.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(preset.enabled)}
+                      onChange={event => updatePreset(preset.id, { enabled: event.target.checked })}
+                    />
+                    <input
+                      value={preset.label}
+                      onChange={event => updatePreset(preset.id, { label: event.target.value })}
+                      className={`${fieldClass} flex-1`}
+                      placeholder="Label"
+                    />
+                    <input
+                      type="color"
+                      value={preset.color || '#38bdf8'}
+                      onChange={event => updatePreset(preset.id, { color: event.target.value })}
+                      className="h-8 w-10 rounded bg-transparent"
+                    />
+                    {preset.mode === 'fixed-date' && (
+                      <button onClick={() => removePreset(preset.id)} className="p-2 rounded-lg border border-white/10 text-gray-500 hover:text-accent-red hover:border-accent-red/30">
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-[10px] text-gray-500 uppercase tracking-wide">{preset.mode === 'ytd' ? 'Dynamic' : 'Date'}</span>
+                    {preset.mode === 'fixed-date' ? (
+                      <input
+                        type="date"
+                        value={preset.anchorDate || ''}
+                        onChange={event => updatePreset(preset.id, { anchorDate: event.target.value })}
+                        className={`${fieldClass} w-40`}
+                      />
+                    ) : (
+                      <span className="text-xs text-gray-400">Uses Jan 1 of the current chart year.</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

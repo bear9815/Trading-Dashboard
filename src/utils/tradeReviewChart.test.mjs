@@ -2,13 +2,17 @@ import assert from 'node:assert/strict'
 import {
   buildTradeReviewChartData,
   aggregateWeeklyBars,
+  calculateAvwapSeries,
   calculateAnchoredRsGradient,
   calculateRollingRsGradient,
   buildAnchoredRsSnapshot,
+  buildAvwapOverlays,
   buildRollingRsSnapshot,
   buildKeltnerShadeBands,
   calculateRsGradient,
+  DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
   resolveLatestAnchorDate,
+  resolveAvwapPresetAnchorDate,
   resolveAnchoredRsAnchorDate,
   buildTradeMarkers,
   calculateKeltnerChannel,
@@ -222,3 +226,70 @@ assert.ok(rollingSnapshot.zScore > 0)
 assert.ok(rollingSnapshot.weight > 0)
 assert.ok(Number.isFinite(rollingSnapshot.signalLine))
 assert.equal(rollingSnapshot.rsWindow, 63)
+
+const avwapBars = [
+  { time: '2026-01-02', open: 10, high: 12, low: 9, close: 11, volume: 100 },
+  { time: '2026-01-03', open: 11, high: 13, low: 10, close: 12, volume: 100 },
+  { time: '2026-01-04', open: 12, high: 14, low: 11, close: 13, volume: 100 },
+]
+
+const avwapSeries = calculateAvwapSeries(avwapBars, '2026-01-03')
+assert.deepEqual(avwapSeries.map(row => row.time), ['2026-01-03', '2026-01-04'])
+assert.equal(Math.round(avwapSeries[0].value * 1000) / 1000, 11.667)
+assert.equal(Math.round(avwapSeries[1].value * 1000) / 1000, 12.167)
+
+assert.ok(Array.isArray(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets))
+assert.equal(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets[0]?.id, 'ytd')
+assert.equal(
+  resolveAvwapPresetAnchorDate({ mode: 'ytd' }, '2026-04-25'),
+  '2026-01-01'
+)
+assert.equal(
+  resolveAvwapPresetAnchorDate({ mode: 'fixed-date', anchorDate: '2026-04-02' }, '2026-04-25'),
+  '2026-04-02'
+)
+
+const avwapOverlays = buildAvwapOverlays(
+  avwapBars,
+  'NVDA',
+  {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    avwapPresets: [
+      { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: true, color: '#f59e0b' },
+      { id: 'fixed', kind: 'preset', mode: 'fixed-date', anchorDate: '2026-01-03', label: 'Jan 3', enabled: true, color: '#38bdf8' },
+    ],
+  },
+  {
+    NVDA: [{ id: 'manual-1', kind: 'manual', anchorDate: '2026-01-03', label: 'Gap Up', enabled: true, color: '#22c55e' }],
+    AMD: [{ id: 'manual-2', kind: 'manual', anchorDate: '2026-01-04', label: 'Other', enabled: true, color: '#ef4444' }],
+  },
+  '2026-04-25'
+)
+assert.equal(avwapOverlays.length, 3)
+assert.ok(avwapOverlays.every(overlay => overlay.series.length > 0))
+assert.ok(avwapOverlays.every(overlay => overlay.anchorDate))
+assert.equal(
+  buildAvwapOverlays(
+    avwapBars,
+    'AMD',
+    { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS, avwapPresets: [] },
+    { NVDA: [{ id: 'manual-1', kind: 'manual', anchorDate: '2026-01-03', label: 'Gap Up', enabled: true, color: '#22c55e' }] },
+    '2026-04-25'
+  ).length,
+  0
+)
+
+const avwapPrepared = buildTradeReviewChartData(
+  avwapBars,
+  { ...trade, symbol: 'NVDA' },
+  [],
+  {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    avwapPresets: [{ id: 'fixed', kind: 'preset', mode: 'fixed-date', anchorDate: '2026-01-03', label: 'Jan 3', enabled: true, color: '#38bdf8' }],
+  },
+  {
+    NVDA: [{ id: 'manual-1', kind: 'manual', anchorDate: '2026-01-04', label: 'Gap Up', enabled: true, color: '#22c55e' }],
+  }
+)
+assert.equal(avwapPrepared.avwapOverlays.length, 2)
+assert.ok(avwapPrepared.avwapOverlays.every(overlay => overlay.series.length > 0))
