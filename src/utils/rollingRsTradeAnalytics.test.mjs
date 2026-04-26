@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import {
-  ROLLING_RS_Z_BUCKETS,
   buildRollingRsTradeAnalytics,
 } from './rollingRsTradeAnalytics.js'
 
@@ -92,7 +91,6 @@ const result = buildRollingRsTradeAnalytics({
   rField: 'rMultipleATR',
 })
 
-assert.equal(ROLLING_RS_Z_BUCKETS.length, 5)
 assert.equal(result.rows.length, 4)
 assert.equal(result.coverage.totalTrades, 5)
 assert.equal(result.coverage.analyzedTrades, 4)
@@ -113,6 +111,7 @@ assert.ok(winner.zTrend10 < 0)
 assert.ok(winner.zTrend20 < 0)
 assert.equal(winner.rValue, 1.7)
 assert.equal(winner.outcome, 'Win')
+assert.equal(winner.bucketLabel, '2 to 4')
 assert.ok(winner.exitZ < winner.entryZ)
 assert.ok(winner.zChangeDuringTrade < 0)
 assert.equal(winner.daysAboveSignalPct, 0)
@@ -122,39 +121,49 @@ assert.ok(loser.entryZ < 0)
 assert.ok(loser.zTrend5 > 0)
 assert.equal(loser.rValue, -0.9)
 assert.equal(loser.outcome, 'Loss')
+assert.equal(loser.bucketLabel, '-4 to -2')
 assert.ok(loser.exitZ > loser.entryZ)
 assert.ok(loser.zChangeDuringTrade > 0)
 assert.equal(loser.brokeBelowSignalDuringTrade, false)
 
 assert.ok(pullback.entryZ > 0)
 assert.ok(pullback.zTrend10 < 0)
+assert.equal(pullback.bucketLabel, '1 to 2')
 assert.ok(turn.entryZ < 0)
 assert.ok(turn.zTrend10 > 0)
+assert.equal(turn.bucketLabel, '-2 to -1')
 
 assert.equal(result.summary.avgWinnerEntryZ, Number(((winner.entryZ + turn.entryZ) / 2).toFixed(3)))
 assert.equal(result.summary.avgLoserEntryZ, Number(((loser.entryZ + pullback.entryZ) / 2).toFixed(3)))
-assert.equal(result.summary.bestBucket.count, 1)
-assert.equal(result.summary.bestBucket.avgR, 1.7)
-assert.ok(result.summary.worstBucket.count >= 1)
-assert.equal(result.summary.worstBucket.avgR, -0.5)
+assert.equal(result.summary.bestBucket, null)
+assert.equal(result.summary.worstBucket, null)
 
-const winningBucket = result.buckets.find(bucket => bucket.count === 1 && bucket.avgR === 1.7)
+assert.deepEqual(
+  result.buckets.map(bucket => bucket.label),
+  ['-4 to -2', '-2 to -1', '-1 to 0', '0 to 1', '1 to 2', '2 to 4']
+)
+
+const winningBucket = result.buckets.find(bucket => bucket.label === '2 to 4')
 const losingBucket = result.buckets.find(bucket => bucket.key === loser.bucketKey)
 const pullbackBucket = result.buckets.find(bucket => bucket.key === pullback.bucketKey)
+const turnBucket = result.buckets.find(bucket => bucket.key === turn.bucketKey)
 assert.ok(winningBucket)
 assert.equal(winningBucket.winRate, 100)
 assert.equal(winningBucket.totalR, 1.7)
 assert.equal(winningBucket.avgPL, 1200)
 assert.equal(winningBucket.profitFactor, Infinity)
 assert.ok(losingBucket)
-assert.equal(losingBucket.count, 2)
-assert.equal(losingBucket.winRate, 50)
-assert.equal(losingBucket.totalR, -0.3)
-assert.equal(losingBucket.profitFactor, 0.667)
+assert.equal(losingBucket.count, 1)
+assert.equal(losingBucket.winRate, 0)
+assert.equal(losingBucket.totalR, -0.9)
+assert.equal(losingBucket.profitFactor, 0)
 assert.ok(pullbackBucket)
 assert.equal(pullbackBucket.winRate, 0)
 assert.equal(pullbackBucket.totalR, -0.5)
 assert.equal(pullbackBucket.profitFactor, 0)
+assert.ok(turnBucket)
+assert.equal(turnBucket.count, 1)
+assert.equal(turnBucket.avgR, 0.6)
 
 const risingGroup = result.trendGroups.find(group => group.key === 'rising')
 const fallingGroup = result.trendGroups.find(group => group.key === 'falling')
@@ -181,9 +190,10 @@ assert.equal(result.lifecycleSummary.losses.brokeBelowSignalRate, 50)
 
 assert.equal(result.selectionProfile.sampleSize, 4)
 assert.equal(result.selectionProfile.lowSample, true)
-assert.equal(result.selectionProfile.focusZone.bucketKey, winningBucket.key)
-assert.ok(result.selectionProfile.avoidZones.some(zone => zone.bucketKey === pullbackBucket.key))
+assert.equal(result.selectionProfile.focusZone, null)
+assert.deepEqual(result.selectionProfile.avoidZones, [])
 assert.equal(result.selectionProfile.bestSetup.key, 'positive_falling')
 assert.equal(result.selectionProfile.weakestSetup.key, 'negative_improving')
 assert.equal(result.selectionProfile.signalPreference.key, 'below_signal')
 assert.equal(result.selectionProfile.lifecyclePreference.key, 'broke_below_signal')
+assert.ok(result.selectionProfile.notes.some(note => note.includes('at least 3 trades')))

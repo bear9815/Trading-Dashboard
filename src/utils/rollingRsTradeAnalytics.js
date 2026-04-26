@@ -3,13 +3,14 @@ import {
   DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
 } from './tradeReviewChart.js'
 
-export const ROLLING_RS_Z_BUCKETS = [
-  { key: 'lt_neg_1', label: '< -1', min: -Infinity, max: -1 },
+const ROLLING_RS_CORE_Z_BUCKETS = [
+  { key: 'neg_2_to_neg_1', label: '-2 to -1', min: -2, max: -1 },
   { key: 'neg_1_to_0', label: '-1 to 0', min: -1, max: 0 },
-  { key: 'zero_to_1', label: '0 to 1', min: 0, max: 1 },
-  { key: 'one_to_2', label: '1 to 2', min: 1, max: 2 },
-  { key: 'gte_2', label: '>= 2', min: 2, max: Infinity },
+  { key: '0_to_1', label: '0 to 1', min: 0, max: 1 },
+  { key: '1_to_2', label: '1 to 2', min: 1, max: 2 },
 ]
+const ROLLING_RS_TAIL_BUCKET_SIZE = 2
+const ROLLING_RS_BUCKET_SIGNAL_MIN_TRADES = 3
 
 const EMPTY_METRICS = {
   count: 0,
@@ -71,8 +72,68 @@ function resolveExitDate(trade) {
   return exitDates.at(-1) || null
 }
 
-function bucketForZ(zScore) {
-  return ROLLING_RS_Z_BUCKETS.find(bucket => zScore >= bucket.min && zScore < bucket.max) || ROLLING_RS_Z_BUCKETS[0]
+function bucketKeyForBounds(min, max) {
+  return `z_${String(min).replace('-', 'neg_').replace('.', '_')}_to_${String(max).replace('-', 'neg_').replace('.', '_')}`
+}
+
+function buildTailBuckets(minZ, maxZ) {
+  const buckets = []
+
+  if (Number.isFinite(minZ) && minZ < -2) {
+    const start = Math.floor(minZ / ROLLING_RS_TAIL_BUCKET_SIZE) * ROLLING_RS_TAIL_BUCKET_SIZE
+    for (let min = start; min < -2; min += ROLLING_RS_TAIL_BUCKET_SIZE) {
+      const max = Math.min(min + ROLLING_RS_TAIL_BUCKET_SIZE, -2)
+      buckets.push({
+        key: bucketKeyForBounds(min, max),
+        label: `${min} to ${max}`,
+        min,
+        max,
+      })
+    }
+  }
+
+  if (Number.isFinite(maxZ) && maxZ >= 2) {
+    const endExclusive = Math.floor(maxZ / ROLLING_RS_TAIL_BUCKET_SIZE) * ROLLING_RS_TAIL_BUCKET_SIZE + ROLLING_RS_TAIL_BUCKET_SIZE
+    for (let min = 2; min < endExclusive; min += ROLLING_RS_TAIL_BUCKET_SIZE) {
+      const max = min + ROLLING_RS_TAIL_BUCKET_SIZE
+      buckets.push({
+        key: bucketKeyForBounds(min, max),
+        label: `${min} to ${max}`,
+        min,
+        max,
+      })
+    }
+  }
+
+  return buckets
+}
+
+function buildBucketsForRows(rows) {
+  const entryZs = rows.map(row => row.entryZ).filter(Number.isFinite)
+  const minZ = entryZs.length ? Math.min(...entryZs) : null
+  const maxZ = entryZs.length ? Math.max(...entryZs) : null
+  const tailBuckets = buildTailBuckets(minZ, maxZ)
+  const negativeTail = tailBuckets.filter(bucket => bucket.max <= -2)
+  const positiveTail = tailBuckets.filter(bucket => bucket.min >= 2)
+  return [
+    ...negativeTail,
+    ...ROLLING_RS_CORE_Z_BUCKETS,
+    ...positiveTail,
+  ]
+}
+
+function bucketForZ(zScore, buckets) {
+  return buckets.find(bucket => zScore >= bucket.min && zScore < bucket.max) || null
+}
+
+function bestByAvgR(groups, minimumCount = 1) {
+  const eligible = groups.filter(group => group.count >= minimumCount && Number.isFinite(group.avgR))
+  return eligible.length ? [...eligible].sort((a, b) => b.avgR - a.avgR)[0] : null
+}
+
+function worstByAvgR(groups, minimumCount = 1) {
+  const eligible = groups.filter(group => group.count >= minimumCount && Number.isFinite(group.avgR))
+  return eligible.length ? [...eligible].sort((a, b) => a.avgR - b.avgR)[0] : null
 }
 
 function summarizeRows(rows) {
@@ -98,7 +159,8 @@ function summarizeRows(rows) {
 }
 
 function summarizeBuckets(rows) {
-  return ROLLING_RS_Z_BUCKETS.map(bucket => {
+  const buckets = buildBucketsForRows(rows)
+  return buckets.map(bucket => {
     const bucketRows = rows.filter(row => row.bucketKey === bucket.key)
     return {
       ...bucket,
@@ -244,27 +306,22 @@ function buildRollingSelection(rows, windowSize = 10) {
     })
 }
 
-function bestByAvgR(groups) {
-  const eligible = groups.filter(group => group.count > 0 && Number.isFinite(group.avgR))
-  return eligible.length ? [...eligible].sort((a, b) => b.avgR - a.avgR)[0] : null
-}
-
-function worstByAvgR(groups) {
-  const eligible = groups.filter(group => group.count > 0 && Number.isFinite(group.avgR))
-  return eligible.length ? [...eligible].sort((a, b) => a.avgR - b.avgR)[0] : null
-}
-
 function buildSelectionProfile({ rows, buckets, setupGroups, signalGroups, lifecycleBreakdown }) {
   const focusCandidates = buckets.filter(bucket =>
-    bucket.count > 0 &&
+    bucket.count >= ROLLING_RS_BUCKET_SIGNAL_MIN_TRADES &&
     Number.isFinite(bucket.avgR) &&
     bucket.avgR > 0 &&
     bucket.profitFactor != null &&
     bucket.profitFactor > 1.25
   )
-  const focusBucket = bestByAvgR(focusCandidates) || bestByAvgR(buckets)
+  const focusBucket = bestByAvgR(focusCandidates)
   const avoidZones = buckets
-    .filter(bucket => bucket.count > 0 && Number.isFinite(bucket.avgR) && bucket.avgR < 0 && (bucket.winRate ?? 0) < 50)
+    .filter(bucket =>
+      bucket.count >= ROLLING_RS_BUCKET_SIGNAL_MIN_TRADES &&
+      Number.isFinite(bucket.avgR) &&
+      bucket.avgR < 0 &&
+      (bucket.winRate ?? 0) < 50
+    )
     .map(bucket => ({
       bucketKey: bucket.key,
       label: bucket.label,
@@ -285,6 +342,8 @@ function buildSelectionProfile({ rows, buckets, setupGroups, signalGroups, lifec
 
   if (focusBucket) {
     notes.push(`Your best entry z bucket is ${focusBucket.label} with ${focusBucket.count} trade${focusBucket.count !== 1 ? 's' : ''} and ${focusBucket.avgR >= 0 ? '+' : ''}${focusBucket.avgR.toFixed(2)}R average.`)
+  } else {
+    notes.push(`No rolling z bucket has reached the ${ROLLING_RS_BUCKET_SIGNAL_MIN_TRADES}-trade minimum yet, so the focus zone stays unranked for now.`)
   }
   if (bestSetup) {
     notes.push(`Your strongest setup profile is ${bestSetup.label}, averaging ${bestSetup.avgR >= 0 ? '+' : ''}${bestSetup.avgR.toFixed(2)}R.`)
@@ -299,7 +358,7 @@ function buildSelectionProfile({ rows, buckets, setupGroups, signalGroups, lifec
     notes.push(`Current avoid candidates: ${avoidZones.map(zone => zone.label).join(', ')}.`)
   }
   if (lowSample) {
-    notes.push('Treat this as low sample until each important bucket has at least 10 trades and the total RS sample reaches roughly 20 trades.')
+    notes.push(`Treat this as low sample until each important bucket has at least 10 trades and the total RS sample reaches roughly 20 trades. Best/worst bucket callouts wait for at least ${ROLLING_RS_BUCKET_SIGNAL_MIN_TRADES} trades in a bucket.`)
   }
 
   return {
@@ -330,12 +389,8 @@ function averageZ(rows) {
 
 function summarize(rows, buckets) {
   const activeBuckets = buckets.filter(bucket => bucket.count > 0)
-  const bestBucket = activeBuckets.length
-    ? [...activeBuckets].sort((a, b) => (b.avgR ?? -Infinity) - (a.avgR ?? -Infinity))[0]
-    : null
-  const worstBucket = activeBuckets.length
-    ? [...activeBuckets].sort((a, b) => (a.avgR ?? Infinity) - (b.avgR ?? Infinity))[0]
-    : null
+  const bestBucket = bestByAvgR(activeBuckets, ROLLING_RS_BUCKET_SIGNAL_MIN_TRADES)
+  const worstBucket = worstByAvgR(activeBuckets, ROLLING_RS_BUCKET_SIGNAL_MIN_TRADES)
 
   return {
     ...summarizeRows(rows),
@@ -343,6 +398,7 @@ function summarize(rows, buckets) {
     avgLoserEntryZ: averageZ(rows.filter(row => row.outcome === 'Loss')),
     bestBucket,
     worstBucket,
+    bucketSignalMinTrades: ROLLING_RS_BUCKET_SIGNAL_MIN_TRADES,
   }
 }
 
@@ -370,8 +426,6 @@ function buildTradeRow(trade, gradient, rField, maLen, rsWindow) {
     const prior = gradient[entryIndex - days]
     return prior ? round(entry.zScore - prior.zScore) : null
   }
-  const bucket = bucketForZ(entry.zScore)
-
   return {
     tradeId: trade.id,
     symbol: String(trade.symbol || '').toUpperCase(),
@@ -395,8 +449,6 @@ function buildTradeRow(trade, gradient, rField, maLen, rsWindow) {
     brokeBelowSignalDuringTrade: lifecycle.length
       ? lifecycle.some(row => Number.isFinite(row.zScore) && Number.isFinite(row.signalLine) && row.zScore < row.signalLine)
       : null,
-    bucketKey: bucket.key,
-    bucketLabel: bucket.label,
   }
 }
 
@@ -440,17 +492,32 @@ export function buildRollingRsTradeAnalytics({
   }
 
   const buckets = summarizeBuckets(rows)
-  const trendGroups = summarizeTrendGroups(rows)
-  const setupGroups = summarizeSetupGroups(rows)
-  const signalGroups = summarizeSignalGroups(rows)
-  const rollingSelection = buildRollingSelection(rows)
-  const lifecycleSummary = summarizeLifecycle(rows)
-  const lifecycleBreakdown = buildLifecycleBreakdown(rows)
-  const selectionProfile = buildSelectionProfile({ rows, buckets, setupGroups, signalGroups, lifecycleBreakdown })
+  const rowsWithBuckets = rows.map(row => {
+    const bucket = bucketForZ(row.entryZ, buckets)
+    return {
+      ...row,
+      bucketKey: bucket?.key || null,
+      bucketLabel: bucket?.label || null,
+    }
+  })
+  const summarizedBuckets = buckets.map(bucket => {
+    const bucketRows = rowsWithBuckets.filter(row => row.bucketKey === bucket.key)
+    return {
+      ...bucket,
+      ...summarizeRows(bucketRows),
+    }
+  })
+  const trendGroups = summarizeTrendGroups(rowsWithBuckets)
+  const setupGroups = summarizeSetupGroups(rowsWithBuckets)
+  const signalGroups = summarizeSignalGroups(rowsWithBuckets)
+  const rollingSelection = buildRollingSelection(rowsWithBuckets)
+  const lifecycleSummary = summarizeLifecycle(rowsWithBuckets)
+  const lifecycleBreakdown = buildLifecycleBreakdown(rowsWithBuckets)
+  const selectionProfile = buildSelectionProfile({ rows: rowsWithBuckets, buckets: summarizedBuckets, setupGroups, signalGroups, lifecycleBreakdown })
 
   return {
-    rows,
-    buckets,
+    rows: rowsWithBuckets,
+    buckets: summarizedBuckets,
     trendGroups,
     setupGroups,
     signalGroups,
@@ -458,12 +525,12 @@ export function buildRollingRsTradeAnalytics({
     lifecycleSummary,
     lifecycleBreakdown,
     selectionProfile,
-    summary: summarize(rows, buckets),
+    summary: summarize(rowsWithBuckets, summarizedBuckets),
     coverage: {
       totalTrades: eligibleTrades.length,
-      analyzedTrades: rows.length,
+      analyzedTrades: rowsWithBuckets.length,
       missingTrades: missing.length,
-      coveragePct: eligibleTrades.length ? round((rows.length / eligibleTrades.length) * 100, 1) : 0,
+      coveragePct: eligibleTrades.length ? round((rowsWithBuckets.length / eligibleTrades.length) * 100, 1) : 0,
       missing,
       missingSymbols: [...new Set(missing.map(item => item.symbol).filter(Boolean))].sort(),
     },

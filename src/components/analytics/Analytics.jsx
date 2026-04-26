@@ -90,13 +90,17 @@ function RsAnalyticsSection({
               {
                 label: 'Best Z Bucket',
                 value: analytics.summary.bestBucket?.label || '—',
-                sub: analytics.summary.bestBucket ? `${analytics.summary.bestBucket.count} trades · ${formatR(analytics.summary.bestBucket.avgR || 0)} avg` : 'No sample',
+                sub: analytics.summary.bestBucket
+                  ? `${analytics.summary.bestBucket.count} trades · ${formatR(analytics.summary.bestBucket.avgR || 0)} avg`
+                  : `Need ${analytics.summary.bucketSignalMinTrades || 3}+ trades in one bucket`,
                 color: 'text-accent-green',
               },
               {
                 label: 'Worst Z Bucket',
                 value: analytics.summary.worstBucket?.label || '—',
-                sub: analytics.summary.worstBucket ? `${analytics.summary.worstBucket.count} trades · ${formatR(analytics.summary.worstBucket.avgR || 0)} avg` : 'No sample',
+                sub: analytics.summary.worstBucket
+                  ? `${analytics.summary.worstBucket.count} trades · ${formatR(analytics.summary.worstBucket.avgR || 0)} avg`
+                  : `Need ${analytics.summary.bucketSignalMinTrades || 3}+ trades in one bucket`,
                 color: 'text-accent-red',
               },
               {
@@ -125,7 +129,7 @@ function RsAnalyticsSection({
               <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
                 <div>
                   <p className="text-xs font-semibold text-gray-300">Selection Profile</p>
-                  <p className="text-[11px] text-gray-600 mt-0.5">Turns the RS history into focus and avoid candidates for this filtered trade sample.</p>
+                  <p className="text-[11px] text-gray-600 mt-0.5">Turns the RS history into focus and avoid candidates for this filtered trade sample, but only promotes buckets once they have enough trades to matter.</p>
                 </div>
                 <span className={`text-[10px] px-2 py-1 rounded border ${
                   analytics.selectionProfile.lowSample
