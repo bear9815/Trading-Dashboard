@@ -20,8 +20,7 @@ import { sliceWeeklyChartBars } from '../../utils/chartTimeframes.js'
 
 const CHART_UP_COLOR = '#2877e3'
 const CHART_DOWN_COLOR = '#ea4ce7'
-const DAILY_RANGE_OPTIONS = [6, 10]
-const TEN_MONTH_BAR_REDUCTION = 5
+const DAILY_RANGE_OPTIONS = [6, 9]
 
 const CHART_OPTIONS = {
   layout: {
@@ -59,13 +58,9 @@ function countVisibleBarsForMonths(bars, months) {
     return barDate instanceof Date && !Number.isNaN(barDate?.getTime?.()) && barDate >= cutoff
   }).length
 
-  const adjustedVisibleBars = months === 10
-    ? visibleBars - TEN_MONTH_BAR_REDUCTION
-    : visibleBars
-
   return Math.max(
     MIN_LIGHTWEIGHT_VISIBLE_BARS,
-    adjustedVisibleBars
+    visibleBars
   )
 }
 

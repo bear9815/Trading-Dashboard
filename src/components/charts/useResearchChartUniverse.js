@@ -69,7 +69,7 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results
 }
 
-function buildTickerChartData(selectedSymbol, historyBarsBySymbol, tradeReviewChartSettings) {
+export function buildTickerChartData(selectedSymbol, historyBarsBySymbol, tradeReviewChartSettings) {
   if (!selectedSymbol) {
     return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
   }
@@ -108,7 +108,6 @@ function buildTickerChartData(selectedSymbol, historyBarsBySymbol, tradeReviewCh
 
 export function useResearchChartUniverse({
   symbols = [],
-  selectedSymbol = null,
   latestAnchorDate = null,
   rollingRsWindow = 63,
   rollingLookback = 50,
@@ -208,15 +207,9 @@ export function useResearchChartUniverse({
     return promise
   }, [historyPlan, symbols])
 
-  const selectedTickerChartData = useMemo(
-    () => buildTickerChartData(selectedSymbol, historyBarsBySymbol, tradeReviewChartSettings),
-    [historyBarsBySymbol, selectedSymbol, tradeReviewChartSettings]
-  )
-
   return {
     benchmarkHistoryBars,
     historyBarsBySymbol,
     loadHistoryUniverse,
-    selectedTickerChartData,
   }
 }

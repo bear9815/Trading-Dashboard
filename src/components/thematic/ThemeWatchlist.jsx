@@ -42,7 +42,7 @@ import {
 } from '../../utils/themeAnalytics.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 import ResearchMultiTimeframeChart from '../charts/ResearchMultiTimeframeChart.jsx'
-import { useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
+import { buildTickerChartData, useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
 
 const SORT_OPTIONS = [
   ['momentum', 'Momentum Rank'],
@@ -1398,10 +1398,8 @@ export default function ThemeWatchlist({
     benchmarkHistoryBars,
     historyBarsBySymbol,
     loadHistoryUniverse,
-    selectedTickerChartData: rawSelectedTickerChartData,
   } = useResearchChartUniverse({
     symbols,
-    selectedSymbol: analyticsMode ? null : selectedDisplaySymbol,
     latestAnchorDate,
     rollingRsWindow,
     rollingLookback: tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50,
@@ -1410,7 +1408,7 @@ export default function ThemeWatchlist({
 
   const selectedTickerChartData = analyticsMode
     ? { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
-    : rawSelectedTickerChartData
+    : buildTickerChartData(selectedDisplaySymbol, historyBarsBySymbol, tradeReviewChartSettings)
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize))
   const pagedRows = useMemo(
