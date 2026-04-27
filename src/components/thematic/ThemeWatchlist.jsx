@@ -4,16 +4,6 @@ import {
   ScatterChart, Scatter, ReferenceLine, LineChart, Line, Cell,
 } from 'recharts'
 import {
-  BarSeries,
-  CandlestickSeries,
-  ColorType,
-  CrosshairMode,
-  createChart,
-  HistogramSeries,
-  LineSeries,
-  createSeriesMarkers,
-} from 'lightweight-charts'
-import {
   Brain, Download, ExternalLink, Layers, ListFilter, Pencil,
   RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network, TrendingUp, ChevronDown, ChevronUp,
 } from 'lucide-react'
@@ -22,27 +12,12 @@ import { MARKET_LEADERS_LIST_ID, useResearchWatchlistStore } from '../../store/u
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
-import { fetchHistoryCached } from '../../utils/historyCache.js'
 import { resolveTickerToName } from '../../utils/marketData.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
 import { buildCompanyVerification } from '../../utils/companyVerification.js'
 import {
-  DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET,
-  MIN_LIGHTWEIGHT_VISIBLE_BARS,
-  WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET,
-  applyRightAnchoredLogicalRange,
-  fitContentWithRightOffset,
-  getVisibleLogicalRange,
-} from '../../utils/lightweightChartViewport.js'
-import { getWeeklyChartStartDate, sliceWeeklyChartBars } from '../../utils/chartTimeframes.js'
-import {
   buildAnchoredRsSnapshot,
-  aggregateWeeklyBars,
-  buildAvwapOverlays,
-  buildKeltnerShadeBands,
   buildRollingRsSnapshot,
-  buildYtdAvwapSnapshot,
-  calculateKeltnerChannel,
   resolveLatestAnchorDate,
 } from '../../utils/tradeReviewChart.js'
 import { buildWatchlistFitMap, filterAndSortWatchlistRows } from '../../utils/watchlistFitSignal.js'
@@ -66,6 +41,8 @@ import {
   withMarketLeadersEcosystemGroup,
 } from '../../utils/themeAnalytics.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
+import ResearchMultiTimeframeChart from '../charts/ResearchMultiTimeframeChart.jsx'
+import { useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
 
 const SORT_OPTIONS = [
   ['momentum', 'Momentum Rank'],
@@ -111,68 +88,10 @@ const EMPTY_ROW = {
   competesWith: [],
 }
 
-const WATCHLIST_HISTORY_TTL_MS = 6 * 60 * 60 * 1000
-const WATCHLIST_HISTORY_CONCURRENCY = 8
-const CHART_UP_COLOR = '#2877e3'
-const CHART_DOWN_COLOR = '#ea4ce7'
 const WATCHLIST_SUMMARY_PANEL_ID = 'watchlist-summary'
 const WATCHLIST_CONTEXT_PANEL_ID = 'watchlist-context'
 const COLUMN_LAYOUT_PANEL_ID = 'column-layout'
 const GROWTH_RESEARCH_DAILY_RANGE_OPTIONS = [6, 10]
-
-function toDateKey(value) {
-  return new Date(value).toISOString().slice(0, 10)
-}
-
-function normalizeChartBars(bars = []) {
-  return bars
-    .map(bar => {
-      const parsedTime = bar?.time
-      const time = typeof parsedTime === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsedTime)
-        ? parsedTime
-        : parsedTime
-          ? toDateKey(parsedTime)
-          : null
-      const open = Number(bar?.open)
-      const high = Number(bar?.high)
-      const low = Number(bar?.low)
-      const close = Number(bar?.close)
-      const volume = Number(bar?.volume || 0)
-      if (!time || !Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
-        return null
-      }
-      const rising = close >= open
-      const color = rising ? CHART_UP_COLOR : CHART_DOWN_COLOR
-      return {
-        time,
-        open,
-        high,
-        low,
-        close,
-        volume,
-        color,
-        wickColor: color,
-        borderColor: color,
-      }
-    })
-    .filter(Boolean)
-}
-
-function countVisibleBarsForMonths(bars, months) {
-  if (!Array.isArray(bars) || !bars.length) return 0
-  const lastBarTime = bars.at(-1)?.time
-  const lastDate = lastBarTime ? new Date(`${lastBarTime}T00:00:00Z`) : null
-  if (!(lastDate instanceof Date) || Number.isNaN(lastDate?.getTime?.())) return bars.length
-  const cutoff = new Date(lastDate)
-  cutoff.setMonth(cutoff.getMonth() - months)
-  return Math.max(
-    MIN_LIGHTWEIGHT_VISIBLE_BARS,
-    bars.filter(bar => {
-      const barDate = bar?.time ? new Date(`${bar.time}T00:00:00Z`) : null
-      return barDate instanceof Date && !Number.isNaN(barDate?.getTime?.()) && barDate >= cutoff
-    }).length
-  )
-}
 
 async function mapWithConcurrency(items, limit, mapper) {
   const results = new Array(items.length)
@@ -701,275 +620,6 @@ function RotationQuadrantLabel(quadrant) {
   }
 }
 
-const ECOSYSTEM_CHART_OPTIONS = {
-  layout: {
-    background: { color: '#d7d7d7' },
-    textColor: '#2b3037',
-    fontFamily: 'Inter, sans-serif',
-  },
-  grid: {
-    vertLines: { color: 'rgba(120, 126, 136, 0.16)' },
-    horzLines: { color: 'rgba(120, 126, 136, 0.22)' },
-  },
-  rightPriceScale: {
-    borderColor: 'rgba(95, 99, 106, 0.22)',
-    scaleMargins: { top: 0.08, bottom: 0.12 },
-  },
-  timeScale: {
-    borderColor: 'rgba(95, 99, 106, 0.22)',
-    timeVisible: false,
-    secondsVisible: false,
-  },
-  crosshair: { mode: CrosshairMode.Normal },
-  handleScroll: true,
-  handleScale: true,
-}
-
-function drawEcosystemShadeBands(canvas, chart, priceSeries, bands) {
-  if (!canvas || !chart || !priceSeries) return
-  const rect = canvas.getBoundingClientRect()
-  const dpr = window.devicePixelRatio || 1
-  canvas.width = Math.max(1, Math.floor(rect.width * dpr))
-  canvas.height = Math.max(1, Math.floor(rect.height * dpr))
-  const ctx = canvas.getContext('2d')
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.clearRect(0, 0, rect.width, rect.height)
-
-  for (const band of [...(bands || [])].sort((a, b) => Number(b.period) - Number(a.period))) {
-    const upper = []
-    const lower = []
-    for (const row of band.rows || []) {
-      const x = chart.timeScale().timeToCoordinate(row.time)
-      const yUpper = priceSeries.priceToCoordinate(row.upper)
-      const yLower = priceSeries.priceToCoordinate(row.lower)
-      if (x == null || yUpper == null || yLower == null) continue
-      upper.push({ x, y: yUpper })
-      lower.push({ x, y: yLower })
-    }
-    if (upper.length < 2 || lower.length < 2) continue
-    ctx.beginPath()
-    ctx.moveTo(upper[0].x, upper[0].y)
-    for (const point of upper.slice(1)) ctx.lineTo(point.x, point.y)
-    for (const point of lower.slice().reverse()) ctx.lineTo(point.x, point.y)
-    ctx.closePath()
-    ctx.fillStyle = band.fillColor
-    ctx.fill()
-  }
-}
-
-function EcosystemLightweightPane({ data, kind, height, chartType, dailyRangeMonths = 6 }) {
-  const chartContainerRef = useRef(null)
-  const shadeCanvasRef = useRef(null)
-
-  useEffect(() => {
-    if (!chartContainerRef.current) return undefined
-    const rightOffset = kind === 'weekly' ? WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET : DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET
-    const chart = createChart(chartContainerRef.current, {
-      ...ECOSYSTEM_CHART_OPTIONS,
-      height,
-      width: chartContainerRef.current.clientWidth,
-    })
-    const candles = kind === 'weekly' ? sliceWeeklyChartBars(data.weeklyBars) : data.dailyBars
-    const priceSeries = chart.addSeries(
-      chartType === 'hlc' ? BarSeries : CandlestickSeries,
-      chartType === 'hlc'
-        ? {
-            upColor: CHART_UP_COLOR,
-            downColor: CHART_DOWN_COLOR,
-            openVisible: false,
-            thinBars: false,
-            priceLineVisible: false,
-          }
-        : {
-            upColor: CHART_UP_COLOR,
-            downColor: CHART_DOWN_COLOR,
-            borderUpColor: CHART_UP_COLOR,
-            borderDownColor: CHART_DOWN_COLOR,
-            borderVisible: true,
-            wickUpColor: CHART_UP_COLOR,
-            wickDownColor: CHART_DOWN_COLOR,
-            priceLineVisible: false,
-          }
-    )
-    priceSeries.setData(candles)
-
-    if (kind === 'daily') {
-      const volumeSeries = chart.addSeries(HistogramSeries, {
-        priceFormat: { type: 'volume' },
-        priceScaleId: '',
-        priceLineVisible: false,
-        lastValueVisible: false,
-      })
-      volumeSeries.setData(
-        data.dailyBars.map(bar => ({
-          time: bar.time,
-          value: bar.volume,
-          color: bar.close >= bar.open ? CHART_UP_COLOR : CHART_DOWN_COLOR,
-        }))
-      )
-      volumeSeries.priceScale().applyOptions({
-        scaleMargins: { top: 0.84, bottom: 0 },
-      })
-
-      for (const overlay of data.avwapOverlays || []) {
-        const series = chart.addSeries(LineSeries, {
-          color: overlay.color,
-          lineWidth: 2,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        })
-        series.setData(overlay.series)
-      }
-
-      createSeriesMarkers(priceSeries, (data.avwapOverlays || []).map(overlay => ({
-        time: overlay.series?.[0]?.time || overlay.anchorDate,
-        position: 'belowBar',
-        color: overlay.color,
-        shape: 'circle',
-        text: overlay.label,
-        size: 0.8,
-      })).filter(marker => marker.time))
-    }
-
-    const bands = kind === 'weekly' ? data.weeklyKeltnerShades : data.keltnerShades
-    const redraw = () => {
-      requestAnimationFrame(() => {
-        drawEcosystemShadeBands(shadeCanvasRef.current, chart, priceSeries, bands)
-      })
-    }
-
-    if (kind === 'daily') {
-      const visibleBars = countVisibleBarsForMonths(candles, dailyRangeMonths)
-      applyRightAnchoredLogicalRange(chart, candles.length, visibleBars, rightOffset)
-    } else {
-      fitContentWithRightOffset(chart, rightOffset)
-    }
-
-    redraw()
-    chart.timeScale().subscribeVisibleTimeRangeChange(redraw)
-
-    const handleWheel = (event) => {
-      if (!candles.length) return
-      event.preventDefault()
-      event.stopPropagation()
-
-      const logicalRange = getVisibleLogicalRange(chart)
-      const currentSpan = Math.max(
-        MIN_LIGHTWEIGHT_VISIBLE_BARS,
-        Math.ceil((logicalRange?.to ?? candles.length + rightOffset) - (logicalRange?.from ?? 0))
-      )
-      const zoomFactor = event.deltaY < 0 ? 0.88 : 1.14
-      const maxVisibleBars = Math.max(MIN_LIGHTWEIGHT_VISIBLE_BARS, candles.length + rightOffset)
-      const nextVisibleBars = Math.min(
-        maxVisibleBars,
-        Math.max(MIN_LIGHTWEIGHT_VISIBLE_BARS, Math.round(currentSpan * zoomFactor))
-      )
-      applyRightAnchoredLogicalRange(chart, candles.length, nextVisibleBars, rightOffset)
-      redraw()
-    }
-    chartContainerRef.current.addEventListener('wheel', handleWheel, { passive: false, capture: true })
-
-    const resizeObserver = new ResizeObserver(([entry]) => {
-      chart.applyOptions({ width: Math.floor(entry.contentRect.width), height })
-      redraw()
-    })
-    resizeObserver.observe(chartContainerRef.current)
-
-    return () => {
-      chart.timeScale().unsubscribeVisibleTimeRangeChange(redraw)
-      chartContainerRef.current?.removeEventListener?.('wheel', handleWheel, true)
-      resizeObserver.disconnect()
-      chart.remove()
-    }
-  }, [chartType, dailyRangeMonths, data, height, kind])
-
-  return (
-    <div className="relative w-full" style={{ height }}>
-      <div ref={chartContainerRef} className="absolute inset-0" />
-      <canvas ref={shadeCanvasRef} className="pointer-events-none absolute inset-0 z-10 h-full w-full" aria-hidden="true" />
-    </div>
-  )
-}
-
-function EcosystemCompositeChart({
-  data,
-  chartType = 'candlestick',
-  title = 'Ecosystem',
-  memberCount = 0,
-  dailyRangeMonths = 6,
-  onChangeDailyRangeMonths,
-  ytdEnabled = false,
-  onToggleYtd,
-  chartLabel = 'Ecosystem Symbol',
-  badgeLabel = 'Synthetic',
-  emptyLabel = 'No chart data for this ecosystem',
-}) {
-  const hasBars = data?.dailyBars?.length
-  return (
-    <div className="rounded-lg overflow-hidden border border-black/20 bg-[#d7d7d7] shadow-sm">
-      <div className="px-2 py-1.5 border-b border-black/15 text-[#242830]">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold mono">{title} · {chartLabel}</p>
-            <p className="text-[10px] text-[#505760]">KC13/34/65 · YTD AVWAP · {memberCount} member{memberCount === 1 ? '' : 's'}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 rounded border border-black/10 bg-white/70 p-0.5">
-              {GROWTH_RESEARCH_DAILY_RANGE_OPTIONS.map(months => (
-                <button
-                  key={months}
-                  type="button"
-                  onClick={() => onChangeDailyRangeMonths?.(months)}
-                  className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-colors ${
-                    dailyRangeMonths === months
-                      ? 'bg-[#242830] text-white'
-                      : 'text-[#505760] hover:bg-black/5'
-                  }`}
-                  title={`Show ${months} months on the daily chart`}
-                >
-                  {months}M
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={onToggleYtd}
-              className={`px-2 py-0.5 text-[10px] font-semibold rounded border transition-colors ${
-                ytdEnabled
-                  ? 'bg-[#f59e0b]/20 border-[#f59e0b]/40 text-[#7a4b00]'
-                  : 'bg-white/70 border-black/10 text-[#505760]'
-              }`}
-            >
-              YTD AVWAP
-            </button>
-            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">{badgeLabel}</span>
-          </div>
-        </div>
-      </div>
-      {!hasBars ? (
-        <div className="h-[520px] flex items-center justify-center text-xs text-[#505760]">{emptyLabel}</div>
-      ) : (
-        <div>
-          <div className="relative border-b-4 border-[#242424]">
-            <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1W</span>
-            <EcosystemLightweightPane data={data} kind="weekly" height={190} chartType={chartType} dailyRangeMonths={dailyRangeMonths} />
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
-              {title}
-            </div>
-          </div>
-          <div className="relative">
-            <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1D</span>
-            <EcosystemLightweightPane data={data} kind="daily" height={350} chartType={chartType} dailyRangeMonths={dailyRangeMonths} />
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
-              {title}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 function toggleYtdAvwap(setTradeReviewChartSettings, chartSettings) {
   const nextPresets = (chartSettings?.avwapPresets || []).map(preset =>
     preset.id === 'ytd' ? { ...preset, enabled: !preset.enabled } : preset
@@ -1234,8 +884,6 @@ export default function ThemeWatchlist({
   const [selectedThemeGroupKey, setSelectedThemeGroupKey] = useState('')
   const [anchoredRsBySymbol, setAnchoredRsBySymbol] = useState({})
   const [rollingRsBySymbol, setRollingRsBySymbol] = useState({})
-  const [historyBarsBySymbol, setHistoryBarsBySymbol] = useState({})
-  const [benchmarkHistoryBars, setBenchmarkHistoryBars] = useState([])
   const [ytdAvwapBySymbol, setYtdAvwapBySymbol] = useState({})
   const [finraBySymbol, setFinraBySymbol] = useState({})
   const [finraEstimateBySymbol, setFinraEstimateBySymbol] = useState({})
@@ -1746,42 +1394,23 @@ export default function ThemeWatchlist({
     return filteredRows[0]?.symbol || null
   }, [filteredRows, selectedSymbol])
 
-  const selectedTickerChartData = useMemo(() => {
-    if (analyticsMode || !selectedDisplaySymbol) {
-      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
-    }
-    const dailyBars = normalizeChartBars(historyBarsBySymbol[selectedDisplaySymbol] || [])
-    if (!dailyBars.length) {
-      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
-    }
-    const weeklyBars = normalizeChartBars(aggregateWeeklyBars(dailyBars))
-    const avwapOverlays = buildAvwapOverlays(
-      dailyBars,
-      selectedDisplaySymbol,
-      tradeReviewChartSettings,
-      {},
-      new Date(),
-      null
-    )
-    const dailyKeltner = {
-      13: calculateKeltnerChannel(dailyBars, 13, 0.25),
-      34: calculateKeltnerChannel(dailyBars, 34, 0.25),
-      65: calculateKeltnerChannel(dailyBars, 65, 0.25),
-    }
-    const weeklyKeltner = {
-      13: calculateKeltnerChannel(weeklyBars, 13, 0.25),
-      34: calculateKeltnerChannel(weeklyBars, 34, 0.25),
-      65: calculateKeltnerChannel(weeklyBars, 65, 0.25),
-    }
-    return {
-      dailyBars,
-      weeklyBars,
-      benchmarkBars: benchmarkHistoryBars,
-      avwapOverlays,
-      keltnerShades: buildKeltnerShadeBands(dailyKeltner),
-      weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
-    }
-  }, [analyticsMode, benchmarkHistoryBars, historyBarsBySymbol, selectedDisplaySymbol, tradeReviewChartSettings])
+  const {
+    benchmarkHistoryBars,
+    historyBarsBySymbol,
+    loadHistoryUniverse,
+    selectedTickerChartData: rawSelectedTickerChartData,
+  } = useResearchChartUniverse({
+    symbols,
+    selectedSymbol: analyticsMode ? null : selectedDisplaySymbol,
+    latestAnchorDate,
+    rollingRsWindow,
+    rollingLookback: tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50,
+    tradeReviewChartSettings,
+  })
+
+  const selectedTickerChartData = analyticsMode
+    ? { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    : rawSelectedTickerChartData
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize))
   const pagedRows = useMemo(
@@ -1817,99 +1446,6 @@ export default function ThemeWatchlist({
 
   const editingRow = editingSymbol ? rowsBySymbol[editingSymbol] : null
   const selectedRow = selectedDisplaySymbol ? rowsBySymbol[selectedDisplaySymbol] : null
-  const historyUniverseRef = useRef({ key: '', data: null, promise: null })
-
-  const historyPlan = useMemo(() => {
-    const end = new Date()
-    end.setDate(end.getDate() + 1)
-
-    const finraStart = new Date()
-    finraStart.setDate(finraStart.getDate() - 180)
-
-    const rollingBufferDays = Math.max(
-      rollingRsWindow + (tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50) + 30,
-      180
-    )
-    const rollingStart = new Date()
-    rollingStart.setDate(rollingStart.getDate() - rollingBufferDays)
-    const weeklyStart = getWeeklyChartStartDate(end)
-
-    let anchorStart = null
-    if (latestAnchorDate) {
-      anchorStart = new Date(`${latestAnchorDate}T00:00:00Z`)
-      anchorStart.setDate(anchorStart.getDate() - 90)
-    }
-
-    const startCandidates = [finraStart, rollingStart, anchorStart, weeklyStart].filter(Boolean)
-    const start = new Date(Math.min(...startCandidates.map(date => date.getTime())))
-    const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
-    const cacheKey = [
-      symbolsKey,
-      benchmarkSymbol,
-      latestAnchorDate || 'none',
-      rollingRsWindow,
-      tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50,
-      toDateKey(start),
-      toDateKey(end),
-    ].join('|')
-
-    return { benchmarkSymbol, start, end, cacheKey }
-  }, [latestAnchorDate, rollingRsWindow, symbolsKey, tradeReviewChartSettings])
-
-  const loadHistoryUniverse = useCallback(async () => {
-    if (!symbols.length) {
-      setHistoryBarsBySymbol({})
-      setBenchmarkHistoryBars([])
-      return { benchmarkBars: [], symbolBarsBySymbol: {}, errorsBySymbol: {} }
-    }
-
-    const current = historyUniverseRef.current
-    if (current.key === historyPlan.cacheKey && current.data) {
-      setHistoryBarsBySymbol(current.data.symbolBarsBySymbol || {})
-      setBenchmarkHistoryBars(current.data.benchmarkBars || [])
-      return current.data
-    }
-    if (current.key === historyPlan.cacheKey && current.promise) return current.promise
-
-    const promise = (async () => {
-      const benchmarkBars = await fetchHistoryCached(
-        historyPlan.benchmarkSymbol,
-        historyPlan.start,
-        historyPlan.end,
-        { ttlMs: WATCHLIST_HISTORY_TTL_MS }
-      )
-
-      const results = await mapWithConcurrency(symbols, WATCHLIST_HISTORY_CONCURRENCY, async symbol => {
-        try {
-          const bars = await fetchHistoryCached(symbol, historyPlan.start, historyPlan.end, {
-            ttlMs: WATCHLIST_HISTORY_TTL_MS,
-          })
-          return [symbol, { bars, error: '' }]
-        } catch (error) {
-          return [symbol, { bars: [], error: error.message || 'Failed' }]
-        }
-      })
-
-      const symbolBarsBySymbol = {}
-      const errorsBySymbol = {}
-      for (const [symbol, payload] of results) {
-        symbolBarsBySymbol[symbol] = payload.bars
-        if (payload.error) errorsBySymbol[symbol] = payload.error
-      }
-
-      const next = { benchmarkBars, symbolBarsBySymbol, errorsBySymbol }
-      setHistoryBarsBySymbol(symbolBarsBySymbol)
-      setBenchmarkHistoryBars(benchmarkBars)
-      historyUniverseRef.current = { key: historyPlan.cacheKey, data: next, promise: null }
-      return next
-    })().catch(error => {
-      historyUniverseRef.current = { key: '', data: null, promise: null }
-      throw error
-    })
-
-    historyUniverseRef.current = { key: historyPlan.cacheKey, data: null, promise }
-    return promise
-  }, [historyPlan, symbols])
 
   const refreshAnchoredRs = useCallback(async ({ silent = false } = {}) => {
     if (!symbols.length) {
@@ -2514,7 +2050,7 @@ export default function ThemeWatchlist({
               </div>
               <div className="space-y-4">
                 {selectedThemeGroup ? (
-                  <EcosystemCompositeChart
+                  <ResearchMultiTimeframeChart
                     data={selectedEcosystemChartData}
                     chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
                     title={selectedThemeGroup.isMarketLeaders ? 'MARKET LEADERS' : `ECO:${String(selectedThemeGroup.label || '').toUpperCase()}`}
@@ -2957,7 +2493,7 @@ export default function ThemeWatchlist({
           </div>
 
           {selectedRow ? (
-            <EcosystemCompositeChart
+            <ResearchMultiTimeframeChart
               data={selectedTickerChartData}
               chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
               title={selectedRow.symbol}

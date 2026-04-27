@@ -28,6 +28,7 @@ const Journal            = lazy(() => import('./components/journal/Journal.jsx')
 const AIFeedback         = lazy(() => import('./components/ai/AIFeedback.jsx'))
 const Settings           = lazy(() => import('./components/settings/Settings.jsx'))
 const TradeReview        = lazy(() => import('./components/chartreview/TradeReview.jsx'))
+const Charts             = lazy(() => import('./components/charts/Charts.jsx'))
 const Morning            = lazy(() => import('./components/morning/Morning.jsx'))
 const RRGPage            = lazy(() => import('./components/rrg/RRGPage.jsx'))
 const EdgeLab            = lazy(() => import('./components/edgelab/EdgeLab.jsx'))
@@ -168,7 +169,7 @@ export default function App() {
           onOpenReminder={() => setReminderOpenSignal(v => v + 1)}
         />
 
-        <main className={`flex-1 ${page === 'rrg' ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+        <main className={`flex-1 ${(page === 'rrg' || page === 'charts') ? 'overflow-hidden' : 'overflow-y-auto'}`}>
           <PageErrorBoundary key={page}>
             <Suspense fallback={<PageLoader />}>
               {page === 'dashboard'   && <Dashboard    {...pageProps} />}
@@ -176,6 +177,7 @@ export default function App() {
               {page === 'risk'        && <RiskPanel     {...pageProps} />}
               {page === 'analytics'   && <Analytics     {...pageProps} />}
               {page === 'chartreview' && <TradeReview   {...pageProps} />}
+              {page === 'charts'      && <Charts />}
               {page === 'morning'     && <Morning />}
               {page === 'journal'     && <Journal       {...pageProps} />}
               {page === 'ai'          && <AIFeedback    {...pageProps} />}
