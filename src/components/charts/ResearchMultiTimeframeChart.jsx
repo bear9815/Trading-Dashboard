@@ -21,6 +21,7 @@ import { sliceWeeklyChartBars } from '../../utils/chartTimeframes.js'
 const CHART_UP_COLOR = '#2877e3'
 const CHART_DOWN_COLOR = '#ea4ce7'
 const DAILY_RANGE_OPTIONS = [6, 10]
+const TEN_MONTH_BAR_REDUCTION = 5
 
 const CHART_OPTIONS = {
   layout: {
@@ -53,12 +54,18 @@ function countVisibleBarsForMonths(bars, months) {
   if (!(lastDate instanceof Date) || Number.isNaN(lastDate?.getTime?.())) return bars.length
   const cutoff = new Date(lastDate)
   cutoff.setMonth(cutoff.getMonth() - months)
+  const visibleBars = bars.filter(bar => {
+    const barDate = bar?.time ? new Date(`${bar.time}T00:00:00Z`) : null
+    return barDate instanceof Date && !Number.isNaN(barDate?.getTime?.()) && barDate >= cutoff
+  }).length
+
+  const adjustedVisibleBars = months === 10
+    ? visibleBars - TEN_MONTH_BAR_REDUCTION
+    : visibleBars
+
   return Math.max(
     MIN_LIGHTWEIGHT_VISIBLE_BARS,
-    bars.filter(bar => {
-      const barDate = bar?.time ? new Date(`${bar.time}T00:00:00Z`) : null
-      return barDate instanceof Date && !Number.isNaN(barDate?.getTime?.()) && barDate >= cutoff
-    }).length
+    adjustedVisibleBars
   )
 }
 
@@ -94,16 +101,16 @@ function drawShadeBands(canvas, chart, priceSeries, bands) {
   }
 }
 
-function LightweightPane({ data, kind, height, chartType, dailyRangeMonths = 6 }) {
+function LightweightPane({ data, kind, height, chartType, dailyRangeMonths = 6, rightOffset, className = '' }) {
   const chartContainerRef = useRef(null)
   const shadeCanvasRef = useRef(null)
 
   useEffect(() => {
     if (!chartContainerRef.current) return undefined
-    const rightOffset = kind === 'weekly' ? WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET : DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET
+    const resolvedRightOffset = rightOffset ?? (kind === 'weekly' ? WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET : DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET)
     const chart = createChart(chartContainerRef.current, {
       ...CHART_OPTIONS,
-      height,
+      height: height ?? chartContainerRef.current.clientHeight,
       width: chartContainerRef.current.clientWidth,
     })
     const candles = kind === 'weekly' ? sliceWeeklyChartBars(data.weeklyBars) : data.dailyBars
@@ -178,9 +185,9 @@ function LightweightPane({ data, kind, height, chartType, dailyRangeMonths = 6 }
 
     if (kind === 'daily') {
       const visibleBars = countVisibleBarsForMonths(candles, dailyRangeMonths)
-      applyRightAnchoredLogicalRange(chart, candles.length, visibleBars, rightOffset)
+      applyRightAnchoredLogicalRange(chart, candles.length, visibleBars, resolvedRightOffset)
     } else {
-      fitContentWithRightOffset(chart, rightOffset)
+      fitContentWithRightOffset(chart, resolvedRightOffset)
     }
 
     redraw()
@@ -194,22 +201,22 @@ function LightweightPane({ data, kind, height, chartType, dailyRangeMonths = 6 }
       const logicalRange = getVisibleLogicalRange(chart)
       const currentSpan = Math.max(
         MIN_LIGHTWEIGHT_VISIBLE_BARS,
-        Math.ceil((logicalRange?.to ?? candles.length + rightOffset) - (logicalRange?.from ?? 0))
+        Math.ceil((logicalRange?.to ?? candles.length + resolvedRightOffset) - (logicalRange?.from ?? 0))
       )
       const zoomFactor = event.deltaY < 0 ? 0.88 : 1.14
-      const maxVisibleBars = Math.max(MIN_LIGHTWEIGHT_VISIBLE_BARS, candles.length + rightOffset)
+      const maxVisibleBars = Math.max(MIN_LIGHTWEIGHT_VISIBLE_BARS, candles.length + resolvedRightOffset)
       const nextVisibleBars = Math.min(
         maxVisibleBars,
         Math.max(MIN_LIGHTWEIGHT_VISIBLE_BARS, Math.round(currentSpan * zoomFactor))
       )
-      applyRightAnchoredLogicalRange(chart, candles.length, nextVisibleBars, rightOffset)
+      applyRightAnchoredLogicalRange(chart, candles.length, nextVisibleBars, resolvedRightOffset)
       redraw()
     }
 
     chartContainerRef.current.addEventListener('wheel', handleWheel, { passive: false, capture: true })
 
     const resizeObserver = new ResizeObserver(([entry]) => {
-      chart.applyOptions({ width: Math.floor(entry.contentRect.width), height })
+      chart.applyOptions({ width: Math.floor(entry.contentRect.width), height: Math.floor(entry.contentRect.height) })
       redraw()
     })
     resizeObserver.observe(chartContainerRef.current)
@@ -220,10 +227,10 @@ function LightweightPane({ data, kind, height, chartType, dailyRangeMonths = 6 }
       resizeObserver.disconnect()
       chart.remove()
     }
-  }, [chartType, dailyRangeMonths, data, height, kind])
+  }, [chartType, dailyRangeMonths, data, height, kind, rightOffset])
 
   return (
-    <div className="relative w-full" style={{ height }}>
+    <div className={`relative w-full ${className}`} style={height ? { height } : undefined}>
       <div ref={chartContainerRef} className="absolute inset-0" />
       <canvas ref={shadeCanvasRef} className="pointer-events-none absolute inset-0 z-10 h-full w-full" aria-hidden="true" />
     </div>
@@ -244,11 +251,14 @@ export default function ResearchMultiTimeframeChart({
   emptyLabel = 'No chart data for this ecosystem',
   weeklyHeight = 190,
   dailyHeight = 350,
+  weeklyRightOffset,
+  dailyRightOffset,
+  fillAvailableHeight = false,
   className = '',
 }) {
   const hasBars = data?.dailyBars?.length
   return (
-    <div className={`rounded-lg overflow-hidden border border-black/20 bg-[#d7d7d7] shadow-sm ${className}`}>
+    <div className={`rounded-lg overflow-hidden border border-black/20 bg-[#d7d7d7] shadow-sm ${fillAvailableHeight ? 'h-full flex flex-col' : ''} ${className}`}>
       <div className="px-2 py-1.5 border-b border-black/15 text-[#242830]">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -292,17 +302,33 @@ export default function ResearchMultiTimeframeChart({
       {!hasBars ? (
         <div className="h-[520px] flex items-center justify-center text-xs text-[#505760]">{emptyLabel}</div>
       ) : (
-        <div>
-          <div className="relative border-b-4 border-[#242424]">
+        <div className={fillAvailableHeight ? 'flex min-h-0 flex-1 flex-col' : ''}>
+          <div className={`relative border-b-4 border-[#242424] ${fillAvailableHeight ? 'min-h-[180px] basis-[34%]' : ''}`}>
             <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1W</span>
-            <LightweightPane data={data} kind="weekly" height={weeklyHeight} chartType={chartType} dailyRangeMonths={dailyRangeMonths} />
+            <LightweightPane
+              data={data}
+              kind="weekly"
+              height={fillAvailableHeight ? undefined : weeklyHeight}
+              chartType={chartType}
+              dailyRangeMonths={dailyRangeMonths}
+              rightOffset={weeklyRightOffset}
+              className={fillAvailableHeight ? 'h-full' : ''}
+            />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
               {title}
             </div>
           </div>
-          <div className="relative">
+          <div className={`relative ${fillAvailableHeight ? 'min-h-[280px] flex-1' : ''}`}>
             <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1D</span>
-            <LightweightPane data={data} kind="daily" height={dailyHeight} chartType={chartType} dailyRangeMonths={dailyRangeMonths} />
+            <LightweightPane
+              data={data}
+              kind="daily"
+              height={fillAvailableHeight ? undefined : dailyHeight}
+              chartType={chartType}
+              dailyRangeMonths={dailyRangeMonths}
+              rightOffset={dailyRightOffset}
+              className={fillAvailableHeight ? 'h-full' : ''}
+            />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
               {title}
             </div>

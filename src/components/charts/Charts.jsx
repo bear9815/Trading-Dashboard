@@ -8,6 +8,13 @@ import { useResearchChartUniverse } from './useResearchChartUniverse.js'
 
 const WATCHLIST_ORDER = { [MARKET_LEADERS_LIST_ID]: 0, [WATCHLIST_LIST_ID]: 1 }
 const DAILY_RANGE_OPTIONS = [6, 10]
+const CHARTS_RIGHT_OFFSET = 3
+
+function isTypingTarget(target) {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable
+}
 
 export default function Charts() {
   const { activeListId, listsById, setActiveList } = useResearchWatchlistStore()
@@ -84,6 +91,49 @@ export default function Charts() {
     }
   }, [loadHistoryUniverse, symbols.length])
 
+  useEffect(() => {
+    if (!filteredRows.length) return undefined
+
+    const handleKeydown = (event) => {
+      if (isTypingTarget(event.target)) return
+      const currentIndex = filteredRows.findIndex(row => row.symbol === selectedDisplaySymbol)
+
+      if (event.code === 'Space') {
+        event.preventDefault()
+        const nextIndex = event.shiftKey
+          ? (currentIndex <= 0 ? filteredRows.length - 1 : currentIndex - 1)
+          : (currentIndex < 0 || currentIndex >= filteredRows.length - 1 ? 0 : currentIndex + 1)
+        const nextSymbol = filteredRows[nextIndex]?.symbol
+        if (nextSymbol) setSelectedSymbol(nextSymbol)
+        return
+      }
+
+      if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+        event.preventDefault()
+        const nextIndex = currentIndex < 0 || currentIndex >= filteredRows.length - 1 ? 0 : currentIndex + 1
+        const nextSymbol = filteredRows[nextIndex]?.symbol
+        if (nextSymbol) setSelectedSymbol(nextSymbol)
+        return
+      }
+
+      if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+        event.preventDefault()
+        const nextIndex = currentIndex <= 0 ? filteredRows.length - 1 : currentIndex - 1
+        const nextSymbol = filteredRows[nextIndex]?.symbol
+        if (nextSymbol) setSelectedSymbol(nextSymbol)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeydown)
+    return () => window.removeEventListener('keydown', handleKeydown)
+  }, [filteredRows, selectedDisplaySymbol])
+
+  useEffect(() => {
+    if (!selectedDisplaySymbol) return
+    const selectedRow = document.querySelector(`[data-chart-watchlist-row="${selectedDisplaySymbol}"]`)
+    selectedRow?.scrollIntoView?.({ block: 'nearest' })
+  }, [selectedDisplaySymbol])
+
   const toggleYtd = () => {
     const nextPresets = (tradeReviewChartSettings?.avwapPresets || []).map(preset =>
       preset.id === 'ytd' ? { ...preset, enabled: !preset.enabled } : preset
@@ -116,8 +166,9 @@ export default function Charts() {
               chartLabel={selectedRow?.companyName || 'Ticker Chart'}
               badgeLabel={activeList?.name || 'Watchlist'}
               emptyLabel={loadingHistory ? 'Loading chart history…' : 'No chart data for this ticker'}
-              weeklyHeight={Math.max(220, typeof window !== 'undefined' ? Math.floor(window.innerHeight * 0.29) : 250)}
-              dailyHeight={Math.max(360, typeof window !== 'undefined' ? Math.floor(window.innerHeight * 0.45) : 390)}
+              weeklyRightOffset={CHARTS_RIGHT_OFFSET}
+              dailyRightOffset={CHARTS_RIGHT_OFFSET}
+              fillAvailableHeight
               className="h-full"
             />
           )}
@@ -180,6 +231,7 @@ export default function Charts() {
                     key={row.symbol}
                     type="button"
                     onClick={() => setSelectedSymbol(row.symbol)}
+                    data-chart-watchlist-row={row.symbol}
                     className={`flex w-full items-start gap-3 border-b border-white/[0.05] px-4 py-3 text-left transition-colors ${
                       active ? 'bg-accent-blue/10' : 'hover:bg-white/[0.03]'
                     }`}
