@@ -170,3 +170,21 @@ const filteredByQuery = filterAndSortWatchlistRows({
 })
 
 assert.deepEqual(filteredByQuery.map(row => row.symbol), ['CCC', 'DDD'])
+
+const rollingSorted = filterAndSortWatchlistRows({
+  rows,
+  query: '',
+  sortKey: 'rollingRs',
+  sortDir: 'desc',
+  rankBySymbol,
+  fitBySymbol: fitMap,
+  fitFilter: 'all',
+  rollingRsBySymbol: {
+    AAA: { zScore: 1.2 },
+    BBB: { zScore: 4.4 },
+    CCC: { zScore: -0.5 },
+    DDD: { zScore: 2.1 },
+  },
+})
+
+assert.deepEqual(rollingSorted.map(row => row.symbol), ['BBB', 'DDD', 'AAA', 'CCC'])

@@ -143,6 +143,16 @@ function arrayText(value) {
   return Array.isArray(value) ? value.join(', ') : String(value || '')
 }
 
+function numericSortValue(row, sortKey, snapshots) {
+  const symbol = row.symbol
+  if (sortKey === 'anchoredRs') return snapshots.anchoredRsBySymbol?.[symbol]?.zScore
+  if (sortKey === 'rollingRs') return snapshots.rollingRsBySymbol?.[symbol]?.zScore
+  if (sortKey === 'ytdAvwap') return snapshots.ytdAvwapBySymbol?.[symbol]?.distancePct
+  if (sortKey === 'finraShortInterest') return snapshots.finraBySymbol?.[symbol]?.shortInterest
+  if (sortKey === 'finraEstimatedShortInterest') return snapshots.finraEstimateBySymbol?.[symbol]?.estimatedShortInterest
+  return null
+}
+
 export function filterAndSortWatchlistRows({
   rows = [],
   query = '',
@@ -151,6 +161,11 @@ export function filterAndSortWatchlistRows({
   rankBySymbol = {},
   fitBySymbol = {},
   fitFilter = 'all',
+  anchoredRsBySymbol = {},
+  rollingRsBySymbol = {},
+  ytdAvwapBySymbol = {},
+  finraBySymbol = {},
+  finraEstimateBySymbol = {},
 } = {}) {
   const base = rows
     .filter(row => matchesQuery(row, query))
@@ -165,6 +180,16 @@ export function filterAndSortWatchlistRows({
 
     if (sortKey === 'fit') {
       return compareFitRows(a, b, fitBySymbol, rankBySymbol, sortDir)
+    }
+
+    const numericSnapshots = { anchoredRsBySymbol, rollingRsBySymbol, ytdAvwapBySymbol, finraBySymbol, finraEstimateBySymbol }
+    const an = numericSortValue(a, sortKey, numericSnapshots)
+    const bn = numericSortValue(b, sortKey, numericSnapshots)
+    if (Number.isFinite(an) || Number.isFinite(bn)) {
+      const av = Number.isFinite(an) ? an : Number.NEGATIVE_INFINITY
+      const bv = Number.isFinite(bn) ? bn : Number.NEGATIVE_INFINITY
+      if (av !== bv) return sortDir === 'asc' ? av - bv : bv - av
+      return a.symbol.localeCompare(b.symbol)
     }
 
     const av = arrayText(a[sortKey]).toLowerCase()

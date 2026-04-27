@@ -23,12 +23,13 @@ const DEFAULT_LISTS = {
     hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
     activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
     controlsCollapsed: true,
+    collapsedPanels: {},
     themeAnalyticsHistory: { theme: [], ecosystem: [] },
     lastUpdated: null,
   },
   [WATCHLIST_LIST_ID]: {
     id: WATCHLIST_LIST_ID,
-    name: 'Watchlist',
+    name: 'Liquid',
     symbols: [],
     rowsBySymbol: {},
     savedViews: [],
@@ -36,6 +37,7 @@ const DEFAULT_LISTS = {
     hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
     activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
     controlsCollapsed: true,
+    collapsedPanels: {},
     themeAnalyticsHistory: { theme: [], ecosystem: [] },
     lastUpdated: null,
   },
@@ -60,11 +62,19 @@ function makeListPatch(list, patch = {}) {
     hiddenColumns: hasPatch('hiddenColumns') ? patch.hiddenColumns : (list.hiddenColumns ?? [...DEFAULT_COLUMN_PRESET.hiddenColumns]),
     activeColumnPreset: hasPatch('activeColumnPreset') ? patch.activeColumnPreset : (list.activeColumnPreset ?? DEFAULT_COLUMN_PRESET.presetKey),
     controlsCollapsed: hasPatch('controlsCollapsed') ? patch.controlsCollapsed : (list.controlsCollapsed ?? true),
+    collapsedPanels: hasPatch('collapsedPanels') ? (patch.collapsedPanels || {}) : (list.collapsedPanels ?? {}),
     themeAnalyticsHistory: hasPatch('themeAnalyticsHistory')
       ? normalizeThemeAnalyticsHistory(patch.themeAnalyticsHistory)
       : (list.themeAnalyticsHistory ?? { theme: [], ecosystem: [] }),
     lastUpdated: hasPatch('lastUpdated') ? patch.lastUpdated : (list.lastUpdated ?? null),
   }
+}
+
+function normalizeListLabel(list) {
+  if (list?.id === WATCHLIST_LIST_ID && list.name === 'Watchlist') {
+    return { ...list, name: 'Liquid' }
+  }
+  return list
 }
 
 function updateActiveList(state, updater) {
@@ -90,14 +100,14 @@ function ensureWorkspaceShape(state) {
 
   if (state?.listsById) {
     const listsById = {
-      [MARKET_LEADERS_LIST_ID]: makeListPatch(
+      [MARKET_LEADERS_LIST_ID]: normalizeListLabel(makeListPatch(
         DEFAULT_LISTS[MARKET_LEADERS_LIST_ID],
         state.listsById[MARKET_LEADERS_LIST_ID] || {}
-      ),
-      [WATCHLIST_LIST_ID]: makeListPatch(
+      )),
+      [WATCHLIST_LIST_ID]: normalizeListLabel(makeListPatch(
         DEFAULT_LISTS[WATCHLIST_LIST_ID],
         state.listsById[WATCHLIST_LIST_ID] || {}
-      ),
+      )),
     }
     return { activeListId, listsById }
   }
@@ -200,6 +210,13 @@ export const useResearchWatchlistStore = create(
 
       setControlsCollapsed: (controlsCollapsed) => set(state => updateActiveList(state, () => ({
         controlsCollapsed,
+      }))),
+
+      setPanelCollapsed: (panelId, collapsed) => set(state => updateActiveList(state, current => ({
+        collapsedPanels: {
+          ...(current.collapsedPanels || {}),
+          [panelId]: !!collapsed,
+        },
       }))),
 
       saveThemeAnalyticsSnapshot: ({ groupingMode, snapshotDate, groups } = {}) => set(state => updateActiveList(state, current => {

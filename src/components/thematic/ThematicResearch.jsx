@@ -293,6 +293,34 @@ function AlphaEdge({ text }) {
 // ── New feature sub-components ────────────────────────────────────────────────
 
 function OverviewTab({ d }) {
+  const [purePlaySort, setPurePlaySort] = useState({ key: 'rank', dir: 'asc' })
+  const purePlays = useMemo(() => {
+    const rows = [1, 2, 3, 4, 5].map(i => {
+      const ticker = d[`Pure Play #${i} Ticker`]
+      if (!ticker) return null
+      return {
+        rank: i,
+        ticker,
+        company: d[`Pure Play #${i} Name`] || '',
+        marketCap: d[`Pure Play #${i} Market Cap`] || '',
+        exposure: d[`Pure Play #${i} Tailwind Exposure`]?.replace(/\*\*/g, '') || '',
+        thesis: d[`Pure Play #${i} Thesis`]?.replace(/\*\*/g, '') || '',
+      }
+    }).filter(Boolean)
+    return rows.sort((a, b) => {
+      const av = a[purePlaySort.key]
+      const bv = b[purePlaySort.key]
+      const direction = purePlaySort.dir === 'asc' ? 1 : -1
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * direction
+      return String(av || '').localeCompare(String(bv || '')) * direction
+    })
+  }, [d, purePlaySort])
+  const handlePurePlaySort = key => {
+    setPurePlaySort(prev => prev.key === key
+      ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+      : { key, dir: key === 'rank' ? 'asc' : 'desc' })
+  }
+
   return (
     <div className="space-y-5">
       <div>
@@ -303,18 +331,36 @@ function OverviewTab({ d }) {
         <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Ecosystem — Pure Plays</div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead><tr className="border-b border-white/10">{['#','Ticker','Company','Mkt Cap','Exposure','Thesis'].map(h=><th key={h} className="text-left py-1.5 px-2 text-gray-500 font-medium text-xs uppercase tracking-wider">{h}</th>)}</tr></thead>
+            <thead>
+              <tr className="border-b border-white/10">
+                {[
+                  ['rank', '#'],
+                  ['ticker', 'Ticker'],
+                  ['company', 'Company'],
+                  ['marketCap', 'Mkt Cap'],
+                  ['exposure', 'Exposure'],
+                  ['thesis', 'Thesis'],
+                ].map(([key, label]) => (
+                  <th key={key} className="text-left py-1.5 px-2 text-gray-500 font-medium text-xs uppercase tracking-wider">
+                    <button type="button" onClick={() => handlePurePlaySort(key)} className="inline-flex items-center gap-1 hover:text-gray-300">
+                      {label}
+                      {purePlaySort.key === key && <span className="text-accent-blue">{purePlaySort.dir === 'asc' ? '↑' : '↓'}</span>}
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
             <tbody>
-              {[1,2,3,4,5].map(i => { const tk=d[`Pure Play #${i} Ticker`]; if(!tk) return null; return (
-                <tr key={i} className="border-b border-white/5 hover:bg-white/[0.03]">
-                  <td className="py-1.5 px-2 text-gray-600">{i}</td>
-                  <td className="py-1.5 px-2 font-bold text-accent-blue">{tk}</td>
-                  <td className="py-1.5 px-2 text-gray-300">{d[`Pure Play #${i} Name`]}</td>
-                  <td className="py-1.5 px-2 text-gray-500 whitespace-nowrap">{d[`Pure Play #${i} Market Cap`]}</td>
-                  <td className="py-1.5 px-2 text-gray-400 max-w-[160px] text-xs">{d[`Pure Play #${i} Tailwind Exposure`]?.replace(/\*\*/g,'')}</td>
-                  <td className="py-1.5 px-2 text-gray-400 max-w-[200px] text-xs">{d[`Pure Play #${i} Thesis`]?.replace(/\*\*/g,'')}</td>
+              {purePlays.map(row => (
+                <tr key={row.rank} className="border-b border-white/5 hover:bg-white/[0.03]">
+                  <td className="py-1.5 px-2 text-gray-600">{row.rank}</td>
+                  <td className="py-1.5 px-2 font-bold text-accent-blue">{row.ticker}</td>
+                  <td className="py-1.5 px-2 text-gray-300">{row.company}</td>
+                  <td className="py-1.5 px-2 text-gray-500 whitespace-nowrap">{row.marketCap}</td>
+                  <td className="py-1.5 px-2 text-gray-400 max-w-[160px] text-xs">{row.exposure}</td>
+                  <td className="py-1.5 px-2 text-gray-400 max-w-[200px] text-xs">{row.thesis}</td>
                 </tr>
-              )})}
+              ))}
             </tbody>
           </table>
         </div>

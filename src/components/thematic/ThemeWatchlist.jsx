@@ -97,6 +97,10 @@ const EMPTY_ROW = {
 
 const WATCHLIST_HISTORY_TTL_MS = 6 * 60 * 60 * 1000
 const WATCHLIST_HISTORY_CONCURRENCY = 8
+const CHART_UP_COLOR = '#2877e3'
+const CHART_DOWN_COLOR = '#ea4ce7'
+const WATCHLIST_SUMMARY_PANEL_ID = 'watchlist-summary'
+const WATCHLIST_CONTEXT_PANEL_ID = 'watchlist-context'
 
 function toDateKey(value) {
   return new Date(value).toISOString().slice(0, 10)
@@ -120,7 +124,7 @@ function normalizeChartBars(bars = []) {
         return null
       }
       const rising = close >= open
-      const color = rising ? '#16a34a' : '#dc2626'
+      const color = rising ? CHART_UP_COLOR : CHART_DOWN_COLOR
       return {
         time,
         open,
@@ -460,6 +464,29 @@ function GroupList({ title, items, empty }) {
   )
 }
 
+function CollapsibleSection({ title, description, collapsed = false, onToggle, children }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02]">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.02]"
+      >
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-gray-500">{title}</p>
+          {description && <p className="mt-1 text-xs text-gray-600">{description}</p>}
+        </div>
+        {collapsed ? <ChevronDown size={16} className="text-gray-500" /> : <ChevronUp size={16} className="text-gray-500" />}
+      </button>
+      {!collapsed && (
+        <div className="border-t border-white/[0.06] p-4">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function formatMetric(value, suffix = '', decimals = 1) {
   if (!Number.isFinite(value)) return '—'
   return `${value >= 0 ? '+' : ''}${value.toFixed(decimals)}${suffix}`
@@ -566,18 +593,20 @@ function EcosystemLightweightPane({ data, kind, height, chartType }) {
       chartType === 'hlc' ? BarSeries : CandlestickSeries,
       chartType === 'hlc'
         ? {
-            upColor: '#2877e3',
-            downColor: '#ea4ce7',
+            upColor: CHART_UP_COLOR,
+            downColor: CHART_DOWN_COLOR,
             openVisible: false,
             thinBars: false,
             priceLineVisible: false,
           }
         : {
-            upColor: '#2877e3',
-            downColor: '#ea4ce7',
+            upColor: CHART_UP_COLOR,
+            downColor: CHART_DOWN_COLOR,
+            borderUpColor: CHART_UP_COLOR,
+            borderDownColor: CHART_DOWN_COLOR,
             borderVisible: true,
-            wickUpColor: '#2877e3',
-            wickDownColor: '#ea4ce7',
+            wickUpColor: CHART_UP_COLOR,
+            wickDownColor: CHART_DOWN_COLOR,
             priceLineVisible: false,
           }
     )
@@ -594,7 +623,7 @@ function EcosystemLightweightPane({ data, kind, height, chartType }) {
         data.dailyBars.map(bar => ({
           time: bar.time,
           value: bar.volume,
-          color: bar.close >= bar.open ? '#2877e3' : '#ea4ce7',
+          color: bar.close >= bar.open ? CHART_UP_COLOR : CHART_DOWN_COLOR,
         }))
       )
       volumeSeries.priceScale().applyOptions({
@@ -851,7 +880,7 @@ function RowEditor({ row, onSave, onClose }) {
       <div className="relative w-full max-w-3xl rounded-2xl bg-surface border border-white/10 shadow-2xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
           <div>
-            <p className="text-sm font-semibold text-white">Edit Watchlist Row</p>
+            <p className="text-sm font-semibold text-white">Edit List Row</p>
             <p className="text-xs text-gray-600">Manual overrides let you refine the AI map.</p>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
@@ -928,6 +957,7 @@ export default function ThemeWatchlist({
     removeView,
     updateColumnLayout,
     setControlsCollapsed,
+    setPanelCollapsed,
     saveThemeAnalyticsSnapshot,
     clear,
   } = useResearchWatchlistStore()
@@ -941,6 +971,7 @@ export default function ThemeWatchlist({
   const hiddenColumns = activeList?.hiddenColumns || []
   const activeColumnPreset = activeList?.activeColumnPreset || 'compact'
   const controlsCollapsed = activeList?.controlsCollapsed ?? true
+  const collapsedPanels = activeList?.collapsedPanels || {}
   const themeAnalyticsHistory = activeList?.themeAnalyticsHistory || { theme: [], ecosystem: [] }
   const watchlists = useMemo(
     () => Object.values(listsById || {}).sort((a, b) => {
@@ -963,6 +994,8 @@ export default function ThemeWatchlist({
   const [draggedColumnId, setDraggedColumnId] = useState(null)
   const themeGrouping = 'theme'
   const [themeSortMode, setThemeSortMode] = useState('strength')
+  const [ecosystemSortKey, setEcosystemSortKey] = useState('strength')
+  const [ecosystemSortDir, setEcosystemSortDir] = useState('desc')
   const [selectedThemeGroupKey, setSelectedThemeGroupKey] = useState('')
   const [anchoredRsBySymbol, setAnchoredRsBySymbol] = useState({})
   const [rollingRsBySymbol, setRollingRsBySymbol] = useState({})
@@ -1088,17 +1121,31 @@ export default function ThemeWatchlist({
   const sortedThemeGroups = useMemo(() => {
     const marketLeadersGroup = activeThemeGroups.find(group => group.isMarketLeaders)
     const groups = activeThemeGroups.filter(group => !group.isMarketLeaders)
-    const sortedGroups = (() => {
-      if (themeSortMode === 'breadth') {
-        return groups.sort((a, b) => (b.greenPct - a.greenPct) || (b.rollingAboveSignalPct - a.rollingAboveSignalPct) || b.count - a.count)
+    const valueForSort = group => {
+      if (ecosystemSortKey === 'ecosystem') return group.label || ''
+      if (ecosystemSortKey === 'members') return group.count
+      if (ecosystemSortKey === 'rolling') return group.avgRollingZ
+      if (ecosystemSortKey === 'anchored') return group.avgAnchoredZ
+      if (ecosystemSortKey === 'greenPct') return group.greenPct
+      if (ecosystemSortKey === 'aboveSignal') return group.rollingAboveSignalPct
+      if (ecosystemSortKey === 'leaderSpread') return group.leaderSpread
+      if (ecosystemSortKey === 'status') return group.healthLabel || ''
+      return group.currentStrengthScore
+    }
+    const sortedGroups = groups.sort((a, b) => {
+      const av = valueForSort(a)
+      const bv = valueForSort(b)
+      const direction = ecosystemSortDir === 'asc' ? 1 : -1
+      if (typeof av === 'string' || typeof bv === 'string') {
+        return String(av).localeCompare(String(bv)) * direction
       }
-      if (themeSortMode === 'narrow') {
-        return groups.sort((a, b) => (b.leaderSpread ?? -Infinity) - (a.leaderSpread ?? -Infinity) || (b.currentStrengthScore ?? -Infinity) - (a.currentStrengthScore ?? -Infinity))
-      }
-      return groups.sort((a, b) => (b.currentStrengthScore ?? -Infinity) - (a.currentStrengthScore ?? -Infinity) || b.count - a.count)
-    })()
+      const an = Number.isFinite(av) ? av : Number.NEGATIVE_INFINITY
+      const bn = Number.isFinite(bv) ? bv : Number.NEGATIVE_INFINITY
+      if (an !== bn) return (an - bn) * direction
+      return (b.currentStrengthScore ?? -Infinity) - (a.currentStrengthScore ?? -Infinity) || a.label.localeCompare(b.label)
+    })
     return marketLeadersGroup ? [marketLeadersGroup, ...sortedGroups] : sortedGroups
-  }, [activeThemeGroups, themeSortMode])
+  }, [activeThemeGroups, ecosystemSortDir, ecosystemSortKey])
 
   const themeRotationGroups = useMemo(
     () => buildThemeRotationMetrics({
@@ -1414,8 +1461,13 @@ export default function ThemeWatchlist({
       rankBySymbol,
       fitBySymbol,
       fitFilter,
+      anchoredRsBySymbol,
+      rollingRsBySymbol,
+      ytdAvwapBySymbol,
+      finraBySymbol,
+      finraEstimateBySymbol,
     })
-  }, [rows, selectedThemeGroupKey, themeGrouping, query, sortKey, sortDir, rankBySymbol, fitBySymbol, fitFilter])
+  }, [anchoredRsBySymbol, finraBySymbol, finraEstimateBySymbol, fitBySymbol, fitFilter, query, rankBySymbol, rollingRsBySymbol, rows, selectedThemeGroupKey, sortDir, sortKey, themeGrouping, ytdAvwapBySymbol])
 
   const selectedDisplaySymbol = useMemo(() => {
     if (selectedSymbol && filteredRows.some(row => row.symbol === selectedSymbol)) return selectedSymbol
@@ -1830,6 +1882,18 @@ export default function ThemeWatchlist({
     setPage(1)
   }
 
+  function handleEcosystemSort(nextKey) {
+    setEcosystemSortKey(prev => {
+      if (prev === nextKey) {
+        setEcosystemSortDir(dir => dir === 'asc' ? 'desc' : 'asc')
+        return prev
+      }
+      setEcosystemSortDir(nextKey === 'ecosystem' || nextKey === 'status' ? 'asc' : 'desc')
+      return nextKey
+    })
+    setThemeSortMode(nextKey === 'greenPct' ? 'breadth' : nextKey === 'leaderSpread' ? 'narrow' : nextKey === 'strength' ? 'strength' : 'custom')
+  }
+
   function handleImport() {
     const parsed = parseImportedSymbols(input)
     if (!parsed.length) {
@@ -1941,7 +2005,7 @@ export default function ThemeWatchlist({
         <Table2 size={14} className="text-accent-blue" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-white">
-            {analyticsMode ? `${activeList?.name || 'Watchlist'} Ecosystem Rotation` : `${activeList?.name || 'Watchlist'} Relationship Map`}
+            {analyticsMode ? `${activeList?.name || 'Liquid'} Ecosystem Rotation` : `${activeList?.name || 'Liquid'} Relationship Map`}
           </p>
           <p className="text-xs text-gray-600">
             {analyticsMode
@@ -1996,7 +2060,7 @@ export default function ThemeWatchlist({
                 <div className="flex xl:flex-col gap-2">
                   <button onClick={handleImport} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/15 border border-accent-blue/25 text-accent-blue text-sm font-medium hover:bg-accent-blue/20 transition-all"><Upload size={13} />Import</button>
                   <button onClick={() => fileRef.current?.click()} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all"><Upload size={13} />CSV</button>
-                  <button onClick={handleAnalyze} disabled={loading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />{rows.length ? 'Refresh Map' : 'Map Watchlist'}</button>
+                  <button onClick={handleAnalyze} disabled={loading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />{rows.length ? 'Refresh Map' : 'Map List'}</button>
                   <button onClick={refreshAnchoredRs} disabled={anchoredRsLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/12 border border-accent-blue/20 text-accent-blue text-sm font-medium hover:bg-accent-blue/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={anchoredRsLoading ? 'animate-pulse' : ''} />{anchoredRsLoading ? 'RS…' : 'Anchored RS'}</button>
                   <button onClick={refreshRollingRs} disabled={rollingRsLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={rollingRsLoading ? 'animate-pulse' : ''} />{rollingRsLoading ? 'Rolling…' : 'Rolling RS'}</button>
                   <button onClick={refreshYtdAvwap} disabled={ytdAvwapLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-yellow/12 border border-accent-yellow/20 text-accent-yellow text-sm font-medium hover:bg-accent-yellow/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={ytdAvwapLoading ? 'animate-pulse' : ''} />{ytdAvwapLoading ? 'AVWAP…' : 'YTD AVWAP'}</button>
@@ -2055,7 +2119,11 @@ export default function ThemeWatchlist({
                   {THEME_SORT_OPTIONS.map(([value, label]) => (
                     <button
                       key={value}
-                      onClick={() => setThemeSortMode(value)}
+                      onClick={() => {
+                        setThemeSortMode(value)
+                        setEcosystemSortKey(value === 'breadth' ? 'greenPct' : value === 'narrow' ? 'leaderSpread' : 'strength')
+                        setEcosystemSortDir('desc')
+                      }}
                       className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
                         themeSortMode === value
                           ? 'bg-accent-green/15 border-accent-green/25 text-accent-green'
@@ -2105,15 +2173,30 @@ export default function ThemeWatchlist({
                     <table className="w-full min-w-[920px] text-sm">
                       <thead className="bg-white/[0.03] text-[11px] uppercase tracking-wider text-gray-500">
                         <tr>
-                          <th className="px-3 py-2 text-left">Ecosystem</th>
-                          <th className="px-3 py-2 text-left">Members</th>
-                          <th className="px-3 py-2 text-left">Strength</th>
-                          <th className="px-3 py-2 text-left">Rolling</th>
-                          <th className="px-3 py-2 text-left">Anchored</th>
-                          <th className="px-3 py-2 text-left">% Green</th>
-                          <th className="px-3 py-2 text-left">% Above Signal</th>
-                          <th className="px-3 py-2 text-left">Leader Spread</th>
-                          <th className="px-3 py-2 text-left">Status</th>
+                          {[
+                            ['ecosystem', 'Ecosystem'],
+                            ['members', 'Members'],
+                            ['strength', 'Strength'],
+                            ['rolling', 'Rolling'],
+                            ['anchored', 'Anchored'],
+                            ['greenPct', '% Green'],
+                            ['aboveSignal', '% Above Signal'],
+                            ['leaderSpread', 'Leader Spread'],
+                            ['status', 'Status'],
+                          ].map(([key, label]) => (
+                            <th key={key} className="px-3 py-2 text-left">
+                              <button
+                                type="button"
+                                onClick={() => handleEcosystemSort(key)}
+                                className="inline-flex items-center gap-1 transition-colors hover:text-gray-300"
+                              >
+                                {label}
+                                {ecosystemSortKey === key && (
+                                  <span className="text-accent-blue">{ecosystemSortDir === 'asc' ? '↑' : '↓'}</span>
+                                )}
+                              </button>
+                            </th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/[0.05]">
@@ -2392,68 +2475,84 @@ export default function ThemeWatchlist({
 
         {!analyticsMode && (
           <>
-        <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
-          <StatPill label="Imported Symbols" value={symbols.length} />
-          <StatPill label="Mapped Rows" value={rows.length} />
-          <StatPill label="Theme Buckets" value={themeGroups.length} />
-          <StatPill label="Top Ranked" value={symbols[0] || '—'} />
-          <StatPill label="RS Anchor" value={latestAnchorDate || '—'} />
-          <StatPill label="Rolling Window" value={`${rollingRsWindow}d`} />
-          <StatPill label="FINRA Matches" value={Object.values(finraBySymbol).filter(item => item?.settlementDate).length} />
-        </div>
-
-        <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs text-gray-500">
-          FINRA short interest uses FINRA&apos;s official consolidated short-interest API. Their published Query API dataset is OTC-oriented, so many exchange-listed names may legitimately show no FINRA record here.
-        </div>
-        <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs text-gray-500">
-          Est. SI Now is a conservative model-based estimate of change since the last official FINRA snapshot. It is not live short interest, and confidence stays low when liquidity or history is weak.
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-          <GroupList title="Momentum Buckets" items={themeGroups} empty="Map your watchlist to see which buckets are strongest." />
-          <GroupList title="Momentum Drivers" items={driverGroups} empty="Drivers appear after the watchlist is mapped." />
-          <GroupList title="Momentum Relationships" items={relationshipGroups} empty="Customer/supplier/competition links will show up here." />
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-4">
-          <div className="bg-white/[0.02] border border-white/10 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Bookmark size={13} className="text-accent-blue" />
-              <span className="text-xs font-semibold uppercase tracking-widest text-gray-500">Saved Views</span>
+        <CollapsibleSection
+          title="List Overview"
+          description="Symbols, mapping coverage, FINRA notes, and momentum group summaries."
+          collapsed={!!collapsedPanels[WATCHLIST_SUMMARY_PANEL_ID]}
+          onToggle={() => setPanelCollapsed(WATCHLIST_SUMMARY_PANEL_ID, !collapsedPanels[WATCHLIST_SUMMARY_PANEL_ID])}
+        >
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
+              <StatPill label="Imported Symbols" value={symbols.length} />
+              <StatPill label="Mapped Rows" value={rows.length} />
+              <StatPill label="Theme Buckets" value={themeGroups.length} />
+              <StatPill label="Top Ranked" value={symbols[0] || '—'} />
+              <StatPill label="RS Anchor" value={latestAnchorDate || '—'} />
+              <StatPill label="Rolling Window" value={`${rollingRsWindow}d`} />
+              <StatPill label="FINRA Matches" value={Object.values(finraBySymbol).filter(item => item?.settlementDate).length} />
             </div>
-            <div className="flex gap-2 mb-3">
-              <input
-                type="text"
-                value={viewName}
-                onChange={e => setViewName(e.target.value)}
-                placeholder="Save current filter/sort view…"
-                className="flex-1 bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50"
-              />
-              <button
-                onClick={handleSaveView}
-                className="px-3 py-2 rounded-lg bg-accent-blue/15 border border-accent-blue/25 text-xs font-semibold text-accent-blue hover:bg-accent-blue/20 transition-all"
-              >
-                Save
-              </button>
+
+            <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs text-gray-500">
+              FINRA short interest uses FINRA&apos;s official consolidated short-interest API. Their published Query API dataset is OTC-oriented, so many exchange-listed names may legitimately show no FINRA record here.
             </div>
-            <div className="space-y-2">
-              {savedViews.length ? savedViews.map(view => (
-                <div key={view.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
-                  <button onClick={() => applyView(view)} className="text-left min-w-0 flex-1">
-                    <p className="text-sm text-gray-300 truncate">{view.name}</p>
-                    <p className="text-xs text-gray-600 truncate">
-                      {view.query || 'All symbols'} · {view.sortKey} {view.sortDir} · fit {view.fitFilter || 'all'} · cols {(view.columnOrder || columnOrder).length - (view.hiddenColumns || hiddenColumns).length}
-                    </p>
-                  </button>
-                  <button onClick={() => removeView(view.id)} className="text-gray-500 hover:text-red-400 transition-colors">
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              )) : <p className="text-xs text-gray-600">Save custom views for large watchlists.</p>}
+            <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs text-gray-500">
+              Est. SI Now is a conservative model-based estimate of change since the last official FINRA snapshot. It is not live short interest, and confidence stays low when liquidity or history is weak.
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+              <GroupList title="Momentum Buckets" items={themeGroups} empty="Map your watchlist to see which buckets are strongest." />
+              <GroupList title="Momentum Drivers" items={driverGroups} empty="Drivers appear after the watchlist is mapped." />
+              <GroupList title="Momentum Relationships" items={relationshipGroups} empty="Customer/supplier/competition links will show up here." />
             </div>
           </div>
-          <RelationshipExplorer row={selectedRow} rows={rows} rowsBySymbol={rowsBySymbol} />
-        </div>
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title="Views + Relationships"
+          description="Saved table views and relationship context for the selected symbol."
+          collapsed={!!collapsedPanels[WATCHLIST_CONTEXT_PANEL_ID]}
+          onToggle={() => setPanelCollapsed(WATCHLIST_CONTEXT_PANEL_ID, !collapsedPanels[WATCHLIST_CONTEXT_PANEL_ID])}
+        >
+          <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <Bookmark size={13} className="text-accent-blue" />
+                <span className="text-xs font-semibold uppercase tracking-widest text-gray-500">Saved Views</span>
+              </div>
+              <div className="flex gap-2 mb-3">
+                <input
+                  type="text"
+                  value={viewName}
+                  onChange={e => setViewName(e.target.value)}
+                  placeholder="Save current filter/sort view…"
+                  className="flex-1 bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50"
+                />
+                <button
+                  onClick={handleSaveView}
+                  className="px-3 py-2 rounded-lg bg-accent-blue/15 border border-accent-blue/25 text-xs font-semibold text-accent-blue hover:bg-accent-blue/20 transition-all"
+                >
+                  Save
+                </button>
+              </div>
+              <div className="space-y-2">
+                {savedViews.length ? savedViews.map(view => (
+                  <div key={view.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+                    <button onClick={() => applyView(view)} className="text-left min-w-0 flex-1">
+                      <p className="text-sm text-gray-300 truncate">{view.name}</p>
+                      <p className="text-xs text-gray-600 truncate">
+                        {view.query || 'All symbols'} · {view.sortKey} {view.sortDir} · fit {view.fitFilter || 'all'} · cols {(view.columnOrder || columnOrder).length - (view.hiddenColumns || hiddenColumns).length}
+                      </p>
+                    </button>
+                    <button onClick={() => removeView(view.id)} className="text-gray-500 hover:text-red-400 transition-colors">
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                )) : <p className="text-xs text-gray-600">Save custom views for large watchlists.</p>}
+              </div>
+            </div>
+            <RelationshipExplorer row={selectedRow} rows={rows} rowsBySymbol={rowsBySymbol} />
+          </div>
+        </CollapsibleSection>
 
         <div className="space-y-3">
           <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-[11px] text-gray-500">
@@ -2469,7 +2568,7 @@ export default function ThemeWatchlist({
               ytdEnabled={ecosystemYtdEnabled}
               onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
               chartLabel="Ticker Chart"
-              badgeLabel={activeList?.name || 'Watchlist'}
+              badgeLabel={activeList?.name || 'Liquid'}
               emptyLabel="No chart data for this ticker"
             />
           ) : null}
@@ -2477,7 +2576,7 @@ export default function ThemeWatchlist({
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-widest">
               <ListFilter size={12} />
-              Watchlist Table
+              {activeList?.name || 'Liquid'} Table
             </div>
             <input
               type="text"
@@ -2586,7 +2685,20 @@ export default function ThemeWatchlist({
                         onDragEnd={() => setDraggedColumnId(null)}
                         className={`text-left px-3 py-2 ${draggedColumnId === column.id ? 'opacity-50' : ''}`}
                       >
-                        {column.label}
+                        {column.id === 'actions' ? (
+                          column.label
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleSort(column.id)}
+                            className="inline-flex items-center gap-1 transition-colors hover:text-gray-300"
+                          >
+                            {column.label}
+                            {sortKey === column.id && (
+                              <span className="text-accent-blue">{sortDir === 'asc' ? '↑' : '↓'}</span>
+                            )}
+                          </button>
+                        )}
                       </th>
                     ))}
                   </tr>
