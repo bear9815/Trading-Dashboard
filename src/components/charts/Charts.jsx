@@ -65,7 +65,7 @@ function CompactMetric({ label, value, tone = 'default' }) {
 
 function CompanyHoverCard({ row, fit, anchored, rolling, ytd }) {
   return (
-    <div className="pointer-events-none absolute left-3 right-3 top-full z-30 mt-2 hidden overflow-hidden rounded-2xl border border-slate-600/60 bg-slate-950/95 text-left shadow-[0_22px_70px_rgba(2,6,23,0.65)] ring-1 ring-slate-500/15 group-hover:block">
+    <div className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden w-[380px] max-w-[min(380px,calc(100vw-3rem))] overflow-hidden rounded-2xl border border-slate-600/60 bg-slate-950/95 text-left shadow-[0_22px_70px_rgba(2,6,23,0.65)] ring-1 ring-slate-500/15 group-hover:block">
       <div className="border-b border-cyan-400/15 bg-gradient-to-r from-slate-900 via-slate-900 to-cyan-950/70 px-4 py-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -328,6 +328,17 @@ export default function Charts() {
               weeklyRightOffset={CHARTS_RIGHT_OFFSET}
               dailyRightOffset={CHARTS_RIGHT_OFFSET}
               fillAvailableHeight
+              headerHoverCard={
+                selectedRow ? (
+                  <CompanyHoverCard
+                    row={selectedRow}
+                    fit={fitBySymbol[selectedRow.symbol]}
+                    anchored={anchoredRsBySymbol[selectedRow.symbol]}
+                    rolling={rollingRsBySymbol[selectedRow.symbol]}
+                    ytd={ytdAvwapBySymbol[selectedRow.symbol]}
+                  />
+                ) : null
+              }
               className="h-full"
             />
           )}
@@ -419,7 +430,7 @@ export default function Charts() {
                     type="button"
                     onClick={() => setSelectedSymbol(row.symbol)}
                     data-chart-watchlist-row={row.symbol}
-                    className={`group relative flex w-full items-start gap-3 border-b border-white/[0.05] px-4 py-3 text-left transition-colors ${
+                    className={`flex w-full items-start gap-3 border-b border-white/[0.05] px-4 py-3 text-left transition-colors ${
                       active ? 'bg-accent-blue/10' : 'hover:bg-white/[0.03]'
                     }`}
                   >
@@ -439,7 +450,6 @@ export default function Charts() {
                         </span>
                       </div>
                     </div>
-                    <CompanyHoverCard row={row} fit={fit} anchored={anchored} rolling={rolling} ytd={ytd} />
                   </button>
                 )
               })

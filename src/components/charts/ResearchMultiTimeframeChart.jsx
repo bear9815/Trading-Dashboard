@@ -250,15 +250,17 @@ export default function ResearchMultiTimeframeChart({
   dailyRightOffset,
   fillAvailableHeight = false,
   className = '',
+  headerHoverCard = null,
 }) {
   const hasBars = data?.dailyBars?.length
   return (
     <div className={`rounded-lg overflow-hidden border border-black/20 bg-[#d7d7d7] shadow-sm ${fillAvailableHeight ? 'h-full flex flex-col' : ''} ${className}`}>
       <div className="px-2 py-1.5 border-b border-black/15 text-[#242830]">
         <div className="flex items-center justify-between gap-3">
-          <div>
+          <div className="group relative w-fit">
             <p className="text-xs font-semibold mono">{title} · {chartLabel}</p>
             <p className="text-[10px] text-[#505760]">KC13/34/65 · YTD AVWAP · {memberCount} member{memberCount === 1 ? '' : 's'}</p>
+            {headerHoverCard}
           </div>
           <div className="flex items-center gap-2">
             {onChangeDailyRangeMonths && (
