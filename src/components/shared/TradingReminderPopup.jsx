@@ -111,6 +111,16 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
     setLoggedNow(false)
   }, [openSignal])
 
+  const persistDraftThought = () => {
+    const trimmed = thought.trim()
+    if (!trimmed) return false
+    addThought(trimmed, thoughtTag)
+    setThought('')
+    setThoughtTag('note')
+    flashSaved()
+    return true
+  }
+
   // ── Time-check loop ──────────────────────────────────────────────────────────
   useEffect(() => {
     const check = () => {
@@ -155,6 +165,7 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
   }, [visible, reminderTimes])
 
   const dismiss = () => {
+    persistDraftThought()
     // Mark this reminder as fired so it won't re-trigger today
     const today   = localDateString()
     const firedKey = `trading-reminder-fired-${today}`
@@ -165,7 +176,6 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
     }
     activeReminderRef.current = null
     setVisible(false)
-    setThought('')
     setLoggedNow(false)
   }
 
@@ -175,18 +185,15 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
   }
 
   const snooze = () => {
+    persistDraftThought()
     snoozeUntilRef.current = Date.now() + 30 * 60 * 1000
     activeReminderRef.current = null
     setVisible(false)
-    setThought('')
   }
 
   const handleLogThought = () => {
-    if (!thought.trim()) return
-    addThought(thought.trim(), thoughtTag)
-    setThought('')
-    flashSaved()
-    textareaRef.current?.focus()
+    const saved = persistDraftThought()
+    if (saved) textareaRef.current?.focus()
   }
 
   const handleQuickState = (item) => {

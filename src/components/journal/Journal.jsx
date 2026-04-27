@@ -9,6 +9,55 @@ import HabitsTab from './HabitsTab.jsx'
 
 const BLANK = { marketState: '', objective: '', psychological: '', affirmation: '' }
 
+function normalizeText(value) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function toTimestamp(value) {
+  if (typeof value === 'number') return value
+  const parsed = new Date(value).getTime()
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function buildThoughtPrefill(thoughts) {
+  if (!thoughts.length) return ''
+  return `Recent trading thoughts:\n${thoughts.map(t => `- ${t.text}`).join('\n')}`
+}
+
+function buildJournalPrefill(entries, tradingThoughts) {
+  const latestEntry = [...entries].sort((a, b) => toTimestamp(b.timestamp) - toTimestamp(a.timestamp))[0]
+  const latestEntryTs = toTimestamp(latestEntry?.timestamp)
+  const base = latestEntry
+    ? {
+        marketState:   normalizeText(latestEntry.marketState),
+        objective:     normalizeText(latestEntry.objective),
+        psychological: normalizeText(latestEntry.psychological),
+        affirmation:   normalizeText(latestEntry.affirmation),
+      }
+    : { ...BLANK }
+
+  const recentThoughts = [...tradingThoughts]
+    .filter(t => toTimestamp(t.timestamp) > latestEntryTs)
+    .sort((a, b) => toTimestamp(b.timestamp) - toTimestamp(a.timestamp))
+    .slice(0, 5)
+
+  const thoughtPrefill = buildThoughtPrefill(recentThoughts)
+  if (!thoughtPrefill) return base
+
+  if (!base.psychological) {
+    return { ...base, psychological: thoughtPrefill }
+  }
+
+  if (base.psychological.includes('Recent trading thoughts:')) {
+    return base
+  }
+
+  return {
+    ...base,
+    psychological: `${base.psychological}\n\n${thoughtPrefill}`,
+  }
+}
+
 function JournalEntryCard({ entry, onDelete }) {
   const [open, setOpen] = useState(false)
   return (
@@ -43,8 +92,8 @@ function JournalEntryCard({ entry, onDelete }) {
   )
 }
 
-function NewEntryForm({ onSave, onCancel }) {
-  const [form, setForm] = useState(BLANK)
+function NewEntryForm({ initial = BLANK, onSave, onCancel }) {
+  const [form, setForm] = useState(() => ({ ...BLANK, ...initial }))
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   return (
@@ -75,7 +124,7 @@ function NewEntryForm({ onSave, onCancel }) {
 }
 
 function EntriesTab() {
-  const { addEntry, deleteEntry, getEntries } = useJournalStore()
+  const { entries, tradingThoughts = [], addEntry, deleteEntry, getEntries } = useJournalStore()
   const [adding, setAdding] = useState(false)
   const [search, setSearch] = useState('')
 
@@ -89,6 +138,8 @@ function EntriesTab() {
     addEntry(form)
     setAdding(false)
   }
+
+  const prefill = buildJournalPrefill(entries, tradingThoughts)
 
   return (
     <div className="flex flex-col gap-4">
@@ -106,7 +157,7 @@ function EntriesTab() {
         </button>
       </div>
 
-      {adding && <NewEntryForm onSave={handleSave} onCancel={() => setAdding(false)} />}
+      {adding && <NewEntryForm initial={prefill} onSave={handleSave} onCancel={() => setAdding(false)} />}
 
       {sorted.length === 0 && !adding ? (
         <div className="card text-center py-12 text-gray-500 text-sm">
