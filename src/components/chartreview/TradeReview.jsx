@@ -7,6 +7,7 @@ import { formatCurrency } from '../../utils/formatters.js'
 import { fetchHistory } from '../../utils/marketData.js'
 import { analyzeTradeVoiceReview, generateTradeVoiceFollowUp } from '../../utils/ai.js'
 import TradeReviewChart from './TradeReviewChart.jsx'
+import SharedChartToolsSettingsModal from '../charts/ChartToolsSettingsModal.jsx'
 import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, Sparkles, Brain, CircleDot, RotateCcw, Mic, MicOff, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Volume2, Square, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine } from 'recharts'
 
@@ -2027,7 +2028,7 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, chartS
       <div>
         <p className="label mb-2">Charts</p>
         <div className="mb-3">
-          <TradeReviewChart trade={trade} chartSettings={chartSettings} />
+          <TradeReviewChart trade={trade} chartSettings={chartSettings} onOpenSettings={() => setChartSettingsOpen(true)} />
         </div>
         <ScreenshotGallery trade={trade} onOpenLightbox={setLightboxIndex} />
       </div>
@@ -2666,7 +2667,7 @@ export default function TradeReview({ selectedAccount }) {
       </div>
 
       {chartSettingsOpen && (
-        <TradeReviewChartSettingsModal
+        <SharedChartToolsSettingsModal
           settings={tradeReviewChartSettings}
           onSave={setTradeReviewChartSettings}
           onClose={() => setChartSettingsOpen(false)}

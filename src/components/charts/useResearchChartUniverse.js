@@ -78,6 +78,13 @@ function collapseRollingGradientToWeekly(weeklyBars, rollingGradient) {
     .filter(Boolean)
 }
 
+function normalizeWeeklyRollingDisplayGradient(rows = []) {
+  return rows.map(row => ({
+    ...row,
+    displayColor: Number(row?.zScore) > 0 ? row.color : 'rgba(255, 255, 255, 0.18)',
+  }))
+}
+
 async function mapWithConcurrency(items, limit, mapper) {
   const results = new Array(items.length)
   let cursor = 0
@@ -160,9 +167,9 @@ export function buildTickerChartData(
       latestAnchorDate,
       tradeReviewChartSettings?.dailyAnchoredRs
     ),
-    weeklyRollingRsGradient: dailyRollingRsGradient.length
+    weeklyRollingRsGradient: normalizeWeeklyRollingDisplayGradient(dailyRollingRsGradient.length
       ? collapseRollingGradientToWeekly(weeklyBars, dailyRollingRsGradient)
-      : calculateRsGradient(weeklyBars, benchmarkWeeklyBars, tradeReviewChartSettings?.weeklyRs),
+      : calculateRsGradient(weeklyBars, benchmarkWeeklyBars, tradeReviewChartSettings?.weeklyRs)),
     ytdAvwap: buildYtdAvwapSnapshot(dailyBars, new Date()),
   }
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Search, Layers, BarChart3, ArrowUpDown } from 'lucide-react'
+import ChartToolsSettingsModal from './ChartToolsSettingsModal.jsx'
 import ResearchMultiTimeframeChart from './ResearchMultiTimeframeChart.jsx'
 import { useResearchWatchlistStore, MARKET_LEADERS_LIST_ID, WATCHLIST_LIST_ID } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
@@ -14,7 +15,6 @@ import { buildWatchlistFitMap } from '../../utils/watchlistFitSignal.js'
 
 const WATCHLIST_ORDER = { [MARKET_LEADERS_LIST_ID]: 0, [WATCHLIST_LIST_ID]: 1 }
 const DAILY_RANGE_OPTIONS = [6, 9]
-const CHARTS_RIGHT_OFFSET = 3
 const SORT_OPTIONS = [
   ['symbol', 'Symbol'],
   ['rollingRs', 'Rolling Z'],
@@ -137,6 +137,7 @@ export default function Charts() {
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [addAvwapMode, setAddAvwapMode] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const watchlists = useMemo(
     () => Object.values(listsById || {}).sort((a, b) => (WATCHLIST_ORDER[a.id] ?? 99) - (WATCHLIST_ORDER[b.id] ?? 99)),
@@ -166,6 +167,8 @@ export default function Charts() {
   const ecosystemYtdEnabled = Boolean(tradeReviewChartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
   const dailyAnchoredRsEnabled = tradeReviewChartSettings?.researchChartsShowDailyAnchoredRs !== false
   const weeklyRollingRsEnabled = tradeReviewChartSettings?.researchChartsShowWeeklyRollingRs !== false
+  const chartsWeeklyRightOffset = Number.isFinite(tradeReviewChartSettings?.researchChartsWeeklyRightOffset) ? tradeReviewChartSettings.researchChartsWeeklyRightOffset : 3
+  const chartsDailyRightOffset = Number.isFinite(tradeReviewChartSettings?.researchChartsDailyRightOffset) ? tradeReviewChartSettings.researchChartsDailyRightOffset : 3
   const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
 
   const {
@@ -369,11 +372,12 @@ export default function Charts() {
                 if (!selectedDisplaySymbol) return
                 removeTradeReviewManualAnchor(selectedDisplaySymbol, anchor.id)
               }}
+              onOpenSettings={() => setSettingsOpen(true)}
               chartLabel={selectedRow?.companyName || 'Ticker Chart'}
               badgeLabel={activeList?.name || 'Watchlist'}
               emptyLabel={loadingHistory ? 'Loading chart history…' : 'No chart data for this ticker'}
-              weeklyRightOffset={CHARTS_RIGHT_OFFSET}
-              dailyRightOffset={CHARTS_RIGHT_OFFSET}
+              weeklyRightOffset={chartsWeeklyRightOffset}
+              dailyRightOffset={chartsDailyRightOffset}
               onChartClick={handleAddAvwapAtDate}
               fillAvailableHeight
               headerHoverCard={
@@ -516,6 +520,13 @@ export default function Charts() {
           </div>
         </aside>
       </div>
+      {settingsOpen && (
+        <ChartToolsSettingsModal
+          settings={tradeReviewChartSettings}
+          onSave={setTradeReviewChartSettings}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
   )
 }

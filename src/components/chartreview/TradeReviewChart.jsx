@@ -1,3 +1,4 @@
+import { SlidersHorizontal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   BarSeries,
@@ -200,7 +201,7 @@ function drawOverlays(canvas, chart, priceSeries, bands, rsGradient = []) {
   }
 }
 
-function LightweightPane({ data, kind, height, chartType, onChartClick }) {
+function LightweightPane({ data, kind, height, chartType, onChartClick, rightOffset }) {
   const containerRef = useRef(null)
   const chartContainerRef = useRef(null)
   const shadeCanvasRef = useRef(null)
@@ -238,11 +239,11 @@ function LightweightPane({ data, kind, height, chartType, onChartClick }) {
         scaleMargins: { top: 0.84, bottom: 0 },
       })
       createSeriesMarkers(candleSeries, [...data.dailyAnchorMarkers, ...data.markers])
-      fitToData(chart, data.markers, candles)
+      fitToData(chart, data.markers, candles, rightOffset)
       redrawShades()
       chart.timeScale().subscribeVisibleTimeRangeChange(redrawShades)
     } else {
-      fitToData(chart, data.markers, candles, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET, WEEKLY_CHART_BARS, false)
+      fitToData(chart, data.markers, candles, rightOffset ?? WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET, WEEKLY_CHART_BARS, false)
       redrawShades()
       chart.timeScale().subscribeVisibleTimeRangeChange(redrawShades)
     }
@@ -264,7 +265,7 @@ function LightweightPane({ data, kind, height, chartType, onChartClick }) {
       resizeObserver.disconnect()
       chart.remove()
     }
-  }, [chartType, data, height, kind, onChartClick])
+  }, [chartType, data, height, kind, onChartClick, rightOffset])
 
   return (
     <div ref={containerRef} className="relative w-full" style={{ height }}>
@@ -278,7 +279,7 @@ function LightweightPane({ data, kind, height, chartType, onChartClick }) {
   )
 }
 
-export default function TradeReviewChart({ trade, chartSettings }) {
+export default function TradeReviewChart({ trade, chartSettings, onOpenSettings }) {
   const setTradeReviewChartSettings = useSettingsStore(state => state.setTradeReviewChartSettings)
   const tradeReviewManualAnchorsBySymbol = useSettingsStore(state => state.tradeReviewManualAnchorsBySymbol)
   const addTradeReviewManualAnchor = useSettingsStore(state => state.addTradeReviewManualAnchor)
@@ -297,6 +298,8 @@ export default function TradeReviewChart({ trade, chartSettings }) {
   )
   const ytdEnabled = Boolean(chartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
   const tradeEntryAvwapEnabled = Boolean(chartSettings?.showTradeEntryAvwap)
+  const tradeReviewWeeklyRightOffset = Number.isFinite(chartSettings?.tradeReviewWeeklyRightOffset) ? chartSettings.tradeReviewWeeklyRightOffset : 1
+  const tradeReviewDailyRightOffset = Number.isFinite(chartSettings?.tradeReviewDailyRightOffset) ? chartSettings.tradeReviewDailyRightOffset : 3
 
   useEffect(() => {
     let cancelled = false
@@ -405,6 +408,15 @@ export default function TradeReviewChart({ trade, chartSettings }) {
             >
               {addAnchorMode ? 'Click Chart…' : 'Add Anchor'}
             </button>
+            {onOpenSettings ? (
+              <button
+                onClick={onOpenSettings}
+                className="inline-flex items-center justify-center rounded border border-black/10 bg-white/70 px-2 py-0.5 text-[#505760] transition-colors hover:bg-white hover:text-[#242830]"
+                title="Chart settings"
+              >
+                <SlidersHorizontal size={12} />
+              </button>
+            ) : null}
             <div className="inline-flex rounded-md border border-black/10 bg-white/70 p-0.5">
               {[
                 { value: 'candlestick', label: 'Candles' },
@@ -471,14 +483,14 @@ export default function TradeReviewChart({ trade, chartSettings }) {
         <div>
           <div className="relative border-b-4 border-[#242424]">
             <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1W</span>
-            <LightweightPane data={data} kind="weekly" height={190} chartType={chartType} onChartClick={handleChartClick} />
+            <LightweightPane data={data} kind="weekly" height={190} chartType={chartType} onChartClick={handleChartClick} rightOffset={tradeReviewWeeklyRightOffset} />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
               {trade.symbol}
             </div>
           </div>
           <div className="relative">
             <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1D</span>
-            <LightweightPane data={data} kind="daily" height={350} chartType={chartType} onChartClick={handleChartClick} />
+            <LightweightPane data={data} kind="daily" height={350} chartType={chartType} onChartClick={handleChartClick} rightOffset={tradeReviewDailyRightOffset} />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
               {trade.symbol}
             </div>

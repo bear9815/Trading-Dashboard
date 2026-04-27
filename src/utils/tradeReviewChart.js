@@ -18,6 +18,10 @@ export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   showTradeEntryAvwap: false,
   researchChartsShowDailyAnchoredRs: true,
   researchChartsShowWeeklyRollingRs: true,
+  researchChartsWeeklyRightOffset: 3,
+  researchChartsDailyRightOffset: 3,
+  tradeReviewWeeklyRightOffset: 1,
+  tradeReviewDailyRightOffset: 3,
   anchorDates: ['2026-01-01', '2026-04-02'],
   avwapPresets: [
     { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },

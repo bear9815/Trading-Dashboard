@@ -1,3 +1,4 @@
+import { SlidersHorizontal } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import {
   BarSeries,
@@ -103,7 +104,7 @@ function drawRsGradient(ctx, chart, rows, width, height) {
     const left = prevX == null ? x - 4 : x - Math.abs(x - prevX) / 2
     const right = nextX == null ? x + Math.abs(x - (prevX ?? x - 8)) / 2 : x + Math.abs(nextX - x) / 2
 
-    ctx.fillStyle = row.color
+    ctx.fillStyle = row.displayColor || row.color
     ctx.fillRect(Math.max(0, left), 0, Math.min(width, right) - Math.max(0, left), height)
   }
 }
@@ -329,6 +330,7 @@ export default function ResearchMultiTimeframeChart({
   manualAnchors = [],
   onToggleManualAnchor,
   onRemoveManualAnchor,
+  onOpenSettings,
 }) {
   const hasBars = data?.dailyBars?.length
   return (
@@ -404,6 +406,15 @@ export default function ResearchMultiTimeframeChart({
                 }`}
               >
                 {addAvwapMode ? 'Click Chart…' : 'Add AVWAP'}
+              </button>
+            ) : null}
+            {onOpenSettings ? (
+              <button
+                onClick={onOpenSettings}
+                className="inline-flex items-center justify-center rounded border border-black/10 bg-white/70 px-2 py-0.5 text-[#505760] transition-colors hover:bg-white hover:text-[#242830]"
+                title="Chart settings"
+              >
+                <SlidersHorizontal size={12} />
               </button>
             ) : null}
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">{badgeLabel}</span>
