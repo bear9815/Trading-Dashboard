@@ -56,9 +56,9 @@ function metricCardTone(kind) {
 
 function CompactMetric({ label, value, tone = 'default' }) {
   return (
-    <div className={`rounded-xl border px-3 py-2 ${metricCardTone(tone)}`}>
-      <p className="text-[10px] uppercase tracking-[0.24em] text-gray-500">{label}</p>
-      <p className="mt-1 text-sm font-semibold text-white">{value}</p>
+    <div className={`flex min-h-[72px] flex-col items-center justify-center rounded-xl border px-3 py-2 text-center ${metricCardTone(tone)}`}>
+      <p className="whitespace-nowrap text-[10px] uppercase tracking-[0.24em] text-gray-500">{label}</p>
+      <p className="mt-1 text-center text-sm font-semibold text-white">{value}</p>
     </div>
   )
 }
