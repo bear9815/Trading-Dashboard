@@ -64,16 +64,8 @@ function countVisibleBarsForMonths(bars, months) {
   )
 }
 
-function drawShadeBands(canvas, chart, priceSeries, bands) {
-  if (!canvas || !chart || !priceSeries) return
-  const rect = canvas.getBoundingClientRect()
-  const dpr = window.devicePixelRatio || 1
-  canvas.width = Math.max(1, Math.floor(rect.width * dpr))
-  canvas.height = Math.max(1, Math.floor(rect.height * dpr))
-  const ctx = canvas.getContext('2d')
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.clearRect(0, 0, rect.width, rect.height)
-
+function drawShadeBands(ctx, chart, priceSeries, bands) {
+  if (!ctx || !chart || !priceSeries) return
   for (const band of [...(bands || [])].sort((a, b) => Number(b.period) - Number(a.period))) {
     const upper = []
     const lower = []
@@ -96,7 +88,71 @@ function drawShadeBands(canvas, chart, priceSeries, bands) {
   }
 }
 
-function LightweightPane({ data, kind, height, chartType, dailyRangeMonths = 6, rightOffset, className = '' }) {
+function drawRsGradient(ctx, chart, rows, width, height) {
+  if (!rows?.length) return
+  const timeScale = chart.timeScale()
+  const sorted = [...rows].sort((a, b) => a.time.localeCompare(b.time))
+
+  for (let index = 0; index < sorted.length; index += 1) {
+    const row = sorted[index]
+    const x = timeScale.timeToCoordinate(row.time)
+    if (x == null) continue
+
+    const prevX = index > 0 ? timeScale.timeToCoordinate(sorted[index - 1].time) : null
+    const nextX = index < sorted.length - 1 ? timeScale.timeToCoordinate(sorted[index + 1].time) : null
+    const left = prevX == null ? x - 4 : x - Math.abs(x - prevX) / 2
+    const right = nextX == null ? x + Math.abs(x - (prevX ?? x - 8)) / 2 : x + Math.abs(nextX - x) / 2
+
+    ctx.fillStyle = row.color
+    ctx.fillRect(Math.max(0, left), 0, Math.min(width, right) - Math.max(0, left), height)
+  }
+}
+
+function drawOverlays(canvas, chart, priceSeries, bands, rsGradient = []) {
+  if (!canvas || !chart || !priceSeries) return
+  const rect = canvas.getBoundingClientRect()
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = Math.max(1, Math.floor(rect.width * dpr))
+  canvas.height = Math.max(1, Math.floor(rect.height * dpr))
+  const ctx = canvas.getContext('2d')
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, rect.width, rect.height)
+
+  drawRsGradient(ctx, chart, rsGradient, rect.width, rect.height)
+  drawShadeBands(ctx, chart, priceSeries, bands)
+}
+
+function chartEventToDateKey(time) {
+  if (!time) return null
+  if (typeof time === 'string') return time
+  if (typeof time === 'object' && typeof time.year === 'number' && typeof time.month === 'number' && typeof time.day === 'number') {
+    return `${time.year}-${String(time.month).padStart(2, '0')}-${String(time.day).padStart(2, '0')}`
+  }
+  return null
+}
+
+function nearestDailyBarAtOrBefore(time, bars) {
+  const dateKey = chartEventToDateKey(time)
+  if (!dateKey || !bars?.length) return null
+  let match = null
+  for (const bar of bars) {
+    if (bar.time > dateKey) break
+    match = bar.time
+  }
+  return match || bars[0]?.time || null
+}
+
+function LightweightPane({
+  data,
+  kind,
+  height,
+  chartType,
+  dailyRangeMonths = 6,
+  rightOffset,
+  className = '',
+  showRsGradient = false,
+  onChartClick,
+}) {
   const chartContainerRef = useRef(null)
   const shadeCanvasRef = useRef(null)
 
@@ -172,9 +228,12 @@ function LightweightPane({ data, kind, height, chartType, dailyRangeMonths = 6, 
     }
 
     const bands = kind === 'weekly' ? data.weeklyKeltnerShades : data.keltnerShades
+    const rsGradient = showRsGradient
+      ? (kind === 'weekly' ? data.weeklyRollingRsGradient : data.dailyAnchoredRsGradient)
+      : []
     const redraw = () => {
       requestAnimationFrame(() => {
-        drawShadeBands(shadeCanvasRef.current, chart, priceSeries, bands)
+        drawOverlays(shadeCanvasRef.current, chart, priceSeries, bands, rsGradient)
       })
     }
 
@@ -187,6 +246,14 @@ function LightweightPane({ data, kind, height, chartType, dailyRangeMonths = 6, 
 
     redraw()
     chart.timeScale().subscribeVisibleTimeRangeChange(redraw)
+
+    const clickHandler = onChartClick
+      ? param => {
+          const anchorDate = nearestDailyBarAtOrBefore(param?.time, data.dailyBars)
+          if (anchorDate) onChartClick(anchorDate)
+        }
+      : null
+    if (clickHandler) chart.subscribeClick(clickHandler)
 
     const handleWheel = (event) => {
       if (!candles.length) return
@@ -217,12 +284,13 @@ function LightweightPane({ data, kind, height, chartType, dailyRangeMonths = 6, 
     resizeObserver.observe(chartContainerRef.current)
 
     return () => {
+      if (clickHandler) chart.unsubscribeClick(clickHandler)
       chart.timeScale().unsubscribeVisibleTimeRangeChange(redraw)
       chartContainerRef.current?.removeEventListener?.('wheel', handleWheel, true)
       resizeObserver.disconnect()
       chart.remove()
     }
-  }, [chartType, dailyRangeMonths, data, height, kind, rightOffset])
+  }, [chartType, dailyRangeMonths, data, height, kind, onChartClick, rightOffset, showRsGradient])
 
   return (
     <div className={`relative w-full ${className}`} style={height ? { height } : undefined}>
@@ -251,6 +319,16 @@ export default function ResearchMultiTimeframeChart({
   fillAvailableHeight = false,
   className = '',
   headerHoverCard = null,
+  weeklyRsEnabled = false,
+  onToggleWeeklyRs,
+  dailyAnchoredRsEnabled = false,
+  onToggleDailyAnchoredRs,
+  onAddAvwap,
+  onChartClick,
+  addAvwapMode = false,
+  manualAnchors = [],
+  onToggleManualAnchor,
+  onRemoveManualAnchor,
 }) {
   const hasBars = data?.dailyBars?.length
   return (
@@ -292,9 +370,79 @@ export default function ResearchMultiTimeframeChart({
             >
               YTD AVWAP
             </button>
+            {onToggleDailyAnchoredRs ? (
+              <button
+                onClick={onToggleDailyAnchoredRs}
+                className={`px-2 py-0.5 text-[10px] font-semibold rounded border transition-colors ${
+                  dailyAnchoredRsEnabled
+                    ? 'bg-[#2563eb]/20 border-[#2563eb]/40 text-[#163a84]'
+                    : 'bg-white/70 border-black/10 text-[#505760]'
+                }`}
+              >
+                Anchored Z
+              </button>
+            ) : null}
+            {onToggleWeeklyRs ? (
+              <button
+                onClick={onToggleWeeklyRs}
+                className={`px-2 py-0.5 text-[10px] font-semibold rounded border transition-colors ${
+                  weeklyRsEnabled
+                    ? 'bg-[#16a34a]/20 border-[#16a34a]/40 text-[#14532d]'
+                    : 'bg-white/70 border-black/10 text-[#505760]'
+                }`}
+              >
+                Rolling Z
+              </button>
+            ) : null}
+            {onAddAvwap ? (
+              <button
+                onClick={onAddAvwap}
+                className={`px-2 py-0.5 text-[10px] font-semibold rounded border transition-colors ${
+                  addAvwapMode
+                    ? 'bg-[#22c55e]/20 border-[#22c55e]/40 text-[#14532d]'
+                    : 'bg-white/70 border-black/10 text-[#505760]'
+                }`}
+              >
+                {addAvwapMode ? 'Click Chart…' : 'Add AVWAP'}
+              </button>
+            ) : null}
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">{badgeLabel}</span>
           </div>
         </div>
+        {!!manualAnchors.length && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {manualAnchors.map(anchor => (
+              <div
+                key={anchor.id}
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                  anchor.enabled
+                    ? 'bg-white/75 border-black/10 text-[#242830]'
+                    : 'bg-black/5 border-black/10 text-[#7c7c7c]'
+                }`}
+              >
+                <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: anchor.color }} />
+                <span>{anchor.label}</span>
+                {onToggleManualAnchor ? (
+                  <button
+                    onClick={() => onToggleManualAnchor(anchor)}
+                    className="text-[9px] uppercase tracking-wide text-[#505760] hover:text-[#242830]"
+                  >
+                    {anchor.enabled ? 'Hide' : 'Show'}
+                  </button>
+                ) : null}
+                {onRemoveManualAnchor ? (
+                  <button
+                    onClick={() => onRemoveManualAnchor(anchor)}
+                    className="text-[11px] text-[#7a4b4b] hover:text-[#3b1d1d]"
+                    aria-label={`Remove ${anchor.label}`}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       {!hasBars ? (
         <div className="h-[520px] flex items-center justify-center text-xs text-[#505760]">{emptyLabel}</div>
@@ -309,6 +457,8 @@ export default function ResearchMultiTimeframeChart({
               chartType={chartType}
               dailyRangeMonths={dailyRangeMonths}
               rightOffset={weeklyRightOffset}
+              showRsGradient={weeklyRsEnabled}
+              onChartClick={addAvwapMode ? onChartClick : null}
               className={fillAvailableHeight ? 'h-full' : ''}
             />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
@@ -324,6 +474,8 @@ export default function ResearchMultiTimeframeChart({
               chartType={chartType}
               dailyRangeMonths={dailyRangeMonths}
               rightOffset={dailyRightOffset}
+              showRsGradient={dailyAnchoredRsEnabled}
+              onChartClick={addAvwapMode ? onChartClick : null}
               className={fillAvailableHeight ? 'h-full' : ''}
             />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">

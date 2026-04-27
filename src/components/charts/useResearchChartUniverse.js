@@ -4,9 +4,13 @@ import { getWeeklyChartStartDate } from '../../utils/chartTimeframes.js'
 import {
   aggregateWeeklyBars,
   buildAvwapOverlays,
+  calculateAnchoredRsGradient,
   buildKeltnerShadeBands,
   buildYtdAvwapSnapshot,
   calculateKeltnerChannel,
+  calculateRollingRsGradient,
+  calculateRsGradient,
+  resolveLatestAnchorDate,
 } from '../../utils/tradeReviewChart.js'
 
 const WATCHLIST_HISTORY_TTL_MS = 6 * 60 * 60 * 1000
@@ -52,6 +56,28 @@ function normalizeChartBars(bars = []) {
     .filter(Boolean)
 }
 
+function mondayKey(key) {
+  const date = new Date(`${key}T00:00:00Z`)
+  const day = date.getUTCDay()
+  const offset = day === 0 ? -6 : 1 - day
+  date.setUTCDate(date.getUTCDate() + offset)
+  return date.toISOString().slice(0, 10)
+}
+
+function collapseRollingGradientToWeekly(weeklyBars, rollingGradient) {
+  if (!weeklyBars?.length || !rollingGradient?.length) return []
+  const latestByWeek = new Map()
+  for (const row of rollingGradient) {
+    latestByWeek.set(mondayKey(row.time), row)
+  }
+  return weeklyBars
+    .map(bar => {
+      const row = latestByWeek.get(bar.time)
+      return row ? { ...row, time: bar.time } : null
+    })
+    .filter(Boolean)
+}
+
 async function mapWithConcurrency(items, limit, mapper) {
   const results = new Array(items.length)
   let cursor = 0
@@ -69,20 +95,46 @@ async function mapWithConcurrency(items, limit, mapper) {
   return results
 }
 
-export function buildTickerChartData(selectedSymbol, historyBarsBySymbol, tradeReviewChartSettings) {
+export function buildTickerChartData(
+  selectedSymbol,
+  historyBarsBySymbol,
+  tradeReviewChartSettings,
+  benchmarkHistoryBars = [],
+  manualAnchorsBySymbol = {}
+) {
   if (!selectedSymbol) {
-    return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    return {
+      dailyBars: [],
+      weeklyBars: [],
+      avwapOverlays: [],
+      keltnerShades: [],
+      weeklyKeltnerShades: [],
+      dailyAnchoredRsGradient: [],
+      weeklyRollingRsGradient: [],
+    }
   }
   const dailyBars = normalizeChartBars(historyBarsBySymbol[selectedSymbol] || [])
   if (!dailyBars.length) {
-    return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    return {
+      dailyBars: [],
+      weeklyBars: [],
+      avwapOverlays: [],
+      keltnerShades: [],
+      weeklyKeltnerShades: [],
+      dailyAnchoredRsGradient: [],
+      weeklyRollingRsGradient: [],
+    }
   }
   const weeklyBars = normalizeChartBars(aggregateWeeklyBars(dailyBars))
+  const benchmarkDailyBars = normalizeChartBars(benchmarkHistoryBars || [])
+  const benchmarkWeeklyBars = normalizeChartBars(aggregateWeeklyBars(benchmarkDailyBars))
+  const dailyRollingRsGradient = calculateRollingRsGradient(dailyBars, benchmarkDailyBars, tradeReviewChartSettings?.dailyRollingRs)
+  const latestAnchorDate = resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates)
   const avwapOverlays = buildAvwapOverlays(
     dailyBars,
     selectedSymbol,
     tradeReviewChartSettings,
-    {},
+    manualAnchorsBySymbol,
     new Date(),
     null
   )
@@ -102,6 +154,15 @@ export function buildTickerChartData(selectedSymbol, historyBarsBySymbol, tradeR
     avwapOverlays,
     keltnerShades: buildKeltnerShadeBands(dailyKeltner),
     weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
+    dailyAnchoredRsGradient: calculateAnchoredRsGradient(
+      dailyBars,
+      benchmarkDailyBars,
+      latestAnchorDate,
+      tradeReviewChartSettings?.dailyAnchoredRs
+    ),
+    weeklyRollingRsGradient: dailyRollingRsGradient.length
+      ? collapseRollingGradientToWeekly(weeklyBars, dailyRollingRsGradient)
+      : calculateRsGradient(weeklyBars, benchmarkWeeklyBars, tradeReviewChartSettings?.weeklyRs),
     ytdAvwap: buildYtdAvwapSnapshot(dailyBars, new Date()),
   }
 }

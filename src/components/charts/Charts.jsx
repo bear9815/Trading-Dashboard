@@ -122,13 +122,21 @@ function CompanyHoverCard({ row, fit, anchored, rolling, ytd }) {
 
 export default function Charts() {
   const { activeListId, listsById, setActiveList } = useResearchWatchlistStore()
-  const { tradeReviewChartSettings, setTradeReviewChartSettings } = useSettingsStore()
+  const {
+    tradeReviewChartSettings,
+    tradeReviewManualAnchorsBySymbol,
+    setTradeReviewChartSettings,
+    addTradeReviewManualAnchor,
+    updateTradeReviewManualAnchor,
+    removeTradeReviewManualAnchor,
+  } = useSettingsStore()
   const [query, setQuery] = useState('')
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [sortKey, setSortKey] = useState('symbol')
   const [sortDir, setSortDir] = useState('asc')
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [historyError, setHistoryError] = useState('')
+  const [addAvwapMode, setAddAvwapMode] = useState(false)
 
   const watchlists = useMemo(
     () => Object.values(listsById || {}).sort((a, b) => (WATCHLIST_ORDER[a.id] ?? 99) - (WATCHLIST_ORDER[b.id] ?? 99)),
@@ -156,6 +164,8 @@ export default function Charts() {
     ? tradeReviewChartSettings.growthResearchDailyRangeMonths
     : 6
   const ecosystemYtdEnabled = Boolean(tradeReviewChartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
+  const dailyAnchoredRsEnabled = tradeReviewChartSettings?.researchChartsShowDailyAnchoredRs !== false
+  const weeklyRollingRsEnabled = tradeReviewChartSettings?.researchChartsShowWeeklyRollingRs !== false
   const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
 
   const {
@@ -222,15 +232,25 @@ export default function Charts() {
   }, [selectedSymbol, sortedRows])
 
   const selectedRow = selectedDisplaySymbol ? rowsBySymbol[selectedDisplaySymbol] : null
+  const selectedManualAnchors = selectedDisplaySymbol
+    ? (tradeReviewManualAnchorsBySymbol?.[selectedDisplaySymbol] || [])
+    : []
   const selectedTickerChartData = useMemo(
-    () => buildTickerChartData(selectedDisplaySymbol, historyBarsBySymbol, tradeReviewChartSettings),
-    [historyBarsBySymbol, selectedDisplaySymbol, tradeReviewChartSettings]
+    () => buildTickerChartData(
+      selectedDisplaySymbol,
+      historyBarsBySymbol,
+      tradeReviewChartSettings,
+      benchmarkHistoryBars,
+      tradeReviewManualAnchorsBySymbol
+    ),
+    [benchmarkHistoryBars, historyBarsBySymbol, selectedDisplaySymbol, tradeReviewChartSettings, tradeReviewManualAnchorsBySymbol]
   )
 
   useEffect(() => {
     setSelectedSymbol(null)
     setQuery('')
     setHistoryError('')
+    setAddAvwapMode(false)
   }, [activeListId])
 
   useEffect(() => {
@@ -300,6 +320,18 @@ export default function Charts() {
     setTradeReviewChartSettings({ avwapPresets: nextPresets })
   }
 
+  const handleAddAvwapAtDate = (anchorDate) => {
+    if (!selectedDisplaySymbol || !anchorDate) return
+    addTradeReviewManualAnchor(selectedDisplaySymbol, {
+      id: `manual-${selectedDisplaySymbol.toLowerCase()}-${anchorDate}-${Date.now()}`,
+      anchorDate,
+      label: anchorDate,
+      enabled: true,
+      color: '#22c55e',
+    })
+    setAddAvwapMode(false)
+  }
+
   return (
     <div className="h-full overflow-hidden bg-surface px-4 py-4 md:px-5">
       <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -322,11 +354,27 @@ export default function Charts() {
               onChangeDailyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchDailyRangeMonths: months })}
               ytdEnabled={ecosystemYtdEnabled}
               onToggleYtd={toggleYtd}
+              weeklyRsEnabled={weeklyRollingRsEnabled}
+              onToggleWeeklyRs={() => setTradeReviewChartSettings({ researchChartsShowWeeklyRollingRs: !weeklyRollingRsEnabled })}
+              dailyAnchoredRsEnabled={dailyAnchoredRsEnabled}
+              onToggleDailyAnchoredRs={() => setTradeReviewChartSettings({ researchChartsShowDailyAnchoredRs: !dailyAnchoredRsEnabled })}
+              onAddAvwap={() => setAddAvwapMode(current => !current)}
+              addAvwapMode={addAvwapMode}
+              manualAnchors={selectedManualAnchors}
+              onToggleManualAnchor={(anchor) => {
+                if (!selectedDisplaySymbol) return
+                updateTradeReviewManualAnchor(selectedDisplaySymbol, anchor.id, { enabled: !anchor.enabled })
+              }}
+              onRemoveManualAnchor={(anchor) => {
+                if (!selectedDisplaySymbol) return
+                removeTradeReviewManualAnchor(selectedDisplaySymbol, anchor.id)
+              }}
               chartLabel={selectedRow?.companyName || 'Ticker Chart'}
               badgeLabel={activeList?.name || 'Watchlist'}
               emptyLabel={loadingHistory ? 'Loading chart history…' : 'No chart data for this ticker'}
               weeklyRightOffset={CHARTS_RIGHT_OFFSET}
               dailyRightOffset={CHARTS_RIGHT_OFFSET}
+              onChartClick={handleAddAvwapAtDate}
               fillAvailableHeight
               headerHoverCard={
                 selectedRow ? (

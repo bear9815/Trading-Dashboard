@@ -10,6 +10,8 @@ const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   chartType: 'candlestick',
   growthResearchDailyRangeMonths: 6,
   showTradeEntryAvwap: false,
+  researchChartsShowDailyAnchoredRs: true,
+  researchChartsShowWeeklyRollingRs: true,
   anchorDates: ['2026-01-01', '2026-04-02'],
   avwapPresets: [
     { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
@@ -69,6 +71,8 @@ function normalizeTradeReviewChartSettings(settings) {
   return {
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
     ...current,
+    researchChartsShowDailyAnchoredRs: current.researchChartsShowDailyAnchoredRs ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowDailyAnchoredRs,
+    researchChartsShowWeeklyRollingRs: current.researchChartsShowWeeklyRollingRs ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowWeeklyRollingRs,
     avwapPresets: ((current.avwapPresets || []).map(normalizeAvwapPreset).filter(Boolean).length
       ? (current.avwapPresets || []).map(normalizeAvwapPreset).filter(Boolean)
       : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets.map(normalizeAvwapPreset).filter(Boolean)),

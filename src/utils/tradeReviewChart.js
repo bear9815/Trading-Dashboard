@@ -16,6 +16,8 @@ export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
   chartType: 'candlestick',
   showTradeEntryAvwap: false,
+  researchChartsShowDailyAnchoredRs: true,
+  researchChartsShowWeeklyRollingRs: true,
   anchorDates: ['2026-01-01', '2026-04-02'],
   avwapPresets: [
     { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
@@ -491,6 +493,8 @@ export function buildAnchoredRsSnapshot(symbolDailyBars, benchmarkDailyBars, set
   const chartSettings = {
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
     ...(settings || {}),
+    researchChartsShowDailyAnchoredRs: settings?.researchChartsShowDailyAnchoredRs ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowDailyAnchoredRs,
+    researchChartsShowWeeklyRollingRs: settings?.researchChartsShowWeeklyRollingRs ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowWeeklyRollingRs,
     dailyAnchoredRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyAnchoredRs, ...(settings?.dailyAnchoredRs || {}) },
   }
   const anchorDate = resolveLatestAnchorDate(chartSettings.anchorDates, asOf)
@@ -522,6 +526,8 @@ export function buildRollingRsSnapshot(symbolDailyBars, benchmarkDailyBars, sett
   const chartSettings = {
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
     ...(settings || {}),
+    researchChartsShowDailyAnchoredRs: settings?.researchChartsShowDailyAnchoredRs ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowDailyAnchoredRs,
+    researchChartsShowWeeklyRollingRs: settings?.researchChartsShowWeeklyRollingRs ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowWeeklyRollingRs,
     dailyRollingRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyRollingRs, ...(settings?.dailyRollingRs || {}) },
   }
   const gradient = calculateRollingRsGradient(symbolDailyBars, benchmarkDailyBars, chartSettings.dailyRollingRs)
