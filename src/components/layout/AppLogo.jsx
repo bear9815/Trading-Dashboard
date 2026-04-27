@@ -2,9 +2,10 @@
  * AppLogo — SVG mark + wordmark for Trading Dashboard.
  * size="sm"  → 32px mark, used in sidebar collapsed / login
  * size="md"  → 36px mark, used in sidebar expanded
+ * size="lg"  → 46px mark, used in the primary sidebar header
  */
 export default function AppLogo({ size = 'md', showWordmark = true }) {
-  const dim = size === 'sm' ? 32 : 36
+  const dim = size === 'sm' ? 32 : size === 'lg' ? 46 : 36
 
   return (
     <div className="flex items-center gap-2.5 shrink-0">
@@ -70,9 +71,13 @@ export default function AppLogo({ size = 'md', showWordmark = true }) {
 
       {/* ── Wordmark ── */}
       {showWordmark && (
-        <div className="hidden md:flex flex-col leading-none">
-          <span className="text-[14px] font-semibold text-white tracking-[0.14em] uppercase">Trading</span>
-          <span className="text-[11px] font-semibold text-[#9bc5ff] tracking-[0.34em] uppercase">Dashboard</span>
+        <div className="hidden md:flex flex-col leading-none min-w-0">
+          <span className={`${size === 'lg' ? 'text-[18px] tracking-[0.22em]' : 'text-[14px] tracking-[0.14em]'} font-semibold text-white uppercase`}>
+            Trading
+          </span>
+          <span className={`${size === 'lg' ? 'text-[12px] tracking-[0.42em]' : 'text-[11px] tracking-[0.34em]'} font-semibold text-[#9bc5ff] uppercase`}>
+            Dashboard
+          </span>
         </div>
       )}
     </div>

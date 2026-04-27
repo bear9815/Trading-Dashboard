@@ -53,7 +53,7 @@ export default function App() {
   const [showImport, setShowImport] = useState(false)
   const [reminderOpenSignal, setReminderOpenSignal] = useState(0)
   const [selectedAccount, setSelectedAccount] = useState('All')
-  const { theme, anthropicApiKey } = useSettingsStore()
+  const { theme, anthropicApiKey, sidebarCollapsed, setSidebarCollapsed } = useSettingsStore()
   const { loadTokens: loadSchwabTokens, _accessToken: schwabAccessToken } = useSchwabStore()
   const { loadFromLocal } = useTradeStore()
   const { loadFromLocal: loadJournalLocal } = useJournalStore()
@@ -157,6 +157,8 @@ export default function App() {
         setPage={setPage}
         selectedAccount={selectedAccount}
         setSelectedAccount={setSelectedAccount}
+        collapsed={sidebarCollapsed}
+        setCollapsed={setSidebarCollapsed}
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">

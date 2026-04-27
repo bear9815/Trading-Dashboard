@@ -1,4 +1,4 @@
-import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, Sparkles, ScanLine, Sun, GitCompare, FlaskConical, Layers, Globe, Trophy, Bot } from 'lucide-react'
+import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, Sparkles, ScanLine, Sun, GitCompare, FlaskConical, Layers, Globe, Trophy, Bot, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import AppLogo from './AppLogo.jsx'
 
@@ -28,7 +28,14 @@ const ACCOUNT_COLORS = [
   { activeBg: 'bg-pink-500/20',      text: 'text-pink-400',      dot: 'bg-pink-400'      },
 ]
 
-export default function Sidebar({ page, setPage, selectedAccount, setSelectedAccount }) {
+export default function Sidebar({
+  page,
+  setPage,
+  selectedAccount,
+  setSelectedAccount,
+  collapsed = false,
+  setCollapsed,
+}) {
   const { getAccounts } = useTradeStore()
   const accounts = getAccounts() // ['All', 'IBKR', 'Schwab', ...]
   const realAccounts = accounts.filter(a => a !== 'All')
@@ -39,16 +46,30 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
   }
 
   return (
-    <aside className="luxury-panel w-16 lg:w-52 2xl:w-60 flex flex-col shrink-0 h-screen sticky top-0 border-r border-white/10 bg-surface-50/80">
+    <aside
+      className={`luxury-panel flex flex-col shrink-0 h-screen sticky top-0 border-r border-white/10 bg-surface-50/80 overflow-hidden transition-[width] duration-300 ease-out
+        ${collapsed ? 'w-16 lg:w-20' : 'w-16 lg:w-56 2xl:w-64'}`}
+    >
 
       {/* Logo */}
-      <div className="px-4 py-5 border-b border-white/10">
-        <AppLogo size="md" showWordmark />
+      <div className={`border-b border-white/10 ${collapsed ? 'px-2 py-4' : 'px-4 py-5'}`}>
+        <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between gap-3'}`}>
+          <AppLogo size={collapsed ? 'md' : 'lg'} showWordmark={!collapsed} />
+          <button
+            type="button"
+            onClick={() => setCollapsed?.(!collapsed)}
+            className="hidden lg:inline-flex items-center justify-center w-10 h-10 rounded-xl border border-white/10 bg-white/[0.04] text-gray-400 transition-colors hover:text-white hover:bg-white/[0.08]"
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
+        </div>
       </div>
 
       {/* ── Account Selector — desktop ── */}
-      {realAccounts.length > 0 && (
-        <div className="hidden lg:block px-3 pt-4 pb-3 border-b border-white/10">
+      {!collapsed && realAccounts.length > 0 && (
+        <div className="hidden lg:block px-3 pt-4 pb-3 border-b border-white/10 shrink-0">
           <p className="text-[10px] text-gray-500 uppercase tracking-[0.28em] mb-2 px-1 font-semibold">Account</p>
           <div className="space-y-0.5">
 
@@ -88,9 +109,9 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
         </div>
       )}
 
-      {/* ── Mobile account indicator — colored dot on collapsed sidebar ── */}
+      {/* ── Account indicator when the sidebar is icon-first ── */}
       {realAccounts.length > 0 && (
-        <div className="lg:hidden flex justify-center py-2 border-b border-white/10">
+        <div className={`${collapsed ? 'hidden lg:flex' : 'lg:hidden'} shrink-0 justify-center py-2 border-b border-white/10`}>
           {selectedAccount === 'All'
             ? <span className="w-2.5 h-2.5 rounded-full bg-white/40" title="All Accounts" />
             : (() => {
@@ -102,21 +123,24 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
       )}
 
       {/* ── Nav ── */}
-      <nav className="flex-1 py-4 lg:py-5 px-2 lg:px-2.5 space-y-1">
+      <nav className={`flex-1 min-h-0 overflow-y-auto py-4 lg:py-5 ${collapsed ? 'px-2' : 'px-2 lg:px-2.5'} space-y-1`}>
         {NAV.map(({ id, label, icon: Icon }) => {
           const active = page === id
           return (
             <button
               key={id}
               onClick={() => setPage(id)}
+              title={collapsed ? label : undefined}
+              aria-label={label}
               className={`w-full flex items-center gap-3 px-3 py-2.5 lg:px-3.5 lg:py-3 rounded-xl text-[13px] lg:text-sm font-medium transition-all
+                ${collapsed ? 'justify-center' : ''}
                 ${active
                   ? 'bg-gradient-to-r from-accent-blue/18 to-accent-purple/12 text-white border border-accent-blue/20 shadow-lg shadow-accent-blue/10'
                   : 'text-gray-300 hover:text-white hover:bg-white/5'
                 }`}
             >
               <Icon size={18} className={`shrink-0 ${active ? 'text-accent-blue' : ''}`} />
-              <span className="hidden lg:block">{label}</span>
+              {!collapsed && <span className="hidden lg:block">{label}</span>}
             </button>
           )
         })}
@@ -138,17 +162,19 @@ export default function Sidebar({ page, setPage, selectedAccount, setSelectedAcc
       )}
 
       {/* ── Footer ── */}
-      <div className="px-3 py-4 border-t border-white/10 hidden lg:block">
+      <div className={`border-t border-white/10 hidden lg:block shrink-0 ${collapsed ? 'px-2 py-3' : 'px-3 py-4'}`}>
         {selectedAccount !== 'All' && realAccounts.includes(selectedAccount) && (() => {
           const colors = getColor(selectedAccount)
           return (
-            <div className={`flex items-center gap-1.5 mb-3 px-2.5 py-2 rounded-xl ${colors.activeBg}`}>
+            <div className={`flex items-center ${collapsed ? 'justify-center px-0' : 'gap-1.5 px-2.5'} mb-3 py-2 rounded-xl ${colors.activeBg}`}>
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${colors.dot}`} />
-              <span className={`text-xs font-semibold uppercase tracking-[0.2em] truncate ${colors.text}`}>{selectedAccount}</span>
+              {!collapsed && <span className={`text-xs font-semibold uppercase tracking-[0.2em] truncate ${colors.text}`}>{selectedAccount}</span>}
             </div>
           )
         })()}
-        <p className="text-xs text-gray-500 px-1 uppercase tracking-[0.2em]">v0.1.0 · Local</p>
+        <p className={`text-xs text-gray-500 uppercase tracking-[0.2em] ${collapsed ? 'text-center px-0' : 'px-1'}`}>
+          {collapsed ? 'v0.1.0' : 'v0.1.0 · Local'}
+        </p>
       </div>
 
     </aside>
