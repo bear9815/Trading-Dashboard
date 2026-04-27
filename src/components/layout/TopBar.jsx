@@ -4,18 +4,6 @@ import { useQuotesStore } from '../../store/useQuotesStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useSchwabStore } from '../../store/useSchwabStore'
 
-const PAGE_TITLES = {
-  dashboard:   'Dashboard',
-  trades:      'Trade Log',
-  risk:        'Risk Panel',
-  analytics:   'Analytics',
-  chartreview: 'Trade Review',
-  morning:     'Morning',
-  journal:     'Journal',
-  ai:          'AI Analysis',
-  settings:    'Settings',
-}
-
 // All unique authors in the default set
 const KNOWN_AUTHORS = [
   'Jesse Livermore',
@@ -295,9 +283,7 @@ export default function TopBar({ page, onImport, onOpenReminder }) {
 
   return (
     <header className="h-14 xl:h-16 bg-surface-50/72 backdrop-blur-xl border-b border-white/10 flex items-center px-3 md:px-4 xl:px-5 shrink-0 sticky top-0 z-10 gap-2 xl:gap-3">
-      <h1 className="text-[0.92rem] xl:text-lg font-semibold tracking-[0.06em] xl:tracking-[0.08em] text-white flex-shrink-0 uppercase">{PAGE_TITLES[page] || 'Trading Dashboard'}</h1>
-
-      {/* Quotes ticker — fills remaining space between title and import button */}
+      {/* Quotes ticker — fills the leading space in the top bar */}
       <QuotesTicker />
 
       <div className="flex items-center gap-1.5 xl:gap-2 flex-shrink-0">
