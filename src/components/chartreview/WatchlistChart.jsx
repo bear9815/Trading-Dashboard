@@ -3,10 +3,11 @@ import { createChart, ColorType, CrosshairMode } from 'lightweight-charts'
 import { RefreshCw, AlertCircle, TrendingUp, TrendingDown } from 'lucide-react'
 import { fetchHistory, fetchQuote } from '../../utils/marketData.js'
 import { fitContentWithRightOffset, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET } from '../../utils/lightweightChartViewport.js'
+import { WEEKLY_CHART_MONTHS, sliceWeeklyChartBars } from '../../utils/chartTimeframes.js'
 
 const INTERVAL_RANGE = {
   '1d': { months: 6 },
-  '1wk': { months: 24 },
+  '1wk': { months: WEEKLY_CHART_MONTHS },
   '1mo': { months: 60 },
 }
 
@@ -72,7 +73,8 @@ export default function WatchlistChart({ symbol, interval = '1d', height = 200, 
         wickUpColor:      '#00d084',
         wickDownColor:    '#ff4757',
       })
-      series.setData(candles)
+      const visibleCandles = interval === '1wk' ? sliceWeeklyChartBars(candles) : candles
+      series.setData(visibleCandles)
       fitContentWithRightOffset(chart, interval === '1wk' ? WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET : undefined)
     } catch (e) {
       setError(e.message)

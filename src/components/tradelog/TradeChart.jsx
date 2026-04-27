@@ -13,6 +13,7 @@ import {
 import { ExternalLink, RefreshCw, AlertCircle } from 'lucide-react'
 import { fetchHistory } from '../../utils/marketData.js'
 import { fitContentWithRightOffset, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET } from '../../utils/lightweightChartViewport.js'
+import { getWeeklyChartStartDate, sliceWeeklyChartBars } from '../../utils/chartTimeframes.js'
 
 // ── Indicator math ────────────────────────────────────────────────────────────
 
@@ -159,9 +160,10 @@ export default function TradeChart({ trade }) {
           // Closed trades: end chart ~5 days after last exit (no future candles)
           // Open trades: extend to today so the current price is visible
           const endMs     = lastExitMs != null ? lastExitMs + 5 * 86_400_000 : Date.now() + 2 * 86_400_000
-          // Extra lookback so EMA/ATR have enough bars to warm up (34 × 2 + buffer)
-          const startDate = new Date(entryMs - 120 * 86_400_000)
           const endDate   = new Date(endMs)
+          const weeklyStartMs = getWeeklyChartStartDate(endDate).getTime()
+          // Extra lookback for daily trade context, plus the weekly view's two-year window.
+          const startDate = new Date(Math.min(entryMs - 120 * 86_400_000, weeklyStartMs))
 
           const daily = await fetchHistory(trade.symbol, startDate, endDate)
           if (cancelRef.current) return
@@ -179,7 +181,7 @@ export default function TradeChart({ trade }) {
       if (chartRef.current) { chartRef.current.remove(); chartRef.current = null }
 
       const daily   = rawRef.current
-      const candles = timeframe === 'W' ? aggregateWeekly(daily) : daily
+      const candles = timeframe === 'W' ? sliceWeeklyChartBars(aggregateWeekly(daily)) : daily
       if (!candles.length) { setError('No candles after aggregation.'); setLoading(false); return }
 
       // ── Wrap all chart creation in try/catch so errors don't freeze loading ─

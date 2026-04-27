@@ -11,6 +11,7 @@ import { fetchHistory } from '../../utils/marketData.js'
 import { buildTradeReviewChartData } from '../../utils/tradeReviewChart.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { setVisibleRangeWithRightOffset, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET } from '../../utils/lightweightChartViewport.js'
+import { WEEKLY_CHART_BARS, sliceWeeklyChartBars } from '../../utils/chartTimeframes.js'
 
 const CHART_OPTIONS = {
   layout: {
@@ -85,11 +86,11 @@ function addHlcBars(chart, candles) {
   return series
 }
 
-function fitToData(chart, markers, bars, rightOffset) {
+function fitToData(chart, markers, bars, rightOffset, maxBars = 120, anchorToMarkers = true) {
   if (!bars.length) return
-  const firstMarker = markers[0]?.time
+  const firstMarker = anchorToMarkers ? markers[0]?.time : null
   const firstIndex = firstMarker ? bars.findIndex(bar => bar.time >= firstMarker) : -1
-  const from = Math.max(0, firstIndex > 24 ? firstIndex - 55 : bars.length - 120)
+  const from = Math.max(0, firstIndex > 24 ? firstIndex - 55 : bars.length - maxBars)
   setVisibleRangeWithRightOffset(
     chart,
     {
@@ -212,7 +213,7 @@ function LightweightPane({ data, kind, height, chartType, onChartClick }) {
       width: chartContainerRef.current.clientWidth,
     })
 
-    const candles = kind === 'weekly' ? data.weeklyCandles : data.dailyCandles
+    const candles = kind === 'weekly' ? sliceWeeklyChartBars(data.weeklyCandles) : data.dailyCandles
     const candleSeries = chartType === 'hlc'
       ? addHlcBars(chart, candles)
       : addCandles(chart, candles)
@@ -237,11 +238,11 @@ function LightweightPane({ data, kind, height, chartType, onChartClick }) {
         scaleMargins: { top: 0.84, bottom: 0 },
       })
       createSeriesMarkers(candleSeries, [...data.dailyAnchorMarkers, ...data.markers])
-      fitToData(chart, data.markers, data.dailyCandles)
+      fitToData(chart, data.markers, candles)
       redrawShades()
       chart.timeScale().subscribeVisibleTimeRangeChange(redrawShades)
     } else {
-      fitToData(chart, data.markers, data.weeklyCandles, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET)
+      fitToData(chart, data.markers, candles, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET, WEEKLY_CHART_BARS, false)
       redrawShades()
       chart.timeScale().subscribeVisibleTimeRangeChange(redrawShades)
     }

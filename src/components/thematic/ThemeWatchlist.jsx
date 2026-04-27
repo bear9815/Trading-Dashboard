@@ -27,6 +27,7 @@ import { resolveTickerToName } from '../../utils/marketData.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
 import { buildCompanyVerification } from '../../utils/companyVerification.js'
 import { fitContentWithRightOffset, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET } from '../../utils/lightweightChartViewport.js'
+import { getWeeklyChartStartDate, sliceWeeklyChartBars } from '../../utils/chartTimeframes.js'
 import {
   buildAnchoredRsSnapshot,
   aggregateWeeklyBars,
@@ -743,7 +744,7 @@ function EcosystemLightweightPane({ data, kind, height, chartType }) {
       height,
       width: chartContainerRef.current.clientWidth,
     })
-    const candles = kind === 'weekly' ? data.weeklyBars : data.dailyBars
+    const candles = kind === 'weekly' ? sliceWeeklyChartBars(data.weeklyBars) : data.dailyBars
     const priceSeries = chart.addSeries(
       chartType === 'hlc' ? BarSeries : CandlestickSeries,
       chartType === 'hlc'
@@ -1755,6 +1756,7 @@ export default function ThemeWatchlist({
     )
     const rollingStart = new Date()
     rollingStart.setDate(rollingStart.getDate() - rollingBufferDays)
+    const weeklyStart = getWeeklyChartStartDate(end)
 
     let anchorStart = null
     if (latestAnchorDate) {
@@ -1762,7 +1764,7 @@ export default function ThemeWatchlist({
       anchorStart.setDate(anchorStart.getDate() - 90)
     }
 
-    const startCandidates = [finraStart, rollingStart, anchorStart].filter(Boolean)
+    const startCandidates = [finraStart, rollingStart, anchorStart, weeklyStart].filter(Boolean)
     const start = new Date(Math.min(...startCandidates.map(date => date.getTime())))
     const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
     const cacheKey = [
