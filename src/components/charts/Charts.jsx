@@ -40,65 +40,80 @@ function fitTone(fitColor) {
   return 'bg-white/15'
 }
 
+function fitBadgeTone(fitColor) {
+  if (fitColor === 'green') return 'border-emerald-400/30 bg-emerald-400/15 text-emerald-200'
+  if (fitColor === 'orange') return 'border-amber-400/30 bg-amber-400/15 text-amber-100'
+  if (fitColor === 'red') return 'border-rose-400/30 bg-rose-400/15 text-rose-100'
+  return 'border-white/10 bg-white/[0.06] text-gray-300'
+}
+
+function metricCardTone(kind) {
+  if (kind === 'rolling') return 'border-cyan-400/20 bg-cyan-400/[0.08]'
+  if (kind === 'anchored') return 'border-violet-400/20 bg-violet-400/[0.08]'
+  if (kind === 'avwap') return 'border-amber-400/20 bg-amber-400/[0.08]'
+  return 'border-white/10 bg-white/[0.03]'
+}
+
+function CompactMetric({ label, value, tone = 'default' }) {
+  return (
+    <div className={`rounded-xl border px-3 py-2 ${metricCardTone(tone)}`}>
+      <p className="text-[10px] uppercase tracking-[0.24em] text-gray-500">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-white">{value}</p>
+    </div>
+  )
+}
+
 function CompanyHoverCard({ row, fit, anchored, rolling, ytd }) {
   return (
-    <div className="pointer-events-none absolute left-3 right-3 top-full z-30 mt-2 hidden rounded-xl border border-white/10 bg-surface-50 p-4 text-left shadow-2xl group-hover:block">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-white">{row.symbol} · {row.companyName || '—'}</p>
-          <p className="mt-1 text-xs text-gray-500">{row.theme || 'No theme'} · {row.ecosystem || 'No ecosystem'} · {row.sector || 'No sector'}</p>
-        </div>
-        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold text-white/95 ${fitTone(fit?.fitColor)}`}>
-          {fit?.fitLabel || 'Needs Data'}
-        </span>
-      </div>
-
-      <div className="mt-3 grid grid-cols-3 gap-2">
-        <div className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2">
-          <p className="text-[10px] uppercase tracking-[0.18em] text-gray-600">Rolling</p>
-          <p className="mt-1 text-sm font-semibold text-white">{formatSigned(rolling?.zScore, 2, 'z')}</p>
-        </div>
-        <div className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2">
-          <p className="text-[10px] uppercase tracking-[0.18em] text-gray-600">Anchored</p>
-          <p className="mt-1 text-sm font-semibold text-white">{formatSigned(anchored?.zScore, 2, 'z')}</p>
-        </div>
-        <div className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2">
-          <p className="text-[10px] uppercase tracking-[0.18em] text-gray-600">YTD AVWAP</p>
-          <p className="mt-1 text-sm font-semibold text-white">{formatSigned(ytd?.distancePct, 1, '%')}</p>
+    <div className="pointer-events-none absolute left-3 right-3 top-full z-30 mt-2 hidden overflow-hidden rounded-2xl border border-slate-600/60 bg-slate-950/95 text-left shadow-[0_22px_70px_rgba(2,6,23,0.65)] ring-1 ring-slate-500/15 group-hover:block">
+      <div className="border-b border-cyan-400/15 bg-gradient-to-r from-slate-900 via-slate-900 to-cyan-950/70 px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-white">{row.symbol} · {row.companyName || '—'}</p>
+            <p className="mt-1 text-xs text-slate-300">{row.theme || 'No theme'} · {row.ecosystem || 'No ecosystem'} · {row.sector || 'No sector'}</p>
+          </div>
+          <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${fitBadgeTone(fit?.fitColor)}`}>
+            {fit?.fitLabel || 'Needs Data'}
+          </span>
         </div>
       </div>
 
-      <div className="mt-3 space-y-3 text-xs">
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-gray-600">What They Do</p>
-          <p className="mt-1 leading-relaxed text-gray-300">{row.whatTheyDo || 'No company summary yet.'}</p>
+      <div className="bg-slate-900/95 px-4 py-4">
+        <div className="grid grid-cols-3 gap-2">
+          <CompactMetric label="Rolling Z" value={formatSigned(rolling?.zScore, 2, 'z')} tone="rolling" />
+          <CompactMetric label="Anchored Z" value={formatSigned(anchored?.zScore, 2, 'z')} tone="anchored" />
+          <CompactMetric label="YTD AVWAP" value={formatSigned(ytd?.distancePct, 1, '%')} tone="avwap" />
         </div>
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.18em] text-gray-600">Related Driver</p>
-          <p className="mt-1 leading-relaxed text-gray-300">{row.relatedDriver || '—'}</p>
-        </div>
-        <div className="grid grid-cols-1 gap-2">
-          <div>
-            <p className="text-[10px] uppercase tracking-[0.18em] text-gray-600">Major Customers</p>
-            <p className="mt-1 leading-relaxed text-gray-300">{row.majorCustomers?.length ? row.majorCustomers.join(', ') : 'Not mapped'}</p>
+
+        <div className="mt-4 space-y-3 text-xs">
+          <div className="rounded-xl border border-slate-700/70 bg-slate-900/80 px-3 py-3">
+            <p className="text-[10px] uppercase tracking-[0.24em] text-cyan-200/80">What They Do</p>
+            <p className="mt-2 leading-relaxed text-slate-200">{row.whatTheyDo || 'No company summary yet.'}</p>
           </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-[0.18em] text-gray-600">Dependencies</p>
-            <p className="mt-1 leading-relaxed text-gray-300">{row.dependencies?.length ? row.dependencies.join(', ') : 'Not mapped'}</p>
+
+          <div className="grid grid-cols-1 gap-3">
+            <div className="rounded-xl border border-violet-400/15 bg-violet-950/20 px-3 py-3">
+              <p className="text-[10px] uppercase tracking-[0.24em] text-violet-200/80">Theme Context</p>
+              <div className="mt-2 space-y-2">
+                <p className="text-slate-200"><span className="text-slate-400">Related driver:</span> {row.relatedDriver || '—'}</p>
+                <p className="text-slate-200"><span className="text-slate-400">Major customers:</span> {row.majorCustomers?.length ? row.majorCustomers.join(', ') : 'Not mapped'}</p>
+                <p className="text-slate-200"><span className="text-slate-400">Dependencies:</span> {row.dependencies?.length ? row.dependencies.join(', ') : 'Not mapped'}</p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-amber-400/15 bg-amber-950/20 px-3 py-3">
+              <p className="text-[10px] uppercase tracking-[0.24em] text-amber-200/80">Relationship Layer</p>
+              <div className="mt-2 space-y-2 text-slate-200">
+                <p><span className="text-slate-400">Customer of:</span> {row.customerOf?.length ? row.customerOf.join(', ') : '—'}</p>
+                <p><span className="text-slate-400">Supplier to:</span> {row.supplierTo?.length ? row.supplierTo.join(', ') : '—'}</p>
+                <p><span className="text-slate-400">Competes with:</span> {row.competesWith?.length ? row.competesWith.join(', ') : '—'}</p>
+              </div>
+            </div>
           </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-[0.18em] text-gray-600">Relationship Layer</p>
-            <p className="mt-1 leading-relaxed text-gray-300">
-              Customer of: {row.customerOf?.length ? row.customerOf.join(', ') : '—'}
-              <br />
-              Supplier to: {row.supplierTo?.length ? row.supplierTo.join(', ') : '—'}
-              <br />
-              Competes with: {row.competesWith?.length ? row.competesWith.join(', ') : '—'}
-            </p>
+
+          <div className="rounded-xl border border-slate-700/70 bg-slate-800/70 px-3 py-2.5 text-[11px] text-slate-300">
+            {fit?.fitReason || 'Signal summary unavailable.'}
           </div>
-        </div>
-        <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] text-gray-400">
-          {fit?.fitReason || 'Signal summary unavailable.'}
         </div>
       </div>
     </div>
@@ -412,10 +427,16 @@ export default function Charts() {
                     <div className="min-w-0 flex-1">
                       <p className={`text-sm font-semibold ${active ? 'text-accent-blue' : 'text-white'}`}>{row.symbol}</p>
                       <p className="mt-1 truncate text-xs text-gray-500">{row.companyName || '—'}</p>
-                      <div className="mt-2 flex items-center gap-3 text-[11px] text-gray-600">
-                        <span>R {formatSigned(rolling?.zScore, 1)}</span>
-                        <span>A {formatSigned(anchored?.zScore, 1)}</span>
-                        <span>YTD {formatSigned(ytd?.distancePct, 0, '%')}</span>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-medium">
+                        <span className="rounded-full border border-cyan-400/15 bg-cyan-400/[0.08] px-2 py-1 text-cyan-100">
+                          Rolling {formatSigned(rolling?.zScore, 1, 'z')}
+                        </span>
+                        <span className="rounded-full border border-violet-400/15 bg-violet-400/[0.08] px-2 py-1 text-violet-100">
+                          Anchored {formatSigned(anchored?.zScore, 1, 'z')}
+                        </span>
+                        <span className="rounded-full border border-amber-400/15 bg-amber-400/[0.08] px-2 py-1 text-amber-100">
+                          AVWAP {formatSigned(ytd?.distancePct, 0, '%')}
+                        </span>
                       </div>
                     </div>
                     <CompanyHoverCard row={row} fit={fit} anchored={anchored} rolling={rolling} ytd={ytd} />

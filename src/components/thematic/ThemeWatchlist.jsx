@@ -950,6 +950,18 @@ export default function ThemeWatchlist({
   const ecosystemYtdEnabled = Boolean(tradeReviewChartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
   const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
 
+  const {
+    benchmarkHistoryBars,
+    historyBarsBySymbol,
+    loadHistoryUniverse,
+  } = useResearchChartUniverse({
+    symbols,
+    latestAnchorDate,
+    rollingRsWindow,
+    rollingLookback: tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50,
+    tradeReviewChartSettings,
+  })
+
   const visibleColumnOrder = useMemo(
     () => buildVisibleColumnOrder({ columnOrder, hiddenColumns }),
     [columnOrder, hiddenColumns]
@@ -1393,18 +1405,6 @@ export default function ThemeWatchlist({
     if (selectedSymbol && filteredRows.some(row => row.symbol === selectedSymbol)) return selectedSymbol
     return filteredRows[0]?.symbol || null
   }, [filteredRows, selectedSymbol])
-
-  const {
-    benchmarkHistoryBars,
-    historyBarsBySymbol,
-    loadHistoryUniverse,
-  } = useResearchChartUniverse({
-    symbols,
-    latestAnchorDate,
-    rollingRsWindow,
-    rollingLookback: tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50,
-    tradeReviewChartSettings,
-  })
 
   const selectedTickerChartData = analyticsMode
     ? { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
