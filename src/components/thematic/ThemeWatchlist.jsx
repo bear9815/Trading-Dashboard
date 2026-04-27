@@ -2460,17 +2460,6 @@ export default function ThemeWatchlist({
             Keyboard: press <span className="font-semibold text-gray-300">Space</span> for the next ticker, or <span className="font-semibold text-gray-300">Shift + Space</span> to go back through the filtered table.
           </div>
 
-          {activeListId === MARKET_LEADERS_LIST_ID && marketLeadersComposite.memberCount > 0 ? (
-            <EcosystemCompositeChart
-              data={marketLeadersChartData}
-              chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
-              title="MARKET LEADERS"
-              memberCount={marketLeadersComposite.memberCount}
-              ytdEnabled={ecosystemYtdEnabled}
-              onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
-            />
-          ) : null}
-
           {selectedRow ? (
             <EcosystemCompositeChart
               data={selectedTickerChartData}
