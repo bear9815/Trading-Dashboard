@@ -37,6 +37,8 @@ const FIT_COLOR_SCORE = {
   green: 3,
 }
 
+export const MARKET_LEADERS_ECOSYSTEM_KEY = '__market_leaders__'
+
 function healthLabel({ count, greenPct, redPct, leaderSpread }) {
   if (redPct >= 50) return 'weak / deteriorating'
   if (count >= 2 && greenPct >= 50 && leaderSpread != null && leaderSpread <= 1.5) return 'broad leadership'
@@ -310,6 +312,40 @@ export function buildThemeGroupMetrics({
       members: snapshotMembers(group.rows, fitBySymbol, rollingRsBySymbol, anchoredRsBySymbol),
     }
   }).sort((a, b) => (b.currentStrengthScore ?? -Infinity) - (a.currentStrengthScore ?? -Infinity) || b.count - a.count || a.label.localeCompare(b.label))
+}
+
+export function buildMarketLeadersEcosystemGroup({
+  rows = [],
+  fitBySymbol = {},
+  rollingRsBySymbol = {},
+  anchoredRsBySymbol = {},
+} = {}) {
+  if (!rows.length) return null
+  const [group] = buildThemeGroupMetrics({
+    rows: rows.map(row => ({ ...row, ecosystem: 'Market Leaders' })),
+    groupBy: 'ecosystem',
+    fitBySymbol,
+    rollingRsBySymbol,
+    anchoredRsBySymbol,
+  })
+  if (!group) return null
+  return {
+    ...group,
+    key: MARKET_LEADERS_ECOSYSTEM_KEY,
+    label: 'Market Leaders',
+    isMarketLeaders: true,
+  }
+}
+
+export function withMarketLeadersEcosystemGroup({
+  groups = [],
+  marketLeadersGroup = null,
+} = {}) {
+  if (!marketLeadersGroup) return groups
+  return [
+    marketLeadersGroup,
+    ...groups.filter(group => group?.key !== MARKET_LEADERS_ECOSYSTEM_KEY),
+  ]
 }
 
 function snapshotGroup(group) {

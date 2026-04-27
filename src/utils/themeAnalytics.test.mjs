@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import {
   buildThemeGroupMetrics,
+  buildMarketLeadersEcosystemGroup,
   buildThemeRotationMetrics,
   normalizeThemeAnalyticsHistory,
   upsertThemeAnalyticsSnapshot,
+  withMarketLeadersEcosystemGroup,
 } from './themeAnalytics.js'
 
 const rows = [
@@ -59,6 +61,37 @@ assert.ok(aiInfra.currentStrengthScore > cloud.currentStrengthScore)
 assert.equal(cloud.count, 1)
 assert.equal(cloud.redPct, 100)
 assert.equal(cloud.healthLabel, 'weak / deteriorating')
+
+const marketLeadersGroup = buildMarketLeadersEcosystemGroup({
+  rows,
+  fitBySymbol,
+  rollingRsBySymbol,
+  anchoredRsBySymbol,
+})
+const ecosystemGroups = buildThemeGroupMetrics({
+  rows,
+  groupBy: 'ecosystem',
+  fitBySymbol,
+  rollingRsBySymbol,
+  anchoredRsBySymbol,
+})
+const pinnedEcosystemGroups = withMarketLeadersEcosystemGroup({
+  groups: ecosystemGroups,
+  marketLeadersGroup,
+})
+
+assert.equal(pinnedEcosystemGroups[0].key, '__market_leaders__')
+assert.equal(pinnedEcosystemGroups[0].label, 'Market Leaders')
+assert.equal(pinnedEcosystemGroups[0].isMarketLeaders, true)
+assert.deepEqual(pinnedEcosystemGroups[0].symbols, ['AAA', 'BBB', 'CCC'])
+assert.deepEqual(pinnedEcosystemGroups.slice(1).map(group => group.key), ecosystemGroups.map(group => group.key))
+assert.equal(
+  withMarketLeadersEcosystemGroup({
+    groups: pinnedEcosystemGroups,
+    marketLeadersGroup,
+  }).filter(group => group.key === '__market_leaders__').length,
+  1
+)
 
 const history0 = upsertThemeAnalyticsSnapshot({
   history: { theme: [], ecosystem: [] },

@@ -43,7 +43,12 @@ import {
   WATCHLIST_COLUMN_PRESETS,
 } from '../../utils/watchlistTableConfig.js'
 import { buildEcosystemCompositeBars } from '../../utils/ecosystemCompositeChart.js'
-import { buildThemeGroupMetrics, buildThemeRotationMetrics } from '../../utils/themeAnalytics.js'
+import {
+  buildMarketLeadersEcosystemGroup,
+  buildThemeGroupMetrics,
+  buildThemeRotationMetrics,
+  withMarketLeadersEcosystemGroup,
+} from '../../utils/themeAnalytics.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 
 const SORT_OPTIONS = [
@@ -1046,7 +1051,7 @@ export default function ThemeWatchlist({
     [rows, fitBySymbol, rollingRsBySymbol, anchoredRsBySymbol]
   )
 
-  const ecosystemGroupsAnalytics = useMemo(
+  const ecosystemGroupsBaseAnalytics = useMemo(
     () => buildThemeGroupMetrics({
       rows,
       groupBy: 'ecosystem',
@@ -1057,18 +1062,42 @@ export default function ThemeWatchlist({
     [rows, fitBySymbol, rollingRsBySymbol, anchoredRsBySymbol]
   )
 
+  const marketLeadersEcosystemGroup = useMemo(
+    () => activeListId === MARKET_LEADERS_LIST_ID
+      ? buildMarketLeadersEcosystemGroup({
+          rows,
+          fitBySymbol,
+          rollingRsBySymbol,
+          anchoredRsBySymbol,
+        })
+      : null,
+    [activeListId, anchoredRsBySymbol, fitBySymbol, rollingRsBySymbol, rows]
+  )
+
+  const ecosystemGroupsAnalytics = useMemo(
+    () => withMarketLeadersEcosystemGroup({
+      groups: ecosystemGroupsBaseAnalytics,
+      marketLeadersGroup: marketLeadersEcosystemGroup,
+    }),
+    [ecosystemGroupsBaseAnalytics, marketLeadersEcosystemGroup]
+  )
+
   const activeGrouping = analyticsMode ? 'ecosystem' : themeGrouping
   const activeThemeGroups = activeGrouping === 'ecosystem' ? ecosystemGroupsAnalytics : themeGroupsAnalytics
 
   const sortedThemeGroups = useMemo(() => {
-    const groups = [...activeThemeGroups]
-    if (themeSortMode === 'breadth') {
-      return groups.sort((a, b) => (b.greenPct - a.greenPct) || (b.rollingAboveSignalPct - a.rollingAboveSignalPct) || b.count - a.count)
-    }
-    if (themeSortMode === 'narrow') {
-      return groups.sort((a, b) => (b.leaderSpread ?? -Infinity) - (a.leaderSpread ?? -Infinity) || (b.currentStrengthScore ?? -Infinity) - (a.currentStrengthScore ?? -Infinity))
-    }
-    return groups.sort((a, b) => (b.currentStrengthScore ?? -Infinity) - (a.currentStrengthScore ?? -Infinity) || b.count - a.count)
+    const marketLeadersGroup = activeThemeGroups.find(group => group.isMarketLeaders)
+    const groups = activeThemeGroups.filter(group => !group.isMarketLeaders)
+    const sortedGroups = (() => {
+      if (themeSortMode === 'breadth') {
+        return groups.sort((a, b) => (b.greenPct - a.greenPct) || (b.rollingAboveSignalPct - a.rollingAboveSignalPct) || b.count - a.count)
+      }
+      if (themeSortMode === 'narrow') {
+        return groups.sort((a, b) => (b.leaderSpread ?? -Infinity) - (a.leaderSpread ?? -Infinity) || (b.currentStrengthScore ?? -Infinity) - (a.currentStrengthScore ?? -Infinity))
+      }
+      return groups.sort((a, b) => (b.currentStrengthScore ?? -Infinity) - (a.currentStrengthScore ?? -Infinity) || b.count - a.count)
+    })()
+    return marketLeadersGroup ? [marketLeadersGroup, ...sortedGroups] : sortedGroups
   }, [activeThemeGroups, themeSortMode])
 
   const themeRotationGroups = useMemo(
@@ -1168,42 +1197,6 @@ export default function ThemeWatchlist({
       weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
     }
   }, [analyticsMode, benchmarkHistoryBars, selectedEcosystemComposite, selectedThemeGroup, tradeReviewChartSettings])
-
-  const marketLeadersComposite = useMemo(() => {
-    if (activeListId !== MARKET_LEADERS_LIST_ID) return { dailyBars: [], weeklyBars: [], memberCount: 0 }
-    return buildEcosystemCompositeBars(symbols, historyBarsBySymbol)
-  }, [activeListId, historyBarsBySymbol, symbols])
-
-  const marketLeadersChartData = useMemo(() => {
-    if (activeListId !== MARKET_LEADERS_LIST_ID || !marketLeadersComposite.dailyBars.length) {
-      return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
-    }
-    const avwapOverlays = buildAvwapOverlays(
-      marketLeadersComposite.dailyBars,
-      'Market Leaders',
-      tradeReviewChartSettings,
-      {},
-      new Date(),
-      null
-    )
-    const dailyKeltner = {
-      13: calculateKeltnerChannel(marketLeadersComposite.dailyBars, 13, 0.25),
-      34: calculateKeltnerChannel(marketLeadersComposite.dailyBars, 34, 0.25),
-      65: calculateKeltnerChannel(marketLeadersComposite.dailyBars, 65, 0.25),
-    }
-    const weeklyKeltner = {
-      13: calculateKeltnerChannel(marketLeadersComposite.weeklyBars, 13, 0.25),
-      34: calculateKeltnerChannel(marketLeadersComposite.weeklyBars, 34, 0.25),
-      65: calculateKeltnerChannel(marketLeadersComposite.weeklyBars, 65, 0.25),
-    }
-    return {
-      ...marketLeadersComposite,
-      benchmarkBars: benchmarkHistoryBars,
-      avwapOverlays,
-      keltnerShades: buildKeltnerShadeBands(dailyKeltner),
-      weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
-    }
-  }, [activeListId, benchmarkHistoryBars, marketLeadersComposite, tradeReviewChartSettings])
 
   const handleColumnVisibilityToggle = useCallback((columnId) => {
     const nextHidden = hiddenColumns.includes(columnId)
@@ -2085,21 +2078,11 @@ export default function ThemeWatchlist({
                 Keyboard: press <span className="font-semibold text-gray-300">Space</span> for the next ecosystem, or <span className="font-semibold text-gray-300">Shift + Space</span> to go back.
               </div>
               <div className="space-y-4">
-                {activeListId === MARKET_LEADERS_LIST_ID && marketLeadersComposite.memberCount > 0 ? (
-                  <EcosystemCompositeChart
-                    data={marketLeadersChartData}
-                    chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
-                    title="MARKET LEADERS"
-                    memberCount={marketLeadersComposite.memberCount}
-                    ytdEnabled={ecosystemYtdEnabled}
-                    onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
-                  />
-                ) : null}
                 {selectedThemeGroup ? (
                   <EcosystemCompositeChart
                     data={selectedEcosystemChartData}
                     chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
-                    title={`ECO:${String(selectedThemeGroup.label || '').toUpperCase()}`}
+                    title={selectedThemeGroup.isMarketLeaders ? 'MARKET LEADERS' : `ECO:${String(selectedThemeGroup.label || '').toUpperCase()}`}
                     memberCount={selectedEcosystemComposite.memberCount}
                     ytdEnabled={ecosystemYtdEnabled}
                     onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
@@ -2139,10 +2122,21 @@ export default function ThemeWatchlist({
                             key={group.key}
                             onClick={() => setSelectedThemeGroupKey(prev => prev === group.key ? '' : group.key)}
                             className={`cursor-pointer transition-colors hover:bg-white/[0.02] ${
-                              selectedThemeGroupKey === group.key ? 'bg-accent-blue/8' : ''
+                              selectedThemeGroup?.key === group.key ? 'bg-accent-blue/8' : ''
+                            } ${
+                              group.isMarketLeaders ? 'border-l-2 border-l-accent-blue/70 bg-accent-blue/5' : ''
                             }`}
                           >
-                            <td className="px-3 py-2.5 font-semibold text-white">{group.label}</td>
+                            <td className="px-3 py-2.5 font-semibold text-white">
+                              <span className="inline-flex items-center gap-2">
+                                {group.label}
+                                {group.isMarketLeaders && (
+                                  <span className="rounded border border-accent-blue/25 bg-accent-blue/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-accent-blue">
+                                    basket
+                                  </span>
+                                )}
+                              </span>
+                            </td>
                             <td className="px-3 py-2.5 text-gray-400">{group.count}</td>
                             <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.currentStrengthScore, '', 1)}</td>
                             <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.avgRollingZ, 'z', 2)}</td>
