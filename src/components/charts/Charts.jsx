@@ -42,7 +42,7 @@ function fitTone(fitColor) {
 
 function CompanyHoverCard({ row, fit, anchored, rolling, ytd }) {
   return (
-    <div className="pointer-events-none absolute left-full top-1/2 z-30 ml-3 hidden w-80 -translate-y-1/2 rounded-xl border border-white/10 bg-surface-50 p-4 text-left shadow-2xl group-hover:block">
+    <div className="pointer-events-none absolute left-3 right-3 top-full z-30 mt-2 hidden rounded-xl border border-white/10 bg-surface-50 p-4 text-left shadow-2xl group-hover:block">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-white">{row.symbol} · {row.companyName || '—'}</p>
@@ -318,7 +318,7 @@ export default function Charts() {
           )}
         </section>
 
-        <aside className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
+        <aside className="flex min-h-0 flex-col rounded-2xl border border-white/10 bg-white/[0.02]">
           <div className="border-b border-white/10 px-4 py-4">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -390,7 +390,7 @@ export default function Charts() {
             ))}
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
             {sortedRows.length ? (
               sortedRows.map(row => {
                 const active = row.symbol === selectedDisplaySymbol
