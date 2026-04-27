@@ -24,6 +24,8 @@ const DEFAULT_LISTS = {
     activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
     controlsCollapsed: true,
     collapsedPanels: {},
+    condensedEcosystemsEnabled: false,
+    condensedEcosystemOverrides: {},
     themeAnalyticsHistory: { theme: [], ecosystem: [] },
     lastUpdated: null,
   },
@@ -38,6 +40,8 @@ const DEFAULT_LISTS = {
     activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
     controlsCollapsed: true,
     collapsedPanels: {},
+    condensedEcosystemsEnabled: false,
+    condensedEcosystemOverrides: {},
     themeAnalyticsHistory: { theme: [], ecosystem: [] },
     lastUpdated: null,
   },
@@ -63,6 +67,8 @@ function makeListPatch(list, patch = {}) {
     activeColumnPreset: hasPatch('activeColumnPreset') ? patch.activeColumnPreset : (list.activeColumnPreset ?? DEFAULT_COLUMN_PRESET.presetKey),
     controlsCollapsed: hasPatch('controlsCollapsed') ? patch.controlsCollapsed : (list.controlsCollapsed ?? true),
     collapsedPanels: hasPatch('collapsedPanels') ? (patch.collapsedPanels || {}) : (list.collapsedPanels ?? {}),
+    condensedEcosystemsEnabled: hasPatch('condensedEcosystemsEnabled') ? !!patch.condensedEcosystemsEnabled : !!list.condensedEcosystemsEnabled,
+    condensedEcosystemOverrides: hasPatch('condensedEcosystemOverrides') ? (patch.condensedEcosystemOverrides || {}) : (list.condensedEcosystemOverrides ?? {}),
     themeAnalyticsHistory: hasPatch('themeAnalyticsHistory')
       ? normalizeThemeAnalyticsHistory(patch.themeAnalyticsHistory)
       : (list.themeAnalyticsHistory ?? { theme: [], ecosystem: [] }),
@@ -218,6 +224,20 @@ export const useResearchWatchlistStore = create(
           [panelId]: !!collapsed,
         },
       }))),
+
+      setCondensedEcosystemsEnabled: (enabled) => set(state => updateActiveList(state, () => ({
+        condensedEcosystemsEnabled: !!enabled,
+      }))),
+
+      setCondensedEcosystemOverride: (sourceKey, targetLabel) => set(state => updateActiveList(state, current => {
+        const key = String(sourceKey || '').trim()
+        if (!key) return current
+        const nextOverrides = { ...(current.condensedEcosystemOverrides || {}) }
+        const label = String(targetLabel || '').trim()
+        if (label) nextOverrides[key] = label
+        else delete nextOverrides[key]
+        return { condensedEcosystemOverrides: nextOverrides }
+      })),
 
       saveThemeAnalyticsSnapshot: ({ groupingMode, snapshotDate, groups } = {}) => set(state => updateActiveList(state, current => {
         const nextHistory = upsertThemeAnalyticsSnapshot({

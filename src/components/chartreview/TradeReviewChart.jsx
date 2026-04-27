@@ -10,7 +10,7 @@ import {
 import { fetchHistory } from '../../utils/marketData.js'
 import { buildTradeReviewChartData } from '../../utils/tradeReviewChart.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
-import { setVisibleRangeWithRightOffset } from '../../utils/lightweightChartViewport.js'
+import { setVisibleRangeWithRightOffset, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET } from '../../utils/lightweightChartViewport.js'
 
 const CHART_OPTIONS = {
   layout: {
@@ -85,15 +85,19 @@ function addHlcBars(chart, candles) {
   return series
 }
 
-function fitToData(chart, markers, bars) {
+function fitToData(chart, markers, bars, rightOffset) {
   if (!bars.length) return
   const firstMarker = markers[0]?.time
   const firstIndex = firstMarker ? bars.findIndex(bar => bar.time >= firstMarker) : -1
   const from = Math.max(0, firstIndex > 24 ? firstIndex - 55 : bars.length - 120)
-  setVisibleRangeWithRightOffset(chart, {
-    from: bars[from]?.time || bars[0].time,
-    to: bars.at(-1).time,
-  })
+  setVisibleRangeWithRightOffset(
+    chart,
+    {
+      from: bars[from]?.time || bars[0].time,
+      to: bars.at(-1).time,
+    },
+    rightOffset
+  )
 }
 
 function chartEventToDateKey(time) {
@@ -237,7 +241,7 @@ function LightweightPane({ data, kind, height, chartType, onChartClick }) {
       redrawShades()
       chart.timeScale().subscribeVisibleTimeRangeChange(redrawShades)
     } else {
-      fitToData(chart, data.markers, data.weeklyCandles)
+      fitToData(chart, data.markers, data.weeklyCandles, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET)
       redrawShades()
       chart.timeScale().subscribeVisibleTimeRangeChange(redrawShades)
     }

@@ -12,7 +12,7 @@ import {
 } from 'lightweight-charts'
 import { ExternalLink, RefreshCw, AlertCircle } from 'lucide-react'
 import { fetchHistory } from '../../utils/marketData.js'
-import { fitContentWithRightOffset } from '../../utils/lightweightChartViewport.js'
+import { fitContentWithRightOffset, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET } from '../../utils/lightweightChartViewport.js'
 
 // ── Indicator math ────────────────────────────────────────────────────────────
 
@@ -352,7 +352,7 @@ export default function TradeChart({ trade }) {
           }
         }
 
-        fitContentWithRightOffset(chart)
+        fitContentWithRightOffset(chart, timeframe === 'W' ? WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET : undefined)
       } catch (chartErr) {
         // Chart creation errors should show the error state, not infinite loading
         if (!cancelRef.current) {

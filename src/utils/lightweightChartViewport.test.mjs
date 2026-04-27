@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict'
 import {
   DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET,
+  WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET,
   applyRightOffset,
   fitContentWithRightOffset,
   setVisibleRangeWithRightOffset,
 } from './lightweightChartViewport.js'
 
 assert.equal(DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET, 5)
+assert.equal(WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET, 1)
 
 const calls = []
 const chart = {
@@ -33,3 +35,9 @@ assert.deepEqual(calls.slice(2, 4), [
 
 applyRightOffset(chart, 8)
 assert.deepEqual(calls.at(-1), ['applyOptions', { rightOffset: 8 }])
+
+fitContentWithRightOffset(chart, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET)
+assert.deepEqual(calls.slice(-2), [
+  ['fitContent'],
+  ['applyOptions', { rightOffset: 1 }],
+])

@@ -26,7 +26,7 @@ import { fetchHistoryCached } from '../../utils/historyCache.js'
 import { resolveTickerToName } from '../../utils/marketData.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
 import { buildCompanyVerification } from '../../utils/companyVerification.js'
-import { fitContentWithRightOffset } from '../../utils/lightweightChartViewport.js'
+import { fitContentWithRightOffset, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET } from '../../utils/lightweightChartViewport.js'
 import {
   buildAnchoredRsSnapshot,
   aggregateWeeklyBars,
@@ -38,6 +38,11 @@ import {
   resolveLatestAnchorDate,
 } from '../../utils/tradeReviewChart.js'
 import { buildWatchlistFitMap, filterAndSortWatchlistRows } from '../../utils/watchlistFitSignal.js'
+import {
+  buildCondensedEcosystemRows,
+  buildCondensedEcosystemSourceMap,
+  normalizeEcosystemKey,
+} from '../../utils/condensedEcosystems.js'
 import {
   applyColumnPreset,
   buildVisibleColumnOrder,
@@ -104,6 +109,7 @@ const CHART_UP_COLOR = '#2877e3'
 const CHART_DOWN_COLOR = '#ea4ce7'
 const WATCHLIST_SUMMARY_PANEL_ID = 'watchlist-summary'
 const WATCHLIST_CONTEXT_PANEL_ID = 'watchlist-context'
+const COLUMN_LAYOUT_PANEL_ID = 'column-layout'
 
 function toDateKey(value) {
   return new Date(value).toISOString().slice(0, 10)
@@ -554,13 +560,23 @@ function CompanyVerificationCell({
   )
 }
 
-function EcosystemMembersModal({ group, rowsBySymbol, fitBySymbol, onClose, onSelectSymbol }) {
+function EcosystemMembersModal({
+  group,
+  rowsBySymbol,
+  fitBySymbol,
+  condensedLabels = [],
+  condensedEnabled = false,
+  onClose,
+  onSelectSymbol,
+  onReassignSource,
+}) {
   if (!group) return null
   const members = (group.symbols || []).map(symbol => ({
     symbol,
     row: rowsBySymbol[symbol] || null,
     fit: fitBySymbol[symbol] || null,
   }))
+  const sourceEcosystems = group.sourceEcosystems || []
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onMouseDown={onClose}>
@@ -574,7 +590,31 @@ function EcosystemMembersModal({ group, rowsBySymbol, fitBySymbol, onClose, onSe
             <X size={16} />
           </button>
         </div>
-        <div className="max-h-[64vh] overflow-y-auto p-4">
+        <div className="max-h-[64vh] overflow-y-auto p-4 space-y-4">
+          {condensedEnabled && sourceEcosystems.length > 0 && (
+            <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+              <p className="text-xs font-semibold uppercase tracking-widest text-gray-500">Source Ecosystems</p>
+              <div className="mt-3 space-y-2">
+                {sourceEcosystems.map(source => (
+                  <div key={source.key} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-200">{source.label}</p>
+                      <p className="text-[11px] text-gray-600">{source.count} member{source.count === 1 ? '' : 's'} · {source.symbols.slice(0, 10).join(', ')}{source.symbols.length > 10 ? '…' : ''}</p>
+                    </div>
+                    <select
+                      value={group.label}
+                      onChange={event => onReassignSource?.(source, event.target.value)}
+                      className="rounded-lg border border-white/10 bg-surface-50 px-2 py-1.5 text-xs text-gray-300 focus:border-accent-blue/50 focus:outline-none"
+                    >
+                      {condensedLabels.map(label => (
+                        <option key={label} value={label}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="grid gap-2 sm:grid-cols-2">
             {members.map(member => (
               <button
@@ -772,7 +812,7 @@ function EcosystemLightweightPane({ data, kind, height, chartType }) {
         drawEcosystemShadeBands(shadeCanvasRef.current, chart, priceSeries, bands)
       })
     }
-    fitContentWithRightOffset(chart)
+    fitContentWithRightOffset(chart, kind === 'weekly' ? WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET : undefined)
     redraw()
     chart.timeScale().subscribeVisibleTimeRangeChange(redraw)
 
@@ -1073,6 +1113,8 @@ export default function ThemeWatchlist({
     updateColumnLayout,
     setControlsCollapsed,
     setPanelCollapsed,
+    setCondensedEcosystemsEnabled,
+    setCondensedEcosystemOverride,
     saveThemeAnalyticsSnapshot,
     clear,
   } = useResearchWatchlistStore()
@@ -1087,6 +1129,8 @@ export default function ThemeWatchlist({
   const activeColumnPreset = activeList?.activeColumnPreset || 'compact'
   const controlsCollapsed = activeList?.controlsCollapsed ?? true
   const collapsedPanels = activeList?.collapsedPanels || {}
+  const condensedEcosystemsEnabled = !!activeList?.condensedEcosystemsEnabled
+  const condensedEcosystemOverrides = activeList?.condensedEcosystemOverrides || {}
   const themeAnalyticsHistory = activeList?.themeAnalyticsHistory || { theme: [], ecosystem: [] }
   const watchlists = useMemo(
     () => Object.values(listsById || {}).sort((a, b) => {
@@ -1201,15 +1245,31 @@ export default function ThemeWatchlist({
     [rows, fitBySymbol, rollingRsBySymbol, anchoredRsBySymbol]
   )
 
+  const ecosystemAnalyticsRows = useMemo(
+    () => condensedEcosystemsEnabled
+      ? buildCondensedEcosystemRows(rows, condensedEcosystemOverrides)
+      : rows,
+    [condensedEcosystemOverrides, condensedEcosystemsEnabled, rows]
+  )
+
+  const condensedSourceMap = useMemo(
+    () => condensedEcosystemsEnabled ? buildCondensedEcosystemSourceMap(ecosystemAnalyticsRows) : {},
+    [condensedEcosystemsEnabled, ecosystemAnalyticsRows]
+  )
+
   const ecosystemGroupsBaseAnalytics = useMemo(
     () => buildThemeGroupMetrics({
-      rows,
+      rows: ecosystemAnalyticsRows,
       groupBy: 'ecosystem',
       fitBySymbol,
       rollingRsBySymbol,
       anchoredRsBySymbol,
-    }),
-    [rows, fitBySymbol, rollingRsBySymbol, anchoredRsBySymbol]
+    }).map(group => ({
+      ...group,
+      sourceEcosystems: condensedSourceMap[group.key] || [],
+      isCondensed: condensedEcosystemsEnabled,
+    })),
+    [anchoredRsBySymbol, condensedEcosystemsEnabled, condensedSourceMap, ecosystemAnalyticsRows, fitBySymbol, rollingRsBySymbol]
   )
 
   const marketLeadersEcosystemGroup = useMemo(
@@ -1241,6 +1301,7 @@ export default function ThemeWatchlist({
     const valueForSort = group => {
       if (ecosystemSortKey === 'ecosystem') return group.label || ''
       if (ecosystemSortKey === 'members') return group.count
+      if (ecosystemSortKey === 'sources') return group.sourceEcosystems?.length || 0
       if (ecosystemSortKey === 'rolling') return group.avgRollingZ
       if (ecosystemSortKey === 'anchored') return group.avgAnchoredZ
       if (ecosystemSortKey === 'greenPct') return group.greenPct
@@ -1305,6 +1366,16 @@ export default function ThemeWatchlist({
     () => sortedThemeGroups.find(group => group.key === membersModalGroupKey) || null,
     [membersModalGroupKey, sortedThemeGroups]
   )
+
+  const condensedLabels = useMemo(
+    () => [...new Set(ecosystemGroupsAnalytics.filter(group => !group.isMarketLeaders).map(group => group.label).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [ecosystemGroupsAnalytics]
+  )
+
+  const uniqueSourceEcosystemCount = useMemo(() => {
+    if (!condensedEcosystemsEnabled) return activeThemeGroups.filter(group => !group.isMarketLeaders).length
+    return new Set(ecosystemAnalyticsRows.map(row => row.sourceEcosystemKey).filter(Boolean)).size
+  }, [activeThemeGroups, condensedEcosystemsEnabled, ecosystemAnalyticsRows])
 
   const selectedThemeMembers = useMemo(() => {
     if (!selectedThemeGroup) return []
@@ -2090,6 +2161,14 @@ export default function ThemeWatchlist({
     setStatus(`Updated ${symbol} to ${officialName}.`)
   }
 
+  function handleReassignSourceEcosystem(source, targetLabel) {
+    const sourceKey = source?.key || normalizeEcosystemKey(source?.label)
+    const nextLabel = String(targetLabel || '').trim()
+    if (!sourceKey || !nextLabel) return
+    setCondensedEcosystemOverride(sourceKey, nextLabel)
+    setStatus(`Moved ${source.label} into ${nextLabel}.`)
+  }
+
   function handleImport() {
     const parsed = parseImportedSymbols(input)
     if (!parsed.length) {
@@ -2313,6 +2392,18 @@ export default function ThemeWatchlist({
                   <p className="text-xs text-gray-500 mt-1">Track what is working inside the active {activeList?.name || 'watchlist'} by ecosystem so you can see which spaces are moving together, broadening, or diverging.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCondensedEcosystemsEnabled(!condensedEcosystemsEnabled)}
+                    className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
+                      condensedEcosystemsEnabled
+                        ? 'bg-accent-blue/15 border-accent-blue/25 text-accent-blue'
+                        : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                    }`}
+                    title="Combine similar ecosystems into broader groups"
+                  >
+                    Condensed {condensedEcosystemsEnabled ? 'On' : 'Off'}
+                  </button>
                   {THEME_SORT_OPTIONS.map(([value, label]) => (
                     <button
                       key={value}
@@ -2333,8 +2424,9 @@ export default function ThemeWatchlist({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
                 <StatPill label="Tracked Ecosystems" value={activeThemeGroups.length} />
+                <StatPill label={condensedEcosystemsEnabled ? 'Source Ecosystems' : 'Condensed Mode'} value={condensedEcosystemsEnabled ? uniqueSourceEcosystemCount : 'Off'} />
                 <StatPill label="Best Breadth" value={sortedThemeGroups[0]?.label || '—'} />
                 <StatPill label="Top Strength" value={sortedThemeGroups[0]?.currentStrengthScore != null ? formatMetric(sortedThemeGroups[0].currentStrengthScore, '', 0) : '—'} />
                 <StatPill label="Rotation History" value={`${themeAnalyticsHistory[activeGrouping]?.length || 0} pts`} />
@@ -2373,6 +2465,7 @@ export default function ThemeWatchlist({
                           {[
                             ['ecosystem', 'Ecosystem'],
                             ['members', 'Members'],
+                            ...(condensedEcosystemsEnabled ? [['sources', 'Sources']] : []),
                             ['strength', 'Strength'],
                             ['rolling', 'Rolling'],
                             ['anchored', 'Anchored'],
@@ -2430,6 +2523,21 @@ export default function ThemeWatchlist({
                                 {group.count} view
                               </button>
                             </td>
+                            {condensedEcosystemsEnabled && (
+                              <td className="px-3 py-2.5 text-gray-400">
+                                <button
+                                  type="button"
+                                  onClick={event => {
+                                    event.stopPropagation()
+                                    setMembersModalGroupKey(group.key)
+                                  }}
+                                  className="rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1 text-xs font-semibold text-gray-300 transition-colors hover:border-accent-blue/25 hover:text-accent-blue"
+                                  title="Show source ecosystems"
+                                >
+                                  {group.sourceEcosystems?.length || 0} sources
+                                </button>
+                              </td>
+                            )}
                             <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.currentStrengthScore, '', 1)}</td>
                             <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.avgRollingZ, 'z', 2)}</td>
                             <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.avgAnchoredZ, 'z', 2)}</td>
@@ -2829,50 +2937,51 @@ export default function ThemeWatchlist({
             </div>
           </div>
 
-          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-3">
-            <div className="flex flex-wrap items-center gap-2 justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-widest text-gray-500">Column Layout</p>
-                <p className="text-xs text-gray-600 mt-1">Drag table headers to reorder columns. Use presets to switch between scan styles, or toggle individual columns below.</p>
-              </div>
+          <CollapsibleSection
+            title="Column Layout"
+            description="Drag table headers to reorder columns. Use presets or toggle individual columns."
+            collapsed={!!collapsedPanels[COLUMN_LAYOUT_PANEL_ID]}
+            onToggle={() => setPanelCollapsed(COLUMN_LAYOUT_PANEL_ID, !collapsedPanels[COLUMN_LAYOUT_PANEL_ID])}
+          >
+            <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
-                {WATCHLIST_COLUMN_PRESETS.map(preset => (
-                  <button
-                    key={preset.key}
-                    onClick={() => handleApplyPreset(preset.key)}
-                    className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
-                      activeColumnPreset === preset.key
-                        ? 'bg-accent-blue/15 border-accent-blue/25 text-accent-blue'
-                        : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
-                    }`}
-                    title={preset.description}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
+                  {WATCHLIST_COLUMN_PRESETS.map(preset => (
+                    <button
+                      key={preset.key}
+                      onClick={() => handleApplyPreset(preset.key)}
+                      className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
+                        activeColumnPreset === preset.key
+                          ? 'bg-accent-blue/15 border-accent-blue/25 text-accent-blue'
+                          : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                      }`}
+                      title={preset.description}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              <div className="flex flex-wrap gap-2">
+                {DEFAULT_WATCHLIST_COLUMN_ORDER.map(columnId => {
+                  const column = columnDefinitions.find(item => item.id === columnId)
+                  if (!column) return null
+                  const isVisible = !hiddenColumns.includes(columnId)
+                  return (
+                    <button
+                      key={columnId}
+                      onClick={() => handleColumnVisibilityToggle(columnId)}
+                      className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
+                        isVisible
+                          ? 'bg-accent-green/12 border-accent-green/25 text-accent-green'
+                          : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                      }`}
+                    >
+                      {isVisible ? 'Shown' : 'Hidden'} · {column.label}
+                    </button>
+                  )
+                })}
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {DEFAULT_WATCHLIST_COLUMN_ORDER.map(columnId => {
-                const column = columnDefinitions.find(item => item.id === columnId)
-                if (!column) return null
-                const isVisible = !hiddenColumns.includes(columnId)
-                return (
-                  <button
-                    key={columnId}
-                    onClick={() => handleColumnVisibilityToggle(columnId)}
-                    className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
-                      isVisible
-                        ? 'bg-accent-green/12 border-accent-green/25 text-accent-green'
-                        : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
-                    }`}
-                  >
-                    {isVisible ? 'Shown' : 'Hidden'} · {column.label}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
+          </CollapsibleSection>
 
           {!rows.length ? (
             <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-6 text-center">
@@ -2970,12 +3079,15 @@ export default function ThemeWatchlist({
         group={membersModalGroup}
         rowsBySymbol={rowsBySymbol}
         fitBySymbol={fitBySymbol}
+        condensedLabels={condensedLabels}
+        condensedEnabled={condensedEcosystemsEnabled}
         onClose={() => setMembersModalGroupKey('')}
         onSelectSymbol={(symbol) => {
           setSelectedSymbol(symbol)
           setQuery(symbol)
           setMembersModalGroupKey('')
         }}
+        onReassignSource={handleReassignSourceEcosystem}
       />
     </div>
   )
