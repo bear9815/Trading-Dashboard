@@ -12,6 +12,7 @@ import {
 } from 'lightweight-charts'
 import { ExternalLink, RefreshCw, AlertCircle } from 'lucide-react'
 import { fetchHistory } from '../../utils/marketData.js'
+import { fitContentWithRightOffset } from '../../utils/lightweightChartViewport.js'
 
 // ── Indicator math ────────────────────────────────────────────────────────────
 
@@ -351,7 +352,7 @@ export default function TradeChart({ trade }) {
           }
         }
 
-        chart.timeScale().fitContent()
+        fitContentWithRightOffset(chart)
       } catch (chartErr) {
         // Chart creation errors should show the error state, not infinite loading
         if (!cancelRef.current) {

@@ -10,6 +10,7 @@ import {
 import { fetchHistory } from '../../utils/marketData.js'
 import { buildTradeReviewChartData } from '../../utils/tradeReviewChart.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
+import { setVisibleRangeWithRightOffset } from '../../utils/lightweightChartViewport.js'
 
 const CHART_OPTIONS = {
   layout: {
@@ -89,7 +90,7 @@ function fitToData(chart, markers, bars) {
   const firstMarker = markers[0]?.time
   const firstIndex = firstMarker ? bars.findIndex(bar => bar.time >= firstMarker) : -1
   const from = Math.max(0, firstIndex > 24 ? firstIndex - 55 : bars.length - 120)
-  chart.timeScale().setVisibleRange({
+  setVisibleRangeWithRightOffset(chart, {
     from: bars[from]?.time || bars[0].time,
     to: bars.at(-1).time,
   })

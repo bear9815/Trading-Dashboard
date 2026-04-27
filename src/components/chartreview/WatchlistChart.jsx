@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createChart, ColorType, CrosshairMode } from 'lightweight-charts'
 import { RefreshCw, AlertCircle, TrendingUp, TrendingDown } from 'lucide-react'
 import { fetchHistory, fetchQuote } from '../../utils/marketData.js'
+import { fitContentWithRightOffset } from '../../utils/lightweightChartViewport.js'
 
 const INTERVAL_RANGE = {
   '1d': { months: 6 },
@@ -72,7 +73,7 @@ export default function WatchlistChart({ symbol, interval = '1d', height = 200, 
         wickDownColor:    '#ff4757',
       })
       series.setData(candles)
-      chart.timeScale().fitContent()
+      fitContentWithRightOffset(chart)
     } catch (e) {
       setError(e.message)
     } finally {

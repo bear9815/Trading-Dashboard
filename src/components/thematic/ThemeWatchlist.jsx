@@ -26,6 +26,7 @@ import { fetchHistoryCached } from '../../utils/historyCache.js'
 import { resolveTickerToName } from '../../utils/marketData.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
 import { buildCompanyVerification } from '../../utils/companyVerification.js'
+import { fitContentWithRightOffset } from '../../utils/lightweightChartViewport.js'
 import {
   buildAnchoredRsSnapshot,
   aggregateWeeklyBars,
@@ -771,7 +772,7 @@ function EcosystemLightweightPane({ data, kind, height, chartType }) {
         drawEcosystemShadeBands(shadeCanvasRef.current, chart, priceSeries, bands)
       })
     }
-    chart.timeScale().fitContent()
+    fitContentWithRightOffset(chart)
     redraw()
     chart.timeScale().subscribeVisibleTimeRangeChange(redraw)
 
