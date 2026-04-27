@@ -26,7 +26,14 @@ import { fetchHistoryCached } from '../../utils/historyCache.js'
 import { resolveTickerToName } from '../../utils/marketData.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
 import { buildCompanyVerification } from '../../utils/companyVerification.js'
-import { fitContentWithRightOffset, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET } from '../../utils/lightweightChartViewport.js'
+import {
+  DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET,
+  MIN_LIGHTWEIGHT_VISIBLE_BARS,
+  WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET,
+  applyRightAnchoredLogicalRange,
+  fitContentWithRightOffset,
+  getVisibleLogicalRange,
+} from '../../utils/lightweightChartViewport.js'
 import { getWeeklyChartStartDate, sliceWeeklyChartBars } from '../../utils/chartTimeframes.js'
 import {
   buildAnchoredRsSnapshot,
@@ -111,6 +118,7 @@ const CHART_DOWN_COLOR = '#ea4ce7'
 const WATCHLIST_SUMMARY_PANEL_ID = 'watchlist-summary'
 const WATCHLIST_CONTEXT_PANEL_ID = 'watchlist-context'
 const COLUMN_LAYOUT_PANEL_ID = 'column-layout'
+const GROWTH_RESEARCH_DAILY_RANGE_OPTIONS = [6, 10]
 
 function toDateKey(value) {
   return new Date(value).toISOString().slice(0, 10)
@@ -148,6 +156,22 @@ function normalizeChartBars(bars = []) {
       }
     })
     .filter(Boolean)
+}
+
+function countVisibleBarsForMonths(bars, months) {
+  if (!Array.isArray(bars) || !bars.length) return 0
+  const lastBarTime = bars.at(-1)?.time
+  const lastDate = lastBarTime ? new Date(`${lastBarTime}T00:00:00Z`) : null
+  if (!(lastDate instanceof Date) || Number.isNaN(lastDate?.getTime?.())) return bars.length
+  const cutoff = new Date(lastDate)
+  cutoff.setMonth(cutoff.getMonth() - months)
+  return Math.max(
+    MIN_LIGHTWEIGHT_VISIBLE_BARS,
+    bars.filter(bar => {
+      const barDate = bar?.time ? new Date(`${bar.time}T00:00:00Z`) : null
+      return barDate instanceof Date && !Number.isNaN(barDate?.getTime?.()) && barDate >= cutoff
+    }).length
+  )
 }
 
 async function mapWithConcurrency(items, limit, mapper) {
@@ -733,12 +757,13 @@ function drawEcosystemShadeBands(canvas, chart, priceSeries, bands) {
   }
 }
 
-function EcosystemLightweightPane({ data, kind, height, chartType }) {
+function EcosystemLightweightPane({ data, kind, height, chartType, dailyRangeMonths = 6 }) {
   const chartContainerRef = useRef(null)
   const shadeCanvasRef = useRef(null)
 
   useEffect(() => {
     if (!chartContainerRef.current) return undefined
+    const rightOffset = kind === 'weekly' ? WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET : DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET
     const chart = createChart(chartContainerRef.current, {
       ...ECOSYSTEM_CHART_OPTIONS,
       height,
@@ -813,9 +838,37 @@ function EcosystemLightweightPane({ data, kind, height, chartType }) {
         drawEcosystemShadeBands(shadeCanvasRef.current, chart, priceSeries, bands)
       })
     }
-    fitContentWithRightOffset(chart, kind === 'weekly' ? WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET : undefined)
+
+    if (kind === 'daily') {
+      const visibleBars = countVisibleBarsForMonths(candles, dailyRangeMonths)
+      applyRightAnchoredLogicalRange(chart, candles.length, visibleBars, rightOffset)
+    } else {
+      fitContentWithRightOffset(chart, rightOffset)
+    }
+
     redraw()
     chart.timeScale().subscribeVisibleTimeRangeChange(redraw)
+
+    const handleWheel = (event) => {
+      if (!candles.length) return
+      event.preventDefault()
+      event.stopPropagation()
+
+      const logicalRange = getVisibleLogicalRange(chart)
+      const currentSpan = Math.max(
+        MIN_LIGHTWEIGHT_VISIBLE_BARS,
+        Math.ceil((logicalRange?.to ?? candles.length + rightOffset) - (logicalRange?.from ?? 0))
+      )
+      const zoomFactor = event.deltaY < 0 ? 0.88 : 1.14
+      const maxVisibleBars = Math.max(MIN_LIGHTWEIGHT_VISIBLE_BARS, candles.length + rightOffset)
+      const nextVisibleBars = Math.min(
+        maxVisibleBars,
+        Math.max(MIN_LIGHTWEIGHT_VISIBLE_BARS, Math.round(currentSpan * zoomFactor))
+      )
+      applyRightAnchoredLogicalRange(chart, candles.length, nextVisibleBars, rightOffset)
+      redraw()
+    }
+    chartContainerRef.current.addEventListener('wheel', handleWheel, { passive: false, capture: true })
 
     const resizeObserver = new ResizeObserver(([entry]) => {
       chart.applyOptions({ width: Math.floor(entry.contentRect.width), height })
@@ -825,10 +878,11 @@ function EcosystemLightweightPane({ data, kind, height, chartType }) {
 
     return () => {
       chart.timeScale().unsubscribeVisibleTimeRangeChange(redraw)
+      chartContainerRef.current?.removeEventListener?.('wheel', handleWheel, true)
       resizeObserver.disconnect()
       chart.remove()
     }
-  }, [chartType, data, height, kind])
+  }, [chartType, dailyRangeMonths, data, height, kind])
 
   return (
     <div className="relative w-full" style={{ height }}>
@@ -843,6 +897,8 @@ function EcosystemCompositeChart({
   chartType = 'candlestick',
   title = 'Ecosystem',
   memberCount = 0,
+  dailyRangeMonths = 6,
+  onChangeDailyRangeMonths,
   ytdEnabled = false,
   onToggleYtd,
   chartLabel = 'Ecosystem Symbol',
@@ -859,6 +915,23 @@ function EcosystemCompositeChart({
             <p className="text-[10px] text-[#505760]">KC13/34/65 · YTD AVWAP · {memberCount} member{memberCount === 1 ? '' : 's'}</p>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 rounded border border-black/10 bg-white/70 p-0.5">
+              {GROWTH_RESEARCH_DAILY_RANGE_OPTIONS.map(months => (
+                <button
+                  key={months}
+                  type="button"
+                  onClick={() => onChangeDailyRangeMonths?.(months)}
+                  className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-colors ${
+                    dailyRangeMonths === months
+                      ? 'bg-[#242830] text-white'
+                      : 'text-[#505760] hover:bg-black/5'
+                  }`}
+                  title={`Show ${months} months on the daily chart`}
+                >
+                  {months}M
+                </button>
+              ))}
+            </div>
             <button
               onClick={onToggleYtd}
               className={`px-2 py-0.5 text-[10px] font-semibold rounded border transition-colors ${
@@ -879,14 +952,14 @@ function EcosystemCompositeChart({
         <div>
           <div className="relative border-b-4 border-[#242424]">
             <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1W</span>
-            <EcosystemLightweightPane data={data} kind="weekly" height={190} chartType={chartType} />
+            <EcosystemLightweightPane data={data} kind="weekly" height={190} chartType={chartType} dailyRangeMonths={dailyRangeMonths} />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
               {title}
             </div>
           </div>
           <div className="relative">
             <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1D</span>
-            <EcosystemLightweightPane data={data} kind="daily" height={350} chartType={chartType} />
+            <EcosystemLightweightPane data={data} kind="daily" height={350} chartType={chartType} dailyRangeMonths={dailyRangeMonths} />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
               {title}
             </div>
@@ -1223,6 +1296,9 @@ export default function ThemeWatchlist({
     () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
     [tradeReviewChartSettings?.anchorDates]
   )
+  const growthResearchDailyRangeMonths = GROWTH_RESEARCH_DAILY_RANGE_OPTIONS.includes(tradeReviewChartSettings?.growthResearchDailyRangeMonths)
+    ? tradeReviewChartSettings.growthResearchDailyRangeMonths
+    : 6
   const ecosystemYtdEnabled = Boolean(tradeReviewChartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
   const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
 
@@ -2443,6 +2519,8 @@ export default function ThemeWatchlist({
                     chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
                     title={selectedThemeGroup.isMarketLeaders ? 'MARKET LEADERS' : `ECO:${String(selectedThemeGroup.label || '').toUpperCase()}`}
                     memberCount={selectedEcosystemComposite.memberCount}
+                    dailyRangeMonths={growthResearchDailyRangeMonths}
+                    onChangeDailyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchDailyRangeMonths: months })}
                     ytdEnabled={ecosystemYtdEnabled}
                     onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
                   />
@@ -2884,6 +2962,8 @@ export default function ThemeWatchlist({
               chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
               title={selectedRow.symbol}
               memberCount={1}
+              dailyRangeMonths={growthResearchDailyRangeMonths}
+              onChangeDailyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchDailyRangeMonths: months })}
               ytdEnabled={ecosystemYtdEnabled}
               onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
               chartLabel="Ticker Chart"

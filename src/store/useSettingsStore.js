@@ -8,6 +8,7 @@ let settingsSessionLoaded = false
 const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
   chartType: 'candlestick',
+  growthResearchDailyRangeMonths: 6,
   showTradeEntryAvwap: false,
   anchorDates: ['2026-01-01', '2026-04-02'],
   avwapPresets: [
