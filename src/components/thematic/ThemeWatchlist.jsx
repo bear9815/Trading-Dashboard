@@ -23,7 +23,9 @@ import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { fetchHistoryCached } from '../../utils/historyCache.js'
+import { resolveTickerToName } from '../../utils/marketData.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
+import { buildCompanyVerification } from '../../utils/companyVerification.js'
 import {
   buildAnchoredRsSnapshot,
   aggregateWeeklyBars,
@@ -483,6 +485,118 @@ function CollapsibleSection({ title, description, collapsed = false, onToggle, c
           {children}
         </div>
       )}
+    </div>
+  )
+}
+
+function CompanyVerificationCell({
+  row,
+  loading = false,
+  onVerify,
+  onApply,
+}) {
+  const verification = row.companyVerification || null
+  const status = verification?.status || 'unchecked'
+  const isMismatch = status === 'mismatch'
+  const isMatch = status === 'match'
+  const isUnverified = status === 'unverified'
+  const badgeClass = isMatch
+    ? 'border-accent-green/25 bg-accent-green/10 text-accent-green'
+    : isMismatch
+      ? 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow'
+      : isUnverified
+        ? 'border-accent-red/25 bg-accent-red/10 text-accent-red'
+        : 'border-white/10 bg-white/[0.03] text-gray-500'
+  const badgeText = isMatch ? 'verified' : isMismatch ? 'check name' : isUnverified ? 'not found' : 'unverified'
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-gray-200">{row.companyName}</p>
+        <button
+          type="button"
+          onClick={event => {
+            event.stopPropagation()
+            onVerify(row)
+          }}
+          disabled={loading}
+          className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors ${badgeClass} disabled:opacity-60`}
+          title="Verify company name against Yahoo Finance"
+        >
+          {loading ? 'checking…' : badgeText}
+        </button>
+      </div>
+      <p className="text-xs text-gray-600 mt-0.5">{row.sector}</p>
+      {isMismatch && (
+        <div className="mt-1 rounded-lg border border-accent-yellow/15 bg-accent-yellow/5 px-2 py-1">
+          <p className="text-[11px] text-gray-400">
+            Yahoo: <span className="font-semibold text-accent-yellow">{verification.officialName}</span>
+            {verification.exchange ? <span className="text-gray-600"> · {verification.exchange}</span> : null}
+          </p>
+          <button
+            type="button"
+            onClick={event => {
+              event.stopPropagation()
+              onApply(row)
+            }}
+            className="mt-1 text-[11px] font-semibold text-accent-blue hover:underline"
+          >
+            Apply official name
+          </button>
+        </div>
+      )}
+      {isMatch && verification.exchange && (
+        <p className="mt-1 text-[10px] text-accent-green">{verification.exchange}</p>
+      )}
+      {row.manualOverride && <span className="text-[10px] text-accent-green">manual</span>}
+    </div>
+  )
+}
+
+function EcosystemMembersModal({ group, rowsBySymbol, fitBySymbol, onClose, onSelectSymbol }) {
+  if (!group) return null
+  const members = (group.symbols || []).map(symbol => ({
+    symbol,
+    row: rowsBySymbol[symbol] || null,
+    fit: fitBySymbol[symbol] || null,
+  }))
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onMouseDown={onClose}>
+      <div className="max-h-[82vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-white/10 bg-surface shadow-2xl" onMouseDown={event => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3 border-b border-white/10 px-5 py-4">
+          <div>
+            <p className="text-sm font-semibold text-white">{group.label}</p>
+            <p className="mt-1 text-xs text-gray-500">{members.length} member{members.length === 1 ? '' : 's'} in this ecosystem</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/[0.04] hover:text-white">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="max-h-[64vh] overflow-y-auto p-4">
+          <div className="grid gap-2 sm:grid-cols-2">
+            {members.map(member => (
+              <button
+                key={member.symbol}
+                type="button"
+                onClick={() => onSelectSymbol(member.symbol)}
+                className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2 text-left transition-colors hover:border-accent-blue/25 hover:bg-accent-blue/5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-accent-blue">{member.symbol}</p>
+                    <p className="truncate text-xs text-gray-300">{member.row?.companyName || 'Unmapped company'}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-gray-600">{member.row?.theme || 'No theme'} · {member.row?.sector || 'No sector'}</p>
+                  </div>
+                  <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${ThemeHealthTone(member.fit?.fitColor === 'green' ? 'broad leadership' : member.fit?.fitColor === 'red' ? 'weak / deteriorating' : 'improving participation')}`}>
+                    {member.fit?.fitLabel || 'Needs Data'}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -990,6 +1104,8 @@ export default function ThemeWatchlist({
   const [fitFilter, setFitFilter] = useState('all')
   const [editingSymbol, setEditingSymbol] = useState(null)
   const [selectedSymbol, setSelectedSymbol] = useState(null)
+  const [verifyingSymbols, setVerifyingSymbols] = useState({})
+  const [membersModalGroupKey, setMembersModalGroupKey] = useState('')
   const [viewName, setViewName] = useState('')
   const [draggedColumnId, setDraggedColumnId] = useState(null)
   const themeGrouping = 'theme'
@@ -1184,6 +1300,11 @@ export default function ThemeWatchlist({
     [themeRotationGroups, selectedThemeGroup]
   )
 
+  const membersModalGroup = useMemo(
+    () => sortedThemeGroups.find(group => group.key === membersModalGroupKey) || null,
+    [membersModalGroupKey, sortedThemeGroups]
+  )
+
   const selectedThemeMembers = useMemo(() => {
     if (!selectedThemeGroup) return []
     return selectedThemeGroup.symbols
@@ -1312,13 +1433,14 @@ export default function ThemeWatchlist({
     {
       id: 'companyName',
       label: 'Company',
-      cellClassName: 'px-3 py-2.5 min-w-[180px]',
+      cellClassName: 'px-3 py-2.5 min-w-[240px]',
       render: (row) => (
-        <>
-          <p className="text-gray-200">{row.companyName}</p>
-          <p className="text-xs text-gray-600 mt-0.5">{row.sector}</p>
-          {row.manualOverride && <span className="text-[10px] text-accent-green">manual</span>}
-        </>
+        <CompanyVerificationCell
+          row={row}
+          loading={!!verifyingSymbols[row.symbol]}
+          onVerify={handleVerifyCompany}
+          onApply={handleApplyVerifiedCompany}
+        />
       ),
     },
     { id: 'ecosystem', label: 'Ecosystem', cellClassName: 'px-3 py-2.5 text-gray-300 min-w-[140px]', render: row => row.ecosystem },
@@ -1430,6 +1552,7 @@ export default function ThemeWatchlist({
     finraEstimateBySymbol,
     finraLoading,
     fitBySymbol,
+    verifyingSymbols,
     removeSymbol,
     rollingRsBySymbol,
     rollingRsLoading,
@@ -1894,6 +2017,78 @@ export default function ThemeWatchlist({
     setThemeSortMode(nextKey === 'greenPct' ? 'breadth' : nextKey === 'leaderSpread' ? 'narrow' : nextKey === 'strength' ? 'strength' : 'custom')
   }
 
+  async function handleVerifyCompany(row) {
+    const symbol = String(row?.symbol || '').trim().toUpperCase()
+    if (!symbol) return
+    setVerifyingSymbols(prev => ({ ...prev, [symbol]: true }))
+    try {
+      const resolved = await resolveTickerToName(symbol)
+      const companyVerification = buildCompanyVerification({
+        symbol,
+        currentName: row.companyName,
+        resolved,
+      })
+      updateRow(symbol, { companyVerification })
+      if (companyVerification.status === 'mismatch') {
+        setStatus(`${symbol} may be mismapped: Yahoo identifies it as ${companyVerification.officialName}.`)
+      } else if (companyVerification.status === 'match') {
+        setStatus(`${symbol} verified as ${companyVerification.officialName}.`)
+      } else {
+        setStatus(`Could not verify ${symbol} from Yahoo Finance.`)
+      }
+    } catch (event) {
+      setError(event?.message || `Could not verify ${symbol}.`)
+    } finally {
+      setVerifyingSymbols(prev => {
+        const { [symbol]: _done, ...rest } = prev
+        return rest
+      })
+    }
+  }
+
+  async function handleVerifyVisibleCompanies() {
+    const candidates = filteredRows.length ? filteredRows : rows
+    if (!candidates.length) {
+      setError('Import and map a list before verifying company names.')
+      return
+    }
+    setStatus(`Verifying ${candidates.length} company name${candidates.length === 1 ? '' : 's'}…`)
+    const nextLoading = Object.fromEntries(candidates.map(row => [row.symbol, true]))
+    setVerifyingSymbols(prev => ({ ...prev, ...nextLoading }))
+    let mismatchCount = 0
+    try {
+      await mapWithConcurrency(candidates, 5, async row => {
+        const symbol = String(row?.symbol || '').trim().toUpperCase()
+        if (!symbol) return
+        const resolved = await resolveTickerToName(symbol)
+        const companyVerification = buildCompanyVerification({
+          symbol,
+          currentName: row.companyName,
+          resolved,
+        })
+        if (companyVerification.status === 'mismatch') mismatchCount += 1
+        updateRow(symbol, { companyVerification })
+      })
+      setStatus(`Verified ${candidates.length} name${candidates.length === 1 ? '' : 's'}${mismatchCount ? ` · ${mismatchCount} need review` : ' · all matched'}.`)
+    } catch (event) {
+      setError(event?.message || 'Company verification failed.')
+    } finally {
+      setVerifyingSymbols(prev => {
+        const next = { ...prev }
+        for (const row of candidates) delete next[row.symbol]
+        return next
+      })
+    }
+  }
+
+  function handleApplyVerifiedCompany(row) {
+    const symbol = String(row?.symbol || '').trim().toUpperCase()
+    const officialName = row?.companyVerification?.officialName
+    if (!symbol || !officialName) return
+    updateRow(symbol, { companyName: officialName })
+    setStatus(`Updated ${symbol} to ${officialName}.`)
+  }
+
   function handleImport() {
     const parsed = parseImportedSymbols(input)
     if (!parsed.length) {
@@ -2061,6 +2256,7 @@ export default function ThemeWatchlist({
                   <button onClick={handleImport} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/15 border border-accent-blue/25 text-accent-blue text-sm font-medium hover:bg-accent-blue/20 transition-all"><Upload size={13} />Import</button>
                   <button onClick={() => fileRef.current?.click()} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all"><Upload size={13} />CSV</button>
                   <button onClick={handleAnalyze} disabled={loading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />{rows.length ? 'Refresh Map' : 'Map List'}</button>
+                  <button onClick={handleVerifyVisibleCompanies} disabled={!rows.length || Object.keys(verifyingSymbols).length > 0} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/12 border border-accent-blue/20 text-accent-blue text-sm font-medium hover:bg-accent-blue/18 transition-all disabled:opacity-40"><RefreshCw size={13} className={Object.keys(verifyingSymbols).length ? 'animate-spin' : ''} />Verify Names</button>
                   <button onClick={refreshAnchoredRs} disabled={anchoredRsLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/12 border border-accent-blue/20 text-accent-blue text-sm font-medium hover:bg-accent-blue/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={anchoredRsLoading ? 'animate-pulse' : ''} />{anchoredRsLoading ? 'RS…' : 'Anchored RS'}</button>
                   <button onClick={refreshRollingRs} disabled={rollingRsLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={rollingRsLoading ? 'animate-pulse' : ''} />{rollingRsLoading ? 'Rolling…' : 'Rolling RS'}</button>
                   <button onClick={refreshYtdAvwap} disabled={ytdAvwapLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-yellow/12 border border-accent-yellow/20 text-accent-yellow text-sm font-medium hover:bg-accent-yellow/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={ytdAvwapLoading ? 'animate-pulse' : ''} />{ytdAvwapLoading ? 'AVWAP…' : 'YTD AVWAP'}</button>
@@ -2220,7 +2416,19 @@ export default function ThemeWatchlist({
                                 )}
                               </span>
                             </td>
-                            <td className="px-3 py-2.5 text-gray-400">{group.count}</td>
+                            <td className="px-3 py-2.5 text-gray-400">
+                              <button
+                                type="button"
+                                onClick={event => {
+                                  event.stopPropagation()
+                                  setMembersModalGroupKey(group.key)
+                                }}
+                                className="rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1 text-xs font-semibold text-accent-blue transition-colors hover:border-accent-blue/25 hover:bg-accent-blue/10"
+                                title={`Show ${group.label} members`}
+                              >
+                                {group.count} view
+                              </button>
+                            </td>
                             <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.currentStrengthScore, '', 1)}</td>
                             <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.avgRollingZ, 'z', 2)}</td>
                             <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.avgAnchoredZ, 'z', 2)}</td>
@@ -2757,6 +2965,17 @@ export default function ThemeWatchlist({
           }}
         />
       )}
+      <EcosystemMembersModal
+        group={membersModalGroup}
+        rowsBySymbol={rowsBySymbol}
+        fitBySymbol={fitBySymbol}
+        onClose={() => setMembersModalGroupKey('')}
+        onSelectSymbol={(symbol) => {
+          setSelectedSymbol(symbol)
+          setQuery(symbol)
+          setMembersModalGroupKey('')
+        }}
+      />
     </div>
   )
 }
