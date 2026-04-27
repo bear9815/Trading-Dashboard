@@ -14,7 +14,7 @@ import { buildTickerChartData, useResearchChartUniverse } from './useResearchCha
 import { buildWatchlistFitMap } from '../../utils/watchlistFitSignal.js'
 
 const WATCHLIST_ORDER = { [MARKET_LEADERS_LIST_ID]: 0, [WATCHLIST_LIST_ID]: 1 }
-const DAILY_RANGE_OPTIONS = [6, 9]
+const DAILY_RANGE_OPTIONS = [3, 6, 9]
 const SORT_OPTIONS = [
   ['symbol', 'Symbol'],
   ['rollingRs', 'Rolling Z'],
@@ -354,6 +354,7 @@ export default function Charts() {
               title={selectedDisplaySymbol || 'Charts'}
               memberCount={1}
               dailyRangeMonths={growthResearchDailyRangeMonths}
+              dailyRangeOptions={DAILY_RANGE_OPTIONS}
               onChangeDailyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchDailyRangeMonths: months })}
               ytdEnabled={ecosystemYtdEnabled}
               onToggleYtd={toggleYtd}

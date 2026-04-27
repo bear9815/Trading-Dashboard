@@ -21,7 +21,7 @@ import { sliceWeeklyChartBars } from '../../utils/chartTimeframes.js'
 
 const CHART_UP_COLOR = '#2877e3'
 const CHART_DOWN_COLOR = '#ea4ce7'
-const DAILY_RANGE_OPTIONS = [6, 9]
+const DEFAULT_DAILY_RANGE_OPTIONS = [6, 9]
 
 const CHART_OPTIONS = {
   layout: {
@@ -307,6 +307,7 @@ export default function ResearchMultiTimeframeChart({
   title = 'Ecosystem',
   memberCount = 0,
   dailyRangeMonths = 6,
+  dailyRangeOptions = DEFAULT_DAILY_RANGE_OPTIONS,
   onChangeDailyRangeMonths,
   ytdEnabled = false,
   onToggleYtd,
@@ -345,7 +346,7 @@ export default function ResearchMultiTimeframeChart({
           <div className="flex items-center gap-2">
             {onChangeDailyRangeMonths && (
               <div className="flex items-center gap-1 rounded border border-black/10 bg-white/70 p-0.5">
-                {DAILY_RANGE_OPTIONS.map(months => (
+                {dailyRangeOptions.map(months => (
                   <button
                     key={months}
                     type="button"

@@ -17,7 +17,10 @@ import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEsti
 import { buildCompanyVerification } from '../../utils/companyVerification.js'
 import {
   buildAnchoredRsSnapshot,
+  buildAvwapOverlays,
+  buildKeltnerShadeBands,
   buildRollingRsSnapshot,
+  calculateKeltnerChannel,
   resolveLatestAnchorDate,
 } from '../../utils/tradeReviewChart.js'
 import { buildWatchlistFitMap, filterAndSortWatchlistRows } from '../../utils/watchlistFitSignal.js'
@@ -91,7 +94,7 @@ const EMPTY_ROW = {
 const WATCHLIST_SUMMARY_PANEL_ID = 'watchlist-summary'
 const WATCHLIST_CONTEXT_PANEL_ID = 'watchlist-context'
 const COLUMN_LAYOUT_PANEL_ID = 'column-layout'
-const GROWTH_RESEARCH_DAILY_RANGE_OPTIONS = [6, 10]
+const GROWTH_RESEARCH_DAILY_RANGE_OPTIONS = [3, 6, 9]
 
 async function mapWithConcurrency(items, limit, mapper) {
   const results = new Array(items.length)
