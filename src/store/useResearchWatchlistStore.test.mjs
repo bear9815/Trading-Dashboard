@@ -5,6 +5,7 @@ import {
   LIQUID_LIST_ID,
   LIQUID_TREND_LIST_ID,
   MARKET_LEADERS_LIST_ID,
+  rebuildTrustedSymbolMemory,
   syncListsWithTrustedCompanyMemory,
   useResearchWatchlistStore,
 } from './useResearchWatchlistStore.js'
@@ -147,4 +148,134 @@ test('upsertRows in Liquid propagates a trusted verified company name into sibli
       globalThis.localStorage = previousLocalStorage
     }
   }
+})
+
+test('weaker sibling-list rows cannot overwrite trusted symbol memory', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  globalThis.localStorage = createLocalStorageMock()
+
+  try {
+    useResearchWatchlistStore.setState({
+      activeListId: LIQUID_LIST_ID,
+      symbolMemoryBySymbol: {
+        APP: {
+          symbol: 'APP',
+          companyName: 'AppLovin Corporation',
+          companyVerification: {
+            status: 'verified',
+            officialName: 'AppLovin Corporation',
+          },
+        },
+      },
+      listsById: {
+        [MARKET_LEADERS_LIST_ID]: {
+          id: MARKET_LEADERS_LIST_ID,
+          name: 'Market Leaders',
+          symbols: ['APP'],
+          rowsBySymbol: {
+            APP: {
+              symbol: 'APP',
+              companyName: 'APP',
+              companyVerification: {
+                status: 'unresolved',
+                officialName: '',
+              },
+            },
+          },
+        },
+        [LIQUID_TREND_LIST_ID]: {
+          id: LIQUID_TREND_LIST_ID,
+          name: 'Liquid Trend',
+          symbols: ['APP'],
+          rowsBySymbol: {},
+        },
+        [LIQUID_LIST_ID]: {
+          id: LIQUID_LIST_ID,
+          name: 'Liquid',
+          symbols: ['APP'],
+          rowsBySymbol: {
+            APP: {
+              symbol: 'APP',
+              companyName: 'AppLovin Corporation',
+              companyVerification: {
+                status: 'verified',
+                officialName: 'AppLovin Corporation',
+              },
+            },
+          },
+        },
+      },
+    })
+
+    useResearchWatchlistStore.setState({ activeListId: MARKET_LEADERS_LIST_ID })
+    useResearchWatchlistStore.getState().updateRow('APP', {
+      companyVerification: {
+        status: 'unresolved',
+        officialName: '',
+      },
+    }, { manualOverride: false })
+
+    const state = useResearchWatchlistStore.getState()
+    assert.equal(state.symbolMemoryBySymbol.APP.companyName, 'AppLovin Corporation')
+    assert.equal(state.symbolMemoryBySymbol.APP.companyVerification.status, 'verified')
+    assert.equal(state.listsById[MARKET_LEADERS_LIST_ID].rowsBySymbol.APP.companyName, 'AppLovin Corporation')
+    assert.equal(state.listsById[MARKET_LEADERS_LIST_ID].rowsBySymbol.APP.companyVerification.status, 'verified')
+    await new Promise(resolve => setTimeout(resolve, 0))
+  } finally {
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+  }
+})
+
+test('rebuildTrustedSymbolMemory restores trusted identities from existing verified rows', () => {
+  const rebuilt = rebuildTrustedSymbolMemory({
+    [MARKET_LEADERS_LIST_ID]: {
+      id: MARKET_LEADERS_LIST_ID,
+      name: 'Market Leaders',
+      rowsBySymbol: {
+        APP: {
+          symbol: 'APP',
+          companyName: 'APP',
+          companyVerification: {
+            status: 'unresolved',
+            officialName: '',
+          },
+        },
+      },
+    },
+    [LIQUID_TREND_LIST_ID]: {
+      id: LIQUID_TREND_LIST_ID,
+      name: 'Liquid Trend',
+      rowsBySymbol: {},
+    },
+    [LIQUID_LIST_ID]: {
+      id: LIQUID_LIST_ID,
+      name: 'Liquid',
+      rowsBySymbol: {
+        APP: {
+          symbol: 'APP',
+          companyName: 'AppLovin Corporation',
+          companyVerification: {
+            status: 'verified',
+            officialName: 'AppLovin Corporation',
+          },
+        },
+      },
+    },
+  }, {
+    APP: {
+      symbol: 'APP',
+      companyName: 'APP',
+      companyVerification: {
+        status: 'unresolved',
+        officialName: '',
+      },
+    },
+  })
+
+  assert.equal(rebuilt.APP.companyName, 'AppLovin Corporation')
+  assert.equal(rebuilt.APP.companyVerification.status, 'verified')
 })

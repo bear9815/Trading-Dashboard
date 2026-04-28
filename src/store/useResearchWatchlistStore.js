@@ -82,6 +82,40 @@ function buildRememberedRow(row = {}) {
   }
 }
 
+function mergeRememberedRow(existingRow = null, nextRow = null) {
+  const rememberedNext = buildRememberedRow(nextRow)
+  if (!rememberedNext) return buildRememberedRow(existingRow)
+
+  const existingTrusted = shouldTrustCompanyVerification(existingRow?.companyVerification)
+  const nextTrusted = shouldTrustCompanyVerification(rememberedNext?.companyVerification)
+
+  if (existingTrusted && !nextTrusted) {
+    return {
+      ...rememberedNext,
+      companyName: existingRow.companyVerification.officialName,
+      companyVerification: existingRow.companyVerification,
+    }
+  }
+
+  return rememberedNext
+}
+
+export function rebuildTrustedSymbolMemory(listsById = {}, symbolMemoryBySymbol = {}) {
+  const nextMemory = { ...(symbolMemoryBySymbol || {}) }
+
+  for (const list of Object.values(listsById || {})) {
+    for (const row of Object.values(list?.rowsBySymbol || {})) {
+      const symbol = String(row?.symbol || '').trim().toUpperCase()
+      if (!symbol) continue
+      if (!shouldTrustCompanyVerification(row?.companyVerification)) continue
+      const remembered = mergeRememberedRow(nextMemory[symbol], row)
+      if (remembered) nextMemory[symbol] = remembered
+    }
+  }
+
+  return nextMemory
+}
+
 export function syncListsWithTrustedCompanyMemory(listsById = {}, symbolMemoryBySymbol = {}) {
   let changed = false
   const nextListsById = { ...listsById }
@@ -188,7 +222,7 @@ function sameAnalyticsHistory(a, b) {
 
 function ensureWorkspaceShape(state) {
   const activeListId = state?.activeListId || MARKET_LEADERS_LIST_ID
-  const symbolMemoryBySymbol = state?.symbolMemoryBySymbol || {}
+  const persistedSymbolMemory = state?.symbolMemoryBySymbol || {}
 
   if (state?.listsById) {
     const rawListsById = DEFAULT_LIST_ORDER.reduce((next, listId) => {
@@ -198,6 +232,7 @@ function ensureWorkspaceShape(state) {
       ))
       return next
     }, {})
+    const symbolMemoryBySymbol = rebuildTrustedSymbolMemory(rawListsById, persistedSymbolMemory)
     const { listsById } = syncListsWithTrustedCompanyMemory(rawListsById, symbolMemoryBySymbol)
     return {
       activeListId: listsById[activeListId] ? activeListId : MARKET_LEADERS_LIST_ID,
@@ -209,7 +244,6 @@ function ensureWorkspaceShape(state) {
   // Legacy single-watchlist state migrates into Market Leaders.
   return {
     activeListId: MARKET_LEADERS_LIST_ID,
-    symbolMemoryBySymbol,
     listsById: syncListsWithTrustedCompanyMemory({
       [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {
         symbols: state?.symbols || [],
@@ -219,7 +253,26 @@ function ensureWorkspaceShape(state) {
       }),
       [WATCHLIST_LIST_ID]: { ...DEFAULT_LISTS[WATCHLIST_LIST_ID] },
       [LIQUID_LIST_ID]: { ...DEFAULT_LISTS[LIQUID_LIST_ID] },
-    }, symbolMemoryBySymbol).listsById,
+    }, rebuildTrustedSymbolMemory({
+      [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {
+        symbols: state?.symbols || [],
+        rowsBySymbol: state?.rowsBySymbol || {},
+        savedViews: state?.savedViews || [],
+        lastUpdated: state?.lastUpdated || null,
+      }),
+      [WATCHLIST_LIST_ID]: { ...DEFAULT_LISTS[WATCHLIST_LIST_ID] },
+      [LIQUID_LIST_ID]: { ...DEFAULT_LISTS[LIQUID_LIST_ID] },
+    }, persistedSymbolMemory)).listsById,
+    symbolMemoryBySymbol: rebuildTrustedSymbolMemory({
+      [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {
+        symbols: state?.symbols || [],
+        rowsBySymbol: state?.rowsBySymbol || {},
+        savedViews: state?.savedViews || [],
+        lastUpdated: state?.lastUpdated || null,
+      }),
+      [WATCHLIST_LIST_ID]: { ...DEFAULT_LISTS[WATCHLIST_LIST_ID] },
+      [LIQUID_LIST_ID]: { ...DEFAULT_LISTS[LIQUID_LIST_ID] },
+    }, persistedSymbolMemory),
   }
 }
 
@@ -264,7 +317,7 @@ export const useResearchWatchlistStore = create(
             updatedAt: new Date().toISOString(),
           }
           next[symbol] = nextRow
-          const remembered = buildRememberedRow(nextRow)
+          const remembered = mergeRememberedRow(nextMemory[symbol], nextRow)
           if (remembered) nextMemory[symbol] = remembered
         }
         const synchronized = syncListsWithTrustedCompanyMemory({
@@ -294,7 +347,7 @@ export const useResearchWatchlistStore = create(
           manualOverride,
         }
         const nextMemory = { ...(state.symbolMemoryBySymbol || {}) }
-        const remembered = buildRememberedRow(nextRow)
+        const remembered = mergeRememberedRow(nextMemory[key], nextRow)
         if (remembered) nextMemory[key] = remembered
         const synchronized = syncListsWithTrustedCompanyMemory({
           ...state.listsById,
