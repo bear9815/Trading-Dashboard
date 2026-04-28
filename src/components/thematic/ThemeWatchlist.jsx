@@ -8,7 +8,7 @@ import {
   RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network, TrendingUp, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { parseChartMeta } from '../../store/useWatchlistStore.js'
-import { MARKET_LEADERS_LIST_ID, useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
+import { MARKET_LEADERS_LIST_ID, WATCHLIST_LIST_ID, useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
@@ -44,6 +44,7 @@ import {
   buildThemeRotationMetrics,
   withMarketLeadersEcosystemGroup,
 } from '../../utils/themeAnalytics.js'
+import { buildSmaBreadthHistory, classifyBreadthHeat } from '../../utils/listBreadth.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 import ResearchMultiTimeframeChart from '../charts/ResearchMultiTimeframeChart.jsx'
 import { buildTickerChartData, useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
@@ -103,6 +104,7 @@ const WATCHLIST_CONTEXT_PANEL_ID = 'watchlist-context'
 const COLUMN_LAYOUT_PANEL_ID = 'column-layout'
 const WATCHLIST_CHART_PANEL_ID = 'watchlist-chart'
 const ECOSYSTEM_CHART_PANEL_ID = 'ecosystem-chart'
+const BREADTH_PANEL_ID = 'breadth-history'
 const GROWTH_RESEARCH_DAILY_RANGE_OPTIONS = [3, 6, 9]
 
 async function mapWithConcurrency(items, limit, mapper) {
@@ -448,6 +450,37 @@ function CollapsibleSection({ title, description, collapsed = false, onToggle, c
           {children}
         </div>
       )}
+    </div>
+  )
+}
+
+function BreadthStatCard({ label, snapshot, tone = 'blue' }) {
+  const toneClass = tone === 'green'
+    ? 'border-accent-green/20 bg-accent-green/8'
+    : 'border-accent-blue/20 bg-accent-blue/8'
+
+  return (
+    <div className={`rounded-xl border p-3 ${toneClass}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-gray-500">{label}</p>
+          <p className="mt-2 text-2xl font-semibold text-white">
+            {Number.isFinite(snapshot?.abovePct) ? `${snapshot.abovePct.toFixed(1)}%` : '—'}
+          </p>
+          <p className="mt-1 text-xs text-gray-500">{classifyBreadthHeat(snapshot?.abovePct)}</p>
+        </div>
+        <div className="text-right text-[11px] text-gray-500">
+          <p>{Number.isFinite(snapshot?.aboveCount) ? snapshot.aboveCount : '—'} above</p>
+          <p>{Number.isFinite(snapshot?.belowCount) ? snapshot.belowCount : '—'} below</p>
+          <p>{Number.isFinite(snapshot?.totalCount) ? snapshot.totalCount : '—'} tracked</p>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-gray-500">
+        <span>Net breadth</span>
+        <span className={Number(snapshot?.netPct) >= 0 ? 'text-accent-green' : 'text-accent-red'}>
+          {Number.isFinite(snapshot?.netPct) ? `${snapshot.netPct.toFixed(1)}%` : '—'}
+        </span>
+      </div>
     </div>
   )
 }
@@ -857,7 +890,15 @@ export default function ThemeWatchlist({
   const { tradeReviewChartSettings, setTradeReviewChartSettings } = useSettingsStore()
   const analyticsMode = mode === 'analytics'
   const activeList = listsById[activeListId]
+  const marketLeadersList = listsById[MARKET_LEADERS_LIST_ID]
+  const liquidList = listsById[WATCHLIST_LIST_ID]
   const symbols = activeList?.symbols || []
+  const marketLeadersSymbols = marketLeadersList?.symbols || []
+  const liquidSymbols = liquidList?.symbols || []
+  const allTrackedSymbols = useMemo(
+    () => [...new Set([...marketLeadersSymbols, ...liquidSymbols])],
+    [liquidSymbols, marketLeadersSymbols]
+  )
   const rowsBySymbol = activeList?.rowsBySymbol || {}
   const savedViews = activeList?.savedViews || []
   const columnOrder = activeList?.columnOrder || DEFAULT_WATCHLIST_COLUMN_ORDER
@@ -962,13 +1003,14 @@ export default function ThemeWatchlist({
     : 6
   const ecosystemYtdEnabled = Boolean(tradeReviewChartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
   const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
+  const breadthPeriod = 5
 
   const {
     benchmarkHistoryBars,
     historyBarsBySymbol,
     loadHistoryUniverse,
   } = useResearchChartUniverse({
-    symbols,
+    symbols: allTrackedSymbols,
     latestAnchorDate,
     rollingRsWindow,
     rollingLookback: tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50,
@@ -1046,6 +1088,51 @@ export default function ThemeWatchlist({
 
   const activeGrouping = analyticsMode ? 'ecosystem' : themeGrouping
   const activeThemeGroups = activeGrouping === 'ecosystem' ? ecosystemGroupsAnalytics : themeGroupsAnalytics
+
+  const marketLeadersBreadthHistory = useMemo(
+    () => buildSmaBreadthHistory({
+      symbols: marketLeadersSymbols,
+      historyBarsBySymbol,
+      period: breadthPeriod,
+    }),
+    [historyBarsBySymbol, marketLeadersSymbols]
+  )
+
+  const liquidBreadthHistory = useMemo(
+    () => buildSmaBreadthHistory({
+      symbols: liquidSymbols,
+      historyBarsBySymbol,
+      period: breadthPeriod,
+    }),
+    [historyBarsBySymbol, liquidSymbols]
+  )
+
+  const breadthHistoryChartData = useMemo(() => {
+    const merged = new Map()
+    for (const point of marketLeadersBreadthHistory) {
+      merged.set(point.date, {
+        date: point.date,
+        marketLeadersAbovePct: point.abovePct,
+        marketLeadersBelowPct: point.belowPct,
+        marketLeadersNetPct: point.netPct,
+      })
+    }
+    for (const point of liquidBreadthHistory) {
+      const current = merged.get(point.date) || { date: point.date }
+      merged.set(point.date, {
+        ...current,
+        liquidAbovePct: point.abovePct,
+        liquidBelowPct: point.belowPct,
+        liquidNetPct: point.netPct,
+      })
+    }
+    return [...merged.values()]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-180)
+  }, [liquidBreadthHistory, marketLeadersBreadthHistory])
+
+  const latestMarketLeadersBreadth = marketLeadersBreadthHistory.at(-1) || null
+  const latestLiquidBreadth = liquidBreadthHistory.at(-1) || null
 
   const sortedThemeGroups = useMemo(() => {
     const marketLeadersGroup = activeThemeGroups.find(group => group.isMarketLeaders)
@@ -2008,6 +2095,89 @@ export default function ThemeWatchlist({
           <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">
             {error}
           </div>
+        )}
+
+        {(breadthHistoryChartData.length || latestMarketLeadersBreadth || latestLiquidBreadth) && (
+          <CollapsibleSection
+            title="5DMA Breadth"
+            description="Historical participation gauge showing what percent of each list is above its 5-day moving average."
+            collapsed={!!collapsedPanels[BREADTH_PANEL_ID]}
+            onToggle={() => setPanelCollapsed(BREADTH_PANEL_ID, !collapsedPanels[BREADTH_PANEL_ID])}
+          >
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <BreadthStatCard label="Market Leaders" snapshot={latestMarketLeadersBreadth} tone="blue" />
+                <BreadthStatCard label="Liquid" snapshot={latestLiquidBreadth} tone="green" />
+              </div>
+
+              {breadthHistoryChartData.length ? (
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                  <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Historical 5DMA Breadth</p>
+                      <p className="text-xs text-gray-500 mt-1">Upper readings mean short-term participation is crowded. Lower readings show washouts and reset conditions.</p>
+                    </div>
+                    <div className="text-[11px] text-gray-500">
+                      Active list: <span className="text-gray-300 font-semibold">{activeList?.name || 'Liquid'}</span>
+                    </div>
+                  </div>
+
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={breadthHistoryChartData} margin={{ top: 8, right: 16, left: -12, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                      <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={28} />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                      <ReferenceLine y={20} stroke="#22c55e55" strokeDasharray="4 4" />
+                      <ReferenceLine y={50} stroke="#ffffff22" strokeDasharray="4 4" />
+                      <ReferenceLine y={80} stroke="#ef444455" strokeDasharray="4 4" />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+                        formatter={(value, name, payload) => {
+                          const point = payload?.payload || {}
+                          if (name === 'Market Leaders') {
+                            return [
+                              `${Number(value).toFixed(1)}% above · ${Number.isFinite(point.marketLeadersNetPct) ? `${point.marketLeadersNetPct.toFixed(1)}% net` : '— net'}`,
+                              'Market Leaders',
+                            ]
+                          }
+                          return [
+                            `${Number(value).toFixed(1)}% above · ${Number.isFinite(point.liquidNetPct) ? `${point.liquidNetPct.toFixed(1)}% net` : '— net'}`,
+                            'Liquid',
+                          ]
+                        }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="marketLeadersAbovePct"
+                        name="Market Leaders"
+                        stroke="#3d84ff"
+                        strokeWidth={activeListId === MARKET_LEADERS_LIST_ID ? 3 : 2}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                        connectNulls
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="liquidAbovePct"
+                        name="Liquid"
+                        stroke="#22c55e"
+                        strokeWidth={activeListId === WATCHLIST_LIST_ID ? 3 : 2}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                        connectNulls
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-gray-500">
+                    <span><span className="text-accent-green font-semibold">0-20%</span> washed out</span>
+                    <span><span className="text-gray-300 font-semibold">50%</span> balanced</span>
+                    <span><span className="text-accent-red font-semibold">80%+</span> crowded / FOMO</span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </CollapsibleSection>
         )}
 
         {analyticsMode && rows.length > 0 && (
