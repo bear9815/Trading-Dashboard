@@ -8,7 +8,7 @@ import {
   TrendingUp, TrendingDown, Minus, BarChart2,
   FileText, ChevronRight, Zap, Tag, Search, Pencil,
 } from 'lucide-react'
-import { filterResearchSources, getPrimaryTicker, groupSourcesByTicker } from '../../utils/researchLibraryFilters.js'
+import { filterResearchSources, getPrimaryTicker, groupSourcesByTicker, sortCompanyTickers } from '../../utils/researchLibraryFilters.js'
 
 const SENTIMENT_CONFIG = {
   bullish: { text: 'text-accent-green',  bg: 'bg-accent-green/10',  border: 'border-accent-green/20',  dot: 'bg-accent-green',  Icon: TrendingUp   },
@@ -268,6 +268,7 @@ function UnassignedRow({ source, onAssign, onView }) {
 export default function CompaniesView({ sources, onViewReport, onUpdateSource }) {
   const [selectedTicker, setSelectedTicker] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [sortMode, setSortMode] = useState('recent')
 
   const filteredSources = useMemo(() => filterResearchSources(sources, searchQuery), [sources, searchQuery])
 
@@ -276,10 +277,7 @@ export default function CompaniesView({ sources, onViewReport, onUpdateSource })
     return groupSourcesByTicker(filteredSources)
   }, [filteredSources])
 
-  const tickers = Object.keys(grouped).sort((a, b) => {
-    // Sort by most recently updated
-    return new Date(grouped[b][0]?.created_at) - new Date(grouped[a][0]?.created_at)
-  })
+  const tickers = useMemo(() => sortCompanyTickers(grouped, sortMode), [grouped, sortMode])
 
   // Auto-select first ticker if nothing selected
   const active = selectedTicker === '__unassigned__'
@@ -321,67 +319,79 @@ export default function CompaniesView({ sources, onViewReport, onUpdateSource })
   }
 
   return (
-    <div className="research-elevated flex gap-5">
+    <div className="research-elevated flex gap-5 min-h-[620px] h-[72vh] max-h-[820px] overflow-hidden">
 
       {/* ── Left: Ticker index ── */}
-      <div className="w-52 shrink-0 space-y-1.5">
-        <div className="relative mb-3">
-          <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 pointer-events-none" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search ticker, company, keyword"
-            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl pl-8 pr-3 py-2 text-xs text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-accent-blue/40 transition-colors"
-          />
+      <div className="w-60 shrink-0 flex flex-col min-h-0">
+        <div className="space-y-3 pb-3">
+          <div className="relative">
+            <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search ticker, company, keyword"
+              className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl pl-8 pr-3 py-2 text-xs text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-accent-blue/40 transition-colors"
+            />
+          </div>
+          <select
+            value={sortMode}
+            onChange={e => setSortMode(e.target.value)}
+            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-accent-blue/40 transition-colors"
+          >
+            <option value="recent" className="bg-gray-900">Sort: Date Added</option>
+            <option value="alphabetical" className="bg-gray-900">Sort: Alphabetical</option>
+          </select>
         </div>
 
-        {tickers.length > 0 && (
-          <>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-3 px-1">
-              Companies ({tickers.length})
-            </p>
-            {tickers.map(ticker => (
-              <TickerRow
-                key={ticker}
-                ticker={ticker}
-                reports={grouped[ticker]}
-                isSelected={ticker === active}
-                onClick={() => setSelectedTicker(ticker)}
-              />
-            ))}
-          </>
-        )}
-
-        {unassigned.length > 0 && (
-          <div className={tickers.length > 0 ? 'pt-3' : ''}>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-3 px-1">
-              Unassigned ({unassigned.length})
-            </p>
-            <button
-              onClick={() => setSelectedTicker('__unassigned__')}
-              className={`w-full text-left px-4 py-3 rounded-xl border transition-all
-                ${active === '__unassigned__'
-                  ? 'bg-amber-500/10 border-amber-500/25'
-                  : 'bg-white/[0.02] border-white/[0.08] hover:border-white/20 hover:bg-white/[0.04]'}`
-              }
-            >
-              <div className="flex items-center gap-2">
-                <Tag size={12} className="text-amber-400" />
-                <span className={`text-sm font-semibold ${active === '__unassigned__' ? 'text-amber-300' : 'text-gray-400'}`}>
-                  No Ticker
-                </span>
-              </div>
-              <p className="text-[11px] text-gray-600 mt-0.5 pl-5">
-                {unassigned.length} report{unassigned.length !== 1 ? 's' : ''}
+        <div className="min-h-0 overflow-y-auto pr-1 space-y-1.5">
+          {tickers.length > 0 && (
+            <>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-3 px-1">
+                Companies ({tickers.length})
               </p>
-            </button>
-          </div>
-        )}
+              {tickers.map(ticker => (
+                <TickerRow
+                  key={ticker}
+                  ticker={ticker}
+                  reports={grouped[ticker]}
+                  isSelected={ticker === active}
+                  onClick={() => setSelectedTicker(ticker)}
+                />
+              ))}
+            </>
+          )}
+
+          {unassigned.length > 0 && (
+            <div className={tickers.length > 0 ? 'pt-3' : ''}>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-3 px-1">
+                Unassigned ({unassigned.length})
+              </p>
+              <button
+                onClick={() => setSelectedTicker('__unassigned__')}
+                className={`w-full text-left px-4 py-3 rounded-xl border transition-all
+                  ${active === '__unassigned__'
+                    ? 'bg-amber-500/10 border-amber-500/25'
+                    : 'bg-white/[0.02] border-white/[0.08] hover:border-white/20 hover:bg-white/[0.04]'}`
+                }
+              >
+                <div className="flex items-center gap-2">
+                  <Tag size={12} className="text-amber-400" />
+                  <span className={`text-sm font-semibold ${active === '__unassigned__' ? 'text-amber-300' : 'text-gray-400'}`}>
+                    No Ticker
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-600 mt-0.5 pl-5">
+                  {unassigned.length} report{unassigned.length !== 1 ? 's' : ''}
+                </p>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Right: Timeline or Unassigned list ── */}
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 min-h-0 overflow-y-auto pr-1">
         {active === '__unassigned__' ? (
           <>
             <div className="mb-5">
@@ -403,7 +413,7 @@ export default function CompaniesView({ sources, onViewReport, onUpdateSource })
           </>
         ) : active ? (
           <>
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center justify-between mb-5 sticky top-0 z-10 bg-surface backdrop-blur-sm py-1">
               <div>
                 <h2 className="text-lg font-bold text-white">{active}</h2>
                 <p className="text-xs text-gray-600 mt-0.5">

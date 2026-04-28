@@ -5,6 +5,7 @@ import {
   filterResearchSources,
   getPrimaryTicker,
   groupSourcesByTicker,
+  sortCompanyTickers,
 } from './researchLibraryFilters.js'
 
 const sources = [
@@ -65,4 +66,14 @@ test('groupSourcesByTicker returns grouped and unassigned buckets from filtered 
   const grouped = groupSourcesByTicker(sources)
   assert.deepEqual(Object.keys(grouped.grouped), ['AMKR', 'AMCR'])
   assert.deepEqual(grouped.unassigned.map(source => source.id), ['3'])
+})
+
+test('sortCompanyTickers sorts alphabetically when requested', () => {
+  const grouped = groupSourcesByTicker(sources)
+  assert.deepEqual(sortCompanyTickers(grouped.grouped, 'alphabetical'), ['AMCR', 'AMKR'])
+})
+
+test('sortCompanyTickers sorts by most recently added report by default', () => {
+  const grouped = groupSourcesByTicker(sources)
+  assert.deepEqual(sortCompanyTickers(grouped.grouped, 'recent'), ['AMKR', 'AMCR'])
 })

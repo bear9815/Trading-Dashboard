@@ -66,3 +66,15 @@ export function groupSourcesByTicker(sources) {
 
   return { grouped, unassigned }
 }
+
+export function sortCompanyTickers(grouped, sortMode = 'recent') {
+  const tickers = Object.keys(grouped || {})
+
+  if (sortMode === 'alphabetical') {
+    return tickers.sort((a, b) => a.localeCompare(b))
+  }
+
+  return tickers.sort((a, b) => (
+    new Date(grouped?.[b]?.[0]?.created_at || 0) - new Date(grouped?.[a]?.[0]?.created_at || 0)
+  ))
+}
