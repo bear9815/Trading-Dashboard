@@ -345,6 +345,11 @@ function HistoricalBreadthMetricTable({ rows }) {
     : activeList === 'liquidTrend'
       ? 'from-accent-yellow/30 via-accent-yellow/10 to-white/[0.04]'
       : 'from-accent-green/35 via-accent-green/15 to-white/[0.04]'
+  const activeHeaderBand = activeList === 'market'
+    ? 'from-[#213455] via-[#172036] to-[#101722]'
+    : activeList === 'liquidTrend'
+      ? 'from-[#4a3f13] via-[#282310] to-[#101722]'
+      : 'from-[#173328] via-[#14251e] to-[#101722]'
 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#080d14] shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
@@ -376,24 +381,21 @@ function HistoricalBreadthMetricTable({ rows }) {
         </div>
       </div>
 
-      <div className="max-h-[72vh] overflow-auto">
+      <div className="relative isolate max-h-[72vh] overflow-auto">
         <table className="min-w-[1460px] w-full border-separate border-spacing-0 text-sm">
           <thead>
             <tr className="text-center text-[10px] font-black uppercase tracking-[0.2em] text-slate-200">
-              <th rowSpan="2" className="sticky left-0 top-0 z-40 border-b border-r border-white/10 bg-[#111827] px-3 py-3 text-left text-slate-300 shadow-[8px_0_18px_rgba(0,0,0,0.28)]">Date</th>
-              <th colSpan={HISTORICAL_METRIC_COLUMNS.length} className={`sticky top-0 z-30 border-b border-white/10 bg-gradient-to-r px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] ${
-                activeList === 'market'
-                  ? 'from-accent-blue/40 via-[#172036] to-[#101722]'
-                  : activeList === 'liquidTrend'
-                    ? 'from-accent-yellow/35 via-[#282310] to-[#101722]'
-                    : 'from-accent-green/35 via-[#14251e] to-[#101722]'
-              }`}>
+              <th className="sticky left-0 top-0 z-40 h-[34px] border-b border-r border-white/10 bg-[#111827] px-3 py-2.5 text-left shadow-[8px_0_18px_rgba(0,0,0,0.28)]" />
+              <th colSpan={HISTORICAL_METRIC_COLUMNS.length} className={`sticky top-0 z-30 h-[34px] border-b border-white/10 bg-gradient-to-r px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.34)] ${activeHeaderBand}`}>
                 {activeLabel}
               </th>
             </tr>
             <tr className="text-center text-[10px] font-black uppercase tracking-[0.12em] text-slate-300">
+              <th className="sticky left-0 top-[34px] z-50 border-b border-r border-white/[0.07] bg-[#0f1724] px-3 py-2.5 text-left shadow-[8px_10px_20px_rgba(0,0,0,0.3)]">
+                Date
+              </th>
               {HISTORICAL_METRIC_COLUMNS.map(column => (
-                <th key={column.key} className="sticky top-[34px] z-30 border-b border-r border-white/[0.07] bg-[#0f1724] px-2 py-2.5 shadow-[0_10px_20px_rgba(0,0,0,0.22)]">
+                <th key={column.key} className="sticky top-[34px] z-30 border-b border-r border-white/[0.07] bg-[#0f1724] px-2 py-2.5 shadow-[0_10px_20px_rgba(0,0,0,0.3)]">
                   {column.label}
                 </th>
               ))}
