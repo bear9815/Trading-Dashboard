@@ -111,6 +111,12 @@ export const BREADTH_WINDOWS = {
   m3: 63,
 }
 
+const ATR_PERIOD = 14
+const ATR_EXTENSION_BASE_PERIOD = 21
+const ATR_EXTENSION_MULTIPLE = 10
+const DAYS34_WINDOW = 34
+const NEW_HIGH_LOW_WINDOW = 63
+
 function pctChange(current, previous) {
   if (!Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) return null
   return ((current - previous) / previous) * 100
@@ -149,10 +155,46 @@ function rollingAverageAtIndex(bars, index, period) {
   return sum / period
 }
 
+function averageTrueRangeAtIndex(bars, index, period = ATR_PERIOD) {
+  if (index < period) return null
+  let sum = 0
+  for (let cursor = index - period + 1; cursor <= index; cursor += 1) {
+    const bar = bars[cursor]
+    const priorClose = bars[cursor - 1]?.close
+    const trueRange = Math.max(
+      bar.high - bar.low,
+      Number.isFinite(priorClose) ? Math.abs(bar.high - priorClose) : 0,
+      Number.isFinite(priorClose) ? Math.abs(bar.low - priorClose) : 0
+    )
+    sum += trueRange
+  }
+  return sum / period
+}
+
+function rollingBoundaryAtIndex(bars, index, period, key, comparator) {
+  const startIndex = Math.max(0, index - period + 1)
+  let boundary = null
+  for (let cursor = startIndex; cursor <= index; cursor += 1) {
+    const value = bars[cursor]?.[key]
+    if (!Number.isFinite(value)) continue
+    boundary = boundary == null ? value : comparator(boundary, value)
+  }
+  return boundary
+}
+
 function buildSymbolMetricRows(bars = [], windows = BREADTH_WINDOWS) {
   const normalizedBars = normalizeBars(bars)
   return normalizedBars.map((bar, index) => {
     const sma5 = rollingAverageAtIndex(normalizedBars, index, 5)
+    const sma21 = rollingAverageAtIndex(normalizedBars, index, ATR_EXTENSION_BASE_PERIOD)
+    const sma50 = rollingAverageAtIndex(normalizedBars, index, 50)
+    const atr14 = averageTrueRangeAtIndex(normalizedBars, index, ATR_PERIOD)
+    const highWindow = rollingBoundaryAtIndex(normalizedBars, index, NEW_HIGH_LOW_WINDOW, 'high', Math.max)
+    const lowWindow = rollingBoundaryAtIndex(normalizedBars, index, NEW_HIGH_LOW_WINDOW, 'low', Math.min)
+    const atrExtensionMultiple =
+      Number.isFinite(atr14) && atr14 > 0 && Number.isFinite(sma21)
+        ? Math.abs(bar.close - sma21) / atr14
+        : null
     const avwap = {}
 
     for (const [key, window] of Object.entries(windows)) {
@@ -181,10 +223,17 @@ function buildSymbolMetricRows(bars = [], windows = BREADTH_WINDOWS) {
       sma5,
       sma5Above: Number.isFinite(sma5) ? bar.close > sma5 : null,
       sma5Below: Number.isFinite(sma5) ? bar.close < sma5 : null,
+      sma50,
+      sma50Above: Number.isFinite(sma50) ? bar.close > sma50 : null,
+      sma50Below: Number.isFinite(sma50) ? bar.close < sma50 : null,
       avwap,
       dayChangePct: index >= 1 ? pctChange(bar.close, normalizedBars[index - 1].close) : null,
       monthChangePct: index >= windows.m1 ? pctChange(bar.close, normalizedBars[index - windows.m1].close) : null,
       quarterChangePct: index >= windows.m3 ? pctChange(bar.close, normalizedBars[index - windows.m3].close) : null,
+      days34ChangePct: index >= DAYS34_WINDOW ? pctChange(bar.close, normalizedBars[index - DAYS34_WINDOW].close) : null,
+      atrExtensionMultiple,
+      isNewHigh: Number.isFinite(highWindow) ? bar.close >= highWindow : null,
+      isNewLow: Number.isFinite(lowWindow) ? bar.close <= lowWindow : null,
     }
   })
 }
@@ -219,10 +268,29 @@ function emptyMoveMetric() {
   }
 }
 
+function emptyNewHighLowMetric() {
+  return {
+    newHighCount: 0,
+    newLowCount: 0,
+    totalCount: 0,
+    newHighPct: 0,
+    newLowPct: 0,
+  }
+}
+
+function emptyExtensionMetric() {
+  return {
+    count: 0,
+    totalCount: 0,
+    pct: 0,
+  }
+}
+
 function emptyHistoryEntry(date) {
   return {
     date,
     sma5: emptyPositionMetric(),
+    sma50: emptyPositionMetric(),
     avwap: {
       ytd: emptyAvwapMetric(),
       m3: emptyAvwapMetric(),
@@ -234,6 +302,14 @@ function emptyHistoryEntry(date) {
       month25: emptyMoveMetric(),
       month50: emptyMoveMetric(),
       quarter25: emptyMoveMetric(),
+      days34_13: emptyMoveMetric(),
+    },
+    advancers: emptyMoveMetric(),
+    newHighLow: emptyNewHighLowMetric(),
+    atrExtension10x: emptyExtensionMetric(),
+    ratios: {
+      day5: null,
+      day10: null,
     },
     regimeScore: null,
     regimeLabel: 'No data',
@@ -263,6 +339,26 @@ function addMove(metric, changePct, threshold) {
   if (changePct <= -threshold) metric.downCount += 1
 }
 
+function addAdvancer(metric, changePct) {
+  if (!Number.isFinite(changePct)) return
+  metric.totalCount += 1
+  if (changePct > 0) metric.upCount += 1
+  if (changePct < 0) metric.downCount += 1
+}
+
+function addNewHighLow(metric, isNewHigh, isNewLow) {
+  if (typeof isNewHigh !== 'boolean' || typeof isNewLow !== 'boolean') return
+  metric.totalCount += 1
+  if (isNewHigh) metric.newHighCount += 1
+  if (isNewLow) metric.newLowCount += 1
+}
+
+function addAtrExtension(metric, multiple) {
+  if (!Number.isFinite(multiple)) return
+  metric.totalCount += 1
+  if (multiple >= ATR_EXTENSION_MULTIPLE) metric.count += 1
+}
+
 function finalizePosition(metric) {
   metric.abovePct = metric.totalCount ? round((metric.aboveCount / metric.totalCount) * 100, 1) : 0
   metric.belowPct = metric.totalCount ? round((metric.belowCount / metric.totalCount) * 100, 1) : 0
@@ -282,6 +378,37 @@ function finalizeMove(metric) {
   metric.upPct = metric.totalCount ? round((metric.upCount / metric.totalCount) * 100, 1) : 0
   metric.downPct = metric.totalCount ? round((metric.downCount / metric.totalCount) * 100, 1) : 0
   return metric
+}
+
+function finalizeNewHighLow(metric) {
+  metric.newHighPct = metric.totalCount ? round((metric.newHighCount / metric.totalCount) * 100, 1) : 0
+  metric.newLowPct = metric.totalCount ? round((metric.newLowCount / metric.totalCount) * 100, 1) : 0
+  return metric
+}
+
+function finalizeExtension(metric) {
+  metric.pct = metric.totalCount ? round((metric.count / metric.totalCount) * 100, 1) : 0
+  return metric
+}
+
+function addRollingRatios(entries) {
+  const ratioFor = (index, period) => {
+    const start = Math.max(0, index - period + 1)
+    let upCount = 0
+    let downCount = 0
+    for (let cursor = start; cursor <= index; cursor += 1) {
+      upCount += entries[cursor]?.moves?.day4?.upCount || 0
+      downCount += entries[cursor]?.moves?.day4?.downCount || 0
+    }
+    return upCount + downCount > 0 ? round(upCount / Math.max(1, downCount), 2) : null
+  }
+
+  entries.forEach((entry, index) => {
+    entry.ratios = {
+      day5: ratioFor(index, 5),
+      day10: ratioFor(index, 10),
+    }
+  })
 }
 
 export function classifyBreadthRegime(score, entry = null) {
@@ -348,6 +475,7 @@ export function buildListBreadthHistory({
     for (const row of buildSymbolMetricRows(historyBarsBySymbol[symbol] || [], windows)) {
       const entry = entriesByDate.get(row.date) || emptyHistoryEntry(row.date)
       addPosition(entry.sma5, row.sma5Above, row.sma5Below)
+      addPosition(entry.sma50, row.sma50Above, row.sma50Below)
       for (const key of ['ytd', 'm3', 'm1', 'w1']) {
         addAvwap(entry.avwap[key], row.avwap[key])
       }
@@ -355,20 +483,28 @@ export function buildListBreadthHistory({
       addMove(entry.moves.month25, row.monthChangePct, 25)
       addMove(entry.moves.month50, row.monthChangePct, 50)
       addMove(entry.moves.quarter25, row.quarterChangePct, 25)
+      addMove(entry.moves.days34_13, row.days34ChangePct, 13)
+      addAdvancer(entry.advancers, row.dayChangePct)
+      addNewHighLow(entry.newHighLow, row.isNewHigh, row.isNewLow)
+      addAtrExtension(entry.atrExtension10x, row.atrExtensionMultiple)
       entriesByDate.set(row.date, entry)
     }
   }
 
-  return [...entriesByDate.values()]
+  const entries = [...entriesByDate.values()]
     .sort((a, b) => a.date.localeCompare(b.date))
     .map(entry => {
       finalizePosition(entry.sma5)
+      finalizePosition(entry.sma50)
       for (const key of ['ytd', 'm3', 'm1', 'w1']) {
         finalizeAvwap(entry.avwap[key])
       }
-      for (const key of ['day4', 'month25', 'month50', 'quarter25']) {
+      for (const key of ['day4', 'month25', 'month50', 'quarter25', 'days34_13']) {
         finalizeMove(entry.moves[key])
       }
+      finalizeMove(entry.advancers)
+      finalizeNewHighLow(entry.newHighLow)
+      finalizeExtension(entry.atrExtension10x)
       const regime = scoreBreadthEntry(entry)
       return {
         ...entry,
@@ -376,6 +512,8 @@ export function buildListBreadthHistory({
         regimeLabel: regime.label,
       }
     })
+  addRollingRatios(entries)
+  return entries
 }
 
 function latestSymbolSnapshot(symbol, historyBarsBySymbol, windows = BREADTH_WINDOWS) {
@@ -388,6 +526,7 @@ function latestSymbolSnapshot(symbol, historyBarsBySymbol, windows = BREADTH_WIN
     date: latest.date,
     close: latest.close,
     sma5Above: latest.sma5Above,
+    sma50Above: latest.sma50Above,
     ytdDistancePct: round(latest.avwap.ytd.distancePct, 2),
     m3DistancePct: round(latest.avwap.m3.distancePct, 2),
     m1DistancePct: round(latest.avwap.m1.distancePct, 2),
@@ -395,6 +534,8 @@ function latestSymbolSnapshot(symbol, historyBarsBySymbol, windows = BREADTH_WIN
     dayChangePct: round(latest.dayChangePct, 2),
     monthChangePct: round(latest.monthChangePct, 2),
     quarterChangePct: round(latest.quarterChangePct, 2),
+    days34ChangePct: round(latest.days34ChangePct, 2),
+    atrExtensionMultiple: round(latest.atrExtensionMultiple, 2),
   }
 }
 
@@ -431,5 +572,9 @@ export function buildListBreadthSymbolSnapshots({
     downMonth50: byAsc('monthChangePct').filter(row => row.monthChangePct <= -50).slice(0, limit),
     upQuarter25: byDesc('quarterChangePct').filter(row => row.quarterChangePct >= 25).slice(0, limit),
     downQuarter25: byAsc('quarterChangePct').filter(row => row.quarterChangePct <= -25).slice(0, limit),
+    upDays34_13: byDesc('days34ChangePct').filter(row => row.days34ChangePct >= 13).slice(0, limit),
+    downDays34_13: byAsc('days34ChangePct').filter(row => row.days34ChangePct <= -13).slice(0, limit),
+    atrExtension10x: byDesc('atrExtensionMultiple').filter(row => row.atrExtensionMultiple >= ATR_EXTENSION_MULTIPLE).slice(0, limit),
+    aboveSma50: byDesc('monthChangePct').filter(row => row.sma50Above).slice(0, limit),
   }
 }

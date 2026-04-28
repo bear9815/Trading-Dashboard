@@ -48,6 +48,9 @@ const DRILLDOWN_GROUPS = [
   { key: 'upMonth50', title: 'Up 50% In 1M', metric: 'monthChangePct', suffix: '%' },
   { key: 'upQuarter25', title: 'Up 25% In Quarter', metric: 'quarterChangePct', suffix: '%' },
   { key: 'downMonth25', title: 'Down 25% In 1M', metric: 'monthChangePct', suffix: '%' },
+  { key: 'upDays34_13', title: 'Up 13% In 34D', metric: 'days34ChangePct', suffix: '%' },
+  { key: 'atrExtension10x', title: '10x ATR Extended', metric: 'atrExtensionMultiple', suffix: 'x' },
+  { key: 'aboveSma50', title: 'Above 50DMA Leaders', metric: 'monthChangePct', suffix: '%' },
 ]
 
 function average(values) {
@@ -64,10 +67,21 @@ function fmtNumber(value) {
   return Number.isFinite(value) ? String(value) : '—'
 }
 
+function fmtRatio(value) {
+  return Number.isFinite(value) ? value.toFixed(2) : '—'
+}
+
 function fmtSigned(value, decimals = 1, suffix = '%') {
   if (!Number.isFinite(value)) return '—'
   const sign = value > 0 ? '+' : ''
   return `${sign}${value.toFixed(decimals)}${suffix}`
+}
+
+function fmtDateLabel(date) {
+  if (!date) return '—'
+  const [year, month, day] = String(date).split('-')
+  if (!year || !month || !day) return date
+  return `${Number(month)}/${Number(day)}/${year}`
 }
 
 function latest(history) {
@@ -197,6 +211,9 @@ function MetricTable({ market, liquid }) {
     ['Up / Down 25% 1M', `+${market?.moves?.month25?.upCount || 0} / -${market?.moves?.month25?.downCount || 0}`, `+${liquid?.moves?.month25?.upCount || 0} / -${liquid?.moves?.month25?.downCount || 0}`],
     ['Up / Down 50% 1M', `+${market?.moves?.month50?.upCount || 0} / -${market?.moves?.month50?.downCount || 0}`, `+${liquid?.moves?.month50?.upCount || 0} / -${liquid?.moves?.month50?.downCount || 0}`],
     ['Up / Down 25% Quarter', `+${market?.moves?.quarter25?.upCount || 0} / -${market?.moves?.quarter25?.downCount || 0}`, `+${liquid?.moves?.quarter25?.upCount || 0} / -${liquid?.moves?.quarter25?.downCount || 0}`],
+    ['Up / Down 13% 34D', `+${market?.moves?.days34_13?.upCount || 0} / -${market?.moves?.days34_13?.downCount || 0}`, `+${liquid?.moves?.days34_13?.upCount || 0} / -${liquid?.moves?.days34_13?.downCount || 0}`],
+    ['Above 50DMA', fmtPct(market?.sma50?.abovePct), fmtPct(liquid?.sma50?.abovePct)],
+    ['10x ATR Extended', fmtNumber(market?.atrExtension10x?.count), fmtNumber(liquid?.atrExtension10x?.count)],
   ]
 
   return (
@@ -223,6 +240,216 @@ function MetricTable({ market, liquid }) {
   )
 }
 
+function summaryPct(count, total) {
+  return total > 0 ? (count / total) * 100 : 0
+}
+
+function SummaryBar({ label, positiveLabel, negativeLabel, positiveCount, negativeCount, total, positiveClass, negativeClass, positiveBarClass, negativeBarClass }) {
+  const positivePct = summaryPct(positiveCount, total)
+  const negativePct = summaryPct(negativeCount, total)
+
+  return (
+    <div className="min-w-[240px] flex-1">
+      <div className="mb-1 flex items-center justify-between gap-3 text-[11px] font-semibold">
+        <span className={positiveClass}>{positiveLabel} {positivePct.toFixed(1)}% ({positiveCount})</span>
+        <span className={negativeClass}>{negativeLabel} {negativePct.toFixed(1)}% ({negativeCount})</span>
+      </div>
+      <div className="flex h-2 overflow-hidden rounded-full bg-white/[0.08]">
+        <div className={positiveBarClass} style={{ width: `${positivePct}%` }} />
+        <div className={negativeBarClass} style={{ width: `${negativePct}%` }} />
+      </div>
+      <p className="mt-1 text-[10px] uppercase tracking-wider text-gray-700">{label}</p>
+    </div>
+  )
+}
+
+function countHeatClass(count, total, direction = 'good') {
+  const pct = total > 0 ? count / total : 0
+  if (pct >= 0.18) return direction === 'good' ? 'bg-accent-green/75 text-white' : 'bg-accent-red/75 text-white'
+  if (pct >= 0.08) return direction === 'good' ? 'bg-accent-green/35 text-white' : 'bg-accent-red/35 text-white'
+  return 'bg-transparent text-gray-300'
+}
+
+function ratioHeatClass(value) {
+  if (!Number.isFinite(value)) return 'bg-transparent text-gray-600'
+  if (value >= 2) return 'bg-accent-green/70 text-white'
+  if (value >= 1.15) return 'bg-accent-green/35 text-white'
+  if (value <= 0.75) return 'bg-accent-red/70 text-white'
+  if (value < 1) return 'bg-accent-red/35 text-white'
+  return 'bg-transparent text-gray-300'
+}
+
+function pctHeatClass(value) {
+  if (!Number.isFinite(value)) return 'bg-transparent text-gray-600'
+  if (value >= 70) return 'bg-accent-green/70 text-white'
+  if (value >= 55) return 'bg-accent-green/30 text-white'
+  if (value <= 35) return 'bg-accent-red/70 text-white'
+  if (value <= 45) return 'bg-accent-red/35 text-white'
+  return 'bg-transparent text-gray-300'
+}
+
+function atrHeatClass(count, total) {
+  const pct = total > 0 ? count / total : 0
+  if (pct >= 0.12) return 'bg-accent-yellow/70 text-gray-950'
+  if (count > 0) return 'bg-accent-yellow/25 text-accent-yellow'
+  return 'bg-transparent text-gray-500'
+}
+
+function BreadthCell({ children, className = '' }) {
+  return (
+    <td className={`border border-white/[0.04] px-3 py-2 text-center font-mono text-sm tabular-nums ${className}`}>
+      {children}
+    </td>
+  )
+}
+
+function HistoricalBreadthTable({ marketHistory, liquidHistory }) {
+  const [active, setActive] = useState('market')
+  const history = active === 'market' ? marketHistory : liquidHistory
+  const rows = useMemo(() => [...(history || [])].slice(-24).reverse(), [history])
+  const latestEntry = rows[0] || null
+  const label = active === 'market' ? 'Market Leaders' : 'Liquid'
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-[#10151d]">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div>
+          <p className="text-sm font-semibold text-white">Historical Breadth Table</p>
+          <p className="mt-1 text-xs text-gray-500">Market-style breadth sheet for the last 24 sessions.</p>
+        </div>
+        <div className="inline-flex rounded-lg border border-white/10 bg-white/[0.02] p-1">
+          {[
+            ['market', 'Market Leaders'],
+            ['liquid', 'Liquid'],
+          ].map(([id, tabLabel]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setActive(id)}
+              className={`rounded-md px-2.5 py-1 text-xs transition-all ${
+                active === id ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {tabLabel}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="border-y border-white/[0.06] bg-white/[0.02] px-4 py-3">
+        <div className="flex flex-wrap items-center gap-4">
+          <p className="text-xs font-semibold uppercase tracking-widest text-gray-500">{label}</p>
+          <SummaryBar
+            label="Daily change"
+            positiveLabel="Advancing"
+            negativeLabel="Declining"
+            positiveCount={latestEntry?.advancers?.upCount || 0}
+            negativeCount={latestEntry?.advancers?.downCount || 0}
+            total={latestEntry?.advancers?.totalCount || 0}
+            positiveClass="text-accent-green"
+            negativeClass="text-accent-red"
+            positiveBarClass="bg-accent-green"
+            negativeBarClass="bg-accent-red"
+          />
+          <SummaryBar
+            label="63D range"
+            positiveLabel="63D High"
+            negativeLabel="63D Low"
+            positiveCount={latestEntry?.newHighLow?.newHighCount || 0}
+            negativeCount={latestEntry?.newHighLow?.newLowCount || 0}
+            total={latestEntry?.newHighLow?.totalCount || 0}
+            positiveClass="text-accent-blue"
+            negativeClass="text-accent-yellow"
+            positiveBarClass="bg-accent-blue"
+            negativeBarClass="bg-accent-yellow"
+          />
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="min-w-[1280px] w-full border-collapse text-sm">
+          <thead>
+            <tr className="text-center text-xs font-black uppercase tracking-wide text-gray-950">
+              <th rowSpan="2" className="border border-black/30 bg-[#efb800] px-3 py-3 text-left">Date</th>
+              <th colSpan="4" className="border border-black/30 bg-[#ffd21f] px-3 py-2">Primary Breadth Indicators</th>
+              <th colSpan="8" className="border border-black/30 bg-[#20c967] px-3 py-2">Secondary Breadth Indicators</th>
+              <th rowSpan="2" className="border border-black/30 bg-[#b77af4] px-3 py-2">10x ATR<br />Ext.</th>
+              <th rowSpan="2" className="border border-black/30 bg-[#5da2f3] px-3 py-2">&gt;50dma</th>
+            </tr>
+            <tr className="text-center text-[11px] font-black text-gray-950">
+              <th className="border border-black/30 bg-[#ffd21f] px-3 py-2">Stocks<br />Up 4%+<br />Today</th>
+              <th className="border border-black/30 bg-[#ffd21f] px-3 py-2">Stocks<br />Down 4%+<br />Today</th>
+              <th className="border border-black/30 bg-[#ffd21f] px-3 py-2">5 Day<br />Ratio</th>
+              <th className="border border-black/30 bg-[#ffd21f] px-3 py-2">10 Day<br />Ratio</th>
+              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Up 25%+<br />Quarter</th>
+              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Down 25%+<br />Quarter</th>
+              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Up 25%+<br />Month</th>
+              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Down 25%+<br />Month</th>
+              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Up 50%+<br />Month</th>
+              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Down 50%+<br />Month</th>
+              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Up 13%+<br />34 Days</th>
+              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Down 13%+<br />34 Days</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length ? rows.map(row => (
+              <tr key={`${active}-${row.date}`} className="bg-[#111821] hover:bg-white/[0.04]">
+                <td className="sticky left-0 z-10 border border-white/[0.04] bg-[#111821] px-3 py-2 font-mono text-sm font-semibold text-gray-100">
+                  {fmtDateLabel(row.date)}
+                </td>
+                <BreadthCell className={countHeatClass(row.moves?.day4?.upCount || 0, row.moves?.day4?.totalCount || 0, 'good')}>
+                  {row.moves?.day4?.upCount || 0}
+                </BreadthCell>
+                <BreadthCell className={countHeatClass(row.moves?.day4?.downCount || 0, row.moves?.day4?.totalCount || 0, 'bad')}>
+                  {row.moves?.day4?.downCount || 0}
+                </BreadthCell>
+                <BreadthCell className={ratioHeatClass(row.ratios?.day5)}>{fmtRatio(row.ratios?.day5)}</BreadthCell>
+                <BreadthCell className={ratioHeatClass(row.ratios?.day10)}>{fmtRatio(row.ratios?.day10)}</BreadthCell>
+                <BreadthCell className={countHeatClass(row.moves?.quarter25?.upCount || 0, row.moves?.quarter25?.totalCount || 0, 'good')}>
+                  {row.moves?.quarter25?.upCount || 0}
+                </BreadthCell>
+                <BreadthCell className={countHeatClass(row.moves?.quarter25?.downCount || 0, row.moves?.quarter25?.totalCount || 0, 'bad')}>
+                  {row.moves?.quarter25?.downCount || 0}
+                </BreadthCell>
+                <BreadthCell className={countHeatClass(row.moves?.month25?.upCount || 0, row.moves?.month25?.totalCount || 0, 'good')}>
+                  {row.moves?.month25?.upCount || 0}
+                </BreadthCell>
+                <BreadthCell className={countHeatClass(row.moves?.month25?.downCount || 0, row.moves?.month25?.totalCount || 0, 'bad')}>
+                  {row.moves?.month25?.downCount || 0}
+                </BreadthCell>
+                <BreadthCell className={countHeatClass(row.moves?.month50?.upCount || 0, row.moves?.month50?.totalCount || 0, 'good')}>
+                  {row.moves?.month50?.upCount || 0}
+                </BreadthCell>
+                <BreadthCell className={countHeatClass(row.moves?.month50?.downCount || 0, row.moves?.month50?.totalCount || 0, 'bad')}>
+                  {row.moves?.month50?.downCount || 0}
+                </BreadthCell>
+                <BreadthCell className={countHeatClass(row.moves?.days34_13?.upCount || 0, row.moves?.days34_13?.totalCount || 0, 'good')}>
+                  {row.moves?.days34_13?.upCount || 0}
+                </BreadthCell>
+                <BreadthCell className={countHeatClass(row.moves?.days34_13?.downCount || 0, row.moves?.days34_13?.totalCount || 0, 'bad')}>
+                  {row.moves?.days34_13?.downCount || 0}
+                </BreadthCell>
+                <BreadthCell className={atrHeatClass(row.atrExtension10x?.count || 0, row.atrExtension10x?.totalCount || 0)}>
+                  {row.atrExtension10x?.count || 0}
+                </BreadthCell>
+                <BreadthCell className={pctHeatClass(row.sma50?.abovePct)}>
+                  {fmtPct(row.sma50?.abovePct)}
+                </BreadthCell>
+              </tr>
+            )) : (
+              <tr>
+                <td colSpan="15" className="px-4 py-8 text-center text-sm text-gray-600">
+                  No historical breadth rows yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function DrilldownTable({ title, rows, metric, suffix }) {
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
@@ -237,7 +464,7 @@ function DrilldownTable({ title, rows, metric, suffix }) {
               </div>
               <div className="text-right">
                 <p className={Number(row[metric]) >= 0 ? 'text-sm font-semibold text-accent-green' : 'text-sm font-semibold text-accent-red'}>
-                  {fmtSigned(row[metric], 1, suffix)}
+                  {suffix === 'x' && Number.isFinite(row[metric]) ? `${row[metric].toFixed(1)}x` : fmtSigned(row[metric], 1, suffix)}
                 </p>
                 <p className="text-[11px] text-gray-600">Close {Number.isFinite(row.close) ? row.close.toFixed(2) : '—'}</p>
               </div>
@@ -488,6 +715,8 @@ export default function MorningBreadthDashboard() {
       </div>
 
       <MetricTable market={marketLatest} liquid={liquidLatest} />
+
+      <HistoricalBreadthTable marketHistory={marketHistory} liquidHistory={liquidHistory} />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
