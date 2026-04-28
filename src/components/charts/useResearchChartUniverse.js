@@ -275,9 +275,34 @@ export function useResearchChartUniverse({
     return promise
   }, [historyPlan, symbols])
 
+  const loadSymbolHistory = useCallback(async (symbol) => {
+    const upperSymbol = String(symbol || '').trim().toUpperCase()
+    if (!upperSymbol) return []
+
+    if (historyBarsBySymbol[upperSymbol]?.length) {
+      return historyBarsBySymbol[upperSymbol]
+    }
+
+    const bars = await fetchHistoryCached(
+      upperSymbol,
+      historyPlan.start,
+      historyPlan.end,
+      { ttlMs: WATCHLIST_HISTORY_TTL_MS }
+    )
+
+    setHistoryBarsBySymbol(current => (
+      current[upperSymbol]?.length
+        ? current
+        : { ...current, [upperSymbol]: bars }
+    ))
+
+    return bars
+  }, [historyBarsBySymbol, historyPlan])
+
   return {
     benchmarkHistoryBars,
     historyBarsBySymbol,
     loadHistoryUniverse,
+    loadSymbolHistory,
   }
 }

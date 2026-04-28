@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import {
   TYPEAHEAD_RESET_MS,
   buildManualAnchorDragUpdate,
+  normalizePendingSymbolInput,
+  resolveAnchorSelectionAfterDelete,
   resolveSymbolTypeahead,
 } from './chartInteractions.js'
 
@@ -96,4 +98,21 @@ const rows = [
   assert.deepEqual(update, {
     anchorDate: '2026-04-08',
   })
+}
+
+{
+  assert.equal(normalizePendingSymbolInput('  msft  '), 'MSFT')
+  assert.equal(normalizePendingSymbolInput('brk.b'), 'BRK.B')
+  assert.equal(normalizePendingSymbolInput('bad symbol!'), 'BADSYMBOL')
+}
+
+{
+  const anchors = [
+    { id: 'a-1' },
+    { id: 'a-2' },
+    { id: 'a-3' },
+  ]
+  assert.equal(resolveAnchorSelectionAfterDelete(anchors, 'a-2'), 'a-3')
+  assert.equal(resolveAnchorSelectionAfterDelete(anchors, 'a-3'), 'a-2')
+  assert.equal(resolveAnchorSelectionAfterDelete([{ id: 'solo' }], 'solo'), null)
 }

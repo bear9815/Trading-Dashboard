@@ -75,3 +75,18 @@ export function buildManualAnchorDragUpdate(anchor, nextAnchorDate) {
   }
   return updates
 }
+
+export function normalizePendingSymbolInput(value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9.-]/g, '')
+}
+
+export function resolveAnchorSelectionAfterDelete(anchors = [], selectedAnchorId) {
+  const currentIndex = anchors.findIndex(anchor => anchor?.id === selectedAnchorId)
+  if (currentIndex < 0) return null
+  if (anchors.length <= 1) return null
+  const fallbackIndex = currentIndex >= anchors.length - 1 ? currentIndex - 1 : currentIndex + 1
+  return anchors[fallbackIndex]?.id || null
+}

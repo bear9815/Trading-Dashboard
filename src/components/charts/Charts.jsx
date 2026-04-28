@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Search, Layers, BarChart3, ArrowUpDown } from 'lucide-react'
+import { Search, Layers, BarChart3, ArrowUpDown, X, Trash2 } from 'lucide-react'
 import ChartToolsSettingsModal from './ChartToolsSettingsModal.jsx'
 import ResearchMultiTimeframeChart from './ResearchMultiTimeframeChart.jsx'
 import {
   buildManualAnchorDragUpdate,
-  resolveSymbolTypeahead,
-  TYPEAHEAD_RESET_MS,
+  normalizePendingSymbolInput,
+  resolveAnchorSelectionAfterDelete,
 } from './chartInteractions.js'
 import { useResearchWatchlistStore, MARKET_LEADERS_LIST_ID, WATCHLIST_LIST_ID } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
@@ -17,6 +17,7 @@ import {
 } from '../../utils/tradeReviewChart.js'
 import { buildTickerChartData, useResearchChartUniverse } from './useResearchChartUniverse.js'
 import { buildWatchlistFitMap } from '../../utils/watchlistFitSignal.js'
+import { resolveTickerToName } from '../../utils/marketData.js'
 
 const WATCHLIST_ORDER = { [MARKET_LEADERS_LIST_ID]: 0, [WATCHLIST_LIST_ID]: 1 }
 const DAILY_RANGE_OPTIONS = [3, 6, 9]
@@ -125,6 +126,106 @@ function CompanyHoverCard({ row, fit, anchored, rolling, ytd }) {
   )
 }
 
+function ManualAvwapModal({ anchor, onSave, onDelete, onClose }) {
+  const [draft, setDraft] = useState(() => ({
+    label: anchor?.label || '',
+    anchorDate: anchor?.anchorDate || '',
+    color: anchor?.color || '#22c55e',
+    enabled: anchor?.enabled !== false,
+  }))
+
+  if (!anchor) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl border border-white/10 bg-surface-50 shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+          <div>
+            <p className="text-sm font-semibold text-white">Edit Manual AVWAP</p>
+            <p className="text-xs text-gray-500">Adjust the anchor date, color, label, or remove it.</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:bg-white/5 hover:text-white">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-4 p-4">
+          <label className="block text-xs text-gray-400">
+            Label
+            <input
+              value={draft.label}
+              onChange={event => setDraft(current => ({ ...current, label: event.target.value }))}
+              className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-surface-200 px-3 text-sm text-gray-200 outline-none focus:border-accent-blue/50"
+              placeholder="Anchor label"
+            />
+          </label>
+
+          <label className="block text-xs text-gray-400">
+            Anchor Date
+            <input
+              type="date"
+              value={draft.anchorDate}
+              onChange={event => setDraft(current => ({ ...current, anchorDate: event.target.value }))}
+              className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-surface-200 px-3 text-sm text-gray-200 outline-none focus:border-accent-blue/50"
+            />
+          </label>
+
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3">
+            <div>
+              <p className="text-xs font-medium text-white">Anchor Color</p>
+              <p className="text-[11px] text-gray-500">This updates the chart line and marker.</p>
+            </div>
+            <input
+              type="color"
+              value={draft.color}
+              onChange={event => setDraft(current => ({ ...current, color: event.target.value }))}
+              className="h-10 w-14 rounded bg-transparent"
+            />
+          </div>
+
+          <label className="flex items-center gap-2 text-xs text-gray-300">
+            <input
+              type="checkbox"
+              checked={draft.enabled}
+              onChange={event => setDraft(current => ({ ...current, enabled: event.target.checked }))}
+            />
+            Show this AVWAP
+          </label>
+        </div>
+
+        <div className="flex items-center justify-between border-t border-white/10 px-4 py-3">
+          <button
+            onClick={() => onDelete(anchor)}
+            className="inline-flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 transition-colors hover:border-red-500/35 hover:bg-red-500/15"
+          >
+            <Trash2 size={13} />
+            Delete
+          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-gray-400 hover:text-white">
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                onSave(anchor, {
+                  label: draft.label.trim() || draft.anchorDate,
+                  anchorDate: draft.anchorDate,
+                  color: draft.color,
+                  enabled: draft.enabled,
+                })
+                onClose()
+              }}
+              className="rounded-lg border border-accent-blue/25 bg-accent-blue/15 px-3 py-2 text-xs font-semibold text-accent-blue"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Charts() {
   const { activeListId, listsById, setActiveList } = useResearchWatchlistStore()
   const {
@@ -143,7 +244,11 @@ export default function Charts() {
   const [historyError, setHistoryError] = useState('')
   const [addAvwapMode, setAddAvwapMode] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [symbolTypeahead, setSymbolTypeahead] = useState(null)
+  const [pendingSymbolInput, setPendingSymbolInput] = useState('')
+  const [customSymbol, setCustomSymbol] = useState('')
+  const [customSymbolMeta, setCustomSymbolMeta] = useState(null)
+  const [selectedAnchorId, setSelectedAnchorId] = useState(null)
+  const [editingAnchorId, setEditingAnchorId] = useState(null)
 
   const watchlists = useMemo(
     () => Object.values(listsById || {}).sort((a, b) => (WATCHLIST_ORDER[a.id] ?? 99) - (WATCHLIST_ORDER[b.id] ?? 99)),
@@ -181,6 +286,7 @@ export default function Charts() {
     benchmarkHistoryBars,
     historyBarsBySymbol,
     loadHistoryUniverse,
+    loadSymbolHistory,
   } = useResearchChartUniverse({
     symbols,
     latestAnchorDate,
@@ -236,14 +342,19 @@ export default function Charts() {
   }, [anchoredRsBySymbol, filteredRows, rollingRsBySymbol, sortDir, sortKey, ytdAvwapBySymbol])
 
   const selectedDisplaySymbol = useMemo(() => {
+    if (customSymbol) return customSymbol
     if (selectedSymbol && sortedRows.some(row => row.symbol === selectedSymbol)) return selectedSymbol
     return sortedRows[0]?.symbol || null
-  }, [selectedSymbol, sortedRows])
+  }, [customSymbol, selectedSymbol, sortedRows])
 
-  const selectedRow = selectedDisplaySymbol ? rowsBySymbol[selectedDisplaySymbol] : null
+  const selectedRow = selectedDisplaySymbol ? (rowsBySymbol[selectedDisplaySymbol] || (customSymbol === selectedDisplaySymbol ? {
+    symbol: selectedDisplaySymbol,
+    companyName: customSymbolMeta?.longName || customSymbolMeta?.shortName || '',
+  } : null)) : null
   const selectedManualAnchors = selectedDisplaySymbol
     ? (tradeReviewManualAnchorsBySymbol?.[selectedDisplaySymbol] || [])
     : []
+  const selectedManualAnchor = selectedManualAnchors.find(anchor => anchor.id === selectedAnchorId) || null
   const selectedTickerChartData = useMemo(
     () => buildTickerChartData(
       selectedDisplaySymbol,
@@ -260,6 +371,11 @@ export default function Charts() {
     setQuery('')
     setHistoryError('')
     setAddAvwapMode(false)
+    setCustomSymbol('')
+    setCustomSymbolMeta(null)
+    setPendingSymbolInput('')
+    setSelectedAnchorId(null)
+    setEditingAnchorId(null)
   }, [activeListId])
 
   useEffect(() => {
@@ -280,13 +396,11 @@ export default function Charts() {
   }, [loadHistoryUniverse, symbols.length])
 
   useEffect(() => {
-    if (!sortedRows.length) return undefined
-
     const handleKeydown = (event) => {
       if (isTypingTarget(event.target)) return
       const currentIndex = sortedRows.findIndex(row => row.symbol === selectedDisplaySymbol)
 
-      if (event.code === 'Space') {
+      if (event.code === 'Space' && sortedRows.length) {
         event.preventDefault()
         const nextIndex = event.shiftKey
           ? (currentIndex <= 0 ? sortedRows.length - 1 : currentIndex - 1)
@@ -296,51 +410,80 @@ export default function Charts() {
         return
       }
 
-      if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+      if ((event.key === 'ArrowDown' || event.key === 'ArrowRight') && sortedRows.length) {
         event.preventDefault()
+        setCustomSymbol('')
         const nextIndex = currentIndex < 0 || currentIndex >= sortedRows.length - 1 ? 0 : currentIndex + 1
         const nextSymbol = sortedRows[nextIndex]?.symbol
         if (nextSymbol) setSelectedSymbol(nextSymbol)
         return
       }
 
-      if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+      if ((event.key === 'ArrowUp' || event.key === 'ArrowLeft') && sortedRows.length) {
         event.preventDefault()
+        setCustomSymbol('')
         const nextIndex = currentIndex <= 0 ? sortedRows.length - 1 : currentIndex - 1
         const nextSymbol = sortedRows[nextIndex]?.symbol
         if (nextSymbol) setSelectedSymbol(nextSymbol)
         return
       }
 
-      if (event.metaKey || event.ctrlKey || event.altKey) return
-      const nextTypeahead = resolveSymbolTypeahead({
-        rows,
-        key: event.key,
-        typeahead: symbolTypeahead,
-        selectedSymbol: selectedDisplaySymbol,
-      })
-      if (!nextTypeahead?.symbol) return
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedAnchorId) {
+        event.preventDefault()
+        const nextSelectedAnchorId = resolveAnchorSelectionAfterDelete(selectedManualAnchors, selectedAnchorId)
+        removeTradeReviewManualAnchor(selectedDisplaySymbol, selectedAnchorId)
+        setSelectedAnchorId(nextSelectedAnchorId)
+        setEditingAnchorId(current => current === selectedAnchorId ? null : current)
+        return
+      }
 
-      event.preventDefault()
-      setSymbolTypeahead(nextTypeahead)
-      setSelectedSymbol(nextTypeahead.symbol)
-      if (!filteredRows.some(row => row.symbol === nextTypeahead.symbol)) {
-        setQuery('')
+      if (event.key === 'Escape') {
+        if (editingAnchorId) {
+          event.preventDefault()
+          setEditingAnchorId(null)
+          return
+        }
+        if (selectedAnchorId) {
+          event.preventDefault()
+          setSelectedAnchorId(null)
+          return
+        }
+        if (pendingSymbolInput) {
+          event.preventDefault()
+          setPendingSymbolInput('')
+        }
+        return
+      }
+
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      if (event.key === 'Enter') {
+        if (!pendingSymbolInput) return
+        event.preventDefault()
+        void handleCommitPendingSymbol()
+        return
+      }
+      if (event.key === 'Backspace') {
+        if (!pendingSymbolInput) return
+        event.preventDefault()
+        setPendingSymbolInput(current => current.slice(0, -1))
+        return
+      }
+      if (event.key.length === 1) {
+        const normalizedKey = normalizePendingSymbolInput(event.key)
+        if (!normalizedKey) return
+        event.preventDefault()
+        setPendingSymbolInput(current => `${current}${normalizedKey}`)
       }
     }
 
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
-  }, [filteredRows, rows, selectedDisplaySymbol, sortedRows, symbolTypeahead])
-
-  useEffect(() => {
-    if (!symbolTypeahead?.buffer) return undefined
-    const timeoutId = window.setTimeout(() => setSymbolTypeahead(null), TYPEAHEAD_RESET_MS)
-    return () => window.clearTimeout(timeoutId)
-  }, [symbolTypeahead])
+  }, [editingAnchorId, pendingSymbolInput, selectedAnchorId, selectedDisplaySymbol, selectedManualAnchors, sortedRows])
 
   useEffect(() => {
     if (!selectedDisplaySymbol) return
+    setSelectedAnchorId(null)
+    setEditingAnchorId(null)
     const selectedRow = document.querySelector(`[data-chart-watchlist-row="${selectedDisplaySymbol}"]`)
     selectedRow?.scrollIntoView?.({ block: 'nearest' })
   }, [selectedDisplaySymbol])
@@ -364,11 +507,52 @@ export default function Charts() {
     setAddAvwapMode(false)
   }
 
+  const handleCommitPendingSymbol = async () => {
+    const normalizedSymbol = normalizePendingSymbolInput(pendingSymbolInput)
+    if (!normalizedSymbol) return
+
+    setHistoryError('')
+    setLoadingHistory(true)
+    setCustomSymbolMeta(null)
+    try {
+      const bars = await loadSymbolHistory(normalizedSymbol)
+      if (!Array.isArray(bars) || !bars.length) {
+        throw new Error(`No chart history found for ${normalizedSymbol}.`)
+      }
+      setCustomSymbol(normalizedSymbol)
+      setSelectedSymbol(normalizedSymbol)
+      setSelectedAnchorId(null)
+      setEditingAnchorId(null)
+      setPendingSymbolInput('')
+
+      resolveTickerToName(normalizedSymbol)
+        .then(info => setCustomSymbolMeta(info))
+        .catch(() => setCustomSymbolMeta(null))
+    } catch (error) {
+      setHistoryError(error.message || `Could not load ${normalizedSymbol}.`)
+    } finally {
+      setLoadingHistory(false)
+    }
+  }
+
   const handleMoveManualAnchor = (anchor, nextAnchorDate) => {
     if (!selectedDisplaySymbol || !anchor?.id || !nextAnchorDate) return
     const updates = buildManualAnchorDragUpdate(anchor, nextAnchorDate)
     if (!updates || updates.anchorDate === anchor.anchorDate) return
     updateTradeReviewManualAnchor(selectedDisplaySymbol, anchor.id, updates)
+  }
+
+  const handleSaveManualAnchor = (anchor, updates) => {
+    if (!selectedDisplaySymbol || !anchor?.id) return
+    updateTradeReviewManualAnchor(selectedDisplaySymbol, anchor.id, updates)
+  }
+
+  const handleDeleteManualAnchor = (anchor) => {
+    if (!selectedDisplaySymbol || !anchor?.id) return
+    const nextSelectedAnchorId = resolveAnchorSelectionAfterDelete(selectedManualAnchors, anchor.id)
+    removeTradeReviewManualAnchor(selectedDisplaySymbol, anchor.id)
+    setSelectedAnchorId(nextSelectedAnchorId)
+    setEditingAnchorId(null)
   }
 
   return (
@@ -405,14 +589,20 @@ export default function Charts() {
                 if (!selectedDisplaySymbol) return
                 updateTradeReviewManualAnchor(selectedDisplaySymbol, anchor.id, { enabled: !anchor.enabled })
               }}
-              onRemoveManualAnchor={(anchor) => {
-                if (!selectedDisplaySymbol) return
-                removeTradeReviewManualAnchor(selectedDisplaySymbol, anchor.id)
-              }}
+              onRemoveManualAnchor={handleDeleteManualAnchor}
               onMoveManualAnchor={addAvwapMode ? null : handleMoveManualAnchor}
+              selectedManualAnchorId={selectedAnchorId}
+              onSelectManualAnchor={(anchor) => {
+                setSelectedAnchorId(current => current === anchor?.id ? null : anchor?.id)
+                setEditingAnchorId(null)
+              }}
+              onEditManualAnchor={(anchor) => {
+                setSelectedAnchorId(anchor?.id || null)
+                setEditingAnchorId(anchor?.id || null)
+              }}
               onOpenSettings={() => setSettingsOpen(true)}
               chartLabel={selectedRow?.companyName || 'Ticker Chart'}
-              badgeLabel={activeList?.name || 'Watchlist'}
+              badgeLabel={customSymbol === selectedDisplaySymbol ? 'Custom' : (activeList?.name || 'Watchlist')}
               emptyLabel={loadingHistory ? 'Loading chart history…' : 'No chart data for this ticker'}
               weeklyRightOffset={chartsWeeklyRightOffset}
               dailyRightOffset={chartsDailyRightOffset}
@@ -469,11 +659,36 @@ export default function Charts() {
                 className="w-full bg-transparent text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none"
               />
             </div>
-            {symbolTypeahead?.buffer ? (
-              <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-accent-blue/80">
-                Symbol Jump: {symbolTypeahead.buffer}
-              </p>
-            ) : null}
+            <div className="mt-3 flex items-center gap-2 rounded-xl border border-accent-blue/15 bg-accent-blue/[0.05] px-3 py-2">
+              <Search size={14} className="text-accent-blue/80" />
+              <input
+                type="text"
+                value={pendingSymbolInput}
+                onChange={event => setPendingSymbolInput(normalizePendingSymbolInput(event.target.value))}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    void handleCommitPendingSymbol()
+                  }
+                }}
+                placeholder="Type any symbol, press Enter…"
+                className="w-full bg-transparent text-sm text-gray-100 placeholder:text-accent-blue/45 focus:outline-none"
+              />
+              {customSymbol ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomSymbol('')
+                    setCustomSymbolMeta(null)
+                    setHistoryError('')
+                  }}
+                  className="rounded-md border border-white/10 px-2 py-1 text-[11px] font-semibold text-gray-400 hover:text-white"
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
+            <p className="mt-2 text-[11px] text-gray-500">You can start typing anywhere on the Charts tab, then press Enter to load that ticker.</p>
 
             {historyError && (
               <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
@@ -523,7 +738,11 @@ export default function Charts() {
                   <button
                     key={row.symbol}
                     type="button"
-                    onClick={() => setSelectedSymbol(row.symbol)}
+                    onClick={() => {
+                      setCustomSymbol('')
+                      setCustomSymbolMeta(null)
+                      setSelectedSymbol(row.symbol)
+                    }}
                     data-chart-watchlist-row={row.symbol}
                     className={`flex w-full items-start gap-3 border-b border-white/[0.05] px-4 py-3 text-left transition-colors ${
                       active ? 'bg-accent-blue/10' : 'hover:bg-white/[0.03]'
@@ -568,6 +787,14 @@ export default function Charts() {
           settings={tradeReviewChartSettings}
           onSave={setTradeReviewChartSettings}
           onClose={() => setSettingsOpen(false)}
+        />
+      )}
+      {editingAnchorId && selectedManualAnchor && (
+        <ManualAvwapModal
+          anchor={selectedManualAnchor}
+          onSave={handleSaveManualAnchor}
+          onDelete={handleDeleteManualAnchor}
+          onClose={() => setEditingAnchorId(null)}
         />
       )}
     </div>

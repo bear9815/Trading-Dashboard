@@ -155,6 +155,9 @@ function LightweightPane({
   onChartClick,
   draggableAnchors = [],
   onMoveAnchor,
+  selectedAnchorId = null,
+  onSelectAnchor,
+  onEditAnchor,
 }) {
   const chartContainerRef = useRef(null)
   const shadeCanvasRef = useRef(null)
@@ -225,9 +228,9 @@ function LightweightPane({
         time: overlay.series?.[0]?.time || overlay.anchorDate,
         position: 'belowBar',
         color: overlay.color,
-        shape: 'circle',
-        text: overlay.label,
-        size: 0.8,
+        shape: overlay.id === selectedAnchorId ? 'square' : 'circle',
+        text: overlay.id === selectedAnchorId ? `${overlay.label} • selected` : overlay.label,
+        size: overlay.id === selectedAnchorId ? 1.2 : 0.8,
       })).filter(marker => marker.time))
     }
 
@@ -307,6 +310,24 @@ function LightweightPane({
       event.stopPropagation()
     }
 
+    const handleClick = (event) => {
+      if (onChartClick || !onSelectAnchor) return
+      const anchor = findNearestDraggableAnchor(event.clientX)
+      if (!anchor) return
+      onSelectAnchor(anchor)
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const handleDoubleClick = (event) => {
+      if (onChartClick || !onEditAnchor) return
+      const anchor = findNearestDraggableAnchor(event.clientX)
+      if (!anchor) return
+      onEditAnchor(anchor)
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
     const handlePointerMove = (event) => {
       if (dragRef.current) {
         const nextAnchorDate = resolveAnchorDateFromClientX(event.clientX)
@@ -363,6 +384,8 @@ function LightweightPane({
     chartContainerRef.current.addEventListener('pointermove', handlePointerMove)
     chartContainerRef.current.addEventListener('pointerup', handlePointerUp)
     chartContainerRef.current.addEventListener('pointercancel', handlePointerCancel)
+    chartContainerRef.current.addEventListener('click', handleClick)
+    chartContainerRef.current.addEventListener('dblclick', handleDoubleClick)
 
     const resizeObserver = new ResizeObserver(([entry]) => {
       chart.applyOptions({ width: Math.floor(entry.contentRect.width), height: Math.floor(entry.contentRect.height) })
@@ -378,11 +401,13 @@ function LightweightPane({
       chartContainerRef.current?.removeEventListener?.('pointermove', handlePointerMove)
       chartContainerRef.current?.removeEventListener?.('pointerup', handlePointerUp)
       chartContainerRef.current?.removeEventListener?.('pointercancel', handlePointerCancel)
+      chartContainerRef.current?.removeEventListener?.('click', handleClick)
+      chartContainerRef.current?.removeEventListener?.('dblclick', handleDoubleClick)
       resizeObserver.disconnect()
       resetDrag()
       chart.remove()
     }
-  }, [chartType, dailyRangeMonths, data, draggableAnchors, height, kind, onChartClick, onMoveAnchor, rightOffset, showRsGradient])
+  }, [chartType, dailyRangeMonths, data, draggableAnchors, height, kind, onChartClick, onEditAnchor, onMoveAnchor, onSelectAnchor, rightOffset, selectedAnchorId, showRsGradient])
 
   return (
     <div className={`relative w-full ${className}`} style={height ? { height } : undefined}>
@@ -423,6 +448,9 @@ export default function ResearchMultiTimeframeChart({
   onToggleManualAnchor,
   onRemoveManualAnchor,
   onMoveManualAnchor,
+  selectedManualAnchorId = null,
+  onSelectManualAnchor,
+  onEditManualAnchor,
   onOpenSettings,
 }) {
   const hasBars = data?.dailyBars?.length
@@ -525,9 +553,17 @@ export default function ResearchMultiTimeframeChart({
                 }`}
               >
                 <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: anchor.color }} />
-                <span>{anchor.label}</span>
+                <button
+                  type="button"
+                  onClick={() => onSelectManualAnchor?.(anchor)}
+                  onDoubleClick={() => onEditManualAnchor?.(anchor)}
+                  className={`${selectedManualAnchorId === anchor.id ? 'text-accent-blue' : ''}`}
+                >
+                  {anchor.label}
+                </button>
                 {onToggleManualAnchor ? (
                   <button
+                    type="button"
                     onClick={() => onToggleManualAnchor(anchor)}
                     className="text-[9px] uppercase tracking-wide text-[#505760] hover:text-[#242830]"
                   >
@@ -536,6 +572,7 @@ export default function ResearchMultiTimeframeChart({
                 ) : null}
                 {onRemoveManualAnchor ? (
                   <button
+                    type="button"
                     onClick={() => onRemoveManualAnchor(anchor)}
                     className="text-[11px] text-[#7a4b4b] hover:text-[#3b1d1d]"
                     aria-label={`Remove ${anchor.label}`}
@@ -582,6 +619,9 @@ export default function ResearchMultiTimeframeChart({
               onChartClick={addAvwapMode ? onChartClick : null}
               draggableAnchors={(data.avwapOverlays || []).filter(overlay => overlay.kind === 'manual')}
               onMoveAnchor={onMoveManualAnchor}
+              selectedAnchorId={selectedManualAnchorId}
+              onSelectAnchor={onSelectManualAnchor}
+              onEditAnchor={onEditManualAnchor}
               className={fillAvailableHeight ? 'h-full' : ''}
             />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
