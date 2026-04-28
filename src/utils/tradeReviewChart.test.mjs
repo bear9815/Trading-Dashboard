@@ -12,8 +12,10 @@ import {
   buildKeltnerShadeBands,
   calculateRsGradient,
   DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+  normalizeAvwapPresets,
   resolveLatestAnchorDate,
   resolveAvwapPresetAnchorDate,
+  resolveBestFitAvwapAnchorDate,
   resolveAnchoredRsAnchorDate,
   buildTradeMarkers,
   calculateKeltnerChannel,
@@ -249,6 +251,58 @@ assert.equal(
   resolveAvwapPresetAnchorDate({ mode: 'fixed-date', anchorDate: '2026-04-02' }, '2026-04-25'),
   '2026-04-02'
 )
+assert.equal(
+  normalizeAvwapPresets([{ id: 'best-fit', kind: 'preset', mode: 'best-fit', label: 'Best Fit', enabled: true, color: '#8b5cf6' }])[0]?.lookbackMonths,
+  3
+)
+assert.equal(
+  normalizeAvwapPresets([{ id: 'best-fit', kind: 'preset', mode: 'best-fit', lookbackMonths: 6, label: 'Best Fit', enabled: true, color: '#8b5cf6' }])[0]?.lookbackMonths,
+  6
+)
+
+const bestFitBars = [
+  { time: '2026-01-02', open: 9.8, high: 10.4, low: 9.5, close: 10.2, volume: 100 },
+  { time: '2026-01-03', open: 10.2, high: 11.2, low: 10.0, close: 10.9, volume: 120 },
+  { time: '2026-01-04', open: 10.9, high: 11.8, low: 10.7, close: 11.6, volume: 130 },
+  { time: '2026-01-05', open: 11.6, high: 12.2, low: 11.0, close: 12.0, volume: 125 },
+  { time: '2026-01-06', open: 12.0, high: 12.5, low: 11.5, close: 12.3, volume: 128 },
+  { time: '2026-01-07', open: 12.3, high: 13.0, low: 11.9, close: 12.8, volume: 132 },
+  { time: '2026-01-08', open: 12.8, high: 13.4, low: 12.1, close: 13.2, volume: 136 },
+  { time: '2026-01-09', open: 13.2, high: 13.8, low: 12.4, close: 13.5, volume: 140 },
+]
+assert.equal(
+  resolveBestFitAvwapAnchorDate(bestFitBars, { mode: 'best-fit', lookbackMonths: 3 }, '2026-01-09'),
+  '2026-01-02'
+)
+
+const lateVsEarlyBestFitBars = [
+  { time: '2026-01-02', open: 9.8, high: 10.5, low: 9.5, close: 10.3, volume: 100 },
+  { time: '2026-01-03', open: 10.3, high: 11.0, low: 10.2, close: 10.8, volume: 115 },
+  { time: '2026-01-04', open: 10.8, high: 11.5, low: 10.6, close: 11.1, volume: 120 },
+  { time: '2026-01-05', open: 11.1, high: 11.6, low: 10.8, close: 11.3, volume: 124 },
+  { time: '2026-01-06', open: 11.3, high: 11.8, low: 10.9, close: 11.4, volume: 126 },
+  { time: '2026-01-07', open: 11.4, high: 11.9, low: 11.0, close: 11.6, volume: 128 },
+  { time: '2026-01-08', open: 11.6, high: 12.1, low: 11.2, close: 11.8, volume: 130 },
+]
+assert.equal(
+  resolveBestFitAvwapAnchorDate(lateVsEarlyBestFitBars, { mode: 'best-fit', lookbackMonths: 3 }, '2026-01-08'),
+  '2026-01-02'
+)
+
+const rejectedBestFitBars = [
+  { time: '2026-01-02', open: 10.0, high: 10.4, low: 9.8, close: 10.2, volume: 100 },
+  { time: '2026-01-03', open: 10.2, high: 10.4, low: 9.1, close: 9.3, volume: 120 },
+  { time: '2026-01-04', open: 9.3, high: 9.7, low: 8.8, close: 9.0, volume: 120 },
+  { time: '2026-01-05', open: 9.0, high: 9.2, low: 8.6, close: 8.8, volume: 120 },
+]
+assert.equal(
+  resolveBestFitAvwapAnchorDate(rejectedBestFitBars, { mode: 'best-fit', lookbackMonths: 3 }, '2026-01-05'),
+  null
+)
+assert.equal(
+  resolveBestFitAvwapAnchorDate([{ time: '2026-01-02', open: 10, high: 11, low: 9.5, close: 10.5, volume: 100 }], { mode: 'best-fit', lookbackMonths: 3 }, '2026-01-02'),
+  null
+)
 
 const avwapOverlays = buildAvwapOverlays(
   avwapBars,
@@ -279,6 +333,30 @@ assert.equal(
   ).length,
   0
 )
+const bestFitOverlayBars = [
+  { time: '2026-01-02', open: 10.0, high: 10.5, low: 9.7, close: 10.3, volume: 100 },
+  { time: '2026-01-03', open: 10.3, high: 11.1, low: 10.1, close: 10.9, volume: 115 },
+  { time: '2026-01-04', open: 10.9, high: 11.6, low: 10.7, close: 11.4, volume: 120 },
+  { time: '2026-01-05', open: 11.4, high: 11.9, low: 10.9, close: 11.7, volume: 126 },
+  { time: '2026-01-06', open: 11.7, high: 12.3, low: 11.3, close: 12.0, volume: 128 },
+  { time: '2026-01-07', open: 12.0, high: 12.5, low: 11.5, close: 12.2, volume: 130 },
+]
+const bestFitOverlays = buildAvwapOverlays(
+  bestFitOverlayBars,
+  'NVDA',
+  {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    avwapPresets: [
+      { id: 'best-fit', kind: 'preset', mode: 'best-fit', lookbackMonths: 3, label: 'Best Fit', enabled: true, color: '#8b5cf6' },
+    ],
+  },
+  {},
+  '2026-01-07'
+)
+assert.equal(bestFitOverlays.length, 1)
+assert.equal(bestFitOverlays[0].mode, 'best-fit')
+assert.equal(bestFitOverlays[0].anchorDate, '2026-01-02')
+assert.ok(bestFitOverlays[0].series.length > 0)
 
 const avwapPrepared = buildTradeReviewChartData(
   avwapBars,
@@ -310,6 +388,30 @@ const tradeEntryOverlay = entryAvwapPrepared.avwapOverlays.find(overlay => overl
 assert.ok(tradeEntryOverlay)
 assert.equal(tradeEntryOverlay.color, '#16a34a')
 assert.equal(tradeEntryOverlay.anchorDate, '2026-01-03')
+const historicalBestFitPrepared = buildTradeReviewChartData(
+  [
+    { time: '2026-01-02', open: 10.0, high: 10.5, low: 9.7, close: 10.3, volume: 100 },
+    { time: '2026-01-03', open: 10.3, high: 10.9, low: 10.0, close: 10.7, volume: 110 },
+    { time: '2026-01-04', open: 10.7, high: 11.4, low: 10.5, close: 11.2, volume: 120 },
+    { time: '2026-01-05', open: 11.2, high: 11.8, low: 10.8, close: 11.6, volume: 125 },
+    { time: '2026-01-06', open: 11.6, high: 12.1, low: 11.2, close: 11.9, volume: 126 },
+    { time: '2026-01-07', open: 11.9, high: 12.6, low: 11.7, close: 12.4, volume: 130 },
+    { time: '2026-01-08', open: 12.4, high: 12.7, low: 11.6, close: 11.8, volume: 131 },
+    { time: '2026-01-09', open: 11.8, high: 12.0, low: 10.8, close: 11.0, volume: 132 },
+  ],
+  { ...trade, symbol: 'NVDA', entryDate: '2026-01-07T15:45:00.000Z' },
+  [],
+  {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    avwapPresets: [
+      { id: 'best-fit', kind: 'preset', mode: 'best-fit', lookbackMonths: 3, label: 'Best Fit', enabled: true, color: '#8b5cf6' },
+    ],
+  },
+  {}
+)
+const historicalBestFitOverlay = historicalBestFitPrepared.avwapOverlays.find(overlay => overlay.mode === 'best-fit')
+assert.ok(historicalBestFitOverlay)
+assert.equal(historicalBestFitOverlay.anchorDate, '2026-01-02')
 
 const ytdSnapshot = buildYtdAvwapSnapshot(avwapBars, '2026-04-25')
 assert.equal(ytdSnapshot.anchorDate, '2026-01-01')

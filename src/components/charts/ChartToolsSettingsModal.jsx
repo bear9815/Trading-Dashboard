@@ -1,5 +1,6 @@
 import { Plus, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
+import { BEST_FIT_LOOKBACK_MONTH_DEFAULT, BEST_FIT_LOOKBACK_MONTH_OPTIONS } from '../../utils/tradeReviewChart.js'
 
 export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
   const [draft, setDraft] = useState(() => ({
@@ -89,6 +90,25 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
     }))
   }
 
+  function addBestFitPreset() {
+    const nextId = `best-fit-${Date.now()}`
+    setDraft(current => ({
+      ...current,
+      avwapPresets: [
+        ...current.avwapPresets,
+        {
+          id: nextId,
+          kind: 'preset',
+          mode: 'best-fit',
+          label: 'Best Fit',
+          enabled: false,
+          color: '#8b5cf6',
+          lookbackMonths: BEST_FIT_LOOKBACK_MONTH_DEFAULT,
+        },
+      ],
+    }))
+  }
+
   function removePreset(id) {
     setDraft(current => ({
       ...current,
@@ -102,7 +122,9 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
       ...draft,
       benchmarkSymbol: (draft.benchmarkSymbol || 'SPY').trim().toUpperCase(),
       anchorDates,
-      avwapPresets: draft.avwapPresets.filter(preset => preset.mode === 'ytd' || preset.anchorDate),
+      avwapPresets: draft.avwapPresets.filter(preset =>
+        preset.mode === 'ytd' || preset.mode === 'best-fit' || preset.anchorDate
+      ),
     })
     onClose()
   }
@@ -204,9 +226,14 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="label">AVWAP Presets</p>
-              <button onClick={addFixedDatePreset} className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-accent-blue/15 text-accent-blue border border-accent-blue/25">
-                <Plus size={12} /> Add Date
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={addBestFitPreset} className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-violet-500/15 text-violet-200 border border-violet-400/25">
+                  <Plus size={12} /> Add Best Fit
+                </button>
+                <button onClick={addFixedDatePreset} className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-accent-blue/15 text-accent-blue border border-accent-blue/25">
+                  <Plus size={12} /> Add Date
+                </button>
+              </div>
             </div>
             <div className="space-y-2">
               {draft.avwapPresets.map(preset => (
@@ -229,14 +256,16 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
                       onChange={event => updatePreset(preset.id, { color: event.target.value })}
                       className="h-8 w-10 rounded bg-transparent"
                     />
-                    {preset.mode === 'fixed-date' && (
+                    {preset.mode !== 'ytd' && (
                       <button onClick={() => removePreset(preset.id)} className="p-2 rounded-lg border border-white/10 text-gray-500 hover:text-accent-red hover:border-accent-red/30">
                         <Trash2 size={13} />
                       </button>
                     )}
                   </div>
                   <div className="mt-2 flex items-center gap-2">
-                    <span className="text-[10px] text-gray-500 uppercase tracking-wide">{preset.mode === 'ytd' ? 'Dynamic' : 'Date'}</span>
+                    <span className="text-[10px] text-gray-500 uppercase tracking-wide">
+                      {preset.mode === 'fixed-date' ? 'Date' : 'Dynamic'}
+                    </span>
                     {preset.mode === 'fixed-date' ? (
                       <input
                         type="date"
@@ -244,6 +273,16 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
                         onChange={event => updatePreset(preset.id, { anchorDate: event.target.value })}
                         className={`${fieldClass} w-40`}
                       />
+                    ) : preset.mode === 'best-fit' ? (
+                      <select
+                        value={preset.lookbackMonths || BEST_FIT_LOOKBACK_MONTH_DEFAULT}
+                        onChange={event => updatePreset(preset.id, { lookbackMonths: Number(event.target.value) })}
+                        className={`${fieldClass} w-40`}
+                      >
+                        {BEST_FIT_LOOKBACK_MONTH_OPTIONS.map(months => (
+                          <option key={months} value={months}>{months}M lookback</option>
+                        ))}
+                      </select>
                     ) : (
                       <span className="text-xs text-gray-400">Uses Jan 1 of the current chart year.</span>
                     )}

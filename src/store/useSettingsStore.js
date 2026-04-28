@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { supabase } from '../lib/supabase.js'
+import { BEST_FIT_LOOKBACK_MONTH_DEFAULT, BEST_FIT_LOOKBACK_MONTH_OPTIONS } from '../utils/tradeReviewChart.js'
 
 // Module-level flag — prevents re-fetching settings more than once per page load
 let settingsSessionLoaded = false
@@ -26,10 +27,23 @@ const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
 }
 
 function normalizeAvwapPreset(preset, index = 0) {
-  const mode = preset?.mode === 'fixed-date' ? 'fixed-date' : 'ytd'
+  const mode = preset?.mode === 'fixed-date'
+    ? 'fixed-date'
+    : preset?.mode === 'best-fit'
+      ? 'best-fit'
+      : 'ytd'
   const anchorDate = typeof preset?.anchorDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(preset.anchorDate)
     ? preset.anchorDate
     : null
+  const rawLookbackMonths = Number(preset?.lookbackMonths)
+  const lookbackMonths = BEST_FIT_LOOKBACK_MONTH_OPTIONS.includes(rawLookbackMonths)
+    ? rawLookbackMonths
+    : BEST_FIT_LOOKBACK_MONTH_DEFAULT
+  const defaultLabel = mode === 'fixed-date'
+    ? anchorDate
+    : mode === 'best-fit'
+      ? 'Best Fit'
+      : 'YTD'
 
   if (mode === 'fixed-date' && !anchorDate) return null
 
@@ -38,9 +52,10 @@ function normalizeAvwapPreset(preset, index = 0) {
     kind: 'preset',
     mode,
     anchorDate: mode === 'fixed-date' ? anchorDate : null,
-    label: (preset?.label || (mode === 'fixed-date' ? anchorDate : 'YTD') || 'AVWAP').trim(),
+    label: (preset?.label || defaultLabel || 'AVWAP').trim(),
     enabled: Boolean(preset?.enabled),
     color: preset?.color || '#f59e0b',
+    ...(mode === 'best-fit' ? { lookbackMonths } : {}),
   }
 }
 

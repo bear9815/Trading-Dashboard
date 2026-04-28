@@ -1,5 +1,7 @@
 export const REVIEW_CHART_UP_COLOR = '#2877e3'
 export const REVIEW_CHART_DOWN_COLOR = '#ea4ce7'
+export const BEST_FIT_LOOKBACK_MONTH_OPTIONS = [1, 3, 6, 12]
+export const BEST_FIT_LOOKBACK_MONTH_DEFAULT = 3
 
 const KELTNER_SHADE_COLORS = {
   13: 'rgba(69, 207, 219, 0.22)',
@@ -85,15 +87,29 @@ function colorizeCandles(bars) {
 
 function normalizeAvwapPreset(preset, index = 0) {
   const anchorDate = toDateKey(preset?.anchorDate)
-  const mode = preset?.mode === 'fixed-date' ? 'fixed-date' : 'ytd'
+  const mode = preset?.mode === 'fixed-date'
+    ? 'fixed-date'
+    : preset?.mode === 'best-fit'
+      ? 'best-fit'
+      : 'ytd'
+  const rawLookbackMonths = Number(preset?.lookbackMonths)
+  const lookbackMonths = BEST_FIT_LOOKBACK_MONTH_OPTIONS.includes(rawLookbackMonths)
+    ? rawLookbackMonths
+    : BEST_FIT_LOOKBACK_MONTH_DEFAULT
+  const defaultLabel = mode === 'fixed-date'
+    ? anchorDate
+    : mode === 'best-fit'
+      ? 'Best Fit'
+      : 'YTD'
   return {
     id: preset?.id || `${mode}-${anchorDate || index}`,
     kind: 'preset',
     mode,
     anchorDate: mode === 'fixed-date' ? anchorDate : null,
-    label: (preset?.label || (mode === 'fixed-date' ? anchorDate : 'YTD') || 'AVWAP').trim(),
+    label: (preset?.label || defaultLabel || 'AVWAP').trim(),
     enabled: Boolean(preset?.enabled),
     color: preset?.color || '#f59e0b',
+    ...(mode === 'best-fit' ? { lookbackMonths } : {}),
   }
 }
 
@@ -113,7 +129,7 @@ function normalizeManualAnchor(anchor, index = 0) {
 export function normalizeAvwapPresets(presets = DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets) {
   const normalized = (presets || [])
     .map((preset, index) => normalizeAvwapPreset(preset, index))
-    .filter(preset => preset.mode === 'ytd' || preset.anchorDate)
+    .filter(preset => preset.mode === 'ytd' || preset.mode === 'best-fit' || preset.anchorDate)
   return normalized.length ? normalized : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets.map(normalizeAvwapPreset)
 }
 
@@ -222,8 +238,200 @@ export function calculateKeltnerChannel(bars, period, multiplier = 0.25) {
 }
 
 export function resolveAvwapPresetAnchorDate(preset, asOf = new Date()) {
-  const mode = preset?.mode === 'fixed-date' ? 'fixed-date' : 'ytd'
+  const mode = preset?.mode === 'fixed-date'
+    ? 'fixed-date'
+    : preset?.mode === 'best-fit'
+      ? 'best-fit'
+      : 'ytd'
   if (mode === 'fixed-date') return toDateKey(preset?.anchorDate)
+  if (mode === 'best-fit') return null
+
+  const asOfKey = toDateKey(asOf)
+  if (!asOfKey) return null
+  return `${asOfKey.slice(0, 4)}-01-01`
+}
+
+function average(values) {
+  const nums = values.filter(Number.isFinite)
+  if (!nums.length) return 0
+  return nums.reduce((sum, value) => sum + value, 0) / nums.length
+}
+
+function buildAtrByTime(bars, period = 14) {
+  const cleaned = cleanBars(bars)
+  if (!cleaned.length) return new Map()
+  const resolvedPeriod = Math.max(1, Math.min(period, cleaned.length))
+  const ranges = trueRanges(cleaned)
+  const atrValues = ema(ranges, resolvedPeriod)
+  const fallbackAtr = Math.max(average(ranges), 0.01)
+  return new Map(
+    cleaned.map((bar, index) => [
+      bar.time,
+      Math.max(atrValues[index] ?? fallbackAtr, 0.01),
+    ])
+  )
+}
+
+function sliceBarsThroughAsOf(bars, asOf = new Date()) {
+  const asOfKey = toDateKey(asOf)
+  if (!asOfKey) return []
+  return cleanBars(bars).filter(bar => bar.time <= asOfKey)
+}
+
+function dateMonthsBefore(key, months) {
+  const date = dateFromKey(key)
+  date.setUTCMonth(date.getUTCMonth() - months)
+  return date.toISOString().slice(0, 10)
+}
+
+function scoreBestFitAvwapAnchor(bars, atrByTime, candidateIndex, candidateRank, eligibleAnchorCount) {
+  const anchorDate = bars[candidateIndex]?.time
+  if (!anchorDate) return null
+
+  const series = calculateAvwapSeries(bars, anchorDate)
+  if (series.length < 4) return null
+
+  const barsSinceAnchor = bars.slice(candidateIndex, candidateIndex + series.length)
+  if (barsSinceAnchor.length !== series.length) return null
+  const evaluationBars = barsSinceAnchor.slice(1)
+  const evaluationSeries = series.slice(1)
+  if (evaluationBars.length < 3) return null
+
+  let supportTouches = 0
+  let nearTouches = 0
+  let undercutReclaims = 0
+  let closeBelowCount = 0
+  let deepViolationCount = 0
+  let violationDepthPenalty = 0
+  let closesAboveCount = 0
+
+  for (let index = 0; index < evaluationBars.length; index += 1) {
+    const bar = evaluationBars[index]
+    const avwapValue = evaluationSeries[index]?.value
+    const atr = atrByTime.get(bar.time) || 0.01
+    const touchTolerance = atr * 0.35
+    const nearTolerance = atr * 0.6
+    const shallowUndercut = atr * 0.45
+    const deepBreak = atr * 0.9
+    const lowDelta = bar.low - avwapValue
+    const closeDelta = bar.close - avwapValue
+
+    if (Math.abs(lowDelta) <= touchTolerance) {
+      supportTouches += 1
+    } else if (lowDelta > 0 && lowDelta <= nearTolerance) {
+      nearTouches += 1
+    }
+
+    if (lowDelta < 0 && Math.abs(lowDelta) <= shallowUndercut && closeDelta >= 0) {
+      undercutReclaims += 1
+    }
+
+    if (closeDelta >= 0) {
+      closesAboveCount += 1
+    } else {
+      closeBelowCount += 1
+      violationDepthPenalty += Math.min(3, Math.abs(closeDelta) / atr)
+    }
+
+    if (lowDelta < -deepBreak || closeDelta < -touchTolerance) {
+      deepViolationCount += 1
+    }
+  }
+
+  const meaningfulInteractions = supportTouches + undercutReclaims
+  const closeAboveRatio = closesAboveCount / evaluationBars.length
+  const recentWindow = evaluationBars.slice(-Math.min(5, evaluationBars.length))
+  const recentAboveCount = recentWindow.filter((bar, index) => {
+    const seriesIndex = evaluationBars.length - recentWindow.length + index
+    return bar.close >= evaluationSeries[seriesIndex].value
+  }).length
+  const recentAboveRatio = recentAboveCount / recentWindow.length
+  const anchorAtr = atrByTime.get(anchorDate) || 0.01
+  const trendProgress = clamp((barsSinceAnchor.at(-1).close - barsSinceAnchor[0].close) / anchorAtr, -4, 12)
+  const ageBias = eligibleAnchorCount <= 1
+    ? 1
+    : 1 - (candidateRank / Math.max(eligibleAnchorCount - 1, 1))
+
+  if (meaningfulInteractions < 2) return null
+  if (closeAboveRatio < 0.55) return null
+  if (recentAboveRatio < 0.6) return null
+  if (trendProgress < 0.5) return null
+
+  const score = (
+    supportTouches * 3 +
+    nearTouches * 1.25 +
+    undercutReclaims * 4 +
+    closeAboveRatio * 6 +
+    recentAboveRatio * 5 +
+    Math.max(0, trendProgress) * 1.2 +
+    ageBias * 6 -
+    closeBelowCount * 2.5 -
+    deepViolationCount * 4 -
+    violationDepthPenalty * 1.5
+  )
+
+  return score >= 8
+    ? {
+        anchorDate,
+      score,
+      seriesLength: series.length,
+      }
+    : null
+}
+
+export function resolveBestFitAvwapAnchorDate(bars, preset = {}, asOf = new Date()) {
+  const visibleBars = sliceBarsThroughAsOf(bars, asOf)
+  if (visibleBars.length < 4) return null
+
+  const lookbackMonths = BEST_FIT_LOOKBACK_MONTH_OPTIONS.includes(Number(preset?.lookbackMonths))
+    ? Number(preset.lookbackMonths)
+    : BEST_FIT_LOOKBACK_MONTH_DEFAULT
+  const asOfKey = visibleBars.at(-1)?.time
+  if (!asOfKey) return null
+
+  const lookbackStartKey = dateMonthsBefore(asOfKey, lookbackMonths)
+  const eligibleAnchorIndexes = visibleBars
+    .map((bar, index) => ({ bar, index }))
+    .filter(({ bar, index }) => bar.time >= lookbackStartKey && index <= visibleBars.length - 4)
+    .map(({ index }) => index)
+
+  if (!eligibleAnchorIndexes.length) return null
+
+  const atrByTime = buildAtrByTime(visibleBars)
+  const candidates = eligibleAnchorIndexes
+    .map((anchorIndex, candidateIndex) => scoreBestFitAvwapAnchor(
+      visibleBars,
+      atrByTime,
+      anchorIndex,
+      candidateIndex,
+      eligibleAnchorIndexes.length
+    ))
+    .filter(Boolean)
+
+  if (!candidates.length) return null
+
+  let best = candidates[0]
+  for (const candidate of candidates.slice(1)) {
+    if (candidate.score > best.score + 2.5) {
+      best = candidate
+      continue
+    }
+    if (Math.abs(candidate.score - best.score) <= 2.5 && candidate.anchorDate < best.anchorDate) {
+      best = candidate
+    }
+  }
+
+  return best?.anchorDate || null
+}
+
+export function resolveAvwapAnchorDate(preset, bars = [], asOf = new Date()) {
+  const mode = preset?.mode === 'fixed-date'
+    ? 'fixed-date'
+    : preset?.mode === 'best-fit'
+      ? 'best-fit'
+      : 'ytd'
+  if (mode === 'fixed-date') return toDateKey(preset?.anchorDate)
+  if (mode === 'best-fit') return resolveBestFitAvwapAnchorDate(bars, preset, asOf)
 
   const asOfKey = toDateKey(asOf)
   if (!asOfKey) return null
@@ -275,7 +483,7 @@ export function buildAvwapOverlays(
     .filter(preset => preset.enabled)
     .map(preset => ({
       ...preset,
-      anchorDate: resolveAvwapPresetAnchorDate(preset, asOf),
+      anchorDate: resolveAvwapAnchorDate(preset, bars, asOf),
     }))
 
   const manualOverlays = activeManualAnchors.filter(anchor => anchor.enabled)
@@ -299,6 +507,9 @@ export function buildAvwapOverlays(
       return {
         ...overlay,
         anchorDate,
+        resolvedLabel: overlay.kind === 'preset' && overlay.mode === 'best-fit'
+          ? `${overlay.label} · ${anchorDate}`
+          : overlay.label,
         series,
       }
     })

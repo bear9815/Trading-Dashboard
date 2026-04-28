@@ -229,7 +229,9 @@ function LightweightPane({
         position: 'belowBar',
         color: overlay.color,
         shape: overlay.id === selectedAnchorId ? 'square' : 'circle',
-        text: overlay.id === selectedAnchorId ? `${overlay.label} • selected` : overlay.label,
+        text: overlay.id === selectedAnchorId
+          ? `${overlay.resolvedLabel || overlay.label} • selected`
+          : (overlay.resolvedLabel || overlay.label),
         size: overlay.id === selectedAnchorId ? 1.2 : 0.8,
       })).filter(marker => marker.time))
     }
