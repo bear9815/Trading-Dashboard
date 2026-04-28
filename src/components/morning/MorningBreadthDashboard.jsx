@@ -313,9 +313,79 @@ function pairHeatClass(value) {
   return 'bg-transparent text-gray-300'
 }
 
-function metricCellClass(value, type) {
-  if (type === 'pct') return pctHeatClass(value)
-  if (type === 'signedPct') return signedPctHeatClass(value)
+function percentile(sortedValues, rank) {
+  if (!sortedValues.length) return null
+  if (sortedValues.length === 1) return sortedValues[0]
+  const safeRank = Math.min(1, Math.max(0, rank))
+  const index = safeRank * (sortedValues.length - 1)
+  const lower = Math.floor(index)
+  const upper = Math.ceil(index)
+  if (lower === upper) return sortedValues[lower]
+  const weight = index - lower
+  return sortedValues[lower] + (sortedValues[upper] - sortedValues[lower]) * weight
+}
+
+function buildHistoricalColumnStats(rows, activeList) {
+  return HISTORICAL_METRIC_COLUMNS.reduce((next, column) => {
+    const values = rows
+      .map(row => row?.[activeList]?.[column.key])
+      .filter(value => {
+        if (column.type === 'pair') return Boolean(value)
+        return Number.isFinite(value)
+      })
+
+    if (!values.length) {
+      next[column.key] = null
+      return next
+    }
+
+    if (column.type === 'pair') {
+      next[column.key] = { type: 'pair' }
+      return next
+    }
+
+    const sorted = [...values].sort((a, b) => a - b)
+    next[column.key] = {
+      type: column.type,
+      p15: percentile(sorted, 0.15),
+      p35: percentile(sorted, 0.35),
+      p65: percentile(sorted, 0.65),
+      p85: percentile(sorted, 0.85),
+    }
+    return next
+  }, {})
+}
+
+function hybridPctHeatClass(value, stats) {
+  if (!Number.isFinite(value)) return 'bg-transparent text-gray-600'
+  if (!stats) return pctHeatClass(value)
+  if (value >= stats.p85) return 'bg-accent-green/70 text-white'
+  if (value >= stats.p65) return 'bg-accent-green/30 text-white'
+  if (value <= stats.p15) return 'bg-accent-red/70 text-white'
+  if (value <= stats.p35) return 'bg-accent-red/35 text-white'
+  return 'bg-transparent text-gray-300'
+}
+
+function hybridSignedPctHeatClass(value, stats) {
+  if (!Number.isFinite(value)) return 'bg-transparent text-gray-600'
+  if (!stats) return signedPctHeatClass(value)
+  if (value === 0) return 'bg-transparent text-gray-300'
+
+  const positiveExtreme = Number.isFinite(stats.p85) ? Math.max(stats.p85, 0) : 0
+  const negativeExtreme = Number.isFinite(stats.p15) ? Math.min(stats.p15, 0) : 0
+
+  if (value > 0) {
+    if (positiveExtreme > 0 && value >= positiveExtreme) return 'bg-accent-green/65 text-white'
+    return 'bg-accent-green/25 text-gray-100'
+  }
+
+  if (negativeExtreme < 0 && value <= negativeExtreme) return 'bg-accent-red/65 text-white'
+  return 'bg-accent-red/25 text-gray-100'
+}
+
+function metricCellClass(value, type, stats) {
+  if (type === 'pct') return hybridPctHeatClass(value, stats)
+  if (type === 'signedPct') return hybridSignedPctHeatClass(value, stats)
   if (type === 'pair') return pairHeatClass(value)
   return 'bg-transparent text-gray-300'
 }
@@ -327,10 +397,10 @@ function formatMetricValue(value, type) {
   return fmtNumber(value)
 }
 
-function HistoricalMetricCell({ entry, column }) {
+function HistoricalMetricCell({ entry, column, stats }) {
   const value = entry?.[column.key]
   return (
-    <td className={`border-b border-r border-white/[0.045] px-3 py-2 text-center font-mono text-[11px] font-semibold tabular-nums ${metricCellClass(value, column.type)}`}>
+    <td className={`border-b border-r border-white/[0.045] px-3 py-2 text-center font-mono text-[11px] font-semibold tabular-nums ${metricCellClass(value, column.type, stats)}`}>
       {formatMetricValue(value, column.type)}
     </td>
   )
@@ -350,6 +420,7 @@ function HistoricalBreadthMetricTable({ rows }) {
     : activeList === 'liquidTrend'
       ? 'from-[#4a3f13] via-[#282310] to-[#101722]'
       : 'from-[#173328] via-[#14251e] to-[#101722]'
+  const columnStats = useMemo(() => buildHistoricalColumnStats(rows, activeList), [rows, activeList])
 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#080d14] shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
@@ -408,7 +479,12 @@ function HistoricalBreadthMetricTable({ rows }) {
                   {fmtDateLabel(row.date)}
                 </td>
                 {HISTORICAL_METRIC_COLUMNS.map(column => (
-                  <HistoricalMetricCell key={`${activeList}-${row.date}-${column.key}`} entry={row[activeList]} column={column} />
+                  <HistoricalMetricCell
+                    key={`${activeList}-${row.date}-${column.key}`}
+                    entry={row[activeList]}
+                    column={column}
+                    stats={columnStats[column.key]}
+                  />
                 ))}
               </tr>
             )) : (
