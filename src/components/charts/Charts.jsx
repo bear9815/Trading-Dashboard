@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Search, Layers, BarChart3, ArrowUpDown, X, Trash2 } from 'lucide-react'
+import { Search, BarChart3, ArrowUpDown, X, Trash2 } from 'lucide-react'
 import ChartToolsSettingsModal from './ChartToolsSettingsModal.jsx'
 import ResearchMultiTimeframeChart from './ResearchMultiTimeframeChart.jsx'
 import {
@@ -784,21 +784,15 @@ export default function Charts() {
         </section>
 
         <aside className="flex min-h-0 flex-col rounded-2xl border border-white/10 bg-white/[0.02]">
-          <div className="border-b border-white/10 px-4 py-4 space-y-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-white">Watchlist</p>
-                <p className="mt-1 text-xs text-gray-500">
-                  {isEcosystemMode ? 'Select an ecosystem basket to drive both charts.' : 'Select a symbol to drive both charts.'}
-                </p>
-              </div>
-              <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] p-1">
+          <div className="border-b border-white/10 px-4 py-3 space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="min-w-0 rounded-xl border border-white/10 bg-white/[0.03] p-1">
                 {watchlists.map(list => (
                   <button
                     key={list.id}
                     type="button"
                     onClick={() => setActiveList(list.id)}
-                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                    className={`rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors ${
                       activeListId === list.id
                         ? 'bg-accent-blue/15 text-accent-blue'
                         : 'text-gray-500 hover:text-gray-300'
@@ -808,16 +802,13 @@ export default function Charts() {
                   </button>
                 ))}
               </div>
-            </div>
-
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] p-1">
+              <div className="min-w-0 rounded-xl border border-white/10 bg-white/[0.03] p-1">
                 {SIDEBAR_VIEW_OPTIONS.map(([value, label]) => (
                   <button
                     key={value}
                     type="button"
                     onClick={() => setSidebarMode(value)}
-                    className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                    className={`rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors ${
                       sidebarMode === value ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
                     }`}
                   >
@@ -825,14 +816,17 @@ export default function Charts() {
                   </button>
                 ))}
               </div>
-              {sidebarMode === 'ecosystems' ? (
-                <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] p-1">
+            </div>
+
+            {sidebarMode === 'ecosystems' ? (
+              <div className="rounded-xl border border-white/10 bg-white/[0.03] p-1">
+                <div className="grid grid-cols-3 gap-1">
                   {ECOSYSTEM_GROUPING_OPTIONS.map(([value, label]) => (
                     <button
                       key={value}
                       type="button"
                       onClick={() => setEcosystemGroupingMode(value)}
-                      className={`rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${
+                      className={`rounded-lg px-2 py-2 text-[11px] font-semibold transition-colors ${
                         ecosystemGroupingMode === value ? 'bg-violet-500/15 text-violet-200' : 'text-gray-500 hover:text-gray-300'
                       }`}
                     >
@@ -840,8 +834,8 @@ export default function Charts() {
                     </button>
                   ))}
                 </div>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
 
             <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
               <Search size={14} className="text-gray-500" />
@@ -882,10 +876,9 @@ export default function Charts() {
                 </button>
               ) : null}
             </div>
-            <p className="text-[11px] text-gray-500">You can start typing anywhere on the Charts tab, then press Enter to load that ticker.</p>
 
             {historyError && (
-              <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
                 {historyError}
               </div>
             )}
@@ -1014,11 +1007,12 @@ export default function Charts() {
             )}
           </div>
 
-          <div className="border-t border-white/10 px-4 py-3">
-            <div className="flex items-start gap-2 text-xs text-gray-500">
-              <Layers size={13} className="mt-0.5 text-gray-600" />
-              <p>Charts now reuses both the symbol watchlist and the ecosystem groupings from Growth Research for the active list.</p>
-            </div>
+          <div className="border-t border-white/10 px-4 py-2.5 text-[11px] text-gray-600">
+            {customSymbol
+              ? `Custom symbol: ${customSymbol}`
+              : isEcosystemMode
+                ? `${activeList?.name || 'Watchlist'} ecosystem view`
+                : `${activeList?.name || 'Watchlist'} symbol view`}
           </div>
         </aside>
       </div>
