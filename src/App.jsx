@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect, lazy, Suspense, useCallback, useRef } from 'react'
 import Sidebar from './components/layout/Sidebar.jsx'
 import TopBar from './components/layout/TopBar.jsx'
 import ImportModal from './components/import/ImportModal.jsx'
@@ -17,6 +17,7 @@ import { useHabitsStore } from './store/useHabitsStore.js'
 import { useAuthStore } from './store/useAuthStore.js'
 import { supabase } from './lib/supabase.js'
 import { Loader } from 'lucide-react'
+import { buildPageHash, getPageFromLocationLike, isAppPage } from './utils/appNavigation.js'
 
 // ── Lazy-loaded pages (each splits into its own chunk) ────────────────────────
 // Only the page you're on gets downloaded — everything else costs nothing until navigated to.
@@ -50,10 +51,14 @@ function PageLoader() {
 }
 
 export default function App() {
-  const [page, setPage] = useState('dashboard')
+  const [page, setPageState] = useState(() => (
+    typeof window === 'undefined' ? 'dashboard' : getPageFromLocationLike(window.location)
+  ))
   const [showImport, setShowImport] = useState(false)
   const [reminderOpenSignal, setReminderOpenSignal] = useState(0)
   const [selectedAccount, setSelectedAccount] = useState('All')
+  const didInitHistoryRef = useRef(false)
+  const lastPageRef = useRef(page)
   const { theme, anthropicApiKey, sidebarCollapsed, setSidebarCollapsed } = useSettingsStore()
   const { loadTokens: loadSchwabTokens, _accessToken: schwabAccessToken } = useSchwabStore()
   const { loadFromLocal } = useTradeStore()
@@ -63,10 +68,53 @@ export default function App() {
   // Note: migrateDeprecatedModels runs inside useAgentsStore's onRehydrateStorage —
   // calling it here raced with IDB hydration and silently wiped custom agents.
 
+  const setPage = useCallback((nextPage) => {
+    setPageState(prev => (isAppPage(nextPage) ? nextPage : prev))
+  }, [])
+
   // Apply theme
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme || 'dark')
   }, [theme])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const syncFromLocation = (state) => {
+      const nextPage = getPageFromLocationLike({ hash: window.location.hash, state })
+      lastPageRef.current = nextPage
+      setPageState(nextPage)
+    }
+
+    const handlePopState = (event) => syncFromLocation(event.state || window.history.state)
+    const handleHashChange = () => syncFromLocation(window.history.state)
+
+    window.addEventListener('popstate', handlePopState)
+    window.addEventListener('hashchange', handleHashChange)
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState)
+      window.removeEventListener('hashchange', handleHashChange)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const url = `${window.location.pathname}${window.location.search}${buildPageHash(page)}`
+
+    if (!didInitHistoryRef.current) {
+      window.history.replaceState({ ...(window.history.state || {}), page }, '', url)
+      didInitHistoryRef.current = true
+      lastPageRef.current = page
+      return
+    }
+
+    if (lastPageRef.current === page) return
+
+    window.history.pushState({ ...(window.history.state || {}), page }, '', url)
+    lastPageRef.current = page
+  }, [page])
 
   // Handle OAuth callback redirect from Schwab (?schwab=connected)
   useEffect(() => {

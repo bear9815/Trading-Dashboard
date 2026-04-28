@@ -14,6 +14,7 @@ import { extractWithOllama, autoAnalyzeWithOllama } from '../../utils/localResea
 import { extractWithOpenRouter, processWithOpenRouterCombined, autoAnalyzeWithOpenRouter } from '../../utils/researchAi.js'
 import { runAgent } from '../../utils/agentRunner.js'
 import { useAgentsStore } from '../../store/useAgentsStore.js'
+import { filterResearchSources } from '../../utils/researchLibraryFilters.js'
 import { jsPDF } from 'jspdf'
 import EarningsReport from './EarningsReport.jsx'
 import CompaniesView  from './CompaniesView.jsx'
@@ -788,6 +789,7 @@ export default function ResearchLibrary({ earningsMode = false }) {
   const [viewMode,     setViewMode]     = useState(earningsMode ? 'companies' : 'library')  // 'library' | 'companies' | 'upload'
   const [openReport,   setOpenReport]   = useState(null)       // source object or null
   const [selectedAgentId, setSelectedAgentId] = useState(null) // explicit agent override
+  const [searchQuery,  setSearchQuery]  = useState('')
   const inputRef = useRef()
 
   useEffect(() => { setCreateDossier(sourceType === 'deep_dive') }, [sourceType])
@@ -1122,7 +1124,12 @@ export default function ResearchLibrary({ earningsMode = false }) {
   const deepDiveCount = allSources.filter(s => s.source_type === 'deep_dive').length
   const earningsCount = allSources.filter(s => s.source_type === 'earnings_call').length
 
-  const companyCount  = [...new Set(sources.map(s => s.primary_ticker || s.tickers?.[0]).filter(Boolean))].length
+  const filteredSources = useMemo(
+    () => filterResearchSources(sources, searchQuery),
+    [sources, searchQuery]
+  )
+
+  const companyCount  = [...new Set(filteredSources.map(s => s.primary_ticker || s.tickers?.[0]).filter(Boolean))].length
 
   // ── Earnings mode: flat layout, no accordion ──
   if (earningsMode) {
@@ -1169,29 +1176,45 @@ export default function ResearchLibrary({ earningsMode = false }) {
 
         {/* Companies sub-tab */}
         {viewMode === 'companies' && (
-          <CompaniesView sources={sources} onViewReport={setOpenReport} onUpdateSource={updateSource} />
+          <CompaniesView sources={filteredSources} onViewReport={setOpenReport} onUpdateSource={updateSource} />
         )}
 
         {/* All Reports sub-tab */}
         {viewMode === 'library' && (
           <>
+            <div className="relative">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search keyword, symbol, company, or theme"
+                className="w-full bg-white/[0.04] border border-white/10 rounded-xl pl-9 pr-3 py-2.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors"
+              />
+            </div>
             {storeLoading && (
               <div className="text-center py-4">
                 <Loader size={16} className="text-gray-600 animate-spin mx-auto"/>
               </div>
             )}
-            {!storeLoading && sources.length > 0 && (
+            {!storeLoading && filteredSources.length > 0 && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {sources.map(source => (
+                {filteredSources.map(source => (
                   <SourceCard key={source.id} source={source} onRemove={removeSource} onView={setOpenReport}/>
                 ))}
               </div>
             )}
-            {!storeLoading && sources.length === 0 && (
+            {!storeLoading && filteredSources.length === 0 && (
               <div className="text-center py-10 text-gray-600">
                 <FileText size={24} className="mx-auto mb-2 opacity-40"/>
-                <p className="text-sm font-medium text-gray-500 mb-1">No earnings reports yet</p>
-                <p className="text-xs">Upload a transcript using the <strong className="text-gray-400">Upload Transcript</strong> tab above</p>
+                <p className="text-sm font-medium text-gray-500 mb-1">
+                  {sources.length === 0 ? 'No earnings reports yet' : 'No matching earnings reports'}
+                </p>
+                <p className="text-xs">
+                  {sources.length === 0
+                    ? <>Upload a transcript using the <strong className="text-gray-400">Upload Transcript</strong> tab above</>
+                    : 'Try a different keyword, symbol, or company name.'}
+                </p>
               </div>
             )}
           </>
@@ -1387,10 +1410,20 @@ export default function ResearchLibrary({ earningsMode = false }) {
           </div>
 
           <div className="p-4 space-y-4">
+          <div className="relative">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search keyword, symbol, company, or theme"
+              className="w-full bg-white/[0.04] border border-white/10 rounded-xl pl-9 pr-3 py-2.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors"
+            />
+          </div>
 
           {/* ── Companies tab ── */}
           {viewMode === 'companies' && (
-            <CompaniesView sources={sources} onViewReport={setOpenReport} onUpdateSource={updateSource} />
+            <CompaniesView sources={filteredSources} onViewReport={setOpenReport} onUpdateSource={updateSource} />
           )}
 
           {/* ── Library tab ── */}
@@ -1525,18 +1558,22 @@ export default function ResearchLibrary({ earningsMode = false }) {
             </div>
           )}
 
-          {!storeLoading && sources.length > 0 && (
+          {!storeLoading && filteredSources.length > 0 && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-              {sources.map(source => (
+              {filteredSources.map(source => (
                 <SourceCard key={source.id} source={source} onRemove={removeSource} onView={setOpenReport}/>
               ))}
             </div>
           )}
 
-          {!storeLoading && sources.length === 0 && !uploading && (
+          {!storeLoading && filteredSources.length === 0 && !uploading && (
             <div className="text-center py-6 text-gray-600">
               <BookOpen size={20} className="mx-auto mb-2 opacity-40"/>
-              <p className="text-xs">No sources yet — upload your first deep dive or earnings call above</p>
+              <p className="text-xs">
+                {sources.length === 0
+                  ? 'No sources yet — upload your first deep dive or earnings call above'
+                  : 'No sources matched your search'}
+              </p>
             </div>
           )}
 

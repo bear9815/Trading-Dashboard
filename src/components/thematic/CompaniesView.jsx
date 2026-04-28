@@ -6,8 +6,9 @@
 import { useState, useMemo } from 'react'
 import {
   TrendingUp, TrendingDown, Minus, BarChart2,
-  FileText, ChevronRight, Zap, Tag,
+  FileText, ChevronRight, Zap, Tag, Search, Pencil,
 } from 'lucide-react'
+import { filterResearchSources, getPrimaryTicker, groupSourcesByTicker } from '../../utils/researchLibraryFilters.js'
 
 const SENTIMENT_CONFIG = {
   bullish: { text: 'text-accent-green',  bg: 'bg-accent-green/10',  border: 'border-accent-green/20',  dot: 'bg-accent-green',  Icon: TrendingUp   },
@@ -23,21 +24,48 @@ function extractConfidenceScore(metrics = []) {
   return m ? m.value : null
 }
 
-// Sort periods: Q4 2026, Q3 2026, Q2 2026... descending
-function sortByPeriod(a, b) {
-  const parse = p => {
-    if (!p) return 0
-    const m = p.match(/Q(\d)\s*(\d{4})/)
-    if (!m) return 0
-    return parseInt(m[2]) * 10 + parseInt(m[1])
-  }
-  return parse(b.period) - parse(a.period)
-}
-
 // Given a list of reports (sorted newest first), return a compact sentiment trend string
 function sentimentTrend(reports) {
   const map = { bullish: '▲', bearish: '▼', neutral: '—', mixed: '~' }
   return reports.slice(0, 4).map(r => map[r.sentiment] || '—').join(' ')
+}
+
+function TickerEditor({ initialTicker = '', actionLabel = 'Save', onSave }) {
+  const [tickerInput, setTickerInput] = useState(initialTicker)
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    const nextTicker = tickerInput.trim().toUpperCase()
+    if (!nextTicker) return
+    setSaving(true)
+    try {
+      await onSave(nextTicker)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <Tag size={12} className="text-gray-600 shrink-0" />
+      <input
+        type="text"
+        value={tickerInput}
+        onChange={e => setTickerInput(e.target.value.toUpperCase())}
+        onKeyDown={e => { if (e.key === 'Enter') handleSave() }}
+        placeholder="Ticker"
+        maxLength={10}
+        className="flex-1 bg-white/[0.04] border border-white/[0.10] rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-gray-700 focus:outline-none focus:border-white/25 transition-colors"
+      />
+      <button
+        onClick={handleSave}
+        disabled={!tickerInput.trim() || saving}
+        className="px-3 py-1.5 rounded-lg bg-accent-green/10 border border-accent-green/20 text-xs font-semibold text-accent-green hover:bg-accent-green/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {saving ? '…' : actionLabel}
+      </button>
+    </div>
+  )
 }
 
 // ── Ticker entry in the left panel ───────────────────────────────────────────
@@ -81,7 +109,7 @@ function TickerRow({ ticker, reports, isSelected, onClick }) {
 }
 
 // ── Single report entry in the timeline ──────────────────────────────────────
-function TimelineEntry({ source, onView }) {
+function TimelineEntry({ source, onView, onUpdateTicker }) {
   const cfg   = SENTIMENT_CONFIG[source.sentiment] || SENTIMENT_CONFIG.neutral
   const score = extractConfidenceScore(source.key_metrics)
   const date  = source.created_at
@@ -129,6 +157,15 @@ function TimelineEntry({ source, onView }) {
           <p className="text-xs text-gray-500 leading-relaxed line-clamp-2 mb-3">{source.summary}</p>
         )}
 
+        <div className="mb-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-2">Edit Symbol</p>
+          <TickerEditor
+            initialTicker={getPrimaryTicker(source) || ''}
+            actionLabel="Update"
+            onSave={(ticker) => onUpdateTicker(source.id, ticker)}
+          />
+        </div>
+
         {/* Key metric chips */}
         {(source.key_metrics || []).filter(m => !m.label?.toLowerCase().includes('confidence')).slice(0, 3).length > 0 && (
           <div className="flex flex-wrap gap-2">
@@ -153,21 +190,6 @@ function TimelineEntry({ source, onView }) {
 
 // ── Unassigned source row — shows title + inline ticker assignment ─────────────
 function UnassignedRow({ source, onAssign, onView }) {
-  const [tickerInput, setTickerInput] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  async function handleAssign() {
-    const val = tickerInput.trim().toUpperCase()
-    if (!val) return
-    setSaving(true)
-    await onAssign(source.id, val)
-    setSaving(false)
-  }
-
-  function handleKey(e) {
-    if (e.key === 'Enter') handleAssign()
-  }
-
   const cfg = SENTIMENT_CONFIG[source.sentiment] || SENTIMENT_CONFIG.neutral
   const date = source.created_at
     ? new Date(source.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -196,24 +218,8 @@ function UnassignedRow({ source, onAssign, onView }) {
       </div>
 
       {/* Inline ticker assignment */}
-      <div className="flex items-center gap-2 mt-2">
-        <Tag size={12} className="text-gray-600 shrink-0" />
-        <input
-          type="text"
-          value={tickerInput}
-          onChange={e => setTickerInput(e.target.value.toUpperCase())}
-          onKeyDown={handleKey}
-          placeholder="Assign ticker (e.g. YSS)"
-          maxLength={10}
-          className="flex-1 bg-white/[0.04] border border-white/[0.10] rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-gray-700 focus:outline-none focus:border-white/25 transition-colors"
-        />
-        <button
-          onClick={handleAssign}
-          disabled={!tickerInput.trim() || saving}
-          className="px-3 py-1.5 rounded-lg bg-accent-green/10 border border-accent-green/20 text-xs font-semibold text-accent-green hover:bg-accent-green/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {saving ? '…' : 'Assign'}
-        </button>
+      <div className="mt-2">
+        <TickerEditor initialTicker="" actionLabel="Assign" onSave={(ticker) => onAssign(source.id, ticker)} />
       </div>
     </div>
   )
@@ -222,24 +228,14 @@ function UnassignedRow({ source, onAssign, onView }) {
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function CompaniesView({ sources, onViewReport, onUpdateSource }) {
   const [selectedTicker, setSelectedTicker] = useState(null)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filteredSources = useMemo(() => filterResearchSources(sources, searchQuery), [sources, searchQuery])
 
   // Group all sources by primary_ticker (fall back to first ticker in array)
   const { grouped, unassigned } = useMemo(() => {
-    const map = {}
-    const noTicker = []
-    for (const s of sources) {
-      const ticker = s.primary_ticker || s.tickers?.[0] || null
-      if (!ticker) {
-        noTicker.push(s)
-        continue
-      }
-      if (!map[ticker]) map[ticker] = []
-      map[ticker].push(s)
-    }
-    // Sort each company's reports newest first
-    for (const t in map) map[t].sort(sortByPeriod)
-    return { grouped: map, unassigned: noTicker }
-  }, [sources])
+    return groupSourcesByTicker(filteredSources)
+  }, [filteredSources])
 
   const tickers = Object.keys(grouped).sort((a, b) => {
     // Sort by most recently updated
@@ -247,15 +243,21 @@ export default function CompaniesView({ sources, onViewReport, onUpdateSource })
   })
 
   // Auto-select first ticker if nothing selected
-  const active = selectedTicker || tickers[0] || null
+  const active = selectedTicker === '__unassigned__'
+    ? '__unassigned__'
+    : (selectedTicker && grouped[selectedTicker] ? selectedTicker : (tickers[0] || (unassigned.length ? '__unassigned__' : null)))
 
   if (tickers.length === 0 && unassigned.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
         <FileText size={32} className="text-gray-700 mb-3" />
-        <p className="text-sm font-semibold text-gray-500 mb-1">No company reports yet</p>
+        <p className="text-sm font-semibold text-gray-500 mb-1">
+          {sources.length === 0 ? 'No company reports yet' : 'No matching company reports'}
+        </p>
         <p className="text-xs text-gray-700 max-w-xs">
-          Upload earnings call transcripts in the Library tab. Reports will appear here organized by ticker.
+          {sources.length === 0
+            ? 'Upload earnings call transcripts in the Library tab. Reports will appear here organized by ticker.'
+            : 'Try a different keyword, ticker, or company name.'}
         </p>
       </div>
     )
@@ -271,11 +273,30 @@ export default function CompaniesView({ sources, onViewReport, onUpdateSource })
     }
   }
 
+  function handleRenameActiveTicker(nextTicker) {
+    if (!onUpdateSource || !activeReports.length) return
+    activeReports.forEach(source => {
+      onUpdateSource(source.id, { primary_ticker: nextTicker, tickers: [nextTicker] })
+    })
+    setSelectedTicker(nextTicker)
+  }
+
   return (
     <div className="research-elevated flex gap-5">
 
       {/* ── Left: Ticker index ── */}
       <div className="w-52 shrink-0 space-y-1.5">
+        <div className="relative mb-3">
+          <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search ticker, company, keyword"
+            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-xl pl-8 pr-3 py-2 text-xs text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-accent-blue/40 transition-colors"
+          />
+        </div>
+
         {tickers.length > 0 && (
           <>
             <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-3 px-1">
@@ -351,6 +372,13 @@ export default function CompaniesView({ sources, onViewReport, onUpdateSource })
                   {activeReports[0]?.period ? ` · latest: ${activeReports[0].period}` : ''}
                 </p>
               </div>
+              <div className="w-full max-w-xs">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-2 flex items-center gap-1">
+                  <Pencil size={10} />
+                  Rename Symbol For This Company
+                </p>
+                <TickerEditor initialTicker={active} actionLabel="Rename All" onSave={handleRenameActiveTicker} />
+              </div>
             </div>
 
             <div>
@@ -359,6 +387,7 @@ export default function CompaniesView({ sources, onViewReport, onUpdateSource })
                   key={source.id}
                   source={source}
                   onView={onViewReport}
+                  onUpdateTicker={handleAssignTicker}
                 />
               ))}
             </div>
