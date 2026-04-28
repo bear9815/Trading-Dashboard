@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict'
-import { buildSmaBreadthHistory, classifyBreadthHeat } from './listBreadth.js'
+import {
+  buildListBreadthHistory,
+  buildListBreadthSymbolSnapshots,
+  buildSmaBreadthHistory,
+  classifyBreadthHeat,
+} from './listBreadth.js'
 
 const historyBarsBySymbol = {
   AAA: [
@@ -51,3 +56,60 @@ assert.equal(classifyBreadthHeat(78), 'Hot')
 assert.equal(classifyBreadthHeat(55), 'Healthy')
 assert.equal(classifyBreadthHeat(34), 'Mixed')
 assert.equal(classifyBreadthHeat(12), 'Washed out')
+
+function makeBars(closes, start = '2026-01-02') {
+  const startDate = new Date(`${start}T00:00:00Z`)
+  return closes.map((close, index) => {
+    const date = new Date(startDate)
+    date.setUTCDate(date.getUTCDate() + index)
+    return {
+      time: date.toISOString().slice(0, 10),
+      open: close,
+      high: close,
+      low: close,
+      close,
+      volume: 1000,
+    }
+  })
+}
+
+const longHistory = {
+  AAA: makeBars([...Array(63).fill(100), 130]),
+  BBB: makeBars([...Array(63).fill(100), 95]),
+  CCC: makeBars([...Array(43).fill(100), ...Array(20).fill(100), 160]),
+  DDD: makeBars([100, 101, 102], '2026-03-04'),
+  EEE: [],
+}
+
+const breadthHistory = buildListBreadthHistory({
+  symbols: ['AAA', 'BBB', 'CCC', 'DDD', 'EEE'],
+  historyBarsBySymbol: longHistory,
+})
+const latest = breadthHistory.at(-1)
+
+assert.equal(latest.sma5.totalCount, 3)
+assert.equal(latest.sma5.aboveCount, 2)
+assert.equal(latest.sma5.belowCount, 1)
+assert.equal(latest.avwap.w1.totalCount, 4)
+assert.equal(latest.avwap.w1.aboveCount, 3)
+assert.equal(latest.avwap.w1.belowCount, 1)
+assert.ok(latest.avwap.w1.avgDistancePct > 10)
+assert.equal(latest.moves.day4.upCount, 2)
+assert.equal(latest.moves.day4.downCount, 1)
+assert.equal(latest.moves.month25.upCount, 2)
+assert.equal(latest.moves.month50.upCount, 1)
+assert.equal(latest.moves.quarter25.upCount, 2)
+assert.equal(latest.moves.quarter25.totalCount, 3)
+assert.ok(latest.regimeScore > 60)
+assert.match(latest.regimeLabel, /Healthy|Hot|FOMO/)
+
+const snapshots = buildListBreadthSymbolSnapshots({
+  symbols: ['AAA', 'BBB', 'CCC', 'DDD', 'EEE'],
+  historyBarsBySymbol: longHistory,
+})
+
+assert.equal(snapshots.strongestAboveAvwap[0].symbol, 'CCC')
+assert.equal(snapshots.deepestBelowAvwap[0].symbol, 'BBB')
+assert.deepEqual(snapshots.upDay4.map(row => row.symbol), ['CCC', 'AAA'])
+assert.deepEqual(snapshots.downDay4.map(row => row.symbol), ['BBB'])
+assert.deepEqual(snapshots.upMonth50.map(row => row.symbol), ['CCC'])

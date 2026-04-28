@@ -2,10 +2,11 @@ import { useMemo, useState, useCallback, useEffect } from 'react'
 import {
   Sun, Plus, Edit2, Trash2, ChevronDown, ChevronUp,
   RefreshCw, Brain, Target, BarChart2, Zap, AlertTriangle,
-  TrendingUp, TrendingDown, Newspaper, Image,
+  TrendingUp, TrendingDown, Newspaper, Image, Activity,
 } from 'lucide-react'
 import MorningBriefing from './MorningBriefing.jsx'
 import MarketBiasTab from './MarketBiasTab.jsx'
+import MorningBreadthDashboard from './MorningBreadthDashboard.jsx'
 import VoiceRecorder from './VoiceRecorder.jsx'
 import ChartGallery from '../shared/ChartGallery.jsx'
 import {
@@ -1422,6 +1423,7 @@ export default function Morning() {
           {[
             { id: 'log',      label: 'Journal',        icon: Sun       },
             { id: 'analysis', label: 'Analysis',       icon: BarChart2 },
+            { id: 'breadth',  label: 'Breadth',        icon: Activity  },
             { id: 'charts',   label: 'Morning Charts', icon: Image     },
             { id: 'brief',    label: 'Market Brief',   icon: Newspaper },
           ].map(({ id, label, icon: Icon }) => (
@@ -1444,6 +1446,7 @@ export default function Morning() {
       {/* Content */}
       {tab === 'log'      && <LogTab />}
       {tab === 'analysis' && <AnalysisTab entries={entries} />}
+      {tab === 'breadth'  && <MorningBreadthDashboard />}
       {tab === 'charts'   && <MarketBiasTab />}
       {tab === 'brief'    && <MorningBriefing />}
     </div>
