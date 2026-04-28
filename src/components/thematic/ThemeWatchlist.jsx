@@ -27,6 +27,7 @@ import { buildWatchlistFitMap, filterAndSortWatchlistRows } from '../../utils/wa
 import {
   buildCondensedEcosystemRows,
   buildCondensedEcosystemSourceMap,
+  normalizeEcosystemGroupingMode,
   normalizeEcosystemKey,
 } from '../../utils/condensedEcosystems.js'
 import {
@@ -69,6 +70,12 @@ const THEME_SORT_OPTIONS = [
   ['strength', 'Strength'],
   ['breadth', 'Breadth'],
   ['narrow', 'Narrow Leadership'],
+]
+
+const ECOSYSTEM_GROUPING_OPTIONS = [
+  ['normal', 'Normal'],
+  ['condensed', 'Condensed'],
+  ['ultra', 'Ultra'],
 ]
 
 const CSV_COLUMNS = [
@@ -840,7 +847,7 @@ export default function ThemeWatchlist({
     updateColumnLayout,
     setControlsCollapsed,
     setPanelCollapsed,
-    setCondensedEcosystemsEnabled,
+    setEcosystemGroupingMode,
     setCondensedEcosystemOverride,
     saveThemeAnalyticsSnapshot,
     clear,
@@ -856,7 +863,8 @@ export default function ThemeWatchlist({
   const activeColumnPreset = activeList?.activeColumnPreset || 'compact'
   const controlsCollapsed = activeList?.controlsCollapsed ?? true
   const collapsedPanels = activeList?.collapsedPanels || {}
-  const condensedEcosystemsEnabled = !!activeList?.condensedEcosystemsEnabled
+  const ecosystemGroupingMode = normalizeEcosystemGroupingMode(activeList?.ecosystemGroupingMode ?? activeList?.condensedEcosystemsEnabled)
+  const groupedEcosystemsEnabled = ecosystemGroupingMode !== 'normal'
   const condensedEcosystemOverrides = activeList?.condensedEcosystemOverrides || {}
   const themeAnalyticsHistory = activeList?.themeAnalyticsHistory || { theme: [], ecosystem: [] }
   const watchlists = useMemo(
@@ -986,15 +994,16 @@ export default function ThemeWatchlist({
   )
 
   const ecosystemAnalyticsRows = useMemo(
-    () => condensedEcosystemsEnabled
-      ? buildCondensedEcosystemRows(rows, condensedEcosystemOverrides)
-      : rows,
-    [condensedEcosystemOverrides, condensedEcosystemsEnabled, rows]
+    () => buildCondensedEcosystemRows(rows, {
+      mode: ecosystemGroupingMode,
+      overrides: condensedEcosystemOverrides,
+    }),
+    [condensedEcosystemOverrides, ecosystemGroupingMode, rows]
   )
 
   const condensedSourceMap = useMemo(
-    () => condensedEcosystemsEnabled ? buildCondensedEcosystemSourceMap(ecosystemAnalyticsRows) : {},
-    [condensedEcosystemsEnabled, ecosystemAnalyticsRows]
+    () => groupedEcosystemsEnabled ? buildCondensedEcosystemSourceMap(ecosystemAnalyticsRows) : {},
+    [ecosystemAnalyticsRows, groupedEcosystemsEnabled]
   )
 
   const ecosystemGroupsBaseAnalytics = useMemo(
@@ -1007,9 +1016,10 @@ export default function ThemeWatchlist({
     }).map(group => ({
       ...group,
       sourceEcosystems: condensedSourceMap[group.key] || [],
-      isCondensed: condensedEcosystemsEnabled,
+      ecosystemGroupingMode,
+      isCondensed: groupedEcosystemsEnabled,
     })),
-    [anchoredRsBySymbol, condensedEcosystemsEnabled, condensedSourceMap, ecosystemAnalyticsRows, fitBySymbol, rollingRsBySymbol]
+    [anchoredRsBySymbol, condensedSourceMap, ecosystemAnalyticsRows, ecosystemGroupingMode, fitBySymbol, groupedEcosystemsEnabled, rollingRsBySymbol]
   )
 
   const marketLeadersEcosystemGroup = useMemo(
@@ -1113,9 +1123,9 @@ export default function ThemeWatchlist({
   )
 
   const uniqueSourceEcosystemCount = useMemo(() => {
-    if (!condensedEcosystemsEnabled) return activeThemeGroups.filter(group => !group.isMarketLeaders).length
+    if (!groupedEcosystemsEnabled) return activeThemeGroups.filter(group => !group.isMarketLeaders).length
     return new Set(ecosystemAnalyticsRows.map(row => row.sourceEcosystemKey).filter(Boolean)).size
-  }, [activeThemeGroups, condensedEcosystemsEnabled, ecosystemAnalyticsRows])
+  }, [activeThemeGroups, ecosystemAnalyticsRows, groupedEcosystemsEnabled])
 
   const selectedThemeMembers = useMemo(() => {
     if (!selectedThemeGroup) return []
@@ -2007,18 +2017,29 @@ export default function ThemeWatchlist({
                   <p className="text-xs text-gray-500 mt-1">Track what is working inside the active {activeList?.name || 'watchlist'} by ecosystem so you can see which spaces are moving together, broadening, or diverging.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCondensedEcosystemsEnabled(!condensedEcosystemsEnabled)}
-                    className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
-                      condensedEcosystemsEnabled
-                        ? 'bg-accent-blue/15 border-accent-blue/25 text-accent-blue'
-                        : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
-                    }`}
-                    title="Combine similar ecosystems into broader groups"
-                  >
-                    Condensed {condensedEcosystemsEnabled ? 'On' : 'Off'}
-                  </button>
+                  <div className="inline-flex rounded-lg border border-white/10 bg-white/[0.02] p-1">
+                    {ECOSYSTEM_GROUPING_OPTIONS.map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setEcosystemGroupingMode(value)}
+                        className={`rounded-md px-2.5 py-1 text-xs transition-all ${
+                          ecosystemGroupingMode === value
+                            ? 'bg-accent-blue/15 text-accent-blue'
+                            : 'text-gray-500 hover:text-gray-300'
+                        }`}
+                        title={
+                          value === 'normal'
+                            ? 'Show each mapped ecosystem as-is'
+                            : value === 'condensed'
+                              ? 'Combine similar ecosystems into broader groups'
+                              : 'Use broader industry-style ecosystem groupings'
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                   {THEME_SORT_OPTIONS.map(([value, label]) => (
                     <button
                       key={value}
@@ -2039,9 +2060,10 @@ export default function ThemeWatchlist({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
                 <StatPill label="Tracked Ecosystems" value={activeThemeGroups.length} />
-                <StatPill label={condensedEcosystemsEnabled ? 'Source Ecosystems' : 'Condensed Mode'} value={condensedEcosystemsEnabled ? uniqueSourceEcosystemCount : 'Off'} />
+                <StatPill label="Source Ecosystems" value={uniqueSourceEcosystemCount} />
+                <StatPill label="Grouping" value={ECOSYSTEM_GROUPING_OPTIONS.find(([value]) => value === ecosystemGroupingMode)?.[1] || 'Normal'} />
                 <StatPill label="Best Breadth" value={sortedThemeGroups[0]?.label || '—'} />
                 <StatPill label="Top Strength" value={sortedThemeGroups[0]?.currentStrengthScore != null ? formatMetric(sortedThemeGroups[0].currentStrengthScore, '', 0) : '—'} />
                 <StatPill label="Rotation History" value={`${themeAnalyticsHistory[activeGrouping]?.length || 0} pts`} />
@@ -2082,7 +2104,7 @@ export default function ThemeWatchlist({
                           {[
                             ['ecosystem', 'Ecosystem'],
                             ['members', 'Members'],
-                            ...(condensedEcosystemsEnabled ? [['sources', 'Sources']] : []),
+                            ...(groupedEcosystemsEnabled ? [['sources', 'Sources']] : []),
                             ['strength', 'Strength'],
                             ['rolling', 'Rolling'],
                             ['anchored', 'Anchored'],
@@ -2140,7 +2162,7 @@ export default function ThemeWatchlist({
                                 {group.count} view
                               </button>
                             </td>
-                            {condensedEcosystemsEnabled && (
+                            {groupedEcosystemsEnabled && (
                               <td className="px-3 py-2.5 text-gray-400">
                                 <button
                                   type="button"
@@ -2699,7 +2721,7 @@ export default function ThemeWatchlist({
         rowsBySymbol={rowsBySymbol}
         fitBySymbol={fitBySymbol}
         condensedLabels={condensedLabels}
-        condensedEnabled={condensedEcosystemsEnabled}
+        condensedEnabled={groupedEcosystemsEnabled}
         onClose={() => setMembersModalGroupKey('')}
         onSelectSymbol={(symbol) => {
           setSelectedSymbol(symbol)

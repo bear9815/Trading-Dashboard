@@ -5,6 +5,7 @@ import {
   DEFAULT_WATCHLIST_COLUMN_ORDER,
   normalizeColumnOrder,
 } from '../utils/watchlistTableConfig.js'
+import { normalizeEcosystemGroupingMode } from '../utils/condensedEcosystems.js'
 import { normalizeThemeAnalyticsHistory, upsertThemeAnalyticsSnapshot } from '../utils/themeAnalytics.js'
 
 export const MARKET_LEADERS_LIST_ID = 'market-leaders'
@@ -24,7 +25,7 @@ const DEFAULT_LISTS = {
     activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
     controlsCollapsed: true,
     collapsedPanels: {},
-    condensedEcosystemsEnabled: false,
+    ecosystemGroupingMode: 'normal',
     condensedEcosystemOverrides: {},
     themeAnalyticsHistory: { theme: [], ecosystem: [] },
     lastUpdated: null,
@@ -40,7 +41,7 @@ const DEFAULT_LISTS = {
     activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
     controlsCollapsed: true,
     collapsedPanels: {},
-    condensedEcosystemsEnabled: false,
+    ecosystemGroupingMode: 'normal',
     condensedEcosystemOverrides: {},
     themeAnalyticsHistory: { theme: [], ecosystem: [] },
     lastUpdated: null,
@@ -53,6 +54,11 @@ function normalizeSymbols(symbols) {
 
 function makeListPatch(list, patch = {}) {
   const hasPatch = key => Object.prototype.hasOwnProperty.call(patch, key)
+  const ecosystemGroupingMode = hasPatch('ecosystemGroupingMode')
+    ? normalizeEcosystemGroupingMode(patch.ecosystemGroupingMode)
+    : hasPatch('condensedEcosystemsEnabled')
+      ? normalizeEcosystemGroupingMode(patch.condensedEcosystemsEnabled)
+      : normalizeEcosystemGroupingMode(list.ecosystemGroupingMode ?? list.condensedEcosystemsEnabled)
 
   return {
     ...list,
@@ -67,7 +73,7 @@ function makeListPatch(list, patch = {}) {
     activeColumnPreset: hasPatch('activeColumnPreset') ? patch.activeColumnPreset : (list.activeColumnPreset ?? DEFAULT_COLUMN_PRESET.presetKey),
     controlsCollapsed: hasPatch('controlsCollapsed') ? patch.controlsCollapsed : (list.controlsCollapsed ?? true),
     collapsedPanels: hasPatch('collapsedPanels') ? (patch.collapsedPanels || {}) : (list.collapsedPanels ?? {}),
-    condensedEcosystemsEnabled: hasPatch('condensedEcosystemsEnabled') ? !!patch.condensedEcosystemsEnabled : !!list.condensedEcosystemsEnabled,
+    ecosystemGroupingMode,
     condensedEcosystemOverrides: hasPatch('condensedEcosystemOverrides') ? (patch.condensedEcosystemOverrides || {}) : (list.condensedEcosystemOverrides ?? {}),
     themeAnalyticsHistory: hasPatch('themeAnalyticsHistory')
       ? normalizeThemeAnalyticsHistory(patch.themeAnalyticsHistory)
@@ -225,8 +231,12 @@ export const useResearchWatchlistStore = create(
         },
       }))),
 
+      setEcosystemGroupingMode: (mode) => set(state => updateActiveList(state, () => ({
+        ecosystemGroupingMode: normalizeEcosystemGroupingMode(mode),
+      }))),
+
       setCondensedEcosystemsEnabled: (enabled) => set(state => updateActiveList(state, () => ({
-        condensedEcosystemsEnabled: !!enabled,
+        ecosystemGroupingMode: normalizeEcosystemGroupingMode(enabled),
       }))),
 
       setCondensedEcosystemOverride: (sourceKey, targetLabel) => set(state => updateActiveList(state, current => {
