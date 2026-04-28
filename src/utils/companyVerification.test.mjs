@@ -28,6 +28,59 @@ test('buildCompanyVerification marks a high-confidence verified match when Yahoo
   assert.equal(verification.needsReview, false)
 })
 
+test('buildCompanyVerification prefers TradingView as the visible company-name source when provided', () => {
+  const verification = buildCompanyVerification({
+    symbol: 'NVDA',
+    currentName: 'NVIDIA Corporation',
+    tradingViewResolved: {
+      symbol: 'NVDA',
+      companyName: 'NVIDIA Corporation',
+      exchange: 'NASDAQ',
+      source: 'tradingview_public_watchlist',
+    },
+    quoteResolved: { longName: 'NVIDIA Corporation', shortName: 'NVIDIA', exchange: 'NasdaqGS', quoteType: 'EQUITY' },
+    searchResolved: { symbol: 'NVDA', longName: 'NVIDIA Corporation', shortName: 'NVIDIA', exchange: 'NasdaqGS', quoteType: 'EQUITY' },
+  })
+
+  assert.equal(verification.status, 'verified')
+  assert.equal(verification.officialName, 'NVIDIA Corporation')
+  assert.equal(verification.sources.tradingview.name, 'NVIDIA Corporation')
+})
+
+test('buildCompanyVerification marks TradingView mismatches for review even when Yahoo resolves the symbol', () => {
+  const verification = buildCompanyVerification({
+    symbol: 'APP',
+    currentName: 'Applovin Holdings',
+    tradingViewResolved: {
+      symbol: 'APP',
+      companyName: 'AppLovin Corporation',
+      exchange: 'NASDAQ',
+      source: 'tradingview_public_watchlist',
+    },
+    quoteResolved: { longName: 'AppLovin Corporation', shortName: 'AppLovin', exchange: 'NasdaqGS', quoteType: 'EQUITY' },
+    searchResolved: { symbol: 'APP', longName: 'AppLovin Corporation', shortName: 'AppLovin', exchange: 'NasdaqGS', quoteType: 'EQUITY' },
+  })
+
+  assert.equal(verification.status, 'review')
+  assert.equal(verification.officialName, 'AppLovin Corporation')
+  assert.equal(verification.needsReview, true)
+})
+
+test('buildCompanyVerification marks symbols missing from the TradingView source for review', () => {
+  const verification = buildCompanyVerification({
+    symbol: 'CRWD',
+    currentName: 'CrowdStrike Holdings, Inc.',
+    tradingViewRequired: true,
+    tradingViewResolved: null,
+    quoteResolved: { longName: 'CrowdStrike Holdings, Inc.', shortName: 'CrowdStrike', exchange: 'NasdaqGS', quoteType: 'EQUITY' },
+    searchResolved: { symbol: 'CRWD', longName: 'CrowdStrike Holdings, Inc.', shortName: 'CrowdStrike', exchange: 'NasdaqGS', quoteType: 'EQUITY' },
+  })
+
+  assert.equal(verification.status, 'review')
+  assert.equal(verification.needsReview, true)
+  assert.match(verification.reason, /not found in the TradingView/i)
+})
+
 test('buildCompanyVerification marks a single-source name as provisional instead of fully verified', () => {
   const verification = buildCompanyVerification({
     symbol: 'CRWV',

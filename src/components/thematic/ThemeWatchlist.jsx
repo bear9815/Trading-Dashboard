@@ -16,6 +16,10 @@ import {
   summarizeCompanyVerificationBatch,
 } from '../../utils/companyVerification.js'
 import {
+  buildTradingViewEntriesBySymbol,
+  isTradingViewWatchlistUrl,
+} from '../../utils/tradingViewWatchlist.js'
+import {
   buildAnchoredRsSnapshot,
   buildAvwapOverlays,
   buildYtdAvwapSnapshot,
@@ -904,6 +908,9 @@ export default function ThemeWatchlist({
     [listsById]
   )
   const [input, setInput] = useState('')
+  const [tradingViewVerifyUrl, setTradingViewVerifyUrl] = useState('')
+  const [tradingViewVerifyLoading, setTradingViewVerifyLoading] = useState(false)
+  const [tradingViewVerifyMeta, setTradingViewVerifyMeta] = useState({ url: '', title: '', count: 0, entriesBySymbol: {} })
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('')
@@ -961,10 +968,43 @@ export default function ThemeWatchlist({
     setError('')
   }, [activeListId])
 
+  const loadTradingViewVerificationSource = useCallback(async ({ force = false } = {}) => {
+    const rawUrl = String(tradingViewVerifyUrl || '').trim()
+    if (!rawUrl) return null
+    if (!isTradingViewWatchlistUrl(rawUrl)) {
+      throw new Error('Use a public TradingView watchlist URL like https://www.tradingview.com/watchlists/123456789/.')
+    }
+    if (!force && tradingViewVerifyMeta.url === rawUrl && Object.keys(tradingViewVerifyMeta.entriesBySymbol || {}).length) {
+      return tradingViewVerifyMeta
+    }
+
+    setTradingViewVerifyLoading(true)
+    try {
+      const params = new URLSearchParams({ url: rawUrl })
+      const response = await fetch(`/api/tradingview/watchlist?${params.toString()}`)
+      const json = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(json?.error || 'TradingView watchlist verification fetch failed.')
+      }
+      const nextMeta = {
+        url: rawUrl,
+        title: json?.title || '',
+        count: Number(json?.count || 0),
+        entriesBySymbol: buildTradingViewEntriesBySymbol(json?.entries || []),
+      }
+      setTradingViewVerifyMeta(nextMeta)
+      return nextMeta
+    } finally {
+      setTradingViewVerifyLoading(false)
+    }
+  }, [tradingViewVerifyMeta, tradingViewVerifyUrl])
+
   const rows = useMemo(
     () => symbols.map(symbol => rowsBySymbol[symbol]).filter(Boolean),
     [symbols, rowsBySymbol]
   )
+  const trimmedTradingViewVerifyUrl = tradingViewVerifyUrl.trim()
+  const activeTradingViewSource = tradingViewVerifyMeta.url === trimmedTradingViewVerifyUrl ? tradingViewVerifyMeta : null
 
   const rankBySymbol = useMemo(
     () => Object.fromEntries(symbols.map((symbol, index) => [symbol, index])),
@@ -1748,6 +1788,9 @@ export default function ThemeWatchlist({
     if (!symbol) return
     setVerifyingSymbols(prev => ({ ...prev, [symbol]: true }))
     try {
+      const tradingViewSource = tradingViewVerifyUrl.trim()
+        ? await loadTradingViewVerificationSource()
+        : null
       const [quoteResolved, searchResolved] = await Promise.all([
         resolveTickerToName(symbol),
         searchTickerIdentity(symbol),
@@ -1757,18 +1800,20 @@ export default function ThemeWatchlist({
         currentName: row.companyName,
         quoteResolved,
         searchResolved,
+        tradingViewResolved: tradingViewSource?.entriesBySymbol?.[symbol] || null,
+        tradingViewRequired: !!tradingViewSource,
       })
       updateRow(symbol, { companyVerification }, { manualOverride: !!row?.manualOverride })
       if (companyVerification.status === 'review') {
-        setStatus(`${symbol} needs review: Yahoo resolves it as ${companyVerification.officialName || 'an unknown company'}.`)
+        setStatus(`${symbol} needs review: ${companyVerification.officialName || 'the source name'} does not cleanly match all verification sources.`)
       } else if (companyVerification.status === 'verified') {
-        setStatus(`${symbol} verified with high confidence as ${companyVerification.officialName}.`)
+        setStatus(`${symbol} verified as ${companyVerification.officialName}${tradingViewSource ? ` using ${tradingViewSource.title || 'the TradingView watchlist'} as the primary name source` : ''}.`)
       } else if (companyVerification.status === 'provisional') {
         setStatus(`${symbol} matched one Yahoo source as ${companyVerification.officialName}.`)
       } else if (companyVerification.status === 'confirmed_override') {
         setStatus(`${symbol} is trusted locally as ${companyVerification.officialName}.`)
       } else {
-        setStatus(`Could not confidently resolve ${symbol} from Yahoo Finance.`)
+        setStatus(`Could not confidently resolve ${symbol}${tradingViewSource ? ' against the TradingView watchlist and Yahoo' : ' from Yahoo Finance'}.`)
       }
     } catch (event) {
       setError(event?.message || `Could not verify ${symbol}.`)
@@ -1786,10 +1831,16 @@ export default function ThemeWatchlist({
       setError('Import and map a list before verifying company names.')
       return
     }
-    setStatus(`Verifying ${candidates.length} company name${candidates.length === 1 ? '' : 's'}…`)
+    setError('')
     const nextLoading = Object.fromEntries(candidates.map(row => [row.symbol, true]))
     setVerifyingSymbols(prev => ({ ...prev, ...nextLoading }))
     try {
+      const tradingViewSource = tradingViewVerifyUrl.trim()
+        ? await loadTradingViewVerificationSource()
+        : null
+      setStatus(
+        `Verifying ${candidates.length} company name${candidates.length === 1 ? '' : 's'}${tradingViewSource ? ` against ${tradingViewSource.title || 'the TradingView watchlist'}` : ''}…`
+      )
       const verifications = await mapWithConcurrency(candidates, 5, async row => {
         const symbol = String(row?.symbol || '').trim().toUpperCase()
         if (!symbol) return null
@@ -1802,6 +1853,8 @@ export default function ThemeWatchlist({
           currentName: row.companyName,
           quoteResolved,
           searchResolved,
+          tradingViewResolved: tradingViewSource?.entriesBySymbol?.[symbol] || null,
+          tradingViewRequired: !!tradingViewSource,
         })
         updateRow(symbol, { companyVerification }, { manualOverride: !!row?.manualOverride })
         return companyVerification
@@ -2034,18 +2087,58 @@ export default function ThemeWatchlist({
           {!controlsCollapsed && (
             <div className="px-4 pb-4">
               <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_auto] gap-3">
-                <textarea
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  placeholder={`Paste TradingView symbols, URLs, or plain tickers into ${activeList?.name || 'this watchlist'}.\nExamples:\nNASDAQ:NVDA\nhttps://www.tradingview.com/chart/.../?symbol=NASDAQ:AMD\nMRVL, ANET, CIEN`}
-                  rows={5}
-                  className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 resize-none"
-                />
+                <div className="space-y-3">
+                  <textarea
+                    value={input}
+                    onChange={e => setInput(e.target.value)}
+                    placeholder={`Paste TradingView symbols, URLs, or plain tickers into ${activeList?.name || 'this watchlist'}.\nExamples:\nNASDAQ:NVDA\nhttps://www.tradingview.com/chart/.../?symbol=NASDAQ:AMD\nMRVL, ANET, CIEN`}
+                    rows={5}
+                    className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 resize-none"
+                  />
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3">
+                    <div className="flex flex-col xl:flex-row gap-2 xl:items-center">
+                      <input
+                        type="url"
+                        value={tradingViewVerifyUrl}
+                        onChange={e => setTradingViewVerifyUrl(e.target.value)}
+                        placeholder="Optional: paste a public TradingView watchlist URL to use as the company-name source of truth"
+                        className="flex-1 bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            setError('')
+                            const source = await loadTradingViewVerificationSource({ force: true })
+                            if (source) {
+                              setStatus(`Loaded ${source.count} company name${source.count === 1 ? '' : 's'} from ${source.title || 'the TradingView watchlist'}.`)
+                            }
+                          } catch (event) {
+                            setError(event?.message || 'Could not load the TradingView watchlist URL.')
+                          }
+                        }}
+                        disabled={!trimmedTradingViewVerifyUrl || tradingViewVerifyLoading}
+                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-accent-blue/20 text-accent-blue text-sm font-medium hover:bg-accent-blue/10 transition-all disabled:opacity-40"
+                      >
+                        <RefreshCw size={13} className={tradingViewVerifyLoading ? 'animate-spin' : ''} />
+                        {tradingViewVerifyLoading ? 'Loading URL…' : 'Load TV URL'}
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] text-gray-500">
+                      When present, Verify Names will treat the public TradingView watchlist as the preferred company-name source and cross-check it against Yahoo.
+                    </p>
+                    {activeTradingViewSource ? (
+                      <p className="mt-1 text-[11px] text-accent-green">
+                        Loaded {activeTradingViewSource.count} symbol{activeTradingViewSource.count === 1 ? '' : 's'} from {activeTradingViewSource.title || activeTradingViewSource.url}.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
                 <div className="flex xl:flex-col gap-2">
                   <button onClick={handleImport} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/15 border border-accent-blue/25 text-accent-blue text-sm font-medium hover:bg-accent-blue/20 transition-all"><Upload size={13} />Import</button>
                   <button onClick={() => fileRef.current?.click()} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-gray-500 text-sm font-medium hover:text-gray-300 hover:border-white/20 transition-all"><Upload size={13} />CSV</button>
                   <button onClick={handleAnalyze} disabled={loading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />{rows.length ? 'Refresh Map' : 'Map List'}</button>
-                  <button onClick={handleVerifyVisibleCompanies} disabled={!rows.length || Object.keys(verifyingSymbols).length > 0} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/12 border border-accent-blue/20 text-accent-blue text-sm font-medium hover:bg-accent-blue/18 transition-all disabled:opacity-40"><RefreshCw size={13} className={Object.keys(verifyingSymbols).length ? 'animate-spin' : ''} />Verify Names</button>
+                  <button onClick={handleVerifyVisibleCompanies} disabled={!rows.length || Object.keys(verifyingSymbols).length > 0 || tradingViewVerifyLoading} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/12 border border-accent-blue/20 text-accent-blue text-sm font-medium hover:bg-accent-blue/18 transition-all disabled:opacity-40"><RefreshCw size={13} className={Object.keys(verifyingSymbols).length || tradingViewVerifyLoading ? 'animate-spin' : ''} />Verify Names</button>
                   <button onClick={refreshAnchoredRs} disabled={anchoredRsLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue/12 border border-accent-blue/20 text-accent-blue text-sm font-medium hover:bg-accent-blue/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={anchoredRsLoading ? 'animate-pulse' : ''} />{anchoredRsLoading ? 'RS…' : 'Anchored RS'}</button>
                   <button onClick={refreshRollingRs} disabled={rollingRsLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-green/12 border border-accent-green/20 text-accent-green text-sm font-medium hover:bg-accent-green/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={rollingRsLoading ? 'animate-pulse' : ''} />{rollingRsLoading ? 'Rolling…' : 'Rolling RS'}</button>
                   <button onClick={refreshYtdAvwap} disabled={ytdAvwapLoading || !symbols.length} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent-yellow/12 border border-accent-yellow/20 text-accent-yellow text-sm font-medium hover:bg-accent-yellow/18 transition-all disabled:opacity-40"><TrendingUp size={13} className={ytdAvwapLoading ? 'animate-pulse' : ''} />{ytdAvwapLoading ? 'AVWAP…' : 'YTD AVWAP'}</button>
