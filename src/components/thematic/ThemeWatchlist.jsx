@@ -50,7 +50,7 @@ import {
   withMarketLeadersEcosystemGroup,
 } from '../../utils/themeAnalytics.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
-import { collectReusableWatchlistRows, getSymbolsNeedingMapping } from '../../utils/watchlistReuse.js'
+import { collectReusableWatchlistRows, getSymbolsNeedingMapping, mergeTrustedCompanyIdentity } from '../../utils/watchlistReuse.js'
 import ResearchMultiTimeframeChart from '../charts/ResearchMultiTimeframeChart.jsx'
 import { buildTickerChartData, useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
 
@@ -1978,7 +1978,8 @@ export default function ThemeWatchlist({
       return
     }
 
-    const symbolsToMap = getSymbolsNeedingMapping(symbols, rowsBySymbol)
+    const isRefresh = rows.length > 0
+    const symbolsToMap = isRefresh ? symbols : getSymbolsNeedingMapping(symbols, rowsBySymbol)
     if (!symbolsToMap.length) {
       setStatus(`All ${symbols.length} symbol${symbols.length !== 1 ? 's already have' : ' already has'} cached mapping in ${activeList?.name || 'the active watchlist'}.`)
       return
@@ -1991,19 +1992,21 @@ export default function ThemeWatchlist({
     setError('')
     try {
       for (let i = 0; i < chunks.length; i++) {
-        setStatus(`Mapping new symbols… ${Math.min(symbolsToMap.length, (i * 12) + 1)}-${Math.min(symbolsToMap.length, (i + 1) * 12)} of ${symbolsToMap.length}`)
+        setStatus(`${isRefresh ? 'Refreshing map' : 'Mapping new symbols'}… ${Math.min(symbolsToMap.length, (i * 12) + 1)}-${Math.min(symbolsToMap.length, (i + 1) * 12)} of ${symbolsToMap.length}`)
         const mapped = await enrichWatchlistChunk(chunks[i], {
           provider,
           apiKey,
           openRouterApiKey,
           openRouterModel: researchOpenRouterModel,
         })
-        upsertRows(mapped)
+        upsertRows(mapped.map(row => mergeTrustedCompanyIdentity(row, rowsBySymbol?.[row.symbol])))
       }
       const reusedCount = symbols.length - symbolsToMap.length
       setStatus(
-        `Mapped ${symbolsToMap.length} new symbol${symbolsToMap.length !== 1 ? 's' : ''} in ${activeList?.name || 'the active watchlist'}. ` +
-        (reusedCount > 0 ? `Reused cached rows for ${reusedCount} symbol${reusedCount !== 1 ? 's' : ''}.` : '')
+        isRefresh
+          ? `Refreshed ${symbolsToMap.length} mapped symbol${symbolsToMap.length !== 1 ? 's' : ''} in ${activeList?.name || 'the active watchlist'}.`
+          : `Mapped ${symbolsToMap.length} new symbol${symbolsToMap.length !== 1 ? 's' : ''} in ${activeList?.name || 'the active watchlist'}. ` +
+            (reusedCount > 0 ? `Reused cached rows for ${reusedCount} symbol${reusedCount !== 1 ? 's' : ''}.` : '')
       )
     } catch (e) {
       setError(e.message || 'Watchlist mapping failed.')

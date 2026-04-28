@@ -2,6 +2,11 @@ function cloneArray(value) {
   return Array.isArray(value) ? [...value] : value
 }
 
+function isTrustedCompanyVerification(verification = null) {
+  const status = verification?.status
+  return (status === 'verified' || status === 'confirmed_override') && !!verification?.officialName
+}
+
 function cloneRow(row) {
   if (!row) return null
   return {
@@ -46,4 +51,15 @@ export function getSymbolsNeedingMapping(symbols = [], rowsBySymbol = {}) {
     const key = String(symbol || '').trim().toUpperCase()
     return key && !rowsBySymbol?.[key]
   })
+}
+
+export function mergeTrustedCompanyIdentity(mappedRow = {}, existingRow = {}) {
+  const verification = existingRow?.companyVerification
+  if (!isTrustedCompanyVerification(verification)) return { ...mappedRow }
+
+  return {
+    ...mappedRow,
+    companyName: verification.officialName,
+    companyVerification: verification,
+  }
 }

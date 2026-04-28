@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { collectReusableWatchlistRows, getSymbolsNeedingMapping } from './watchlistReuse.js'
+import { collectReusableWatchlistRows, getSymbolsNeedingMapping, mergeTrustedCompanyIdentity } from './watchlistReuse.js'
 
 test('collectReusableWatchlistRows reuses cached rows from sibling lists for duplicate symbols', () => {
   const sharedCustomers = ['MSFT', 'AMZN']
@@ -70,4 +70,28 @@ test('getSymbolsNeedingMapping only returns symbols without cached rows', () => 
   })
 
   assert.deepEqual(missing, ['ANET'])
+})
+
+test('mergeTrustedCompanyIdentity keeps a trusted verified company name during remap', () => {
+  const nextRow = mergeTrustedCompanyIdentity(
+    {
+      symbol: 'APP',
+      companyName: 'AppLovin Corp. Class A',
+      ecosystem: 'Ad Tech',
+      theme: 'App Monetization',
+    },
+    {
+      symbol: 'APP',
+      companyName: 'AppLovin Corporation',
+      companyVerification: {
+        status: 'confirmed_override',
+        officialName: 'AppLovin Corporation',
+        exchange: 'NASDAQ',
+      },
+    }
+  )
+
+  assert.equal(nextRow.companyName, 'AppLovin Corporation')
+  assert.equal(nextRow.companyVerification.status, 'confirmed_override')
+  assert.equal(nextRow.ecosystem, 'Ad Tech')
 })
