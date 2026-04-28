@@ -153,9 +153,12 @@ function LightweightPane({
   className = '',
   showRsGradient = false,
   onChartClick,
+  draggableAnchors = [],
+  onMoveAnchor,
 }) {
   const chartContainerRef = useRef(null)
   const shadeCanvasRef = useRef(null)
+  const dragRef = useRef(null)
 
   useEffect(() => {
     if (!chartContainerRef.current) return undefined
@@ -256,6 +259,85 @@ function LightweightPane({
       : null
     if (clickHandler) chart.subscribeClick(clickHandler)
 
+    const resolveAnchorDateFromClientX = (clientX) => {
+      const rect = chartContainerRef.current?.getBoundingClientRect?.()
+      if (!rect) return null
+      const time = chart.timeScale().coordinateToTime(clientX - rect.left)
+      return nearestDailyBarAtOrBefore(time, data.dailyBars)
+    }
+
+    const findNearestDraggableAnchor = (clientX) => {
+      if (kind !== 'daily' || !draggableAnchors.length) return null
+      const rect = chartContainerRef.current?.getBoundingClientRect?.()
+      if (!rect) return null
+      const localX = clientX - rect.left
+      let bestMatch = null
+
+      for (const anchor of draggableAnchors) {
+        const anchorX = chart.timeScale().timeToCoordinate(anchor.anchorDate)
+        if (anchorX == null) continue
+        const distance = Math.abs(anchorX - localX)
+        if (distance > 12) continue
+        if (!bestMatch || distance < bestMatch.distance) {
+          bestMatch = { anchor, distance }
+        }
+      }
+
+      return bestMatch?.anchor || null
+    }
+
+    const resetDrag = () => {
+      dragRef.current = null
+      if (chartContainerRef.current) chartContainerRef.current.style.cursor = ''
+    }
+
+    const handlePointerDown = (event) => {
+      if (event.button !== 0 || !onMoveAnchor || onChartClick) return
+      const anchor = findNearestDraggableAnchor(event.clientX)
+      if (!anchor) return
+
+      dragRef.current = {
+        pointerId: event.pointerId,
+        anchor,
+        nextAnchorDate: resolveAnchorDateFromClientX(event.clientX) || anchor.anchorDate,
+      }
+      chartContainerRef.current?.setPointerCapture?.(event.pointerId)
+      chartContainerRef.current.style.cursor = 'grabbing'
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const handlePointerMove = (event) => {
+      if (dragRef.current) {
+        const nextAnchorDate = resolveAnchorDateFromClientX(event.clientX)
+        if (nextAnchorDate) dragRef.current.nextAnchorDate = nextAnchorDate
+        event.preventDefault()
+        return
+      }
+
+      if (!onMoveAnchor || onChartClick) return
+      const anchor = findNearestDraggableAnchor(event.clientX)
+      chartContainerRef.current.style.cursor = anchor ? 'grab' : ''
+    }
+
+    const handlePointerUp = (event) => {
+      if (!dragRef.current) return
+      const activeDrag = dragRef.current
+      chartContainerRef.current?.releasePointerCapture?.(activeDrag.pointerId)
+      resetDrag()
+      if (activeDrag.anchor.anchorDate !== activeDrag.nextAnchorDate) {
+        onMoveAnchor(activeDrag.anchor, activeDrag.nextAnchorDate)
+      }
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const handlePointerCancel = () => {
+      if (!dragRef.current) return
+      chartContainerRef.current?.releasePointerCapture?.(dragRef.current.pointerId)
+      resetDrag()
+    }
+
     const handleWheel = (event) => {
       if (!candles.length) return
       event.preventDefault()
@@ -277,6 +359,10 @@ function LightweightPane({
     }
 
     chartContainerRef.current.addEventListener('wheel', handleWheel, { passive: false, capture: true })
+    chartContainerRef.current.addEventListener('pointerdown', handlePointerDown)
+    chartContainerRef.current.addEventListener('pointermove', handlePointerMove)
+    chartContainerRef.current.addEventListener('pointerup', handlePointerUp)
+    chartContainerRef.current.addEventListener('pointercancel', handlePointerCancel)
 
     const resizeObserver = new ResizeObserver(([entry]) => {
       chart.applyOptions({ width: Math.floor(entry.contentRect.width), height: Math.floor(entry.contentRect.height) })
@@ -288,10 +374,15 @@ function LightweightPane({
       if (clickHandler) chart.unsubscribeClick(clickHandler)
       chart.timeScale().unsubscribeVisibleTimeRangeChange(redraw)
       chartContainerRef.current?.removeEventListener?.('wheel', handleWheel, true)
+      chartContainerRef.current?.removeEventListener?.('pointerdown', handlePointerDown)
+      chartContainerRef.current?.removeEventListener?.('pointermove', handlePointerMove)
+      chartContainerRef.current?.removeEventListener?.('pointerup', handlePointerUp)
+      chartContainerRef.current?.removeEventListener?.('pointercancel', handlePointerCancel)
       resizeObserver.disconnect()
+      resetDrag()
       chart.remove()
     }
-  }, [chartType, dailyRangeMonths, data, height, kind, onChartClick, rightOffset, showRsGradient])
+  }, [chartType, dailyRangeMonths, data, draggableAnchors, height, kind, onChartClick, onMoveAnchor, rightOffset, showRsGradient])
 
   return (
     <div className={`relative w-full ${className}`} style={height ? { height } : undefined}>
@@ -331,6 +422,7 @@ export default function ResearchMultiTimeframeChart({
   manualAnchors = [],
   onToggleManualAnchor,
   onRemoveManualAnchor,
+  onMoveManualAnchor,
   onOpenSettings,
 }) {
   const hasBars = data?.dailyBars?.length
@@ -488,6 +580,8 @@ export default function ResearchMultiTimeframeChart({
               rightOffset={dailyRightOffset}
               showRsGradient={dailyAnchoredRsEnabled}
               onChartClick={addAvwapMode ? onChartClick : null}
+              draggableAnchors={(data.avwapOverlays || []).filter(overlay => overlay.kind === 'manual')}
+              onMoveAnchor={onMoveManualAnchor}
               className={fillAvailableHeight ? 'h-full' : ''}
             />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">

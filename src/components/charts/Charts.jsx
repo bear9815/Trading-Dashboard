@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { Search, Layers, BarChart3, ArrowUpDown } from 'lucide-react'
 import ChartToolsSettingsModal from './ChartToolsSettingsModal.jsx'
 import ResearchMultiTimeframeChart from './ResearchMultiTimeframeChart.jsx'
+import {
+  buildManualAnchorDragUpdate,
+  resolveSymbolTypeahead,
+  TYPEAHEAD_RESET_MS,
+} from './chartInteractions.js'
 import { useResearchWatchlistStore, MARKET_LEADERS_LIST_ID, WATCHLIST_LIST_ID } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import {
@@ -138,6 +143,7 @@ export default function Charts() {
   const [historyError, setHistoryError] = useState('')
   const [addAvwapMode, setAddAvwapMode] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [symbolTypeahead, setSymbolTypeahead] = useState(null)
 
   const watchlists = useMemo(
     () => Object.values(listsById || {}).sort((a, b) => (WATCHLIST_ORDER[a.id] ?? 99) - (WATCHLIST_ORDER[b.id] ?? 99)),
@@ -303,12 +309,35 @@ export default function Charts() {
         const nextIndex = currentIndex <= 0 ? sortedRows.length - 1 : currentIndex - 1
         const nextSymbol = sortedRows[nextIndex]?.symbol
         if (nextSymbol) setSelectedSymbol(nextSymbol)
+        return
+      }
+
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const nextTypeahead = resolveSymbolTypeahead({
+        rows,
+        key: event.key,
+        typeahead: symbolTypeahead,
+        selectedSymbol: selectedDisplaySymbol,
+      })
+      if (!nextTypeahead?.symbol) return
+
+      event.preventDefault()
+      setSymbolTypeahead(nextTypeahead)
+      setSelectedSymbol(nextTypeahead.symbol)
+      if (!filteredRows.some(row => row.symbol === nextTypeahead.symbol)) {
+        setQuery('')
       }
     }
 
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
-  }, [selectedDisplaySymbol, sortedRows])
+  }, [filteredRows, rows, selectedDisplaySymbol, sortedRows, symbolTypeahead])
+
+  useEffect(() => {
+    if (!symbolTypeahead?.buffer) return undefined
+    const timeoutId = window.setTimeout(() => setSymbolTypeahead(null), TYPEAHEAD_RESET_MS)
+    return () => window.clearTimeout(timeoutId)
+  }, [symbolTypeahead])
 
   useEffect(() => {
     if (!selectedDisplaySymbol) return
@@ -333,6 +362,13 @@ export default function Charts() {
       color: '#22c55e',
     })
     setAddAvwapMode(false)
+  }
+
+  const handleMoveManualAnchor = (anchor, nextAnchorDate) => {
+    if (!selectedDisplaySymbol || !anchor?.id || !nextAnchorDate) return
+    const updates = buildManualAnchorDragUpdate(anchor, nextAnchorDate)
+    if (!updates || updates.anchorDate === anchor.anchorDate) return
+    updateTradeReviewManualAnchor(selectedDisplaySymbol, anchor.id, updates)
   }
 
   return (
@@ -373,6 +409,7 @@ export default function Charts() {
                 if (!selectedDisplaySymbol) return
                 removeTradeReviewManualAnchor(selectedDisplaySymbol, anchor.id)
               }}
+              onMoveManualAnchor={addAvwapMode ? null : handleMoveManualAnchor}
               onOpenSettings={() => setSettingsOpen(true)}
               chartLabel={selectedRow?.companyName || 'Ticker Chart'}
               badgeLabel={activeList?.name || 'Watchlist'}
@@ -432,6 +469,11 @@ export default function Charts() {
                 className="w-full bg-transparent text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none"
               />
             </div>
+            {symbolTypeahead?.buffer ? (
+              <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-accent-blue/80">
+                Symbol Jump: {symbolTypeahead.buffer}
+              </p>
+            ) : null}
 
             {historyError && (
               <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
