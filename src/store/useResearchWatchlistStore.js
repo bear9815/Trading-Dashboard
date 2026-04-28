@@ -67,6 +67,20 @@ const DEFAULT_LISTS = {
   },
 }
 
+function buildRememberedRow(row = {}) {
+  const symbol = String(row?.symbol || '').trim().toUpperCase()
+  if (!symbol) return null
+  return {
+    ...row,
+    symbol,
+    majorCustomers: Array.isArray(row?.majorCustomers) ? [...row.majorCustomers] : [],
+    dependencies: Array.isArray(row?.dependencies) ? [...row.dependencies] : [],
+    customerOf: Array.isArray(row?.customerOf) ? [...row.customerOf] : [],
+    supplierTo: Array.isArray(row?.supplierTo) ? [...row.supplierTo] : [],
+    competesWith: Array.isArray(row?.competesWith) ? [...row.competesWith] : [],
+  }
+}
+
 function normalizeSymbols(symbols) {
   return [...new Set((symbols || []).map(s => (s || '').trim().toUpperCase()).filter(Boolean))]
 }
@@ -131,6 +145,7 @@ function sameAnalyticsHistory(a, b) {
 
 function ensureWorkspaceShape(state) {
   const activeListId = state?.activeListId || MARKET_LEADERS_LIST_ID
+  const symbolMemoryBySymbol = state?.symbolMemoryBySymbol || {}
 
   if (state?.listsById) {
     const listsById = DEFAULT_LIST_ORDER.reduce((next, listId) => {
@@ -143,12 +158,14 @@ function ensureWorkspaceShape(state) {
     return {
       activeListId: listsById[activeListId] ? activeListId : MARKET_LEADERS_LIST_ID,
       listsById,
+      symbolMemoryBySymbol,
     }
   }
 
   // Legacy single-watchlist state migrates into Market Leaders.
   return {
     activeListId: MARKET_LEADERS_LIST_ID,
+    symbolMemoryBySymbol,
     listsById: {
       [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {
         symbols: state?.symbols || [],
@@ -167,6 +184,7 @@ export const useResearchWatchlistStore = create(
     (set, get) => ({
       activeListId: MARKET_LEADERS_LIST_ID,
       listsById: { ...DEFAULT_LISTS },
+      symbolMemoryBySymbol: {},
 
       setActiveList: (listId) => set(state => ({
         activeListId: state.listsById[listId] ? listId : state.activeListId,
@@ -187,38 +205,66 @@ export const useResearchWatchlistStore = create(
         symbols: [...current.symbols, ...(symbols || [])],
       }))),
 
-      upsertRows: (rows) => set(state => updateActiveList(state, current => {
+      upsertRows: (rows) => set(state => {
+        const activeListId = state.activeListId || MARKET_LEADERS_LIST_ID
+        const current = state.listsById?.[activeListId] || DEFAULT_LISTS[activeListId] || DEFAULT_LISTS[MARKET_LEADERS_LIST_ID]
         const next = { ...current.rowsBySymbol }
+        const nextMemory = { ...(state.symbolMemoryBySymbol || {}) }
         for (const row of rows || []) {
           const symbol = (row?.symbol || '').trim().toUpperCase()
           if (!symbol) continue
-          next[symbol] = {
+          const nextRow = {
             ...current.rowsBySymbol[symbol],
             ...row,
             symbol,
             updatedAt: new Date().toISOString(),
           }
+          next[symbol] = nextRow
+          const remembered = buildRememberedRow(nextRow)
+          if (remembered) nextMemory[symbol] = remembered
         }
-        return { rowsBySymbol: next, lastUpdated: new Date().toISOString() }
-      })),
-
-      updateRow: (symbol, updates) => set(state => updateActiveList(state, current => {
-        const key = (symbol || '').trim().toUpperCase()
-        if (!key) return current
         return {
-          rowsBySymbol: {
-            ...current.rowsBySymbol,
-            [key]: {
-              ...current.rowsBySymbol[key],
-              ...updates,
-              symbol: key,
-              updatedAt: new Date().toISOString(),
-              manualOverride: true,
-            },
+          listsById: {
+            ...state.listsById,
+            [activeListId]: makeListPatch(current, {
+              rowsBySymbol: next,
+              lastUpdated: new Date().toISOString(),
+            }),
           },
-          lastUpdated: new Date().toISOString(),
+          symbolMemoryBySymbol: nextMemory,
         }
-      })),
+      }),
+
+      updateRow: (symbol, updates, options = {}) => set(state => {
+        const activeListId = state.activeListId || MARKET_LEADERS_LIST_ID
+        const current = state.listsById?.[activeListId] || DEFAULT_LISTS[activeListId] || DEFAULT_LISTS[MARKET_LEADERS_LIST_ID]
+        const key = (symbol || '').trim().toUpperCase()
+        if (!key) return state
+        const manualOverride = options?.manualOverride ?? true
+        const nextRow = {
+          ...current.rowsBySymbol[key],
+          ...updates,
+          symbol: key,
+          updatedAt: new Date().toISOString(),
+          manualOverride,
+        }
+        const nextMemory = { ...(state.symbolMemoryBySymbol || {}) }
+        const remembered = buildRememberedRow(nextRow)
+        if (remembered) nextMemory[key] = remembered
+        return {
+          listsById: {
+            ...state.listsById,
+            [activeListId]: makeListPatch(current, {
+              rowsBySymbol: {
+                ...current.rowsBySymbol,
+                [key]: nextRow,
+              },
+              lastUpdated: new Date().toISOString(),
+            }),
+          },
+          symbolMemoryBySymbol: nextMemory,
+        }
+      }),
 
       removeSymbol: (symbol) => set(state => updateActiveList(state, current => {
         const key = (symbol || '').trim().toUpperCase()
@@ -302,6 +348,7 @@ export const useResearchWatchlistStore = create(
           next[listId] = makeListPatch(DEFAULT_LISTS[listId], {})
           return next
         }, {}),
+        symbolMemoryBySymbol: get().symbolMemoryBySymbol || {},
       }),
 
       getLists: () => DEFAULT_LIST_ORDER.map(id => get().listsById[id]).filter(Boolean),

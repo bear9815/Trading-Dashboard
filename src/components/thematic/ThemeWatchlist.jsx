@@ -8,9 +8,13 @@ import { DEFAULT_LIST_ORDER, MARKET_LEADERS_LIST_ID, useResearchWatchlistStore }
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
-import { resolveTickerToName } from '../../utils/marketData.js'
+import { resolveTickerToName, searchTickerIdentity } from '../../utils/marketData.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
-import { buildCompanyVerification } from '../../utils/companyVerification.js'
+import {
+  buildCompanyVerification,
+  buildVerifiedCompanyOverride,
+  summarizeCompanyVerificationBatch,
+} from '../../utils/companyVerification.js'
 import {
   buildAnchoredRsSnapshot,
   buildAvwapOverlays,
@@ -458,17 +462,29 @@ function CompanyVerificationCell({
 }) {
   const verification = row.companyVerification || null
   const status = verification?.status || 'unchecked'
-  const isMismatch = status === 'mismatch'
-  const isMatch = status === 'match'
-  const isUnverified = status === 'unverified'
-  const badgeClass = isMatch
+  const isVerified = status === 'verified'
+  const isConfirmed = status === 'confirmed_override'
+  const isProvisional = status === 'provisional'
+  const isReview = status === 'review'
+  const isUnresolved = status === 'unresolved'
+  const badgeClass = isVerified || isConfirmed
     ? 'border-accent-green/25 bg-accent-green/10 text-accent-green'
-    : isMismatch
+    : isProvisional || isReview
       ? 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow'
-      : isUnverified
+      : isUnresolved
         ? 'border-accent-red/25 bg-accent-red/10 text-accent-red'
         : 'border-white/10 bg-white/[0.03] text-gray-500'
-  const badgeText = isMatch ? 'verified' : isMismatch ? 'check name' : isUnverified ? 'not found' : 'unverified'
+  const badgeText = isConfirmed
+    ? 'trusted'
+    : isVerified
+      ? 'verified'
+      : isProvisional
+        ? '1 source'
+        : isReview
+          ? 'review'
+          : isUnresolved
+            ? 'no match'
+            : 'unverified'
 
   return (
     <div>
@@ -488,12 +504,15 @@ function CompanyVerificationCell({
         </button>
       </div>
       <p className="text-xs text-gray-600 mt-0.5">{row.sector}</p>
-      {isMismatch && (
+      {(isReview || isProvisional) && verification?.officialName && (
         <div className="mt-1 rounded-lg border border-accent-yellow/15 bg-accent-yellow/5 px-2 py-1">
           <p className="text-[11px] text-gray-400">
             Yahoo: <span className="font-semibold text-accent-yellow">{verification.officialName}</span>
             {verification.exchange ? <span className="text-gray-600"> · {verification.exchange}</span> : null}
           </p>
+          {verification.reason ? (
+            <p className="mt-1 text-[10px] text-gray-500">{verification.reason}</p>
+          ) : null}
           <button
             type="button"
             onClick={event => {
@@ -506,9 +525,15 @@ function CompanyVerificationCell({
           </button>
         </div>
       )}
-      {isMatch && verification.exchange && (
+      {isUnresolved && verification?.reason ? (
+        <p className="mt-1 text-[10px] text-red-300">{verification.reason}</p>
+      ) : null}
+      {(isVerified || isConfirmed) && verification.exchange && (
         <p className="mt-1 text-[10px] text-accent-green">{verification.exchange}</p>
       )}
+      {(isVerified || isConfirmed) && verification?.reason ? (
+        <p className="mt-1 text-[10px] text-gray-500">{verification.reason}</p>
+      ) : null}
       {row.manualOverride && <span className="text-[10px] text-accent-green">manual</span>}
     </div>
   )
@@ -837,6 +862,7 @@ export default function ThemeWatchlist({
   const {
     activeListId,
     listsById,
+    symbolMemoryBySymbol,
     setActiveList,
     replaceWatchlist,
     upsertRows,
@@ -1722,19 +1748,27 @@ export default function ThemeWatchlist({
     if (!symbol) return
     setVerifyingSymbols(prev => ({ ...prev, [symbol]: true }))
     try {
-      const resolved = await resolveTickerToName(symbol)
+      const [quoteResolved, searchResolved] = await Promise.all([
+        resolveTickerToName(symbol),
+        searchTickerIdentity(symbol),
+      ])
       const companyVerification = buildCompanyVerification({
         symbol,
         currentName: row.companyName,
-        resolved,
+        quoteResolved,
+        searchResolved,
       })
-      updateRow(symbol, { companyVerification })
-      if (companyVerification.status === 'mismatch') {
-        setStatus(`${symbol} may be mismapped: Yahoo identifies it as ${companyVerification.officialName}.`)
-      } else if (companyVerification.status === 'match') {
-        setStatus(`${symbol} verified as ${companyVerification.officialName}.`)
+      updateRow(symbol, { companyVerification }, { manualOverride: !!row?.manualOverride })
+      if (companyVerification.status === 'review') {
+        setStatus(`${symbol} needs review: Yahoo resolves it as ${companyVerification.officialName || 'an unknown company'}.`)
+      } else if (companyVerification.status === 'verified') {
+        setStatus(`${symbol} verified with high confidence as ${companyVerification.officialName}.`)
+      } else if (companyVerification.status === 'provisional') {
+        setStatus(`${symbol} matched one Yahoo source as ${companyVerification.officialName}.`)
+      } else if (companyVerification.status === 'confirmed_override') {
+        setStatus(`${symbol} is trusted locally as ${companyVerification.officialName}.`)
       } else {
-        setStatus(`Could not verify ${symbol} from Yahoo Finance.`)
+        setStatus(`Could not confidently resolve ${symbol} from Yahoo Finance.`)
       }
     } catch (event) {
       setError(event?.message || `Could not verify ${symbol}.`)
@@ -1755,21 +1789,28 @@ export default function ThemeWatchlist({
     setStatus(`Verifying ${candidates.length} company name${candidates.length === 1 ? '' : 's'}…`)
     const nextLoading = Object.fromEntries(candidates.map(row => [row.symbol, true]))
     setVerifyingSymbols(prev => ({ ...prev, ...nextLoading }))
-    let mismatchCount = 0
     try {
-      await mapWithConcurrency(candidates, 5, async row => {
+      const verifications = await mapWithConcurrency(candidates, 5, async row => {
         const symbol = String(row?.symbol || '').trim().toUpperCase()
-        if (!symbol) return
-        const resolved = await resolveTickerToName(symbol)
+        if (!symbol) return null
+        const [quoteResolved, searchResolved] = await Promise.all([
+          resolveTickerToName(symbol),
+          searchTickerIdentity(symbol),
+        ])
         const companyVerification = buildCompanyVerification({
           symbol,
           currentName: row.companyName,
-          resolved,
+          quoteResolved,
+          searchResolved,
         })
-        if (companyVerification.status === 'mismatch') mismatchCount += 1
-        updateRow(symbol, { companyVerification })
+        updateRow(symbol, { companyVerification }, { manualOverride: !!row?.manualOverride })
+        return companyVerification
       })
-      setStatus(`Verified ${candidates.length} name${candidates.length === 1 ? '' : 's'}${mismatchCount ? ` · ${mismatchCount} need review` : ' · all matched'}.`)
+      const summary = summarizeCompanyVerificationBatch(verifications)
+      setStatus(
+        `Verified ${candidates.length} name${candidates.length === 1 ? '' : 's'} · ` +
+        `${summary.verified} strong · ${summary.provisional} provisional · ${summary.review} review · ${summary.unresolved} unresolved.`
+      )
     } catch (event) {
       setError(event?.message || 'Company verification failed.')
     } finally {
@@ -1785,8 +1826,14 @@ export default function ThemeWatchlist({
     const symbol = String(row?.symbol || '').trim().toUpperCase()
     const officialName = row?.companyVerification?.officialName
     if (!symbol || !officialName) return
-    updateRow(symbol, { companyName: officialName })
-    setStatus(`Updated ${symbol} to ${officialName}.`)
+    const companyVerification = buildVerifiedCompanyOverride({
+      symbol,
+      officialName,
+      exchange: row?.companyVerification?.exchange || '',
+      quoteType: row?.companyVerification?.quoteType || '',
+    })
+    updateRow(symbol, { companyName: officialName, companyVerification }, { manualOverride: true })
+    setStatus(`Updated ${symbol} to ${officialName} and saved it as a trusted local mapping.`)
   }
 
   function handleReassignSourceEcosystem(source, targetLabel) {
@@ -1807,6 +1854,7 @@ export default function ThemeWatchlist({
       symbols: parsed,
       activeListId,
       listsById,
+      symbolMemoryBySymbol,
     })
     replaceWatchlist(parsed)
     if (reusableRows.length) upsertRows(reusableRows)
@@ -1837,6 +1885,7 @@ export default function ThemeWatchlist({
       symbols: parsed,
       activeListId,
       listsById,
+      symbolMemoryBySymbol,
     })
     replaceWatchlist(parsed)
     if (reusableRows.length) upsertRows(reusableRows)

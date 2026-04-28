@@ -38,6 +38,31 @@ test('collectReusableWatchlistRows reuses cached rows from sibling lists for dup
   assert.notEqual(rows[1].majorCustomers, sharedCustomers)
 })
 
+test('collectReusableWatchlistRows falls back to sticky symbol memory when no active list row exists', () => {
+  const rows = collectReusableWatchlistRows({
+    symbols: ['APP', 'TTD'],
+    activeListId: 'liquid',
+    listsById: {
+      liquid: { id: 'liquid', rowsBySymbol: {} },
+      watchlist: { id: 'watchlist', rowsBySymbol: {} },
+    },
+    symbolMemoryBySymbol: {
+      APP: {
+        symbol: 'APP',
+        companyName: 'AppLovin Corporation',
+        companyVerification: {
+          status: 'confirmed_override',
+          manuallyConfirmed: true,
+        },
+      },
+    },
+  })
+
+  assert.deepEqual(rows.map(row => row.symbol), ['APP'])
+  assert.equal(rows[0].companyName, 'AppLovin Corporation')
+  assert.equal(rows[0].companyVerification.status, 'confirmed_override')
+})
+
 test('getSymbolsNeedingMapping only returns symbols without cached rows', () => {
   const missing = getSymbolsNeedingMapping(['NVDA', 'ANET', 'TTD'], {
     NVDA: { symbol: 'NVDA' },

@@ -14,7 +14,12 @@ function cloneRow(row) {
   }
 }
 
-export function collectReusableWatchlistRows({ symbols = [], activeListId = '', listsById = {} } = {}) {
+export function collectReusableWatchlistRows({
+  symbols = [],
+  activeListId = '',
+  listsById = {},
+  symbolMemoryBySymbol = {},
+} = {}) {
   const orderedListIds = [
     activeListId,
     ...Object.keys(listsById || {}).filter(id => id !== activeListId),
@@ -28,6 +33,9 @@ export function collectReusableWatchlistRows({ symbols = [], activeListId = '', 
       const row = listsById?.[listId]?.rowsBySymbol?.[symbol]
       if (row) return cloneRow({ ...row, symbol })
     }
+
+    const remembered = symbolMemoryBySymbol?.[symbol]
+    if (remembered) return cloneRow({ ...remembered, symbol })
 
     return null
   }).filter(Boolean)

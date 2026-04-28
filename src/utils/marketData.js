@@ -736,6 +736,45 @@ export async function resolveTickerToName(symbol) {
       longName:  q.longName  || q.shortName || null,
       shortName: q.shortName || null,
       exchange:  q.fullExchangeName || q.exchange || null,
+      quoteType: q.quoteType || null,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Resolve a ticker through Yahoo symbol search. This is a separate Yahoo surface
+ * from the quote endpoint and helps us distinguish high-confidence matches from
+ * single-source matches.
+ */
+export async function searchTickerIdentity(symbol) {
+  const normalized = String(symbol || '').trim().toUpperCase()
+  if (!normalized) return null
+
+  try {
+    const params = new URLSearchParams({
+      q: normalized,
+      quotesCount: '8',
+      newsCount: '0',
+      enableFuzzyQuery: 'false',
+      quotesQueryId: 'tss_match_phrase_query',
+    })
+    const res = await fetch(`${YF}/v1/finance/search?${params.toString()}`, {
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!res.ok) return null
+    const json = await res.json()
+    const quotes = Array.isArray(json?.quotes) ? json.quotes : []
+    const exact = quotes.find(item => String(item?.symbol || '').trim().toUpperCase() === normalized) || quotes[0]
+    if (!exact) return null
+
+    return {
+      symbol: String(exact.symbol || normalized).trim().toUpperCase(),
+      longName: exact.longname || exact.shortname || null,
+      shortName: exact.shortname || exact.longname || null,
+      exchange: exact.exchDisp || exact.exchange || null,
+      quoteType: exact.quoteType || exact.typeDisp || null,
     }
   } catch {
     return null
