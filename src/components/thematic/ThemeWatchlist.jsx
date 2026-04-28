@@ -41,6 +41,7 @@ import {
   withMarketLeadersEcosystemGroup,
 } from '../../utils/themeAnalytics.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
+import { collectReusableWatchlistRows, getSymbolsNeedingMapping } from '../../utils/watchlistReuse.js'
 import ResearchMultiTimeframeChart from '../charts/ResearchMultiTimeframeChart.jsx'
 import { buildTickerChartData, useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
 
@@ -1801,7 +1802,13 @@ export default function ThemeWatchlist({
       setError('Paste TradingView symbols, URLs, or plain tickers to import your watchlist.')
       return
     }
+    const reusableRows = collectReusableWatchlistRows({
+      symbols: parsed,
+      activeListId,
+      listsById,
+    })
     replaceWatchlist(parsed)
+    if (reusableRows.length) upsertRows(reusableRows)
     setSelectedSymbol(null)
     setEditingSymbol(null)
     setQuery('')
@@ -1809,7 +1816,12 @@ export default function ThemeWatchlist({
     setSortDir('asc')
     setFitFilter('all')
     setError('')
-    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} into ${activeList?.name || 'the active watchlist'}. Prior map for this list was cleared.`)
+    setStatus(
+      `Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} into ${activeList?.name || 'the active watchlist'}. ` +
+      (reusableRows.length
+        ? `Reused cached mapping for ${reusableRows.length} symbol${reusableRows.length !== 1 ? 's' : ''}.`
+        : 'Prior map for this list was cleared.')
+    )
     setPage(1)
   }
 
@@ -1820,7 +1832,13 @@ export default function ThemeWatchlist({
       setError('Could not find symbols in that CSV file.')
       return
     }
+    const reusableRows = collectReusableWatchlistRows({
+      symbols: parsed,
+      activeListId,
+      listsById,
+    })
     replaceWatchlist(parsed)
+    if (reusableRows.length) upsertRows(reusableRows)
     setSelectedSymbol(null)
     setEditingSymbol(null)
     setQuery('')
@@ -1828,7 +1846,12 @@ export default function ThemeWatchlist({
     setSortDir('asc')
     setFitFilter('all')
     setError('')
-    setStatus(`Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} from CSV into ${activeList?.name || 'the active watchlist'}. Prior map for this list was cleared.`)
+    setStatus(
+      `Imported ${parsed.length} symbol${parsed.length !== 1 ? 's' : ''} from CSV into ${activeList?.name || 'the active watchlist'}. ` +
+      (reusableRows.length
+        ? `Reused cached mapping for ${reusableRows.length} symbol${reusableRows.length !== 1 ? 's' : ''}.`
+        : 'Prior map for this list was cleared.')
+    )
     setPage(1)
   }
 
@@ -1846,14 +1869,20 @@ export default function ThemeWatchlist({
       return
     }
 
+    const symbolsToMap = getSymbolsNeedingMapping(symbols, rowsBySymbol)
+    if (!symbolsToMap.length) {
+      setStatus(`All ${symbols.length} symbol${symbols.length !== 1 ? 's already have' : ' already has'} cached mapping in ${activeList?.name || 'the active watchlist'}.`)
+      return
+    }
+
     const chunks = []
-    for (let i = 0; i < symbols.length; i += 12) chunks.push(symbols.slice(i, i + 12))
+    for (let i = 0; i < symbolsToMap.length; i += 12) chunks.push(symbolsToMap.slice(i, i + 12))
 
     setLoading(true)
     setError('')
     try {
       for (let i = 0; i < chunks.length; i++) {
-        setStatus(`Mapping watchlist… ${Math.min(symbols.length, (i * 12) + 1)}-${Math.min(symbols.length, (i + 1) * 12)} of ${symbols.length}`)
+        setStatus(`Mapping new symbols… ${Math.min(symbolsToMap.length, (i * 12) + 1)}-${Math.min(symbolsToMap.length, (i + 1) * 12)} of ${symbolsToMap.length}`)
         const mapped = await enrichWatchlistChunk(chunks[i], {
           provider,
           apiKey,
@@ -1862,7 +1891,11 @@ export default function ThemeWatchlist({
         })
         upsertRows(mapped)
       }
-      setStatus(`Mapped ${symbols.length} symbol${symbols.length !== 1 ? 's' : ''} in ${activeList?.name || 'the active watchlist'}.`)
+      const reusedCount = symbols.length - symbolsToMap.length
+      setStatus(
+        `Mapped ${symbolsToMap.length} new symbol${symbolsToMap.length !== 1 ? 's' : ''} in ${activeList?.name || 'the active watchlist'}. ` +
+        (reusedCount > 0 ? `Reused cached rows for ${reusedCount} symbol${reusedCount !== 1 ? 's' : ''}.` : '')
+      )
     } catch (e) {
       setError(e.message || 'Watchlist mapping failed.')
     } finally {
