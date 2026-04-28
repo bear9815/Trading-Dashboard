@@ -14,6 +14,7 @@ import { buildCompanyVerification } from '../../utils/companyVerification.js'
 import {
   buildAnchoredRsSnapshot,
   buildAvwapOverlays,
+  buildYtdAvwapSnapshot,
   buildKeltnerShadeBands,
   buildRollingRsSnapshot,
   calculateKeltnerChannel,
