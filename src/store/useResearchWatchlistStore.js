@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import {
   applyColumnPreset,
   DEFAULT_WATCHLIST_COLUMN_ORDER,
@@ -7,6 +7,7 @@ import {
 } from '../utils/watchlistTableConfig.js'
 import { normalizeEcosystemGroupingMode } from '../utils/condensedEcosystems.js'
 import { normalizeThemeAnalyticsHistory, upsertThemeAnalyticsSnapshot } from '../utils/themeAnalytics.js'
+import { idbStorage } from '../utils/idbStorage.js'
 
 export const MARKET_LEADERS_LIST_ID = 'market-leaders'
 export const WATCHLIST_LIST_ID = 'watchlist'
@@ -307,6 +308,7 @@ export const useResearchWatchlistStore = create(
     }),
     {
       name: 'growth-research-watchlist-v1',
+      storage: createJSONStorage(() => idbStorage),
       merge: (persistedState, currentState) => {
         const normalized = ensureWorkspaceShape(persistedState)
         return {
