@@ -26,6 +26,8 @@ import {
 } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import {
+  BREADTH_TABLE_SESSION_COUNT,
+  buildHistoricalBreadthMetricRows,
   buildListBreadthHistory,
   buildListBreadthSymbolSnapshots,
 } from '../../utils/listBreadth.js'
@@ -51,6 +53,28 @@ const DRILLDOWN_GROUPS = [
   { key: 'upDays34_13', title: 'Up 13% In 34D', metric: 'days34ChangePct', suffix: '%' },
   { key: 'atrExtension10x', title: '10x ATR Extended', metric: 'atrExtensionMultiple', suffix: 'x' },
   { key: 'aboveSma50', title: 'Above 50DMA Leaders', metric: 'monthChangePct', suffix: '%' },
+]
+
+const BREADTH_VIEW_TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'table', label: 'Breadth Table' },
+]
+
+const HISTORICAL_METRIC_COLUMNS = [
+  { key: 'sma5AbovePct', label: '5DMA Above', type: 'pct' },
+  { key: 'ytdAvwapAbovePct', label: 'YTD AVWAP Above', type: 'pct' },
+  { key: 'm3AvwapAbovePct', label: '3M AVWAP Above', type: 'pct' },
+  { key: 'm1AvwapAbovePct', label: '1M AVWAP Above', type: 'pct' },
+  { key: 'w1AvwapAbovePct', label: '1W AVWAP Above', type: 'pct' },
+  { key: 'm3DistancePct', label: '3M Distance', type: 'signedPct' },
+  { key: 'm1DistancePct', label: '1M Distance', type: 'signedPct' },
+  { key: 'w1DistancePct', label: '1W Distance', type: 'signedPct' },
+  { key: 'upDown4', label: 'Up / Down 4%', type: 'pair' },
+  { key: 'upDown25Month', label: 'Up / Down 25% 1M', type: 'pair' },
+  { key: 'upDown50Month', label: 'Up / Down 50% 1M', type: 'pair' },
+  { key: 'upDown25Quarter', label: 'Up / Down 25% Quarter', type: 'pair' },
+  { key: 'upDown13Days34', label: 'Up / Down 13% 34D', type: 'pair' },
+  { key: 'above50dmaPct', label: 'Above 50DMA', type: 'pct' },
 ]
 
 function average(values) {
@@ -82,6 +106,11 @@ function fmtDateLabel(date) {
   const [year, month, day] = String(date).split('-')
   if (!year || !month || !day) return date
   return `${Number(month)}/${Number(day)}/${year}`
+}
+
+function fmtPair(value) {
+  if (!value) return '—'
+  return `+${value.up || 0} / -${value.down || 0}`
 }
 
 function latest(history) {
@@ -240,45 +269,6 @@ function MetricTable({ market, liquid }) {
   )
 }
 
-function summaryPct(count, total) {
-  return total > 0 ? (count / total) * 100 : 0
-}
-
-function SummaryBar({ label, positiveLabel, negativeLabel, positiveCount, negativeCount, total, positiveClass, negativeClass, positiveBarClass, negativeBarClass }) {
-  const positivePct = summaryPct(positiveCount, total)
-  const negativePct = summaryPct(negativeCount, total)
-
-  return (
-    <div className="min-w-[240px] flex-1">
-      <div className="mb-1 flex items-center justify-between gap-3 text-[11px] font-semibold">
-        <span className={positiveClass}>{positiveLabel} {positivePct.toFixed(1)}% ({positiveCount})</span>
-        <span className={negativeClass}>{negativeLabel} {negativePct.toFixed(1)}% ({negativeCount})</span>
-      </div>
-      <div className="flex h-2 overflow-hidden rounded-full bg-white/[0.08]">
-        <div className={positiveBarClass} style={{ width: `${positivePct}%` }} />
-        <div className={negativeBarClass} style={{ width: `${negativePct}%` }} />
-      </div>
-      <p className="mt-1 text-[10px] uppercase tracking-wider text-gray-700">{label}</p>
-    </div>
-  )
-}
-
-function countHeatClass(count, total, direction = 'good') {
-  const pct = total > 0 ? count / total : 0
-  if (pct >= 0.18) return direction === 'good' ? 'bg-accent-green/75 text-white' : 'bg-accent-red/75 text-white'
-  if (pct >= 0.08) return direction === 'good' ? 'bg-accent-green/35 text-white' : 'bg-accent-red/35 text-white'
-  return 'bg-transparent text-gray-300'
-}
-
-function ratioHeatClass(value) {
-  if (!Number.isFinite(value)) return 'bg-transparent text-gray-600'
-  if (value >= 2) return 'bg-accent-green/70 text-white'
-  if (value >= 1.15) return 'bg-accent-green/35 text-white'
-  if (value <= 0.75) return 'bg-accent-red/70 text-white'
-  if (value < 1) return 'bg-accent-red/35 text-white'
-  return 'bg-transparent text-gray-300'
-}
-
 function pctHeatClass(value) {
   if (!Number.isFinite(value)) return 'bg-transparent text-gray-600'
   if (value >= 70) return 'bg-accent-green/70 text-white'
@@ -288,157 +278,96 @@ function pctHeatClass(value) {
   return 'bg-transparent text-gray-300'
 }
 
-function atrHeatClass(count, total) {
-  const pct = total > 0 ? count / total : 0
-  if (pct >= 0.12) return 'bg-accent-yellow/70 text-gray-950'
-  if (count > 0) return 'bg-accent-yellow/25 text-accent-yellow'
-  return 'bg-transparent text-gray-500'
+function signedPctHeatClass(value) {
+  if (!Number.isFinite(value)) return 'bg-transparent text-gray-600'
+  if (value >= 10) return 'bg-accent-green/65 text-white'
+  if (value > 0) return 'bg-accent-green/25 text-gray-100'
+  if (value <= -10) return 'bg-accent-red/65 text-white'
+  if (value < 0) return 'bg-accent-red/25 text-gray-100'
+  return 'bg-transparent text-gray-300'
 }
 
-function BreadthCell({ children, className = '' }) {
+function pairHeatClass(value) {
+  if (!value) return 'bg-transparent text-gray-600'
+  const up = value.up || 0
+  const down = value.down || 0
+  if (up >= down * 2 && up > 0) return 'bg-accent-green/65 text-white'
+  if (up > down) return 'bg-accent-green/25 text-gray-100'
+  if (down >= up * 2 && down > 0) return 'bg-accent-red/65 text-white'
+  if (down > up) return 'bg-accent-red/25 text-gray-100'
+  return 'bg-transparent text-gray-300'
+}
+
+function metricCellClass(value, type) {
+  if (type === 'pct') return pctHeatClass(value)
+  if (type === 'signedPct') return signedPctHeatClass(value)
+  if (type === 'pair') return pairHeatClass(value)
+  return 'bg-transparent text-gray-300'
+}
+
+function formatMetricValue(value, type) {
+  if (type === 'pct') return fmtPct(value)
+  if (type === 'signedPct') return fmtSigned(value)
+  if (type === 'pair') return fmtPair(value)
+  return fmtNumber(value)
+}
+
+function HistoricalMetricCell({ entry, column }) {
+  const value = entry?.[column.key]
   return (
-    <td className={`border border-white/[0.04] px-3 py-2 text-center font-mono text-sm tabular-nums ${className}`}>
-      {children}
+    <td className={`border border-white/[0.04] px-3 py-2 text-center font-mono text-xs tabular-nums ${metricCellClass(value, column.type)}`}>
+      {formatMetricValue(value, column.type)}
     </td>
   )
 }
 
-function HistoricalBreadthTable({ marketHistory, liquidHistory }) {
-  const [active, setActive] = useState('market')
-  const history = active === 'market' ? marketHistory : liquidHistory
-  const rows = useMemo(() => [...(history || [])].slice(-24).reverse(), [history])
-  const latestEntry = rows[0] || null
-  const label = active === 'market' ? 'Market Leaders' : 'Liquid'
-
+function HistoricalBreadthMetricTable({ rows }) {
   return (
     <div className="rounded-xl border border-white/10 bg-[#10151d]">
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div>
-          <p className="text-sm font-semibold text-white">Historical Breadth Table</p>
-          <p className="mt-1 text-xs text-gray-500">Market-style breadth sheet for the last 24 sessions.</p>
+          <p className="text-sm font-semibold text-white">Historical Breadth Metrics</p>
+          <p className="mt-1 text-xs text-gray-500">
+            Six-month daily log of the same metrics in the current breadth comparison.
+          </p>
         </div>
-        <div className="inline-flex rounded-lg border border-white/10 bg-white/[0.02] p-1">
-          {[
-            ['market', 'Market Leaders'],
-            ['liquid', 'Liquid'],
-          ].map(([id, tabLabel]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setActive(id)}
-              className={`rounded-md px-2.5 py-1 text-xs transition-all ${
-                active === id ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
-              }`}
-            >
-              {tabLabel}
-            </button>
-          ))}
-        </div>
+        <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-gray-400">
+          Last {BREADTH_TABLE_SESSION_COUNT} sessions
+        </p>
       </div>
 
-      <div className="border-y border-white/[0.06] bg-white/[0.02] px-4 py-3">
-        <div className="flex flex-wrap items-center gap-4">
-          <p className="text-xs font-semibold uppercase tracking-widest text-gray-500">{label}</p>
-          <SummaryBar
-            label="Daily change"
-            positiveLabel="Advancing"
-            negativeLabel="Declining"
-            positiveCount={latestEntry?.advancers?.upCount || 0}
-            negativeCount={latestEntry?.advancers?.downCount || 0}
-            total={latestEntry?.advancers?.totalCount || 0}
-            positiveClass="text-accent-green"
-            negativeClass="text-accent-red"
-            positiveBarClass="bg-accent-green"
-            negativeBarClass="bg-accent-red"
-          />
-          <SummaryBar
-            label="63D range"
-            positiveLabel="63D High"
-            negativeLabel="63D Low"
-            positiveCount={latestEntry?.newHighLow?.newHighCount || 0}
-            negativeCount={latestEntry?.newHighLow?.newLowCount || 0}
-            total={latestEntry?.newHighLow?.totalCount || 0}
-            positiveClass="text-accent-blue"
-            negativeClass="text-accent-yellow"
-            positiveBarClass="bg-accent-blue"
-            negativeBarClass="bg-accent-yellow"
-          />
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="min-w-[1280px] w-full border-collapse text-sm">
+      <div className="overflow-x-auto border-t border-white/[0.06]">
+        <table className="min-w-[2800px] w-full border-collapse text-sm">
           <thead>
-            <tr className="text-center text-xs font-black uppercase tracking-wide text-gray-950">
-              <th rowSpan="2" className="border border-black/30 bg-[#efb800] px-3 py-3 text-left">Date</th>
-              <th colSpan="4" className="border border-black/30 bg-[#ffd21f] px-3 py-2">Primary Breadth Indicators</th>
-              <th colSpan="8" className="border border-black/30 bg-[#20c967] px-3 py-2">Secondary Breadth Indicators</th>
-              <th rowSpan="2" className="border border-black/30 bg-[#b77af4] px-3 py-2">10x ATR<br />Ext.</th>
-              <th rowSpan="2" className="border border-black/30 bg-[#5da2f3] px-3 py-2">&gt;50dma</th>
+            <tr className="text-center text-[11px] font-black uppercase tracking-wide text-gray-950">
+              <th rowSpan="2" className="sticky left-0 z-20 border border-black/30 bg-[#efb800] px-3 py-3 text-left">Date</th>
+              <th colSpan={HISTORICAL_METRIC_COLUMNS.length} className="border border-black/30 bg-[#3d84ff] px-3 py-2">Market Leaders</th>
+              <th colSpan={HISTORICAL_METRIC_COLUMNS.length} className="border border-black/30 bg-[#22c55e] px-3 py-2">Liquid</th>
             </tr>
-            <tr className="text-center text-[11px] font-black text-gray-950">
-              <th className="border border-black/30 bg-[#ffd21f] px-3 py-2">Stocks<br />Up 4%+<br />Today</th>
-              <th className="border border-black/30 bg-[#ffd21f] px-3 py-2">Stocks<br />Down 4%+<br />Today</th>
-              <th className="border border-black/30 bg-[#ffd21f] px-3 py-2">5 Day<br />Ratio</th>
-              <th className="border border-black/30 bg-[#ffd21f] px-3 py-2">10 Day<br />Ratio</th>
-              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Up 25%+<br />Quarter</th>
-              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Down 25%+<br />Quarter</th>
-              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Up 25%+<br />Month</th>
-              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Down 25%+<br />Month</th>
-              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Up 50%+<br />Month</th>
-              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Down 50%+<br />Month</th>
-              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Up 13%+<br />34 Days</th>
-              <th className="border border-black/30 bg-[#20c967] px-3 py-2">Down 13%+<br />34 Days</th>
+            <tr className="text-center text-[10px] font-black text-gray-950">
+              {['market', 'liquid'].flatMap(group => HISTORICAL_METRIC_COLUMNS.map(column => (
+                <th key={`${group}-${column.key}`} className="border border-black/30 bg-[#ffd21f] px-2 py-2">
+                  {column.label}
+                </th>
+              )))}
             </tr>
           </thead>
           <tbody>
             {rows.length ? rows.map(row => (
-              <tr key={`${active}-${row.date}`} className="bg-[#111821] hover:bg-white/[0.04]">
+              <tr key={row.date} className="bg-[#111821] hover:bg-white/[0.04]">
                 <td className="sticky left-0 z-10 border border-white/[0.04] bg-[#111821] px-3 py-2 font-mono text-sm font-semibold text-gray-100">
                   {fmtDateLabel(row.date)}
                 </td>
-                <BreadthCell className={countHeatClass(row.moves?.day4?.upCount || 0, row.moves?.day4?.totalCount || 0, 'good')}>
-                  {row.moves?.day4?.upCount || 0}
-                </BreadthCell>
-                <BreadthCell className={countHeatClass(row.moves?.day4?.downCount || 0, row.moves?.day4?.totalCount || 0, 'bad')}>
-                  {row.moves?.day4?.downCount || 0}
-                </BreadthCell>
-                <BreadthCell className={ratioHeatClass(row.ratios?.day5)}>{fmtRatio(row.ratios?.day5)}</BreadthCell>
-                <BreadthCell className={ratioHeatClass(row.ratios?.day10)}>{fmtRatio(row.ratios?.day10)}</BreadthCell>
-                <BreadthCell className={countHeatClass(row.moves?.quarter25?.upCount || 0, row.moves?.quarter25?.totalCount || 0, 'good')}>
-                  {row.moves?.quarter25?.upCount || 0}
-                </BreadthCell>
-                <BreadthCell className={countHeatClass(row.moves?.quarter25?.downCount || 0, row.moves?.quarter25?.totalCount || 0, 'bad')}>
-                  {row.moves?.quarter25?.downCount || 0}
-                </BreadthCell>
-                <BreadthCell className={countHeatClass(row.moves?.month25?.upCount || 0, row.moves?.month25?.totalCount || 0, 'good')}>
-                  {row.moves?.month25?.upCount || 0}
-                </BreadthCell>
-                <BreadthCell className={countHeatClass(row.moves?.month25?.downCount || 0, row.moves?.month25?.totalCount || 0, 'bad')}>
-                  {row.moves?.month25?.downCount || 0}
-                </BreadthCell>
-                <BreadthCell className={countHeatClass(row.moves?.month50?.upCount || 0, row.moves?.month50?.totalCount || 0, 'good')}>
-                  {row.moves?.month50?.upCount || 0}
-                </BreadthCell>
-                <BreadthCell className={countHeatClass(row.moves?.month50?.downCount || 0, row.moves?.month50?.totalCount || 0, 'bad')}>
-                  {row.moves?.month50?.downCount || 0}
-                </BreadthCell>
-                <BreadthCell className={countHeatClass(row.moves?.days34_13?.upCount || 0, row.moves?.days34_13?.totalCount || 0, 'good')}>
-                  {row.moves?.days34_13?.upCount || 0}
-                </BreadthCell>
-                <BreadthCell className={countHeatClass(row.moves?.days34_13?.downCount || 0, row.moves?.days34_13?.totalCount || 0, 'bad')}>
-                  {row.moves?.days34_13?.downCount || 0}
-                </BreadthCell>
-                <BreadthCell className={atrHeatClass(row.atrExtension10x?.count || 0, row.atrExtension10x?.totalCount || 0)}>
-                  {row.atrExtension10x?.count || 0}
-                </BreadthCell>
-                <BreadthCell className={pctHeatClass(row.sma50?.abovePct)}>
-                  {fmtPct(row.sma50?.abovePct)}
-                </BreadthCell>
+                {HISTORICAL_METRIC_COLUMNS.map(column => (
+                  <HistoricalMetricCell key={`market-${row.date}-${column.key}`} entry={row.market} column={column} />
+                ))}
+                {HISTORICAL_METRIC_COLUMNS.map(column => (
+                  <HistoricalMetricCell key={`liquid-${row.date}-${column.key}`} entry={row.liquid} column={column} />
+                ))}
               </tr>
             )) : (
               <tr>
-                <td colSpan="15" className="px-4 py-8 text-center text-sm text-gray-600">
+                <td colSpan={(HISTORICAL_METRIC_COLUMNS.length * 2) + 1} className="px-4 py-8 text-center text-sm text-gray-600">
                   No historical breadth rows yet.
                 </td>
               </tr>
@@ -526,6 +455,7 @@ function Drilldowns({ marketSnapshots, liquidSnapshots }) {
 export default function MorningBreadthDashboard() {
   const { listsById } = useResearchWatchlistStore()
   const { tradeReviewChartSettings } = useSettingsStore()
+  const [activeBreadthView, setActiveBreadthView] = useState('overview')
   const [metricFamily, setMetricFamily] = useState('sma')
   const [chartCollapsed, setChartCollapsed] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -593,6 +523,10 @@ export default function MorningBreadthDashboard() {
   const marketLatest = latest(marketHistory)
   const liquidLatest = latest(liquidHistory)
   const chartData = useMemo(() => mergeHistory(marketHistory, liquidHistory), [liquidHistory, marketHistory])
+  const historicalMetricRows = useMemo(
+    () => buildHistoricalBreadthMetricRows({ marketHistory, liquidHistory }),
+    [liquidHistory, marketHistory]
+  )
   const marketSnapshots = useMemo(
     () => buildListBreadthSymbolSnapshots({ symbols: marketLeadersSymbols, historyBarsBySymbol }),
     [historyBarsBySymbol, marketLeadersSymbols]
@@ -644,6 +578,23 @@ export default function MorningBreadthDashboard() {
         )}
       </div>
 
+      <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.02] p-1">
+        {BREADTH_VIEW_TABS.map(view => (
+          <button
+            key={view.id}
+            type="button"
+            onClick={() => setActiveBreadthView(view.id)}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+              activeBreadthView === view.id ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            {view.label}
+          </button>
+        ))}
+      </div>
+
+      {activeBreadthView === 'overview' ? (
+        <>
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <ListScoreCard label="Market Leaders" entry={marketLatest} tone="blue" />
         <ListScoreCard label="Liquid" entry={liquidLatest} tone="green" />
@@ -716,8 +667,6 @@ export default function MorningBreadthDashboard() {
 
       <MetricTable market={marketLatest} liquid={liquidLatest} />
 
-      <HistoricalBreadthTable marketHistory={marketHistory} liquidHistory={liquidHistory} />
-
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
           <div className="mb-3 flex items-center gap-2">
@@ -744,6 +693,10 @@ export default function MorningBreadthDashboard() {
       </div>
 
       <Drilldowns marketSnapshots={marketSnapshots} liquidSnapshots={liquidSnapshots} />
+        </>
+      ) : (
+        <HistoricalBreadthMetricTable rows={historicalMetricRows} />
+      )}
     </div>
   )
 }

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import {
+  BREADTH_TABLE_SESSION_COUNT,
+  buildHistoricalBreadthMetricRows,
   buildListBreadthHistory,
   buildListBreadthSymbolSnapshots,
   buildSmaBreadthHistory,
@@ -127,3 +129,18 @@ assert.deepEqual(snapshots.upMonth50.map(row => row.symbol), ['CCC'])
 assert.deepEqual(snapshots.upDays34_13.map(row => row.symbol), ['CCC', 'AAA'])
 assert.deepEqual(snapshots.atrExtension10x.map(row => row.symbol), ['AAA', 'BBB', 'CCC'])
 assert.deepEqual(snapshots.aboveSma50.map(row => row.symbol), ['CCC', 'AAA'])
+
+const tableRows = buildHistoricalBreadthMetricRows({
+  marketHistory: breadthHistory,
+  liquidHistory: breadthHistory.slice(0, -1),
+  limit: 3,
+})
+
+assert.equal(BREADTH_TABLE_SESSION_COUNT, 126)
+assert.equal(tableRows.length, 3)
+assert.equal(tableRows[0].date, latest.date)
+assert.equal(tableRows[0].market.sma5AbovePct, latest.sma5.abovePct)
+assert.equal(tableRows[0].market.upDown13Days34.up, latest.moves.days34_13.upCount)
+assert.equal(tableRows[0].market.above50dmaPct, latest.sma50.abovePct)
+assert.equal(tableRows[0].liquid, null)
+assert.equal(tableRows[1].liquid.date, breadthHistory.at(-2).date)

@@ -116,6 +116,7 @@ const ATR_EXTENSION_BASE_PERIOD = 21
 const ATR_EXTENSION_MULTIPLE = 10
 const DAYS34_WINDOW = 34
 const NEW_HIGH_LOW_WINDOW = 63
+export const BREADTH_TABLE_SESSION_COUNT = 126
 
 function pctChange(current, previous) {
   if (!Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) return null
@@ -577,4 +578,58 @@ export function buildListBreadthSymbolSnapshots({
     atrExtension10x: byDesc('atrExtensionMultiple').filter(row => row.atrExtensionMultiple >= ATR_EXTENSION_MULTIPLE).slice(0, limit),
     aboveSma50: byDesc('monthChangePct').filter(row => row.sma50Above).slice(0, limit),
   }
+}
+
+function metricTableSnapshot(entry) {
+  if (!entry) return null
+  return {
+    date: entry.date,
+    sma5AbovePct: entry.sma5?.abovePct ?? null,
+    ytdAvwapAbovePct: entry.avwap?.ytd?.abovePct ?? null,
+    m3AvwapAbovePct: entry.avwap?.m3?.abovePct ?? null,
+    m1AvwapAbovePct: entry.avwap?.m1?.abovePct ?? null,
+    w1AvwapAbovePct: entry.avwap?.w1?.abovePct ?? null,
+    m3DistancePct: entry.avwap?.m3?.avgDistancePct ?? null,
+    m1DistancePct: entry.avwap?.m1?.avgDistancePct ?? null,
+    w1DistancePct: entry.avwap?.w1?.avgDistancePct ?? null,
+    upDown4: {
+      up: entry.moves?.day4?.upCount || 0,
+      down: entry.moves?.day4?.downCount || 0,
+    },
+    upDown25Month: {
+      up: entry.moves?.month25?.upCount || 0,
+      down: entry.moves?.month25?.downCount || 0,
+    },
+    upDown50Month: {
+      up: entry.moves?.month50?.upCount || 0,
+      down: entry.moves?.month50?.downCount || 0,
+    },
+    upDown25Quarter: {
+      up: entry.moves?.quarter25?.upCount || 0,
+      down: entry.moves?.quarter25?.downCount || 0,
+    },
+    upDown13Days34: {
+      up: entry.moves?.days34_13?.upCount || 0,
+      down: entry.moves?.days34_13?.downCount || 0,
+    },
+    above50dmaPct: entry.sma50?.abovePct ?? null,
+  }
+}
+
+export function buildHistoricalBreadthMetricRows({
+  marketHistory = [],
+  liquidHistory = [],
+  limit = BREADTH_TABLE_SESSION_COUNT,
+} = {}) {
+  const marketByDate = new Map(marketHistory.map(entry => [entry.date, entry]))
+  const liquidByDate = new Map(liquidHistory.map(entry => [entry.date, entry]))
+  const dates = [...new Set([...marketByDate.keys(), ...liquidByDate.keys()])]
+    .sort((a, b) => b.localeCompare(a))
+    .slice(0, limit)
+
+  return dates.map(date => ({
+    date,
+    market: metricTableSnapshot(marketByDate.get(date)),
+    liquid: metricTableSnapshot(liquidByDate.get(date)),
+  }))
 }
