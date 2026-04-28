@@ -14,6 +14,18 @@ function average(values) {
   return finite.reduce((sum, value) => sum + value, 0) / finite.length
 }
 
+function percentile(sortedValues, rank) {
+  if (!sortedValues.length) return null
+  if (sortedValues.length === 1) return sortedValues[0]
+  const safeRank = Math.min(1, Math.max(0, rank))
+  const index = safeRank * (sortedValues.length - 1)
+  const lower = Math.floor(index)
+  const upper = Math.ceil(index)
+  if (lower === upper) return sortedValues[lower]
+  const weight = index - lower
+  return sortedValues[lower] + (sortedValues[upper] - sortedValues[lower]) * weight
+}
+
 function normalizeBars(bars = []) {
   return bars
     .map(bar => {
@@ -156,6 +168,15 @@ function rollingAverageAtIndex(bars, index, period) {
   return sum / period
 }
 
+function positiveChangeCountAtIndex(bars, index, period = 5) {
+  const startIndex = Math.max(1, index - period + 1)
+  let count = 0
+  for (let cursor = startIndex; cursor <= index; cursor += 1) {
+    if (pctChange(bars[cursor]?.close, bars[cursor - 1]?.close) > 0) count += 1
+  }
+  return count
+}
+
 function averageTrueRangeAtIndex(bars, index, period = ATR_PERIOD) {
   if (index < period) return null
   let sum = 0
@@ -187,8 +208,10 @@ function buildSymbolMetricRows(bars = [], windows = BREADTH_WINDOWS) {
   const normalizedBars = normalizeBars(bars)
   return normalizedBars.map((bar, index) => {
     const sma5 = rollingAverageAtIndex(normalizedBars, index, 5)
+    const sma20 = rollingAverageAtIndex(normalizedBars, index, 20)
     const sma21 = rollingAverageAtIndex(normalizedBars, index, ATR_EXTENSION_BASE_PERIOD)
     const sma50 = rollingAverageAtIndex(normalizedBars, index, 50)
+    const sma200 = rollingAverageAtIndex(normalizedBars, index, 200)
     const atr14 = averageTrueRangeAtIndex(normalizedBars, index, ATR_PERIOD)
     const highWindow = rollingBoundaryAtIndex(normalizedBars, index, NEW_HIGH_LOW_WINDOW, 'high', Math.max)
     const lowWindow = rollingBoundaryAtIndex(normalizedBars, index, NEW_HIGH_LOW_WINDOW, 'low', Math.min)
@@ -218,23 +241,43 @@ function buildSymbolMetricRows(bars = [], windows = BREADTH_WINDOWS) {
       anchorDate: Number.isInteger(ytdStartIndex) ? normalizedBars[ytdStartIndex]?.time || null : null,
     }
 
+    const monthChangePct = index >= windows.m1 ? pctChange(bar.close, normalizedBars[index - windows.m1].close) : null
+    const positiveDayCount5 = positiveChangeCountAtIndex(normalizedBars, index, 5)
+    const allAvwapAligned = ['ytd', 'm3', 'm1', 'w1'].every(key => avwap[key]?.isAbove === true)
+    const thrustPersistence = positiveDayCount5 >= 3 && Number.isFinite(monthChangePct) && monthChangePct > 0 && bar.close > (sma20 ?? Infinity)
+    const trendEfficient =
+      bar.close > (sma20 ?? Infinity) &&
+      avwap.m1?.isAbove === true &&
+      Number.isFinite(avwap.w1?.distancePct) &&
+      avwap.w1.distancePct >= 0 &&
+      avwap.w1.distancePct <= 10
+
     return {
       date: bar.time,
       close: bar.close,
       sma5,
       sma5Above: Number.isFinite(sma5) ? bar.close > sma5 : null,
       sma5Below: Number.isFinite(sma5) ? bar.close < sma5 : null,
+      sma20,
+      sma20Above: Number.isFinite(sma20) ? bar.close > sma20 : null,
+      sma20Below: Number.isFinite(sma20) ? bar.close < sma20 : null,
       sma50,
       sma50Above: Number.isFinite(sma50) ? bar.close > sma50 : null,
       sma50Below: Number.isFinite(sma50) ? bar.close < sma50 : null,
+      sma200,
+      sma200Above: Number.isFinite(sma200) ? bar.close > sma200 : null,
+      sma200Below: Number.isFinite(sma200) ? bar.close < sma200 : null,
       avwap,
       dayChangePct: index >= 1 ? pctChange(bar.close, normalizedBars[index - 1].close) : null,
-      monthChangePct: index >= windows.m1 ? pctChange(bar.close, normalizedBars[index - windows.m1].close) : null,
+      monthChangePct,
       quarterChangePct: index >= windows.m3 ? pctChange(bar.close, normalizedBars[index - windows.m3].close) : null,
       days34ChangePct: index >= DAYS34_WINDOW ? pctChange(bar.close, normalizedBars[index - DAYS34_WINDOW].close) : null,
       atrExtensionMultiple,
       isNewHigh: Number.isFinite(highWindow) ? bar.close >= highWindow : null,
       isNewLow: Number.isFinite(lowWindow) ? bar.close <= lowWindow : null,
+      allAvwapAligned,
+      thrustPersistence,
+      trendEfficient,
     }
   })
 }
@@ -287,16 +330,29 @@ function emptyExtensionMetric() {
   }
 }
 
+function emptyShareMetric() {
+  return {
+    count: 0,
+    totalCount: 0,
+    pct: 0,
+  }
+}
+
 function emptyHistoryEntry(date) {
   return {
     date,
     sma5: emptyPositionMetric(),
+    sma20: emptyPositionMetric(),
     sma50: emptyPositionMetric(),
+    sma200: emptyPositionMetric(),
     avwap: {
       ytd: emptyAvwapMetric(),
       m3: emptyAvwapMetric(),
       m1: emptyAvwapMetric(),
       w1: emptyAvwapMetric(),
+    },
+    alignment: {
+      allAvwap: emptyShareMetric(),
     },
     moves: {
       day4: emptyMoveMetric(),
@@ -305,9 +361,22 @@ function emptyHistoryEntry(date) {
       quarter25: emptyMoveMetric(),
       days34_13: emptyMoveMetric(),
     },
+    persistence: {
+      thrust5: emptyShareMetric(),
+    },
+    damage: {
+      downMonth8: emptyShareMetric(),
+      downMonth10: emptyShareMetric(),
+      downMonth15: emptyShareMetric(),
+    },
     advancers: emptyMoveMetric(),
     newHighLow: emptyNewHighLowMetric(),
     atrExtension10x: emptyExtensionMetric(),
+    trendQuality: {
+      efficientTrend: emptyShareMetric(),
+      tightDispersionPct: null,
+    },
+    _m1DistanceSamples: [],
     ratios: {
       day5: null,
       day10: null,
@@ -360,6 +429,12 @@ function addAtrExtension(metric, multiple) {
   if (multiple >= ATR_EXTENSION_MULTIPLE) metric.count += 1
 }
 
+function addShare(metric, active) {
+  if (typeof active !== 'boolean') return
+  metric.totalCount += 1
+  if (active) metric.count += 1
+}
+
 function finalizePosition(metric) {
   metric.abovePct = metric.totalCount ? round((metric.aboveCount / metric.totalCount) * 100, 1) : 0
   metric.belowPct = metric.totalCount ? round((metric.belowCount / metric.totalCount) * 100, 1) : 0
@@ -388,6 +463,11 @@ function finalizeNewHighLow(metric) {
 }
 
 function finalizeExtension(metric) {
+  metric.pct = metric.totalCount ? round((metric.count / metric.totalCount) * 100, 1) : 0
+  return metric
+}
+
+function finalizeShare(metric) {
   metric.pct = metric.totalCount ? round((metric.count / metric.totalCount) * 100, 1) : 0
   return metric
 }
@@ -476,18 +556,29 @@ export function buildListBreadthHistory({
     for (const row of buildSymbolMetricRows(historyBarsBySymbol[symbol] || [], windows)) {
       const entry = entriesByDate.get(row.date) || emptyHistoryEntry(row.date)
       addPosition(entry.sma5, row.sma5Above, row.sma5Below)
+      addPosition(entry.sma20, row.sma20Above, row.sma20Below)
       addPosition(entry.sma50, row.sma50Above, row.sma50Below)
+      addPosition(entry.sma200, row.sma200Above, row.sma200Below)
       for (const key of ['ytd', 'm3', 'm1', 'w1']) {
         addAvwap(entry.avwap[key], row.avwap[key])
       }
+      addShare(entry.alignment.allAvwap, row.allAvwapAligned)
       addMove(entry.moves.day4, row.dayChangePct, 4)
       addMove(entry.moves.month25, row.monthChangePct, 25)
       addMove(entry.moves.month50, row.monthChangePct, 50)
       addMove(entry.moves.quarter25, row.quarterChangePct, 25)
       addMove(entry.moves.days34_13, row.days34ChangePct, 13)
+      addShare(entry.persistence.thrust5, row.thrustPersistence)
+      addShare(entry.damage.downMonth8, Number.isFinite(row.monthChangePct) ? row.monthChangePct <= -8 : null)
+      addShare(entry.damage.downMonth10, Number.isFinite(row.monthChangePct) ? row.monthChangePct <= -10 : null)
+      addShare(entry.damage.downMonth15, Number.isFinite(row.monthChangePct) ? row.monthChangePct <= -15 : null)
       addAdvancer(entry.advancers, row.dayChangePct)
       addNewHighLow(entry.newHighLow, row.isNewHigh, row.isNewLow)
       addAtrExtension(entry.atrExtension10x, row.atrExtensionMultiple)
+      addShare(entry.trendQuality.efficientTrend, row.trendEfficient)
+      if (Number.isFinite(row.avwap?.m1?.distancePct)) {
+        entry._m1DistanceSamples.push(row.avwap.m1.distancePct)
+      }
       entriesByDate.set(row.date, entry)
     }
   }
@@ -496,16 +587,31 @@ export function buildListBreadthHistory({
     .sort((a, b) => a.date.localeCompare(b.date))
     .map(entry => {
       finalizePosition(entry.sma5)
+      finalizePosition(entry.sma20)
       finalizePosition(entry.sma50)
+      finalizePosition(entry.sma200)
       for (const key of ['ytd', 'm3', 'm1', 'w1']) {
         finalizeAvwap(entry.avwap[key])
       }
+      finalizeShare(entry.alignment.allAvwap)
       for (const key of ['day4', 'month25', 'month50', 'quarter25', 'days34_13']) {
         finalizeMove(entry.moves[key])
       }
+      finalizeShare(entry.persistence.thrust5)
+      finalizeShare(entry.damage.downMonth8)
+      finalizeShare(entry.damage.downMonth10)
+      finalizeShare(entry.damage.downMonth15)
       finalizeMove(entry.advancers)
       finalizeNewHighLow(entry.newHighLow)
       finalizeExtension(entry.atrExtension10x)
+      finalizeShare(entry.trendQuality.efficientTrend)
+      if (entry._m1DistanceSamples.length) {
+        const sortedDistances = [...entry._m1DistanceSamples].sort((a, b) => a - b)
+        const median = percentile(sortedDistances, 0.5)
+        const tightCount = sortedDistances.filter(value => Math.abs(value - median) <= 10).length
+        entry.trendQuality.tightDispersionPct = round((tightCount / sortedDistances.length) * 100, 1)
+      }
+      delete entry._m1DistanceSamples
       const regime = scoreBreadthEntry(entry)
       return {
         ...entry,
@@ -527,7 +633,9 @@ function latestSymbolSnapshot(symbol, historyBarsBySymbol, windows = BREADTH_WIN
     date: latest.date,
     close: latest.close,
     sma5Above: latest.sma5Above,
+    sma20Above: latest.sma20Above,
     sma50Above: latest.sma50Above,
+    sma200Above: latest.sma200Above,
     ytdDistancePct: round(latest.avwap.ytd.distancePct, 2),
     m3DistancePct: round(latest.avwap.m3.distancePct, 2),
     m1DistancePct: round(latest.avwap.m1.distancePct, 2),
@@ -585,10 +693,12 @@ function metricTableSnapshot(entry) {
   return {
     date: entry.date,
     sma5AbovePct: entry.sma5?.abovePct ?? null,
+    sma20AbovePct: entry.sma20?.abovePct ?? null,
     ytdAvwapAbovePct: entry.avwap?.ytd?.abovePct ?? null,
     m3AvwapAbovePct: entry.avwap?.m3?.abovePct ?? null,
     m1AvwapAbovePct: entry.avwap?.m1?.abovePct ?? null,
     w1AvwapAbovePct: entry.avwap?.w1?.abovePct ?? null,
+    allAvwapAlignedPct: entry.alignment?.allAvwap?.pct ?? null,
     m3DistancePct: entry.avwap?.m3?.avgDistancePct ?? null,
     m1DistancePct: entry.avwap?.m1?.avgDistancePct ?? null,
     w1DistancePct: entry.avwap?.w1?.avgDistancePct ?? null,
@@ -612,7 +722,23 @@ function metricTableSnapshot(entry) {
       up: entry.moves?.days34_13?.upCount || 0,
       down: entry.moves?.days34_13?.downCount || 0,
     },
+    newHighLow: {
+      up: entry.newHighLow?.newHighCount || 0,
+      down: entry.newHighLow?.newLowCount || 0,
+    },
+    thrustPersistencePct: entry.persistence?.thrust5?.pct ?? null,
+    atrExtensionPct: entry.atrExtension10x?.pct ?? null,
+    down8Pct: entry.damage?.downMonth8?.pct ?? null,
+    down10Pct: entry.damage?.downMonth10?.pct ?? null,
+    down15Pct: entry.damage?.downMonth15?.pct ?? null,
+    newLowPct: entry.newHighLow?.newLowPct ?? null,
+    below20dmaPct: entry.sma20?.belowPct ?? null,
     above50dmaPct: entry.sma50?.abovePct ?? null,
+    below50dmaPct: entry.sma50?.belowPct ?? null,
+    sma200AbovePct: entry.sma200?.abovePct ?? null,
+    below200dmaPct: entry.sma200?.belowPct ?? null,
+    trendEfficiencyPct: entry.trendQuality?.efficientTrend?.pct ?? null,
+    tightDispersionPct: entry.trendQuality?.tightDispersionPct ?? null,
   }
 }
 

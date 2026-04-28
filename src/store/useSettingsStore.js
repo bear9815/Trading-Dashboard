@@ -26,6 +26,44 @@ const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
 }
 
+export const DEFAULT_BREADTH_TABLE_SETTINGS = {
+  activeGroup: 'avwap',
+  heatmap: {
+    pctLowerBands: [15, 35],
+    pctUpperBands: [65, 85],
+    signedLowerBands: [15],
+    signedUpperBands: [85],
+  },
+}
+
+function normalizePercentileBands(values = []) {
+  return [...new Set(
+    (Array.isArray(values) ? values : [values])
+      .map(value => Number(value))
+      .filter(Number.isFinite)
+      .map(value => Math.min(99, Math.max(1, Math.round(value))))
+  )].sort((a, b) => a - b)
+}
+
+export function normalizeBreadthTableSettings(settings) {
+  const current = settings || {}
+  return {
+    ...DEFAULT_BREADTH_TABLE_SETTINGS,
+    ...current,
+    activeGroup: typeof current.activeGroup === 'string' && current.activeGroup.trim()
+      ? current.activeGroup
+      : DEFAULT_BREADTH_TABLE_SETTINGS.activeGroup,
+    heatmap: {
+      ...DEFAULT_BREADTH_TABLE_SETTINGS.heatmap,
+      ...(current.heatmap || {}),
+      pctLowerBands: normalizePercentileBands(current.heatmap?.pctLowerBands ?? DEFAULT_BREADTH_TABLE_SETTINGS.heatmap.pctLowerBands),
+      pctUpperBands: normalizePercentileBands(current.heatmap?.pctUpperBands ?? DEFAULT_BREADTH_TABLE_SETTINGS.heatmap.pctUpperBands),
+      signedLowerBands: normalizePercentileBands(current.heatmap?.signedLowerBands ?? DEFAULT_BREADTH_TABLE_SETTINGS.heatmap.signedLowerBands),
+      signedUpperBands: normalizePercentileBands(current.heatmap?.signedUpperBands ?? DEFAULT_BREADTH_TABLE_SETTINGS.heatmap.signedUpperBands),
+    },
+  }
+}
+
 function normalizeAvwapPreset(preset, index = 0) {
   const mode = preset?.mode === 'fixed-date'
     ? 'fixed-date'
@@ -122,6 +160,7 @@ const CLOUD_FIELDS = [
   'dashboardNote', 'openPositionsColumns',
   'riskVisibleColumns',
   'tradeReviewChartSettings',
+  'breadthTableSettings',
   'tradeReviewManualAnchorsBySymbol',
   'excludedSymbols', 'strategies', 'edges',
   // symbolThemes intentionally excluded — it's a large AI cache, device-local is fine
@@ -156,6 +195,7 @@ export const useSettingsStore = create(
       benchmarkSymbol: 'SPY',
       tpMultiplier: 2,
       tradeReviewChartSettings: normalizeTradeReviewChartSettings(),
+      breadthTableSettings: normalizeBreadthTableSettings(),
       tradeReviewManualAnchorsBySymbol: {},
 
       alpacaApiKey: '',
@@ -218,6 +258,7 @@ export const useSettingsStore = create(
             ...s,
             ...data.data,
             tradeReviewChartSettings: normalizeTradeReviewChartSettings(data.data.tradeReviewChartSettings ?? s.tradeReviewChartSettings),
+            breadthTableSettings: normalizeBreadthTableSettings(data.data.breadthTableSettings ?? s.breadthTableSettings),
             tradeReviewManualAnchorsBySymbol: normalizeTradeReviewManualAnchorsBySymbol(
               data.data.tradeReviewManualAnchorsBySymbol ?? s.tradeReviewManualAnchorsBySymbol
             ),
@@ -270,6 +311,19 @@ export const useSettingsStore = create(
         })
         set({ tradeReviewChartSettings: next })
         saveToCloud({ ...get(), tradeReviewChartSettings: next })
+      },
+      setBreadthTableSettings: (settings) => {
+        const current = get().breadthTableSettings || {}
+        const next = normalizeBreadthTableSettings({
+          ...current,
+          ...(settings || {}),
+          heatmap: {
+            ...(current.heatmap || {}),
+            ...(settings?.heatmap || {}),
+          },
+        })
+        set({ breadthTableSettings: next })
+        saveToCloud({ ...get(), breadthTableSettings: next })
       },
       setTradeReviewManualAnchorsBySymbol: (manualAnchorsBySymbol) => {
         const next = normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol)
@@ -385,6 +439,9 @@ export const useSettingsStore = create(
         merged.useLocalLLM = merged.researchAiProvider === 'local'
         merged.tradeReviewChartSettings = normalizeTradeReviewChartSettings(
           persistedState?.tradeReviewChartSettings ?? currentState?.tradeReviewChartSettings
+        )
+        merged.breadthTableSettings = normalizeBreadthTableSettings(
+          persistedState?.breadthTableSettings ?? currentState?.breadthTableSettings
         )
         merged.tradeReviewManualAnchorsBySymbol = normalizeTradeReviewManualAnchorsBySymbol(
           persistedState?.tradeReviewManualAnchorsBySymbol ?? currentState?.tradeReviewManualAnchorsBySymbol

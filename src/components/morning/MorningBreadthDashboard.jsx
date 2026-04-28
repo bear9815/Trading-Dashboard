@@ -6,6 +6,7 @@ import {
   ChevronUp,
   Gauge,
   RefreshCw,
+  SlidersHorizontal,
   TrendingDown,
   TrendingUp,
 } from 'lucide-react'
@@ -33,6 +34,7 @@ import {
   buildListBreadthSymbolSnapshots,
 } from '../../utils/listBreadth.js'
 import { resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
+import BreadthTableSettingsModal from './BreadthTableSettingsModal.jsx'
 import { useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
 
 const METRIC_FAMILIES = [
@@ -67,21 +69,71 @@ const BREADTH_VIEW_TABS = [
   { id: 'table', label: 'Breadth Table' },
 ]
 
-const HISTORICAL_METRIC_COLUMNS = [
-  { key: 'sma5AbovePct', label: '5DMA Above', type: 'pct' },
-  { key: 'ytdAvwapAbovePct', label: 'YTD AVWAP Above', type: 'pct' },
-  { key: 'm3AvwapAbovePct', label: '3M AVWAP Above', type: 'pct' },
-  { key: 'm1AvwapAbovePct', label: '1M AVWAP Above', type: 'pct' },
-  { key: 'w1AvwapAbovePct', label: '1W AVWAP Above', type: 'pct' },
-  { key: 'm3DistancePct', label: '3M Distance', type: 'signedPct' },
-  { key: 'm1DistancePct', label: '1M Distance', type: 'signedPct' },
-  { key: 'w1DistancePct', label: '1W Distance', type: 'signedPct' },
-  { key: 'upDown4', label: 'Up / Down 4%', type: 'pair' },
-  { key: 'upDown25Month', label: 'Up / Down 25% 1M', type: 'pair' },
-  { key: 'upDown50Month', label: 'Up / Down 50% 1M', type: 'pair' },
-  { key: 'upDown25Quarter', label: 'Up / Down 25% Quarter', type: 'pair' },
-  { key: 'upDown13Days34', label: 'Up / Down 13% 34D', type: 'pair' },
-  { key: 'above50dmaPct', label: 'Above 50DMA', type: 'pct' },
+const HISTORICAL_COLUMN_GROUPS = [
+  {
+    id: 'participation',
+    label: 'Participation',
+    description: 'Moving-average participation across short, intermediate, and structural trends.',
+    columns: [
+      { key: 'sma5AbovePct', label: '5DMA Above', type: 'pct' },
+      { key: 'sma20AbovePct', label: '20DMA Above', type: 'pct' },
+      { key: 'above50dmaPct', label: 'Above 50DMA', type: 'pct' },
+      { key: 'sma200AbovePct', label: 'Above 200DMA', type: 'pct' },
+    ],
+  },
+  {
+    id: 'avwap',
+    label: 'AVWAP Structure',
+    description: 'All anchored VWAP participation and distance metrics stay together in this view.',
+    columns: [
+      { key: 'ytdAvwapAbovePct', label: 'YTD AVWAP Above', type: 'pct' },
+      { key: 'm3AvwapAbovePct', label: '3M AVWAP Above', type: 'pct' },
+      { key: 'm1AvwapAbovePct', label: '1M AVWAP Above', type: 'pct' },
+      { key: 'w1AvwapAbovePct', label: '1W AVWAP Above', type: 'pct' },
+      { key: 'allAvwapAlignedPct', label: 'All AVWAP Aligned', type: 'pct' },
+      { key: 'm3DistancePct', label: '3M Distance', type: 'signedPct' },
+      { key: 'm1DistancePct', label: '1M Distance', type: 'signedPct' },
+      { key: 'w1DistancePct', label: '1W Distance', type: 'signedPct' },
+    ],
+  },
+  {
+    id: 'thrust',
+    label: 'Momentum / Thrust',
+    description: 'Breadth thrust, highs vs lows, and extension that can hint at exhaustion.',
+    columns: [
+      { key: 'upDown4', label: 'Up / Down 4%', type: 'pair' },
+      { key: 'upDown25Month', label: 'Up / Down 25% 1M', type: 'pair' },
+      { key: 'upDown50Month', label: 'Up / Down 50% 1M', type: 'pair' },
+      { key: 'upDown25Quarter', label: 'Up / Down 25% Quarter', type: 'pair' },
+      { key: 'upDown13Days34', label: 'Up / Down 13% 34D', type: 'pair' },
+      { key: 'newHighLow', label: 'New Highs / Lows', type: 'pair' },
+      { key: 'thrustPersistencePct', label: 'Thrust Persistence', type: 'pct' },
+      { key: 'atrExtensionPct', label: '10x ATR Extended', type: 'inversePct' },
+    ],
+  },
+  {
+    id: 'damage',
+    label: 'Damage / Capitulation',
+    description: 'Drawdown and breakdown breadth for spotting washouts or deeper damage.',
+    columns: [
+      { key: 'down8Pct', label: 'Down 8% In 1M', type: 'inversePct' },
+      { key: 'down10Pct', label: 'Down 10% In 1M', type: 'inversePct' },
+      { key: 'down15Pct', label: 'Down 15% In 1M', type: 'inversePct' },
+      { key: 'newLowPct', label: 'New Lows', type: 'inversePct' },
+      { key: 'below20dmaPct', label: 'Below 20DMA', type: 'inversePct' },
+      { key: 'below50dmaPct', label: 'Below 50DMA', type: 'inversePct' },
+      { key: 'below200dmaPct', label: 'Below 200DMA', type: 'inversePct' },
+    ],
+  },
+  {
+    id: 'trend',
+    label: 'Trend Quality',
+    description: 'Orderly trend behavior and cross-sectional dispersion quality.',
+    columns: [
+      { key: 'trendEfficiencyPct', label: 'Trend Efficiency', type: 'pct' },
+      { key: 'tightDispersionPct', label: 'Tight Dispersion', type: 'pct' },
+    ],
+  },
 ]
 
 function average(values) {
@@ -284,24 +336,6 @@ function MetricTable({ entriesById }) {
   )
 }
 
-function pctHeatClass(value) {
-  if (!Number.isFinite(value)) return 'bg-transparent text-gray-600'
-  if (value >= 70) return 'bg-accent-green/70 text-white'
-  if (value >= 55) return 'bg-accent-green/30 text-white'
-  if (value <= 35) return 'bg-accent-red/70 text-white'
-  if (value <= 45) return 'bg-accent-red/35 text-white'
-  return 'bg-transparent text-gray-300'
-}
-
-function signedPctHeatClass(value) {
-  if (!Number.isFinite(value)) return 'bg-transparent text-gray-600'
-  if (value >= 10) return 'bg-accent-green/65 text-white'
-  if (value > 0) return 'bg-accent-green/25 text-gray-100'
-  if (value <= -10) return 'bg-accent-red/65 text-white'
-  if (value < 0) return 'bg-accent-red/25 text-gray-100'
-  return 'bg-transparent text-gray-300'
-}
-
 function pairHeatClass(value) {
   if (!value) return 'bg-transparent text-gray-600'
   const up = value.up || 0
@@ -325,8 +359,47 @@ function percentile(sortedValues, rank) {
   return sortedValues[lower] + (sortedValues[upper] - sortedValues[lower]) * weight
 }
 
-function buildHistoricalColumnStats(rows, activeList) {
-  return HISTORICAL_METRIC_COLUMNS.reduce((next, column) => {
+const POSITIVE_HEAT_SCALE = [
+  'bg-accent-green/15 text-gray-100',
+  'bg-accent-green/25 text-gray-100',
+  'bg-accent-green/40 text-white',
+  'bg-accent-green/55 text-white',
+  'bg-accent-green/70 text-white',
+]
+
+const NEGATIVE_HEAT_SCALE = [
+  'bg-accent-red/15 text-gray-100',
+  'bg-accent-red/25 text-gray-100',
+  'bg-accent-red/40 text-white',
+  'bg-accent-red/55 text-white',
+  'bg-accent-red/70 text-white',
+]
+
+function bandLevelForUpper(value, thresholds = []) {
+  let level = 0
+  thresholds.forEach((threshold, index) => {
+    if (Number.isFinite(threshold) && value >= threshold) level = index + 1
+  })
+  return level
+}
+
+function bandLevelForLower(value, thresholds = []) {
+  let level = 0
+  for (let index = thresholds.length - 1; index >= 0; index -= 1) {
+    if (Number.isFinite(thresholds[index]) && value <= thresholds[index]) {
+      level = thresholds.length - index
+    }
+  }
+  return level
+}
+
+function heatClassFromLevel(level, palette) {
+  if (!level) return 'bg-transparent text-gray-300'
+  return palette[Math.min(level - 1, palette.length - 1)]
+}
+
+function buildHistoricalColumnStats(rows, activeList, columns, heatmapSettings) {
+  return columns.reduce((next, column) => {
     const values = rows
       .map(row => row?.[activeList]?.[column.key])
       .filter(value => {
@@ -347,10 +420,14 @@ function buildHistoricalColumnStats(rows, activeList) {
     const sorted = [...values].sort((a, b) => a - b)
     next[column.key] = {
       type: column.type,
-      p15: percentile(sorted, 0.15),
-      p35: percentile(sorted, 0.35),
-      p65: percentile(sorted, 0.65),
-      p85: percentile(sorted, 0.85),
+      lowerThresholds: (column.type === 'signedPct'
+        ? heatmapSettings?.signedLowerBands
+        : heatmapSettings?.pctLowerBands
+      ).map(rank => percentile(sorted, rank / 100)),
+      upperThresholds: (column.type === 'signedPct'
+        ? heatmapSettings?.signedUpperBands
+        : heatmapSettings?.pctUpperBands
+      ).map(rank => percentile(sorted, rank / 100)),
     }
     return next
   }, {})
@@ -358,40 +435,50 @@ function buildHistoricalColumnStats(rows, activeList) {
 
 function hybridPctHeatClass(value, stats) {
   if (!Number.isFinite(value)) return 'bg-transparent text-gray-600'
-  if (!stats) return pctHeatClass(value)
-  if (value >= stats.p85) return 'bg-accent-green/70 text-white'
-  if (value >= stats.p65) return 'bg-accent-green/30 text-white'
-  if (value <= stats.p15) return 'bg-accent-red/70 text-white'
-  if (value <= stats.p35) return 'bg-accent-red/35 text-white'
+  if (!stats) return 'bg-transparent text-gray-300'
+  const positiveLevel = bandLevelForUpper(value, stats.upperThresholds)
+  if (positiveLevel) return heatClassFromLevel(positiveLevel, POSITIVE_HEAT_SCALE)
+  const negativeLevel = bandLevelForLower(value, stats.lowerThresholds)
+  if (negativeLevel) return heatClassFromLevel(negativeLevel, NEGATIVE_HEAT_SCALE)
+  return 'bg-transparent text-gray-300'
+}
+
+function hybridInversePctHeatClass(value, stats) {
+  if (!Number.isFinite(value)) return 'bg-transparent text-gray-600'
+  if (!stats) return 'bg-transparent text-gray-300'
+  const negativeLevel = bandLevelForUpper(value, stats.upperThresholds)
+  if (negativeLevel) return heatClassFromLevel(negativeLevel, NEGATIVE_HEAT_SCALE)
+  const positiveLevel = bandLevelForLower(value, stats.lowerThresholds)
+  if (positiveLevel) return heatClassFromLevel(positiveLevel, POSITIVE_HEAT_SCALE)
   return 'bg-transparent text-gray-300'
 }
 
 function hybridSignedPctHeatClass(value, stats) {
   if (!Number.isFinite(value)) return 'bg-transparent text-gray-600'
-  if (!stats) return signedPctHeatClass(value)
+  if (!stats) return 'bg-transparent text-gray-300'
   if (value === 0) return 'bg-transparent text-gray-300'
 
-  const positiveExtreme = Number.isFinite(stats.p85) ? Math.max(stats.p85, 0) : 0
-  const negativeExtreme = Number.isFinite(stats.p15) ? Math.min(stats.p15, 0) : 0
-
   if (value > 0) {
-    if (positiveExtreme > 0 && value >= positiveExtreme) return 'bg-accent-green/65 text-white'
+    const positiveLevel = bandLevelForUpper(value, stats.upperThresholds)
+    if (positiveLevel) return heatClassFromLevel(positiveLevel, POSITIVE_HEAT_SCALE)
     return 'bg-accent-green/25 text-gray-100'
   }
 
-  if (negativeExtreme < 0 && value <= negativeExtreme) return 'bg-accent-red/65 text-white'
+  const negativeLevel = bandLevelForLower(value, stats.lowerThresholds)
+  if (negativeLevel) return heatClassFromLevel(negativeLevel, NEGATIVE_HEAT_SCALE)
   return 'bg-accent-red/25 text-gray-100'
 }
 
 function metricCellClass(value, type, stats) {
   if (type === 'pct') return hybridPctHeatClass(value, stats)
+  if (type === 'inversePct') return hybridInversePctHeatClass(value, stats)
   if (type === 'signedPct') return hybridSignedPctHeatClass(value, stats)
   if (type === 'pair') return pairHeatClass(value)
   return 'bg-transparent text-gray-300'
 }
 
 function formatMetricValue(value, type) {
-  if (type === 'pct') return fmtPct(value)
+  if (type === 'pct' || type === 'inversePct') return fmtPct(value)
   if (type === 'signedPct') return fmtSigned(value)
   if (type === 'pair') return fmtPair(value)
   return fmtNumber(value)
@@ -406,10 +493,13 @@ function HistoricalMetricCell({ entry, column, stats }) {
   )
 }
 
-function HistoricalBreadthMetricTable({ rows }) {
+function HistoricalBreadthMetricTable({ rows, settings, onSettingsChange }) {
   const [activeList, setActiveList] = useState('liquid')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const activeConfig = BREADTH_LISTS.find(config => config.id === activeList) || BREADTH_LISTS[2]
   const activeLabel = activeConfig.label
+  const activeGroup = HISTORICAL_COLUMN_GROUPS.find(group => group.id === settings?.activeGroup) || HISTORICAL_COLUMN_GROUPS[1]
+  const activeColumns = activeGroup.columns
   const activeAccent = activeList === 'market'
     ? 'from-accent-blue/35 via-accent-blue/15 to-white/[0.04]'
     : activeList === 'liquidTrend'
@@ -420,84 +510,125 @@ function HistoricalBreadthMetricTable({ rows }) {
     : activeList === 'liquidTrend'
       ? 'from-[#4a3f13] via-[#282310] to-[#101722]'
       : 'from-[#173328] via-[#14251e] to-[#101722]'
-  const columnStats = useMemo(() => buildHistoricalColumnStats(rows, activeList), [rows, activeList])
+  const columnStats = useMemo(
+    () => buildHistoricalColumnStats(rows, activeList, activeColumns, settings?.heatmap || {}),
+    [rows, activeList, activeColumns, settings?.heatmap]
+  )
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#080d14] shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
-      <div className={`flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] bg-gradient-to-r ${activeAccent} px-4 py-3`}>
-        <div>
-          <p className="text-[11px] font-black uppercase tracking-[0.22em] text-white/85">Historical Breadth Tape</p>
-          <p className="mt-1 text-[11px] font-medium text-slate-400">
-            One trading year of daily breadth metrics, latest session first.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-xl border border-white/10 bg-black/25 p-1 shadow-inner shadow-black/30">
-            {BREADTH_LISTS.slice().reverse().map(({ id, label }) => (
+    <>
+      <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#080d14] shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
+        <div className={`space-y-3 border-b border-white/[0.06] bg-gradient-to-r ${activeAccent} px-4 py-3`}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-black uppercase tracking-[0.22em] text-white/85">Historical Breadth Tape</p>
+              <p className="mt-1 text-[11px] font-medium text-slate-400">
+                One trading year of daily breadth metrics, latest session first.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex rounded-xl border border-white/10 bg-black/25 p-1 shadow-inner shadow-black/30">
+                {BREADTH_LISTS.slice().reverse().map(({ id, label }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setActiveList(id)}
+                    className={`rounded-lg px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] transition-all ${
+                      activeList === id ? 'bg-white/10 text-white shadow-sm shadow-black/20' : 'text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <button
-                key={id}
                 type="button"
-                onClick={() => setActiveList(id)}
-                className={`rounded-lg px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] transition-all ${
-                  activeList === id ? 'bg-white/10 text-white shadow-sm shadow-black/20' : 'text-slate-500 hover:text-slate-300'
+                onClick={() => setSettingsOpen(true)}
+                className="inline-flex items-center gap-1 rounded-xl border border-white/10 bg-black/25 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] text-slate-300 hover:text-white"
+              >
+                <SlidersHorizontal size={12} />
+                Heatmap
+              </button>
+              <p className="rounded-xl border border-white/10 bg-black/25 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] text-slate-300">
+                Last {BREADTH_TABLE_SESSION_COUNT} sessions
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {HISTORICAL_COLUMN_GROUPS.map(group => (
+              <button
+                key={group.id}
+                type="button"
+                onClick={() => onSettingsChange({ activeGroup: group.id })}
+                className={`rounded-xl border px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] transition-all ${
+                  settings?.activeGroup === group.id
+                    ? 'border-white/20 bg-white/10 text-white'
+                    : 'border-white/10 bg-black/20 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {label}
+                {group.label}
               </button>
             ))}
           </div>
-          <p className="rounded-xl border border-white/10 bg-black/25 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] text-slate-300">
-            Last {BREADTH_TABLE_SESSION_COUNT} sessions
-          </p>
-        </div>
-      </div>
 
-      <div className="relative isolate max-h-[72vh] overflow-auto">
-        <table className="min-w-[1460px] w-full border-separate border-spacing-0 text-sm">
-          <thead>
-            <tr className="text-center text-[10px] font-black uppercase tracking-[0.2em] text-slate-200">
-              <th className="sticky left-0 top-0 z-40 h-[34px] border-b border-r border-white/10 bg-[#111827] px-3 py-2.5 text-left shadow-[8px_0_18px_rgba(0,0,0,0.28)]" />
-              <th colSpan={HISTORICAL_METRIC_COLUMNS.length} className={`sticky top-0 z-30 h-[34px] border-b border-white/10 bg-gradient-to-r px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.34)] ${activeHeaderBand}`}>
-                {activeLabel}
-              </th>
-            </tr>
-            <tr className="text-center text-[10px] font-black uppercase tracking-[0.12em] text-slate-300">
-              <th className="sticky left-0 top-[34px] z-50 border-b border-r border-white/[0.07] bg-[#0f1724] px-3 py-2.5 text-left shadow-[8px_10px_20px_rgba(0,0,0,0.3)]">
-                Date
-              </th>
-              {HISTORICAL_METRIC_COLUMNS.map(column => (
-                <th key={column.key} className="sticky top-[34px] z-30 border-b border-r border-white/[0.07] bg-[#0f1724] px-2 py-2.5 shadow-[0_10px_20px_rgba(0,0,0,0.3)]">
-                  {column.label}
+          <p className="text-[11px] text-slate-400">{activeGroup.description}</p>
+        </div>
+
+        <div className="relative isolate max-h-[72vh] overflow-auto">
+          <table className="min-w-full w-max border-separate border-spacing-0 text-sm">
+            <thead>
+              <tr className="text-center text-[10px] font-black uppercase tracking-[0.2em] text-slate-200">
+                <th className="sticky left-0 top-0 z-40 h-[34px] border-b border-r border-white/10 bg-[#111827] px-3 py-2.5 text-left shadow-[8px_0_18px_rgba(0,0,0,0.28)]" />
+                <th colSpan={activeColumns.length} className={`sticky top-0 z-30 h-[34px] border-b border-white/10 bg-gradient-to-r px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.34)] ${activeHeaderBand}`}>
+                  {activeLabel}
                 </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length ? rows.map(row => (
-              <tr key={`${activeList}-${row.date}`} className="bg-[#0b111a] odd:bg-[#0d1420] hover:bg-white/[0.045]">
-                <td className="sticky left-0 z-20 border-b border-r border-white/[0.06] bg-[#101722] px-3 py-2 font-mono text-xs font-black tabular-nums text-slate-200 shadow-[8px_0_18px_rgba(0,0,0,0.24)]">
-                  {fmtDateLabel(row.date)}
-                </td>
-                {HISTORICAL_METRIC_COLUMNS.map(column => (
-                  <HistoricalMetricCell
-                    key={`${activeList}-${row.date}-${column.key}`}
-                    entry={row[activeList]}
-                    column={column}
-                    stats={columnStats[column.key]}
-                  />
+              </tr>
+              <tr className="text-center text-[10px] font-black uppercase tracking-[0.12em] text-slate-300">
+                <th className="sticky left-0 top-[34px] z-50 border-b border-r border-white/[0.07] bg-[#0f1724] px-3 py-2.5 text-left shadow-[8px_10px_20px_rgba(0,0,0,0.3)]">
+                  Date
+                </th>
+                {activeColumns.map(column => (
+                  <th key={column.key} className="sticky top-[34px] z-30 border-b border-r border-white/[0.07] bg-[#0f1724] px-2 py-2.5 shadow-[0_10px_20px_rgba(0,0,0,0.3)]">
+                    {column.label}
+                  </th>
                 ))}
               </tr>
-            )) : (
-              <tr>
-                <td colSpan={HISTORICAL_METRIC_COLUMNS.length + 1} className="px-4 py-8 text-center text-sm text-gray-600">
-                  No historical breadth rows yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.length ? rows.map(row => (
+                <tr key={`${activeList}-${row.date}`} className="bg-[#0b111a] odd:bg-[#0d1420] hover:bg-white/[0.045]">
+                  <td className="sticky left-0 z-20 border-b border-r border-white/[0.06] bg-[#101722] px-3 py-2 font-mono text-xs font-black tabular-nums text-slate-200 shadow-[8px_0_18px_rgba(0,0,0,0.24)]">
+                    {fmtDateLabel(row.date)}
+                  </td>
+                  {activeColumns.map(column => (
+                    <HistoricalMetricCell
+                      key={`${activeList}-${row.date}-${column.key}`}
+                      entry={row[activeList]}
+                      column={column}
+                      stats={columnStats[column.key]}
+                    />
+                  ))}
+                </tr>
+              )) : (
+                <tr>
+                  <td colSpan={activeColumns.length + 1} className="px-4 py-8 text-center text-sm text-gray-600">
+                    No historical breadth rows yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+      {settingsOpen && (
+        <BreadthTableSettingsModal
+          settings={settings}
+          onSave={onSettingsChange}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+    </>
   )
 }
 
@@ -573,7 +704,7 @@ function Drilldowns({ snapshotsById }) {
 
 export default function MorningBreadthDashboard() {
   const { listsById } = useResearchWatchlistStore()
-  const { tradeReviewChartSettings } = useSettingsStore()
+  const { tradeReviewChartSettings, breadthTableSettings, setBreadthTableSettings } = useSettingsStore()
   const [activeBreadthView, setActiveBreadthView] = useState('overview')
   const [metricFamily, setMetricFamily] = useState('sma')
   const [chartCollapsed, setChartCollapsed] = useState(false)
@@ -843,8 +974,12 @@ export default function MorningBreadthDashboard() {
       <Drilldowns snapshotsById={snapshotsById} />
         </>
       ) : (
-        <HistoricalBreadthMetricTable rows={historicalMetricRows} />
-      )}
+          <HistoricalBreadthMetricTable
+            rows={historicalMetricRows}
+            settings={breadthTableSettings}
+            onSettingsChange={setBreadthTableSettings}
+          />
+        )}
     </div>
   )
 }
