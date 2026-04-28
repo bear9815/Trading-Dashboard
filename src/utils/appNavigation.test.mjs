@@ -3,8 +3,10 @@ import assert from 'node:assert/strict'
 
 import {
   APP_PAGES,
+  APP_PAGE_STORAGE_KEY,
   buildPageHash,
   getPageFromLocationLike,
+  getRestoredPage,
   isAppPage,
 } from './appNavigation.js'
 
@@ -31,4 +33,28 @@ test('getPageFromLocationLike falls back to state when hash is absent', () => {
 
 test('getPageFromLocationLike falls back to dashboard for unknown values', () => {
   assert.equal(getPageFromLocationLike({ hash: '#unknown', state: { page: 'nope' } }), APP_PAGES[0])
+})
+
+test('getRestoredPage prefers URL state over persisted page', () => {
+  assert.equal(
+    getRestoredPage({
+      locationLike: { hash: '#thematic' },
+      storedPage: 'settings',
+    }),
+    'thematic'
+  )
+})
+
+test('getRestoredPage falls back to persisted page when location has no app page', () => {
+  assert.equal(
+    getRestoredPage({
+      locationLike: { hash: '' },
+      storedPage: 'charts',
+    }),
+    'charts'
+  )
+})
+
+test('storage key is stable for hard reload recovery', () => {
+  assert.equal(APP_PAGE_STORAGE_KEY, 'trading-dashboard:page')
 })

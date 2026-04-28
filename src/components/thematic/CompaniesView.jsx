@@ -68,6 +68,39 @@ function TickerEditor({ initialTicker = '', actionLabel = 'Save', onSave }) {
   )
 }
 
+function InlineTickerEditor({ initialTicker = '', actionLabel = 'Save', triggerLabel = 'Edit symbol', onSave }) {
+  const [open, setOpen] = useState(false)
+
+  async function handleSave(nextTicker) {
+    await onSave(nextTicker)
+    setOpen(false)
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+      >
+        <Pencil size={11} />
+        {triggerLabel}
+      </button>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      <TickerEditor initialTicker={initialTicker} actionLabel={actionLabel} onSave={handleSave} />
+      <button
+        onClick={() => setOpen(false)}
+        className="text-[11px] text-gray-600 hover:text-gray-400 transition-colors"
+      >
+        Cancel
+      </button>
+    </div>
+  )
+}
+
 // ── Ticker entry in the left panel ───────────────────────────────────────────
 function TickerRow({ ticker, reports, isSelected, onClick }) {
   const latest   = reports[0]
@@ -157,11 +190,17 @@ function TimelineEntry({ source, onView, onUpdateTicker }) {
           <p className="text-xs text-gray-500 leading-relaxed line-clamp-2 mb-3">{source.summary}</p>
         )}
 
-        <div className="mb-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-2">Edit Symbol</p>
-          <TickerEditor
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-600">Symbol</span>
+            <span className="text-xs font-semibold text-gray-300">
+              {getPrimaryTicker(source) || 'Unassigned'}
+            </span>
+          </div>
+          <InlineTickerEditor
             initialTicker={getPrimaryTicker(source) || ''}
             actionLabel="Update"
+            triggerLabel="Edit"
             onSave={(ticker) => onUpdateTicker(source.id, ticker)}
           />
         </div>
@@ -372,12 +411,14 @@ export default function CompaniesView({ sources, onViewReport, onUpdateSource })
                   {activeReports[0]?.period ? ` · latest: ${activeReports[0].period}` : ''}
                 </p>
               </div>
-              <div className="w-full max-w-xs">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mb-2 flex items-center gap-1">
-                  <Pencil size={10} />
-                  Rename Symbol For This Company
-                </p>
-                <TickerEditor initialTicker={active} actionLabel="Rename All" onSave={handleRenameActiveTicker} />
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-500">Company symbol: <span className="font-semibold text-gray-300">{active}</span></span>
+                <InlineTickerEditor
+                  initialTicker={active}
+                  actionLabel="Rename All"
+                  triggerLabel="Rename symbol"
+                  onSave={handleRenameActiveTicker}
+                />
               </div>
             </div>
 

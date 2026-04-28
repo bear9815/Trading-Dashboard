@@ -17,7 +17,7 @@ import { useHabitsStore } from './store/useHabitsStore.js'
 import { useAuthStore } from './store/useAuthStore.js'
 import { supabase } from './lib/supabase.js'
 import { Loader } from 'lucide-react'
-import { buildPageHash, getPageFromLocationLike, isAppPage } from './utils/appNavigation.js'
+import { APP_PAGE_STORAGE_KEY, buildPageHash, getPageFromLocationLike, getRestoredPage, isAppPage } from './utils/appNavigation.js'
 
 // ── Lazy-loaded pages (each splits into its own chunk) ────────────────────────
 // Only the page you're on gets downloaded — everything else costs nothing until navigated to.
@@ -52,7 +52,12 @@ function PageLoader() {
 
 export default function App() {
   const [page, setPageState] = useState(() => (
-    typeof window === 'undefined' ? 'dashboard' : getPageFromLocationLike(window.location)
+    typeof window === 'undefined'
+      ? 'dashboard'
+      : getRestoredPage({
+        locationLike: window.location,
+        storedPage: window.sessionStorage.getItem(APP_PAGE_STORAGE_KEY),
+      })
   ))
   const [showImport, setShowImport] = useState(false)
   const [reminderOpenSignal, setReminderOpenSignal] = useState(0)
@@ -81,8 +86,12 @@ export default function App() {
     if (typeof window === 'undefined') return
 
     const syncFromLocation = (state) => {
-      const nextPage = getPageFromLocationLike({ hash: window.location.hash, state })
+      const nextPage = getRestoredPage({
+        locationLike: { hash: window.location.hash, state },
+        storedPage: window.sessionStorage.getItem(APP_PAGE_STORAGE_KEY),
+      })
       lastPageRef.current = nextPage
+      window.sessionStorage.setItem(APP_PAGE_STORAGE_KEY, nextPage)
       setPageState(nextPage)
     }
 
@@ -107,6 +116,7 @@ export default function App() {
       window.history.replaceState({ ...(window.history.state || {}), page }, '', url)
       didInitHistoryRef.current = true
       lastPageRef.current = page
+      window.sessionStorage.setItem(APP_PAGE_STORAGE_KEY, page)
       return
     }
 
@@ -114,6 +124,7 @@ export default function App() {
 
     window.history.pushState({ ...(window.history.state || {}), page }, '', url)
     lastPageRef.current = page
+    window.sessionStorage.setItem(APP_PAGE_STORAGE_KEY, page)
   }, [page])
 
   // Handle OAuth callback redirect from Schwab (?schwab=connected)
