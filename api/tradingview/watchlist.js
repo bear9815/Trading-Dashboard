@@ -1,6 +1,7 @@
 import {
+  buildTradingViewEntriesFromScannerRows,
   isTradingViewWatchlistUrl,
-  parseTradingViewWatchlistHtml,
+  parseTradingViewWatchlistSeedData,
 } from '../../src/utils/tradingViewWatchlist.js'
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
@@ -32,17 +33,41 @@ export default async function handler(req, res) {
     }
 
     const html = await upstream.text()
-    const parsed = parseTradingViewWatchlistHtml(html)
-    if (!parsed.entries.length) {
-      return res.status(422).json({ error: 'Could not extract symbols and company names from that public TradingView watchlist.' })
+    const seed = parseTradingViewWatchlistSeedData(html)
+    if (!seed.symbols.length) {
+      return res.status(422).json({ error: 'Could not extract symbols from that public TradingView watchlist.' })
+    }
+
+    const scannerResponse = await fetch('https://scanner.tradingview.com/global/scan?label-product=popup-watchlists', {
+      method: 'POST',
+      headers: {
+        'User-Agent': UA,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Origin': 'https://www.tradingview.com',
+        'Referer': rawUrl,
+      },
+      body: JSON.stringify({
+        columns: ['description', 'name', 'type', 'subtype', 'exchange'],
+        symbols: { tickers: seed.symbols },
+      }),
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!scannerResponse.ok) {
+      return res.status(502).json({ error: `TradingView scanner lookup failed with status ${scannerResponse.status}.` })
+    }
+    const scannerJson = await scannerResponse.json().catch(() => ({}))
+    const entries = buildTradingViewEntriesFromScannerRows(seed.symbols, scannerJson)
+    if (!entries.length) {
+      return res.status(422).json({ error: 'TradingView exposed the watchlist symbols, but not the company names for verification.' })
     }
 
     res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600')
     return res.status(200).json({
       url: rawUrl,
-      title: parsed.title || '',
-      count: parsed.entries.length,
-      entries: parsed.entries,
+      title: seed.title || '',
+      count: entries.length,
+      entries,
     })
   } catch (error) {
     return res.status(502).json({

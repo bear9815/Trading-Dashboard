@@ -148,6 +148,56 @@ export function parseTradingViewWatchlistHtml(html = '') {
   }
 }
 
+export function parseTradingViewWatchlistSeedData(html = '') {
+  const text = String(html || '')
+  const scriptRe = /<script[^>]*type="application\/prs\.init-data\+json"[^>]*>([\s\S]*?)<\/script>/gi
+  let match
+
+  while ((match = scriptRe.exec(text))) {
+    try {
+      const data = JSON.parse(match[1])
+      const list = data?.sharedWatchlist?.list
+      const symbols = Array.isArray(list?.symbols) ? list.symbols.map(symbol => String(symbol || '').trim()).filter(Boolean) : []
+      if (!symbols.length) continue
+      return {
+        title: stripTags(list?.name || '') || extractTitle(text) || '',
+        symbols,
+      }
+    } catch {
+      // Ignore malformed scripts and continue.
+    }
+  }
+
+  return {
+    title: extractTitle(text) || '',
+    symbols: [],
+  }
+}
+
+export function buildTradingViewEntriesFromScannerRows(symbols = [], scannerResponse = {}) {
+  const rows = Array.isArray(scannerResponse?.data) ? scannerResponse.data : []
+  const rowByRawSymbol = new Map(
+    rows
+      .filter(Boolean)
+      .map(row => [String(row?.s || '').trim().toUpperCase(), row])
+  )
+
+  return (symbols || []).map(rawSymbol => {
+    const normalizedRawSymbol = String(rawSymbol || '').trim().toUpperCase()
+    const row = rowByRawSymbol.get(normalizedRawSymbol)
+    const description = stripTags(row?.d?.[0] || '')
+    const symbol = normalizeTradingViewSymbol(normalizedRawSymbol)
+    if (!symbol || !description) return null
+    return {
+      symbol,
+      companyName: description,
+      exchange: row?.d?.[4] || extractExchange(normalizedRawSymbol),
+      rawSymbol: normalizedRawSymbol,
+      source: 'tradingview_public_watchlist',
+    }
+  }).filter(Boolean)
+}
+
 export function buildTradingViewEntriesBySymbol(entries = []) {
   return Object.fromEntries(
     (entries || [])
