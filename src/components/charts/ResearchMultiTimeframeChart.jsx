@@ -1,4 +1,4 @@
-import { SlidersHorizontal } from 'lucide-react'
+import { ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import {
   BarSeries,
@@ -454,6 +454,9 @@ export default function ResearchMultiTimeframeChart({
   onSelectManualAnchor,
   onEditManualAnchor,
   onOpenSettings,
+  collapsible = false,
+  collapsed = false,
+  onToggleCollapse,
 }) {
   const hasBars = data?.dailyBars?.length
   return (
@@ -540,10 +543,21 @@ export default function ResearchMultiTimeframeChart({
                 <SlidersHorizontal size={12} />
               </button>
             ) : null}
+            {collapsible ? (
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className="inline-flex items-center justify-center rounded border border-black/10 bg-white/70 px-2 py-0.5 text-[#505760] transition-colors hover:bg-white hover:text-[#242830]"
+                title={collapsed ? 'Expand chart' : 'Collapse chart'}
+                aria-label={collapsed ? 'Expand chart' : 'Collapse chart'}
+              >
+                {collapsed ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+              </button>
+            ) : null}
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">{badgeLabel}</span>
           </div>
         </div>
-        {!!manualAnchors.length && (
+        {!collapsed && !!manualAnchors.length && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {manualAnchors.map(anchor => (
               <div
@@ -587,7 +601,7 @@ export default function ResearchMultiTimeframeChart({
           </div>
         )}
       </div>
-      {!hasBars ? (
+      {collapsed ? null : !hasBars ? (
         <div className="h-[520px] flex items-center justify-center text-xs text-[#505760]">{emptyLabel}</div>
       ) : (
         <div className={fillAvailableHeight ? 'flex min-h-0 flex-1 flex-col' : ''}>
