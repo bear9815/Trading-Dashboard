@@ -132,6 +132,7 @@ assert.deepEqual(snapshots.aboveSma50.map(row => row.symbol), ['CCC', 'AAA'])
 
 const tableRows = buildHistoricalBreadthMetricRows({
   marketHistory: breadthHistory,
+  liquidTrendHistory: breadthHistory,
   liquidHistory: breadthHistory.slice(0, -1),
   limit: 3,
 })
@@ -140,6 +141,7 @@ assert.equal(BREADTH_TABLE_SESSION_COUNT, 252)
 assert.equal(tableRows.length, 3)
 assert.equal(tableRows[0].date, latest.date)
 assert.equal(tableRows[0].market.sma5AbovePct, latest.sma5.abovePct)
+assert.equal(tableRows[0].liquidTrend.sma5AbovePct, latest.sma5.abovePct)
 assert.equal(tableRows[0].market.upDown13Days34.up, latest.moves.days34_13.upCount)
 assert.equal(tableRows[0].market.above50dmaPct, latest.sma50.abovePct)
 assert.equal(tableRows[0].liquid, null)

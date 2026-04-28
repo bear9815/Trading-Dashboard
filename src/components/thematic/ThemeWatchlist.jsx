@@ -4,7 +4,7 @@ import {
   RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network, TrendingUp, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { parseChartMeta } from '../../store/useWatchlistStore.js'
-import { MARKET_LEADERS_LIST_ID, useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
+import { DEFAULT_LIST_ORDER, MARKET_LEADERS_LIST_ID, useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
@@ -867,7 +867,10 @@ export default function ThemeWatchlist({
   const themeAnalyticsHistory = activeList?.themeAnalyticsHistory || { theme: [], ecosystem: [] }
   const watchlists = useMemo(
     () => Object.values(listsById || {}).sort((a, b) => {
-      const order = { 'market-leaders': 0, watchlist: 1 }
+      const order = DEFAULT_LIST_ORDER.reduce((next, id, index) => {
+        next[id] = index
+        return next
+      }, {})
       return (order[a.id] ?? 99) - (order[b.id] ?? 99)
     }),
     [listsById]

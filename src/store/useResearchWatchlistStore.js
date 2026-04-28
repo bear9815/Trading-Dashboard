@@ -10,8 +10,10 @@ import { normalizeThemeAnalyticsHistory, upsertThemeAnalyticsSnapshot } from '..
 
 export const MARKET_LEADERS_LIST_ID = 'market-leaders'
 export const WATCHLIST_LIST_ID = 'watchlist'
+export const LIQUID_TREND_LIST_ID = WATCHLIST_LIST_ID
+export const LIQUID_LIST_ID = 'liquid'
 
-const DEFAULT_LIST_ORDER = [MARKET_LEADERS_LIST_ID, WATCHLIST_LIST_ID]
+export const DEFAULT_LIST_ORDER = [MARKET_LEADERS_LIST_ID, LIQUID_TREND_LIST_ID, LIQUID_LIST_ID]
 const DEFAULT_COLUMN_PRESET = applyColumnPreset('compact')
 const DEFAULT_LISTS = {
   [MARKET_LEADERS_LIST_ID]: {
@@ -32,6 +34,22 @@ const DEFAULT_LISTS = {
   },
   [WATCHLIST_LIST_ID]: {
     id: WATCHLIST_LIST_ID,
+    name: 'Liquid Trend',
+    symbols: [],
+    rowsBySymbol: {},
+    savedViews: [],
+    columnOrder: [...DEFAULT_COLUMN_PRESET.columnOrder],
+    hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
+    activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
+    controlsCollapsed: true,
+    collapsedPanels: {},
+    ecosystemGroupingMode: 'normal',
+    condensedEcosystemOverrides: {},
+    themeAnalyticsHistory: { theme: [], ecosystem: [] },
+    lastUpdated: null,
+  },
+  [LIQUID_LIST_ID]: {
+    id: LIQUID_LIST_ID,
     name: 'Liquid',
     symbols: [],
     rowsBySymbol: {},
@@ -84,7 +102,10 @@ function makeListPatch(list, patch = {}) {
 
 function normalizeListLabel(list) {
   if (list?.id === WATCHLIST_LIST_ID && list.name === 'Watchlist') {
-    return { ...list, name: 'Liquid' }
+    return { ...list, name: 'Liquid Trend' }
+  }
+  if (list?.id === WATCHLIST_LIST_ID && list.name === 'Liquid') {
+    return { ...list, name: 'Liquid Trend' }
   }
   return list
 }
@@ -111,17 +132,17 @@ function ensureWorkspaceShape(state) {
   const activeListId = state?.activeListId || MARKET_LEADERS_LIST_ID
 
   if (state?.listsById) {
-    const listsById = {
-      [MARKET_LEADERS_LIST_ID]: normalizeListLabel(makeListPatch(
-        DEFAULT_LISTS[MARKET_LEADERS_LIST_ID],
-        state.listsById[MARKET_LEADERS_LIST_ID] || {}
-      )),
-      [WATCHLIST_LIST_ID]: normalizeListLabel(makeListPatch(
-        DEFAULT_LISTS[WATCHLIST_LIST_ID],
-        state.listsById[WATCHLIST_LIST_ID] || {}
-      )),
+    const listsById = DEFAULT_LIST_ORDER.reduce((next, listId) => {
+      next[listId] = normalizeListLabel(makeListPatch(
+        DEFAULT_LISTS[listId],
+        state.listsById[listId] || {}
+      ))
+      return next
+    }, {})
+    return {
+      activeListId: listsById[activeListId] ? activeListId : MARKET_LEADERS_LIST_ID,
+      listsById,
     }
-    return { activeListId, listsById }
   }
 
   // Legacy single-watchlist state migrates into Market Leaders.
@@ -135,6 +156,7 @@ function ensureWorkspaceShape(state) {
         lastUpdated: state?.lastUpdated || null,
       }),
       [WATCHLIST_LIST_ID]: { ...DEFAULT_LISTS[WATCHLIST_LIST_ID] },
+      [LIQUID_LIST_ID]: { ...DEFAULT_LISTS[LIQUID_LIST_ID] },
     },
   }
 }
@@ -275,10 +297,10 @@ export const useResearchWatchlistStore = create(
 
       resetWorkspaceState: () => set({
         activeListId: MARKET_LEADERS_LIST_ID,
-        listsById: {
-          [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {}),
-          [WATCHLIST_LIST_ID]: makeListPatch(DEFAULT_LISTS[WATCHLIST_LIST_ID], {}),
-        },
+        listsById: DEFAULT_LIST_ORDER.reduce((next, listId) => {
+          next[listId] = makeListPatch(DEFAULT_LISTS[listId], {})
+          return next
+        }, {}),
       }),
 
       getLists: () => DEFAULT_LIST_ORDER.map(id => get().listsById[id]).filter(Boolean),

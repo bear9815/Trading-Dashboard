@@ -7,7 +7,7 @@ import {
   normalizePendingSymbolInput,
   resolveAnchorSelectionAfterDelete,
 } from './chartInteractions.js'
-import { useResearchWatchlistStore, MARKET_LEADERS_LIST_ID, WATCHLIST_LIST_ID } from '../../store/useResearchWatchlistStore.js'
+import { DEFAULT_LIST_ORDER, useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import {
   buildAnchoredRsSnapshot,
@@ -21,7 +21,10 @@ import { resolveTickerToName } from '../../utils/marketData.js'
 import { buildCondensedEcosystemRows, normalizeEcosystemGroupingMode, normalizeEcosystemKey } from '../../utils/condensedEcosystems.js'
 import { buildEcosystemCompositeBars } from '../../utils/ecosystemCompositeChart.js'
 
-const WATCHLIST_ORDER = { [MARKET_LEADERS_LIST_ID]: 0, [WATCHLIST_LIST_ID]: 1 }
+const WATCHLIST_ORDER = DEFAULT_LIST_ORDER.reduce((next, id, index) => {
+  next[id] = index
+  return next
+}, {})
 const DAILY_RANGE_OPTIONS = [3, 6, 9]
 const SIDEBAR_VIEW_OPTIONS = [
   ['symbols', 'Symbols'],

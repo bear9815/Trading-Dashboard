@@ -618,18 +618,21 @@ function metricTableSnapshot(entry) {
 
 export function buildHistoricalBreadthMetricRows({
   marketHistory = [],
+  liquidTrendHistory = [],
   liquidHistory = [],
   limit = BREADTH_TABLE_SESSION_COUNT,
 } = {}) {
   const marketByDate = new Map(marketHistory.map(entry => [entry.date, entry]))
+  const liquidTrendByDate = new Map(liquidTrendHistory.map(entry => [entry.date, entry]))
   const liquidByDate = new Map(liquidHistory.map(entry => [entry.date, entry]))
-  const dates = [...new Set([...marketByDate.keys(), ...liquidByDate.keys()])]
+  const dates = [...new Set([...marketByDate.keys(), ...liquidTrendByDate.keys(), ...liquidByDate.keys()])]
     .sort((a, b) => b.localeCompare(a))
     .slice(0, limit)
 
   return dates.map(date => ({
     date,
     market: metricTableSnapshot(marketByDate.get(date)),
+    liquidTrend: metricTableSnapshot(liquidTrendByDate.get(date)),
     liquid: metricTableSnapshot(liquidByDate.get(date)),
   }))
 }

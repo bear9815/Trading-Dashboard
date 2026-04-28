@@ -20,8 +20,9 @@ import {
   YAxis,
 } from 'recharts'
 import {
+  LIQUID_LIST_ID,
+  LIQUID_TREND_LIST_ID,
   MARKET_LEADERS_LIST_ID,
-  WATCHLIST_LIST_ID,
   useResearchWatchlistStore,
 } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
@@ -35,10 +36,16 @@ import { resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
 import { useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
 
 const METRIC_FAMILIES = [
-  { id: 'sma', label: '5DMA', marketKey: 'marketSma5', liquidKey: 'liquidSma5', domain: [0, 100], unit: '%' },
-  { id: 'avwap', label: 'AVWAP', marketKey: 'marketAvwapStack', liquidKey: 'liquidAvwapStack', domain: [0, 100], unit: '%' },
-  { id: 'distance', label: 'Distance', marketKey: 'marketAvgDistance', liquidKey: 'liquidAvgDistance', domain: ['auto', 'auto'], unit: '%' },
-  { id: 'thrust', label: 'Thrust', marketKey: 'marketThrustNet', liquidKey: 'liquidThrustNet', domain: ['auto', 'auto'], unit: '' },
+  { id: 'sma', label: '5DMA', suffix: 'Sma5', domain: [0, 100], unit: '%' },
+  { id: 'avwap', label: 'AVWAP', suffix: 'AvwapStack', domain: [0, 100], unit: '%' },
+  { id: 'distance', label: 'Distance', suffix: 'AvgDistance', domain: ['auto', 'auto'], unit: '%' },
+  { id: 'thrust', label: 'Thrust', suffix: 'ThrustNet', domain: ['auto', 'auto'], unit: '' },
+]
+
+const BREADTH_LISTS = [
+  { id: 'market', listId: MARKET_LEADERS_LIST_ID, label: 'Market Leaders', tone: 'blue', color: '#3d84ff' },
+  { id: 'liquidTrend', listId: LIQUID_TREND_LIST_ID, label: 'Liquid Trend', tone: 'yellow', color: '#f5c542' },
+  { id: 'liquid', listId: LIQUID_LIST_ID, label: 'Liquid', tone: 'green', color: '#22c55e' },
 ]
 
 const DRILLDOWN_GROUPS = [
@@ -144,7 +151,7 @@ function regimeTone(label) {
   return 'border-white/10 bg-white/[0.04] text-gray-400'
 }
 
-function mergeHistory(marketHistory, liquidHistory) {
+function mergeHistory(historiesById) {
   const rows = new Map()
   const add = (prefix, entry) => {
     const current = rows.get(entry.date) || { date: entry.date }
@@ -158,34 +165,37 @@ function mergeHistory(marketHistory, liquidHistory) {
     })
   }
 
-  for (const entry of marketHistory) add('market', entry)
-  for (const entry of liquidHistory) add('liquid', entry)
+  for (const config of BREADTH_LISTS) {
+    for (const entry of historiesById[config.id] || []) add(config.id, entry)
+  }
   return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-180)
 }
 
-function buildMorningRead(market, liquid) {
-  if (!market && !liquid) return 'Import Market Leaders and Liquid lists in Growth Research to unlock breadth reads.'
-  if (!market) return `Liquid breadth is ${liquid.regimeLabel.toLowerCase()}, but Market Leaders need data.`
-  if (!liquid) return `Market Leaders breadth is ${market.regimeLabel.toLowerCase()}, but Liquid needs data.`
+function buildMorningRead(market, liquidTrend, liquid) {
+  if (!market && !liquidTrend && !liquid) return 'Import Market Leaders, Liquid Trend, and Liquid lists in Growth Research to unlock breadth reads.'
+  if (!market) return 'Market Leaders need data before breadth can be compared cleanly.'
+  if (!liquid && !liquidTrend) return `Market Leaders breadth is ${market.regimeLabel.toLowerCase()}, but Liquid lists need data.`
 
-  const scoreSpread = (market.regimeScore ?? 0) - (liquid.regimeScore ?? 0)
+  const comparison = liquid || liquidTrend
+  const comparisonLabel = liquid ? 'Liquid' : 'Liquid Trend'
+  const scoreSpread = (market.regimeScore ?? 0) - (comparison.regimeScore ?? 0)
   const marketHot = (market.sma5?.abovePct ?? 0) >= 75
-  const liquidHot = (liquid.sma5?.abovePct ?? 0) >= 75
+  const liquidHot = (comparison.sma5?.abovePct ?? 0) >= 75
   const marketAvwapWeak = avwapStack(market) != null && avwapStack(market) < 50
-  const liquidAvwapWeak = avwapStack(liquid) != null && avwapStack(liquid) < 50
+  const liquidAvwapWeak = avwapStack(comparison) != null && avwapStack(comparison) < 50
 
   if (marketHot && marketAvwapWeak) return 'Market Leaders have short-term heat without broad AVWAP support, so chase risk is elevated.'
-  if (liquidHot && liquidAvwapWeak) return 'Liquid breadth is hot but AVWAP structure is weaker underneath, so selectivity matters.'
-  if (scoreSpread >= 15) return 'Market Leaders are carrying the tape while Liquid lags, so leadership is narrow.'
-  if (scoreSpread <= -15) return 'Liquid breadth is improving faster than Market Leaders, which points to broadening participation.'
+  if (liquidHot && liquidAvwapWeak) return `${comparisonLabel} breadth is hot but AVWAP structure is weaker underneath, so selectivity matters.`
+  if (scoreSpread >= 15) return `Market Leaders are carrying the tape while ${comparisonLabel} lags, so leadership is narrow.`
+  if (scoreSpread <= -15) return `${comparisonLabel} breadth is improving faster than Market Leaders, which points to broadening participation.`
   if (marketHot && liquidHot) return 'Both lists are hot, so momentum is strong but fresh entries need discipline.'
-  if ((market.regimeScore ?? 50) < 38 && (liquid.regimeScore ?? 50) < 38) return 'Both lists are washed out or distributing, so patience beats forcing breakouts.'
+  if ((market.regimeScore ?? 50) < 38 && (comparison.regimeScore ?? 50) < 38) return 'Both lists are washed out or distributing, so patience beats forcing breakouts.'
   return 'Breadth is balanced enough for selective risk, with confirmation still coming from AVWAP structure.'
 }
 
 function ListScoreCard({ label, entry, tone = 'blue' }) {
-  const border = tone === 'green' ? 'border-accent-green/20' : 'border-accent-blue/20'
-  const bg = tone === 'green' ? 'bg-accent-green/8' : 'bg-accent-blue/8'
+  const border = tone === 'green' ? 'border-accent-green/20' : tone === 'yellow' ? 'border-accent-yellow/20' : 'border-accent-blue/20'
+  const bg = tone === 'green' ? 'bg-accent-green/8' : tone === 'yellow' ? 'bg-accent-yellow/8' : 'bg-accent-blue/8'
 
   return (
     <div className={`rounded-xl border ${border} ${bg} p-4`}>
@@ -226,23 +236,24 @@ function ListScoreCard({ label, entry, tone = 'blue' }) {
   )
 }
 
-function MetricTable({ market, liquid }) {
+function MetricTable({ entriesById }) {
+  const valueFor = (listId, formatter) => formatter(entriesById[listId])
   const rows = [
-    ['5DMA Above', fmtPct(market?.sma5?.abovePct), fmtPct(liquid?.sma5?.abovePct)],
-    ['YTD AVWAP Above', fmtPct(market?.avwap?.ytd?.abovePct), fmtPct(liquid?.avwap?.ytd?.abovePct)],
-    ['3M AVWAP Above', fmtPct(market?.avwap?.m3?.abovePct), fmtPct(liquid?.avwap?.m3?.abovePct)],
-    ['1M AVWAP Above', fmtPct(market?.avwap?.m1?.abovePct), fmtPct(liquid?.avwap?.m1?.abovePct)],
-    ['1W AVWAP Above', fmtPct(market?.avwap?.w1?.abovePct), fmtPct(liquid?.avwap?.w1?.abovePct)],
-    ['3M Distance', fmtSigned(market?.avwap?.m3?.avgDistancePct), fmtSigned(liquid?.avwap?.m3?.avgDistancePct)],
-    ['1M Distance', fmtSigned(market?.avwap?.m1?.avgDistancePct), fmtSigned(liquid?.avwap?.m1?.avgDistancePct)],
-    ['1W Distance', fmtSigned(market?.avwap?.w1?.avgDistancePct), fmtSigned(liquid?.avwap?.w1?.avgDistancePct)],
-    ['Up / Down 4%', `+${market?.moves?.day4?.upCount || 0} / -${market?.moves?.day4?.downCount || 0}`, `+${liquid?.moves?.day4?.upCount || 0} / -${liquid?.moves?.day4?.downCount || 0}`],
-    ['Up / Down 25% 1M', `+${market?.moves?.month25?.upCount || 0} / -${market?.moves?.month25?.downCount || 0}`, `+${liquid?.moves?.month25?.upCount || 0} / -${liquid?.moves?.month25?.downCount || 0}`],
-    ['Up / Down 50% 1M', `+${market?.moves?.month50?.upCount || 0} / -${market?.moves?.month50?.downCount || 0}`, `+${liquid?.moves?.month50?.upCount || 0} / -${liquid?.moves?.month50?.downCount || 0}`],
-    ['Up / Down 25% Quarter', `+${market?.moves?.quarter25?.upCount || 0} / -${market?.moves?.quarter25?.downCount || 0}`, `+${liquid?.moves?.quarter25?.upCount || 0} / -${liquid?.moves?.quarter25?.downCount || 0}`],
-    ['Up / Down 13% 34D', `+${market?.moves?.days34_13?.upCount || 0} / -${market?.moves?.days34_13?.downCount || 0}`, `+${liquid?.moves?.days34_13?.upCount || 0} / -${liquid?.moves?.days34_13?.downCount || 0}`],
-    ['Above 50DMA', fmtPct(market?.sma50?.abovePct), fmtPct(liquid?.sma50?.abovePct)],
-    ['10x ATR Extended', fmtNumber(market?.atrExtension10x?.count), fmtNumber(liquid?.atrExtension10x?.count)],
+    ['5DMA Above', entry => fmtPct(entry?.sma5?.abovePct)],
+    ['YTD AVWAP Above', entry => fmtPct(entry?.avwap?.ytd?.abovePct)],
+    ['3M AVWAP Above', entry => fmtPct(entry?.avwap?.m3?.abovePct)],
+    ['1M AVWAP Above', entry => fmtPct(entry?.avwap?.m1?.abovePct)],
+    ['1W AVWAP Above', entry => fmtPct(entry?.avwap?.w1?.abovePct)],
+    ['3M Distance', entry => fmtSigned(entry?.avwap?.m3?.avgDistancePct)],
+    ['1M Distance', entry => fmtSigned(entry?.avwap?.m1?.avgDistancePct)],
+    ['1W Distance', entry => fmtSigned(entry?.avwap?.w1?.avgDistancePct)],
+    ['Up / Down 4%', entry => `+${entry?.moves?.day4?.upCount || 0} / -${entry?.moves?.day4?.downCount || 0}`],
+    ['Up / Down 25% 1M', entry => `+${entry?.moves?.month25?.upCount || 0} / -${entry?.moves?.month25?.downCount || 0}`],
+    ['Up / Down 50% 1M', entry => `+${entry?.moves?.month50?.upCount || 0} / -${entry?.moves?.month50?.downCount || 0}`],
+    ['Up / Down 25% Quarter', entry => `+${entry?.moves?.quarter25?.upCount || 0} / -${entry?.moves?.quarter25?.downCount || 0}`],
+    ['Up / Down 13% 34D', entry => `+${entry?.moves?.days34_13?.upCount || 0} / -${entry?.moves?.days34_13?.downCount || 0}`],
+    ['Above 50DMA', entry => fmtPct(entry?.sma50?.abovePct)],
+    ['10x ATR Extended', entry => fmtNumber(entry?.atrExtension10x?.count)],
   ]
 
   return (
@@ -251,16 +262,20 @@ function MetricTable({ market, liquid }) {
         <thead className="bg-white/[0.03] text-[11px] uppercase tracking-wider text-gray-500">
           <tr>
             <th className="px-3 py-2 text-left">Metric</th>
-            <th className="px-3 py-2 text-left">Market Leaders</th>
-            <th className="px-3 py-2 text-left">Liquid</th>
+            {BREADTH_LISTS.map(config => (
+              <th key={config.id} className="px-3 py-2 text-left">{config.label}</th>
+            ))}
           </tr>
         </thead>
         <tbody className="divide-y divide-white/[0.05]">
-          {rows.map(([label, marketValue, liquidValue]) => (
+          {rows.map(([label, formatter]) => (
             <tr key={label}>
               <td className="px-3 py-2.5 text-gray-500">{label}</td>
-              <td className="px-3 py-2.5 font-medium text-gray-200">{marketValue}</td>
-              <td className="px-3 py-2.5 font-medium text-gray-200">{liquidValue}</td>
+              {BREADTH_LISTS.map(config => (
+                <td key={`${label}-${config.id}`} className="px-3 py-2.5 font-medium text-gray-200">
+                  {valueFor(config.id, formatter)}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -323,8 +338,13 @@ function HistoricalMetricCell({ entry, column }) {
 
 function HistoricalBreadthMetricTable({ rows }) {
   const [activeList, setActiveList] = useState('liquid')
-  const activeLabel = activeList === 'market' ? 'Market Leaders' : 'Liquid'
-  const activeAccent = activeList === 'market' ? 'from-accent-blue/35 via-accent-blue/15 to-white/[0.04]' : 'from-accent-green/35 via-accent-green/15 to-white/[0.04]'
+  const activeConfig = BREADTH_LISTS.find(config => config.id === activeList) || BREADTH_LISTS[2]
+  const activeLabel = activeConfig.label
+  const activeAccent = activeList === 'market'
+    ? 'from-accent-blue/35 via-accent-blue/15 to-white/[0.04]'
+    : activeList === 'liquidTrend'
+      ? 'from-accent-yellow/30 via-accent-yellow/10 to-white/[0.04]'
+      : 'from-accent-green/35 via-accent-green/15 to-white/[0.04]'
 
   return (
     <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#080d14] shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
@@ -337,10 +357,7 @@ function HistoricalBreadthMetricTable({ rows }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex rounded-xl border border-white/10 bg-black/25 p-1 shadow-inner shadow-black/30">
-            {[
-              ['liquid', 'Liquid'],
-              ['market', 'Market Leaders'],
-            ].map(([id, label]) => (
+            {BREADTH_LISTS.slice().reverse().map(({ id, label }) => (
               <button
                 key={id}
                 type="button"
@@ -364,7 +381,13 @@ function HistoricalBreadthMetricTable({ rows }) {
           <thead>
             <tr className="text-center text-[10px] font-black uppercase tracking-[0.2em] text-slate-200">
               <th rowSpan="2" className="sticky left-0 top-0 z-40 border-b border-r border-white/10 bg-[#111827] px-3 py-3 text-left text-slate-300 shadow-[8px_0_18px_rgba(0,0,0,0.28)]">Date</th>
-              <th colSpan={HISTORICAL_METRIC_COLUMNS.length} className={`sticky top-0 z-30 border-b border-white/10 bg-gradient-to-r px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] ${activeList === 'market' ? 'from-accent-blue/40 via-[#172036] to-[#101722]' : 'from-accent-green/35 via-[#14251e] to-[#101722]'}`}>
+              <th colSpan={HISTORICAL_METRIC_COLUMNS.length} className={`sticky top-0 z-30 border-b border-white/10 bg-gradient-to-r px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] ${
+                activeList === 'market'
+                  ? 'from-accent-blue/40 via-[#172036] to-[#101722]'
+                  : activeList === 'liquidTrend'
+                    ? 'from-accent-yellow/35 via-[#282310] to-[#101722]'
+                    : 'from-accent-green/35 via-[#14251e] to-[#101722]'
+              }`}>
                 {activeLabel}
               </th>
             </tr>
@@ -428,9 +451,9 @@ function DrilldownTable({ title, rows, metric, suffix }) {
   )
 }
 
-function Drilldowns({ marketSnapshots, liquidSnapshots }) {
+function Drilldowns({ snapshotsById }) {
   const [active, setActive] = useState('market')
-  const snapshots = active === 'market' ? marketSnapshots : liquidSnapshots
+  const snapshots = snapshotsById[active]
 
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
@@ -440,10 +463,7 @@ function Drilldowns({ marketSnapshots, liquidSnapshots }) {
           <p className="mt-1 text-xs text-gray-500">Expand what is actually driving each breadth read.</p>
         </div>
         <div className="inline-flex rounded-lg border border-white/10 bg-white/[0.02] p-1">
-          {[
-            ['market', 'Market Leaders'],
-            ['liquid', 'Liquid'],
-          ].map(([id, label]) => (
+          {BREADTH_LISTS.map(({ id, label }) => (
             <button
               key={id}
               type="button"
@@ -482,11 +502,16 @@ export default function MorningBreadthDashboard() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const marketLeadersSymbols = listsById?.[MARKET_LEADERS_LIST_ID]?.symbols || []
-  const liquidSymbols = listsById?.[WATCHLIST_LIST_ID]?.symbols || []
+  const symbolsById = useMemo(
+    () => BREADTH_LISTS.reduce((next, config) => {
+      next[config.id] = listsById?.[config.listId]?.symbols || []
+      return next
+    }, {}),
+    [listsById]
+  )
   const allSymbols = useMemo(
-    () => [...new Set([...marketLeadersSymbols, ...liquidSymbols])],
-    [liquidSymbols, marketLeadersSymbols]
+    () => [...new Set(BREADTH_LISTS.flatMap(config => symbolsById[config.id] || []))],
+    [symbolsById]
   )
   const latestAnchorDate = useMemo(
     () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
@@ -533,38 +558,48 @@ export default function MorningBreadthDashboard() {
     }
   }, [allSymbols.length, loadHistoryUniverse])
 
-  const marketHistory = useMemo(
-    () => buildListBreadthHistory({ symbols: marketLeadersSymbols, historyBarsBySymbol }),
-    [historyBarsBySymbol, marketLeadersSymbols]
+  const historiesById = useMemo(
+    () => BREADTH_LISTS.reduce((next, config) => {
+      next[config.id] = buildListBreadthHistory({ symbols: symbolsById[config.id], historyBarsBySymbol })
+      return next
+    }, {}),
+    [historyBarsBySymbol, symbolsById]
   )
-  const liquidHistory = useMemo(
-    () => buildListBreadthHistory({ symbols: liquidSymbols, historyBarsBySymbol }),
-    [historyBarsBySymbol, liquidSymbols]
+  const latestById = useMemo(
+    () => BREADTH_LISTS.reduce((next, config) => {
+      next[config.id] = latest(historiesById[config.id])
+      return next
+    }, {}),
+    [historiesById]
   )
-  const marketLatest = latest(marketHistory)
-  const liquidLatest = latest(liquidHistory)
-  const chartData = useMemo(() => mergeHistory(marketHistory, liquidHistory), [liquidHistory, marketHistory])
+  const marketLatest = latestById.market
+  const liquidTrendLatest = latestById.liquidTrend
+  const liquidLatest = latestById.liquid
+  const chartData = useMemo(() => mergeHistory(historiesById), [historiesById])
   const historicalMetricRows = useMemo(
-    () => buildHistoricalBreadthMetricRows({ marketHistory, liquidHistory }),
-    [liquidHistory, marketHistory]
+    () => buildHistoricalBreadthMetricRows({
+      marketHistory: historiesById.market,
+      liquidTrendHistory: historiesById.liquidTrend,
+      liquidHistory: historiesById.liquid,
+    }),
+    [historiesById]
   )
-  const marketSnapshots = useMemo(
-    () => buildListBreadthSymbolSnapshots({ symbols: marketLeadersSymbols, historyBarsBySymbol }),
-    [historyBarsBySymbol, marketLeadersSymbols]
-  )
-  const liquidSnapshots = useMemo(
-    () => buildListBreadthSymbolSnapshots({ symbols: liquidSymbols, historyBarsBySymbol }),
-    [historyBarsBySymbol, liquidSymbols]
+  const snapshotsById = useMemo(
+    () => BREADTH_LISTS.reduce((next, config) => {
+      next[config.id] = buildListBreadthSymbolSnapshots({ symbols: symbolsById[config.id], historyBarsBySymbol })
+      return next
+    }, {}),
+    [historyBarsBySymbol, symbolsById]
   )
   const activeMetric = METRIC_FAMILIES.find(metric => metric.id === metricFamily) || METRIC_FAMILIES[0]
-  const morningRead = buildMorningRead(marketLatest, liquidLatest)
+  const morningRead = buildMorningRead(marketLatest, liquidTrendLatest, liquidLatest)
 
   if (!allSymbols.length) {
     return (
       <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-8 text-center">
         <Activity size={22} className="mx-auto mb-3 text-gray-600" />
         <p className="text-sm font-semibold text-gray-300">No breadth universe yet.</p>
-        <p className="mt-1 text-xs text-gray-600">Add symbols to Market Leaders or Liquid in Growth Research, then Morning can build the breadth dashboard.</p>
+        <p className="mt-1 text-xs text-gray-600">Add symbols to Market Leaders, Liquid Trend, or Liquid in Growth Research, then Morning can build the breadth dashboard.</p>
       </div>
     )
   }
@@ -616,9 +651,10 @@ export default function MorningBreadthDashboard() {
 
       {activeBreadthView === 'overview' ? (
         <>
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <ListScoreCard label="Market Leaders" entry={marketLatest} tone="blue" />
-        <ListScoreCard label="Liquid" entry={liquidLatest} tone="green" />
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        {BREADTH_LISTS.map(config => (
+          <ListScoreCard key={config.id} label={config.label} entry={latestById[config.id]} tone={config.tone} />
+        ))}
       </div>
 
       <div className="rounded-xl border border-white/10 bg-white/[0.02]">
@@ -627,7 +663,7 @@ export default function MorningBreadthDashboard() {
             <BarChart3 size={14} className="text-accent-blue" />
             <div>
               <p className="text-sm font-semibold text-white">Historical Breadth</p>
-              <p className="text-xs text-gray-600">Market Leaders vs Liquid, last 180 sessions.</p>
+              <p className="text-xs text-gray-600">Market Leaders, Liquid Trend, and Liquid, last 180 sessions.</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -678,15 +714,26 @@ export default function MorningBreadthDashboard() {
                     name,
                   ]}
                 />
-                <Line type="monotone" dataKey={activeMetric.marketKey} name="Market Leaders" stroke="#3d84ff" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} connectNulls />
-                <Line type="monotone" dataKey={activeMetric.liquidKey} name="Liquid" stroke="#22c55e" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} connectNulls />
+                {BREADTH_LISTS.map(config => (
+                  <Line
+                    key={config.id}
+                    type="monotone"
+                    dataKey={`${config.id}${activeMetric.suffix}`}
+                    name={config.label}
+                    stroke={config.color}
+                    strokeWidth={2.5}
+                    dot={false}
+                    activeDot={{ r: 4 }}
+                    connectNulls
+                  />
+                ))}
               </LineChart>
             </ResponsiveContainer>
           </div>
         )}
       </div>
 
-      <MetricTable market={marketLatest} liquid={liquidLatest} />
+      <MetricTable entriesById={latestById} />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
@@ -696,6 +743,7 @@ export default function MorningBreadthDashboard() {
           </div>
           <div className="space-y-2 text-sm text-gray-400">
             <p>Market Leaders AVWAP stack: <span className="font-semibold text-white">{fmtPct(avwapStack(marketLatest))}</span></p>
+            <p>Liquid Trend AVWAP stack: <span className="font-semibold text-white">{fmtPct(avwapStack(liquidTrendLatest))}</span></p>
             <p>Liquid AVWAP stack: <span className="font-semibold text-white">{fmtPct(avwapStack(liquidLatest))}</span></p>
             <p>Liquid minus Leaders score spread: <span className="font-semibold text-white">{fmtSigned((liquidLatest?.regimeScore ?? 0) - (marketLatest?.regimeScore ?? 0), 0, '')}</span></p>
           </div>
@@ -707,13 +755,14 @@ export default function MorningBreadthDashboard() {
           </div>
           <div className="space-y-2 text-sm text-gray-400">
             <p>Market Leaders down 4%: <span className="font-semibold text-white">{marketLatest?.moves?.day4?.downCount || 0}</span></p>
+            <p>Liquid Trend down 4%: <span className="font-semibold text-white">{liquidTrendLatest?.moves?.day4?.downCount || 0}</span></p>
             <p>Liquid down 4%: <span className="font-semibold text-white">{liquidLatest?.moves?.day4?.downCount || 0}</span></p>
             <p>Liquid down 25% in 1M: <span className="font-semibold text-white">{liquidLatest?.moves?.month25?.downCount || 0}</span></p>
           </div>
         </div>
       </div>
 
-      <Drilldowns marketSnapshots={marketSnapshots} liquidSnapshots={liquidSnapshots} />
+      <Drilldowns snapshotsById={snapshotsById} />
         </>
       ) : (
         <HistoricalBreadthMetricTable rows={historicalMetricRows} />
