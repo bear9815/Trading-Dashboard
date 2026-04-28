@@ -15,12 +15,23 @@ import {
   buildYtdAvwapSnapshot,
   resolveLatestAnchorDate,
 } from '../../utils/tradeReviewChart.js'
-import { buildTickerChartData, useResearchChartUniverse } from './useResearchChartUniverse.js'
+import { buildChartDataFromBars, buildTickerChartData, useResearchChartUniverse } from './useResearchChartUniverse.js'
 import { buildWatchlistFitMap } from '../../utils/watchlistFitSignal.js'
 import { resolveTickerToName } from '../../utils/marketData.js'
+import { buildCondensedEcosystemRows, normalizeEcosystemGroupingMode, normalizeEcosystemKey } from '../../utils/condensedEcosystems.js'
+import { buildEcosystemCompositeBars } from '../../utils/ecosystemCompositeChart.js'
 
 const WATCHLIST_ORDER = { [MARKET_LEADERS_LIST_ID]: 0, [WATCHLIST_LIST_ID]: 1 }
 const DAILY_RANGE_OPTIONS = [3, 6, 9]
+const SIDEBAR_VIEW_OPTIONS = [
+  ['symbols', 'Symbols'],
+  ['ecosystems', 'Ecosystems'],
+]
+const ECOSYSTEM_GROUPING_OPTIONS = [
+  ['normal', 'Normal'],
+  ['condensed', 'Condensed'],
+  ['ultra', 'Ultra'],
+]
 const SORT_OPTIONS = [
   ['symbol', 'Symbol'],
   ['rollingRs', 'Rolling Z'],
@@ -51,6 +62,48 @@ function fitBadgeTone(fitColor) {
   if (fitColor === 'orange') return 'border-amber-400/30 bg-amber-400/15 text-amber-100'
   if (fitColor === 'red') return 'border-rose-400/30 bg-rose-400/15 text-rose-100'
   return 'border-white/10 bg-white/[0.06] text-gray-300'
+}
+
+function averageMetric(values) {
+  const finite = values.filter(Number.isFinite)
+  if (!finite.length) return null
+  return finite.reduce((sum, value) => sum + value, 0) / finite.length
+}
+
+function buildEcosystemSidebarGroups(rows, groupingMode, overrides, anchoredRsBySymbol, rollingRsBySymbol, ytdAvwapBySymbol, fitBySymbol) {
+  const groupedRows = buildCondensedEcosystemRows(rows, {
+    mode: groupingMode,
+    overrides,
+  })
+  const byKey = new Map()
+
+  for (const row of groupedRows) {
+    const label = String(row?.ecosystem || 'Other').trim() || 'Other'
+    const key = normalizeEcosystemKey(label) || 'other'
+    const current = byKey.get(key) || {
+      key,
+      label,
+      symbols: [],
+      rows: [],
+      sourceEcosystems: new Set(),
+    }
+    current.symbols.push(row.symbol)
+    current.rows.push(row)
+    if (row?.sourceEcosystem) current.sourceEcosystems.add(row.sourceEcosystem)
+    byKey.set(key, current)
+  }
+
+  return [...byKey.values()].map(group => ({
+    key: group.key,
+    label: group.label,
+    symbols: group.symbols,
+    count: group.symbols.length,
+    sourceCount: group.sourceEcosystems.size,
+    topSymbol: group.symbols[0] || '',
+    rollingRs: averageMetric(group.symbols.map(symbol => rollingRsBySymbol[symbol]?.zScore)),
+    anchoredRs: averageMetric(group.symbols.map(symbol => anchoredRsBySymbol[symbol]?.zScore)),
+    ytdAvwap: averageMetric(group.symbols.map(symbol => ytdAvwapBySymbol[symbol]?.distancePct)),
+  }))
 }
 
 function metricCardTone(kind) {
@@ -227,7 +280,7 @@ function ManualAvwapModal({ anchor, onSave, onDelete, onClose }) {
 }
 
 export default function Charts() {
-  const { activeListId, listsById, setActiveList } = useResearchWatchlistStore()
+  const { activeListId, listsById, setActiveList, setEcosystemGroupingMode } = useResearchWatchlistStore()
   const {
     tradeReviewChartSettings,
     tradeReviewManualAnchorsBySymbol,
@@ -249,12 +302,16 @@ export default function Charts() {
   const [customSymbolMeta, setCustomSymbolMeta] = useState(null)
   const [selectedAnchorId, setSelectedAnchorId] = useState(null)
   const [editingAnchorId, setEditingAnchorId] = useState(null)
+  const [sidebarMode, setSidebarMode] = useState('symbols')
+  const [selectedEcosystemKey, setSelectedEcosystemKey] = useState('')
 
   const watchlists = useMemo(
     () => Object.values(listsById || {}).sort((a, b) => (WATCHLIST_ORDER[a.id] ?? 99) - (WATCHLIST_ORDER[b.id] ?? 99)),
     [listsById]
   )
   const activeList = listsById[activeListId]
+  const ecosystemGroupingMode = normalizeEcosystemGroupingMode(activeList?.ecosystemGroupingMode)
+  const condensedEcosystemOverrides = activeList?.condensedEcosystemOverrides || {}
   const symbols = activeList?.symbols || []
   const rowsBySymbol = activeList?.rowsBySymbol || {}
   const rows = useMemo(() => symbols.map(symbol => rowsBySymbol[symbol]).filter(Boolean), [rowsBySymbol, symbols])
@@ -317,6 +374,24 @@ export default function Charts() {
     [anchoredRsBySymbol, rollingRsBySymbol, symbols]
   )
 
+  const filteredEcosystemGroups = useMemo(() => {
+    const groups = buildEcosystemSidebarGroups(
+      rows,
+      ecosystemGroupingMode,
+      condensedEcosystemOverrides,
+      anchoredRsBySymbol,
+      rollingRsBySymbol,
+      ytdAvwapBySymbol,
+      fitBySymbol
+    )
+    const needle = query.trim().toLowerCase()
+    if (!needle) return groups
+    return groups.filter(group => {
+      const haystack = `${group.label} ${group.topSymbol} ${group.symbols.join(' ')}`.toLowerCase()
+      return haystack.includes(needle)
+    })
+  }, [anchoredRsBySymbol, condensedEcosystemOverrides, ecosystemGroupingMode, fitBySymbol, query, rollingRsBySymbol, rows, ytdAvwapBySymbol])
+
   const sortedRows = useMemo(() => {
     const base = [...filteredRows]
     const numericValue = (row) => {
@@ -341,11 +416,46 @@ export default function Charts() {
     })
   }, [anchoredRsBySymbol, filteredRows, rollingRsBySymbol, sortDir, sortKey, ytdAvwapBySymbol])
 
+  const sortedEcosystemGroups = useMemo(() => {
+    const base = [...filteredEcosystemGroups]
+    return base.sort((a, b) => {
+      if (sortKey === 'symbol') {
+        const result = a.label.localeCompare(b.label)
+        return sortDir === 'asc' ? result : -result
+      }
+
+      const av = sortKey === 'rollingRs'
+        ? a.rollingRs
+        : sortKey === 'anchoredRs'
+          ? a.anchoredRs
+          : a.ytdAvwap
+      const bv = sortKey === 'rollingRs'
+        ? b.rollingRs
+        : sortKey === 'anchoredRs'
+          ? b.anchoredRs
+          : b.ytdAvwap
+      const aSafe = Number.isFinite(av) ? av : Number.NEGATIVE_INFINITY
+      const bSafe = Number.isFinite(bv) ? bv : Number.NEGATIVE_INFINITY
+      if (aSafe !== bSafe) return sortDir === 'asc' ? aSafe - bSafe : bSafe - aSafe
+      return a.label.localeCompare(b.label)
+    })
+  }, [filteredEcosystemGroups, sortDir, sortKey])
+
   const selectedDisplaySymbol = useMemo(() => {
     if (customSymbol) return customSymbol
+    if (sidebarMode === 'ecosystems') return null
     if (selectedSymbol && sortedRows.some(row => row.symbol === selectedSymbol)) return selectedSymbol
     return sortedRows[0]?.symbol || null
-  }, [customSymbol, selectedSymbol, sortedRows])
+  }, [customSymbol, selectedSymbol, sidebarMode, sortedRows])
+
+  const selectedEcosystemGroup = useMemo(() => {
+    if (sidebarMode !== 'ecosystems') return null
+    if (selectedEcosystemKey) {
+      const explicit = sortedEcosystemGroups.find(group => group.key === selectedEcosystemKey)
+      if (explicit) return explicit
+    }
+    return sortedEcosystemGroups[0] || null
+  }, [selectedEcosystemKey, sidebarMode, sortedEcosystemGroups])
 
   const selectedRow = selectedDisplaySymbol ? (rowsBySymbol[selectedDisplaySymbol] || (customSymbol === selectedDisplaySymbol ? {
     symbol: selectedDisplaySymbol,
@@ -365,9 +475,22 @@ export default function Charts() {
     ),
     [benchmarkHistoryBars, historyBarsBySymbol, selectedDisplaySymbol, tradeReviewChartSettings, tradeReviewManualAnchorsBySymbol]
   )
+  const selectedEcosystemComposite = useMemo(
+    () => selectedEcosystemGroup ? buildEcosystemCompositeBars(selectedEcosystemGroup.symbols, historyBarsBySymbol) : { dailyBars: [], weeklyBars: [], memberCount: 0 },
+    [historyBarsBySymbol, selectedEcosystemGroup]
+  )
+  const selectedEcosystemChartData = useMemo(
+    () => buildChartDataFromBars(
+      selectedEcosystemComposite.dailyBars,
+      tradeReviewChartSettings,
+      benchmarkHistoryBars
+    ),
+    [benchmarkHistoryBars, selectedEcosystemComposite.dailyBars, tradeReviewChartSettings]
+  )
 
   useEffect(() => {
     setSelectedSymbol(null)
+    setSelectedEcosystemKey('')
     setQuery('')
     setHistoryError('')
     setAddAvwapMode(false)
@@ -398,33 +521,51 @@ export default function Charts() {
   useEffect(() => {
     const handleKeydown = (event) => {
       if (isTypingTarget(event.target)) return
-      const currentIndex = sortedRows.findIndex(row => row.symbol === selectedDisplaySymbol)
+      const activeEntries = sidebarMode === 'ecosystems' ? sortedEcosystemGroups : sortedRows
+      const currentIndex = sidebarMode === 'ecosystems'
+        ? activeEntries.findIndex(group => group.key === selectedEcosystemGroup?.key)
+        : activeEntries.findIndex(row => row.symbol === selectedDisplaySymbol)
 
-      if (event.code === 'Space' && sortedRows.length) {
+      if (event.code === 'Space' && activeEntries.length) {
         event.preventDefault()
         const nextIndex = event.shiftKey
-          ? (currentIndex <= 0 ? sortedRows.length - 1 : currentIndex - 1)
-          : (currentIndex < 0 || currentIndex >= sortedRows.length - 1 ? 0 : currentIndex + 1)
-        const nextSymbol = sortedRows[nextIndex]?.symbol
-        if (nextSymbol) setSelectedSymbol(nextSymbol)
+          ? (currentIndex <= 0 ? activeEntries.length - 1 : currentIndex - 1)
+          : (currentIndex < 0 || currentIndex >= activeEntries.length - 1 ? 0 : currentIndex + 1)
+        if (sidebarMode === 'ecosystems') {
+          const nextKey = activeEntries[nextIndex]?.key
+          if (nextKey) setSelectedEcosystemKey(nextKey)
+        } else {
+          const nextSymbol = activeEntries[nextIndex]?.symbol
+          if (nextSymbol) setSelectedSymbol(nextSymbol)
+        }
         return
       }
 
-      if ((event.key === 'ArrowDown' || event.key === 'ArrowRight') && sortedRows.length) {
+      if ((event.key === 'ArrowDown' || event.key === 'ArrowRight') && activeEntries.length) {
         event.preventDefault()
         setCustomSymbol('')
-        const nextIndex = currentIndex < 0 || currentIndex >= sortedRows.length - 1 ? 0 : currentIndex + 1
-        const nextSymbol = sortedRows[nextIndex]?.symbol
-        if (nextSymbol) setSelectedSymbol(nextSymbol)
+        const nextIndex = currentIndex < 0 || currentIndex >= activeEntries.length - 1 ? 0 : currentIndex + 1
+        if (sidebarMode === 'ecosystems') {
+          const nextKey = activeEntries[nextIndex]?.key
+          if (nextKey) setSelectedEcosystemKey(nextKey)
+        } else {
+          const nextSymbol = activeEntries[nextIndex]?.symbol
+          if (nextSymbol) setSelectedSymbol(nextSymbol)
+        }
         return
       }
 
-      if ((event.key === 'ArrowUp' || event.key === 'ArrowLeft') && sortedRows.length) {
+      if ((event.key === 'ArrowUp' || event.key === 'ArrowLeft') && activeEntries.length) {
         event.preventDefault()
         setCustomSymbol('')
-        const nextIndex = currentIndex <= 0 ? sortedRows.length - 1 : currentIndex - 1
-        const nextSymbol = sortedRows[nextIndex]?.symbol
-        if (nextSymbol) setSelectedSymbol(nextSymbol)
+        const nextIndex = currentIndex <= 0 ? activeEntries.length - 1 : currentIndex - 1
+        if (sidebarMode === 'ecosystems') {
+          const nextKey = activeEntries[nextIndex]?.key
+          if (nextKey) setSelectedEcosystemKey(nextKey)
+        } else {
+          const nextSymbol = activeEntries[nextIndex]?.symbol
+          if (nextSymbol) setSelectedSymbol(nextSymbol)
+        }
         return
       }
 
@@ -478,15 +619,16 @@ export default function Charts() {
 
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
-  }, [editingAnchorId, pendingSymbolInput, selectedAnchorId, selectedDisplaySymbol, selectedManualAnchors, sortedRows])
+  }, [editingAnchorId, pendingSymbolInput, selectedAnchorId, selectedDisplaySymbol, selectedEcosystemGroup?.key, selectedManualAnchors, sidebarMode, sortedEcosystemGroups, sortedRows])
 
   useEffect(() => {
-    if (!selectedDisplaySymbol) return
+    const selectedRowKey = sidebarMode === 'ecosystems' ? selectedEcosystemGroup?.key : selectedDisplaySymbol
+    if (!selectedRowKey) return
     setSelectedAnchorId(null)
     setEditingAnchorId(null)
-    const selectedRow = document.querySelector(`[data-chart-watchlist-row="${selectedDisplaySymbol}"]`)
+    const selectedRow = document.querySelector(`[data-chart-watchlist-row="${selectedRowKey}"]`)
     selectedRow?.scrollIntoView?.({ block: 'nearest' })
-  }, [selectedDisplaySymbol])
+  }, [selectedDisplaySymbol, selectedEcosystemGroup?.key, sidebarMode])
 
   const toggleYtd = () => {
     const nextPresets = (tradeReviewChartSettings?.avwapPresets || []).map(preset =>
@@ -555,6 +697,23 @@ export default function Charts() {
     setEditingAnchorId(null)
   }
 
+  const isEcosystemMode = sidebarMode === 'ecosystems' && !customSymbol
+  const activeChartData = isEcosystemMode ? selectedEcosystemChartData : selectedTickerChartData
+  const activeChartTitle = customSymbol
+    ? selectedDisplaySymbol || 'Charts'
+    : isEcosystemMode
+      ? `ECO:${String(selectedEcosystemGroup?.label || 'Charts').toUpperCase()}`
+      : (selectedDisplaySymbol || 'Charts')
+  const activeChartMemberCount = isEcosystemMode ? (selectedEcosystemComposite.memberCount || 0) : 1
+  const activeChartLabel = isEcosystemMode
+    ? `${selectedEcosystemGroup?.count || 0} symbols`
+    : (selectedRow?.companyName || 'Ticker Chart')
+  const activeBadgeLabel = customSymbol
+    ? 'Custom'
+    : isEcosystemMode
+      ? `${activeList?.name || 'Watchlist'} · ${ECOSYSTEM_GROUPING_OPTIONS.find(([value]) => value === ecosystemGroupingMode)?.[1] || 'Normal'}`
+      : (activeList?.name || 'Watchlist')
+
   return (
     <div className="h-full overflow-hidden bg-surface px-4 py-4 md:px-5">
       <div className="grid h-full min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -569,10 +728,10 @@ export default function Charts() {
             </div>
           ) : (
             <ResearchMultiTimeframeChart
-              data={selectedTickerChartData}
+              data={activeChartData}
               chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
-              title={selectedDisplaySymbol || 'Charts'}
-              memberCount={1}
+              title={activeChartTitle}
+              memberCount={activeChartMemberCount}
               dailyRangeMonths={growthResearchDailyRangeMonths}
               dailyRangeOptions={DAILY_RANGE_OPTIONS}
               onChangeDailyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchDailyRangeMonths: months })}
@@ -582,34 +741,34 @@ export default function Charts() {
               onToggleWeeklyRs={() => setTradeReviewChartSettings({ researchChartsShowWeeklyRollingRs: !weeklyRollingRsEnabled })}
               dailyAnchoredRsEnabled={dailyAnchoredRsEnabled}
               onToggleDailyAnchoredRs={() => setTradeReviewChartSettings({ researchChartsShowDailyAnchoredRs: !dailyAnchoredRsEnabled })}
-              onAddAvwap={() => setAddAvwapMode(current => !current)}
+              onAddAvwap={isEcosystemMode ? null : (() => setAddAvwapMode(current => !current))}
               addAvwapMode={addAvwapMode}
-              manualAnchors={selectedManualAnchors}
+              manualAnchors={isEcosystemMode ? [] : selectedManualAnchors}
               onToggleManualAnchor={(anchor) => {
                 if (!selectedDisplaySymbol) return
                 updateTradeReviewManualAnchor(selectedDisplaySymbol, anchor.id, { enabled: !anchor.enabled })
               }}
-              onRemoveManualAnchor={handleDeleteManualAnchor}
-              onMoveManualAnchor={addAvwapMode ? null : handleMoveManualAnchor}
+              onRemoveManualAnchor={isEcosystemMode ? null : handleDeleteManualAnchor}
+              onMoveManualAnchor={isEcosystemMode || addAvwapMode ? null : handleMoveManualAnchor}
               selectedManualAnchorId={selectedAnchorId}
-              onSelectManualAnchor={(anchor) => {
+              onSelectManualAnchor={isEcosystemMode ? null : ((anchor) => {
                 setSelectedAnchorId(current => current === anchor?.id ? null : anchor?.id)
                 setEditingAnchorId(null)
-              }}
-              onEditManualAnchor={(anchor) => {
+              })}
+              onEditManualAnchor={isEcosystemMode ? null : ((anchor) => {
                 setSelectedAnchorId(anchor?.id || null)
                 setEditingAnchorId(anchor?.id || null)
-              }}
+              })}
               onOpenSettings={() => setSettingsOpen(true)}
-              chartLabel={selectedRow?.companyName || 'Ticker Chart'}
-              badgeLabel={customSymbol === selectedDisplaySymbol ? 'Custom' : (activeList?.name || 'Watchlist')}
+              chartLabel={activeChartLabel}
+              badgeLabel={activeBadgeLabel}
               emptyLabel={loadingHistory ? 'Loading chart history…' : 'No chart data for this ticker'}
               weeklyRightOffset={chartsWeeklyRightOffset}
               dailyRightOffset={chartsDailyRightOffset}
-              onChartClick={handleAddAvwapAtDate}
+              onChartClick={isEcosystemMode ? null : handleAddAvwapAtDate}
               fillAvailableHeight
               headerHoverCard={
-                selectedRow ? (
+                !isEcosystemMode && selectedRow ? (
                   <CompanyHoverCard
                     row={selectedRow}
                     fit={fitBySymbol[selectedRow.symbol]}
@@ -625,11 +784,13 @@ export default function Charts() {
         </section>
 
         <aside className="flex min-h-0 flex-col rounded-2xl border border-white/10 bg-white/[0.02]">
-          <div className="border-b border-white/10 px-4 py-4">
-            <div className="flex items-center justify-between gap-3">
+          <div className="border-b border-white/10 px-4 py-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-white">Watchlist</p>
-                <p className="text-xs text-gray-500 mt-1">Select a symbol to drive both charts.</p>
+                <p className="mt-1 text-xs text-gray-500">
+                  {isEcosystemMode ? 'Select an ecosystem basket to drive both charts.' : 'Select a symbol to drive both charts.'}
+                </p>
               </div>
               <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] p-1">
                 {watchlists.map(list => (
@@ -649,17 +810,50 @@ export default function Charts() {
               </div>
             </div>
 
-            <div className="mt-3 flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] p-1">
+                {SIDEBAR_VIEW_OPTIONS.map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setSidebarMode(value)}
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                      sidebarMode === value ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {sidebarMode === 'ecosystems' ? (
+                <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] p-1">
+                  {ECOSYSTEM_GROUPING_OPTIONS.map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setEcosystemGroupingMode(value)}
+                      className={`rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${
+                        ecosystemGroupingMode === value ? 'bg-violet-500/15 text-violet-200' : 'text-gray-500 hover:text-gray-300'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
               <Search size={14} className="text-gray-500" />
               <input
                 type="text"
                 value={query}
                 onChange={event => setQuery(event.target.value)}
-                placeholder="Filter symbols or company names…"
+                placeholder={sidebarMode === 'ecosystems' ? 'Filter ecosystems or members…' : 'Filter symbols or company names…'}
                 className="w-full bg-transparent text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none"
               />
             </div>
-            <div className="mt-3 flex items-center gap-2 rounded-xl border border-accent-blue/15 bg-accent-blue/[0.05] px-3 py-2">
+            <div className="flex items-center gap-2 rounded-xl border border-accent-blue/15 bg-accent-blue/[0.05] px-3 py-2">
               <Search size={14} className="text-accent-blue/80" />
               <input
                 type="text"
@@ -688,7 +882,7 @@ export default function Charts() {
                 </button>
               ) : null}
             </div>
-            <p className="mt-2 text-[11px] text-gray-500">You can start typing anywhere on the Charts tab, then press Enter to load that ticker.</p>
+            <p className="text-[11px] text-gray-500">You can start typing anywhere on the Charts tab, then press Enter to load that ticker.</p>
 
             {historyError && (
               <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-300">
@@ -698,7 +892,7 @@ export default function Charts() {
           </div>
 
           <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-gray-600">
-            <span>{filteredRows.length} symbols</span>
+            <span>{sidebarMode === 'ecosystems' ? `${filteredEcosystemGroups.length} groups` : `${filteredRows.length} symbols`}</span>
             <span>{loadingHistory ? 'Loading' : activeList?.name || 'List'}</span>
           </div>
 
@@ -727,49 +921,95 @@ export default function Charts() {
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto pr-1">
-            {sortedRows.length ? (
-              sortedRows.map(row => {
-                const active = row.symbol === selectedDisplaySymbol
-                const fit = fitBySymbol[row.symbol]
-                const rolling = rollingRsBySymbol[row.symbol]
-                const anchored = anchoredRsBySymbol[row.symbol]
-                const ytd = ytdAvwapBySymbol[row.symbol]
-                return (
-                  <button
-                    key={row.symbol}
-                    type="button"
-                    onClick={() => {
-                      setCustomSymbol('')
-                      setCustomSymbolMeta(null)
-                      setSelectedSymbol(row.symbol)
-                    }}
-                    data-chart-watchlist-row={row.symbol}
-                    className={`flex w-full items-start gap-3 border-b border-white/[0.05] px-4 py-3 text-left transition-colors ${
-                      active ? 'bg-accent-blue/10' : 'hover:bg-white/[0.03]'
-                    }`}
-                  >
-                    <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${fitTone(fit?.fitColor)}`} />
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-sm font-semibold ${active ? 'text-accent-blue' : 'text-white'}`}>{row.symbol}</p>
-                      <p className="mt-1 truncate text-xs text-gray-500">{row.companyName || '—'}</p>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-medium">
-                        <span className="rounded-full border border-cyan-400/15 bg-cyan-400/[0.08] px-2 py-1 text-cyan-100">
-                          Rolling {formatSigned(rolling?.zScore, 1, 'z')}
-                        </span>
-                        <span className="rounded-full border border-violet-400/15 bg-violet-400/[0.08] px-2 py-1 text-violet-100">
-                          Anchored {formatSigned(anchored?.zScore, 1, 'z')}
-                        </span>
-                        <span className="rounded-full border border-amber-400/15 bg-amber-400/[0.08] px-2 py-1 text-amber-100">
-                          AVWAP {formatSigned(ytd?.distancePct, 0, '%')}
+            {(sidebarMode === 'ecosystems' ? sortedEcosystemGroups.length : sortedRows.length) ? (
+              sidebarMode === 'ecosystems' ? (
+                sortedEcosystemGroups.map(group => {
+                  const active = group.key === selectedEcosystemGroup?.key && !customSymbol
+                  return (
+                    <button
+                      key={group.key}
+                      type="button"
+                      onClick={() => {
+                        setCustomSymbol('')
+                        setCustomSymbolMeta(null)
+                        setSelectedEcosystemKey(group.key)
+                      }}
+                      data-chart-watchlist-row={group.key}
+                      className={`w-full border-b border-white/[0.05] px-4 py-3 text-left transition-colors ${
+                        active ? 'bg-accent-blue/10' : 'hover:bg-white/[0.03]'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className={`truncate text-sm font-semibold ${active ? 'text-accent-blue' : 'text-white'}`}>{group.label}</p>
+                          <p className="mt-1 text-[11px] text-gray-500">
+                            {group.count} symbols{ecosystemGroupingMode !== 'normal' && group.sourceCount ? ` · ${group.sourceCount} source groups` : ''}
+                          </p>
+                        </div>
+                        <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-gray-400">
+                          {group.topSymbol || '—'}
                         </span>
                       </div>
-                    </div>
-                  </button>
-                )
-              })
+                      <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-medium">
+                        <span className="rounded-full border border-cyan-400/15 bg-cyan-400/[0.08] px-2 py-1 text-cyan-100">
+                          R {formatSigned(group.rollingRs, 1, 'z')}
+                        </span>
+                        <span className="rounded-full border border-violet-400/15 bg-violet-400/[0.08] px-2 py-1 text-violet-100">
+                          A {formatSigned(group.anchoredRs, 1, 'z')}
+                        </span>
+                        <span className="rounded-full border border-amber-400/15 bg-amber-400/[0.08] px-2 py-1 text-amber-100">
+                          V {formatSigned(group.ytdAvwap, 0, '%')}
+                        </span>
+                      </div>
+                    </button>
+                  )
+                })
+              ) : (
+                sortedRows.map(row => {
+                  const active = row.symbol === selectedDisplaySymbol
+                  const fit = fitBySymbol[row.symbol]
+                  const rolling = rollingRsBySymbol[row.symbol]
+                  const anchored = anchoredRsBySymbol[row.symbol]
+                  const ytd = ytdAvwapBySymbol[row.symbol]
+                  return (
+                    <button
+                      key={row.symbol}
+                      type="button"
+                      onClick={() => {
+                        setCustomSymbol('')
+                        setCustomSymbolMeta(null)
+                        setSelectedSymbol(row.symbol)
+                      }}
+                      data-chart-watchlist-row={row.symbol}
+                      className={`w-full border-b border-white/[0.05] px-4 py-3 text-left transition-colors ${
+                        active ? 'bg-accent-blue/10' : 'hover:bg-white/[0.03]'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${fitTone(fit?.fitColor)}`} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline justify-between gap-3">
+                            <p className={`text-sm font-semibold ${active ? 'text-accent-blue' : 'text-white'}`}>{row.symbol}</p>
+                            <span className="text-[11px] text-gray-500">{formatSigned(ytd?.distancePct, 0, '%')}</span>
+                          </div>
+                          <p className="mt-1 truncate text-[11px] text-gray-500">{row.companyName || row.ecosystem || '—'}</p>
+                          <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-medium">
+                            <span className="rounded-full border border-cyan-400/15 bg-cyan-400/[0.08] px-2 py-1 text-cyan-100">
+                              R {formatSigned(rolling?.zScore, 1, 'z')}
+                            </span>
+                            <span className="rounded-full border border-violet-400/15 bg-violet-400/[0.08] px-2 py-1 text-violet-100">
+                              A {formatSigned(anchored?.zScore, 1, 'z')}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })
+              )
             ) : (
               <div className="px-4 py-6 text-sm text-gray-500">
-                No symbols match your current filter.
+                No {sidebarMode === 'ecosystems' ? 'ecosystems' : 'symbols'} match your current filter.
               </div>
             )}
           </div>
@@ -777,7 +1017,7 @@ export default function Charts() {
           <div className="border-t border-white/10 px-4 py-3">
             <div className="flex items-start gap-2 text-xs text-gray-500">
               <Layers size={13} className="mt-0.5 text-gray-600" />
-              <p>This page reuses your Growth Research watchlists. Use Growth Research to import or map the list, then use Charts for full-screen charting.</p>
+              <p>Charts now reuses both the symbol watchlist and the ecosystem groupings from Growth Research for the active list.</p>
             </div>
           </div>
         </aside>

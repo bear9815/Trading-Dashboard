@@ -109,7 +109,23 @@ export function buildTickerChartData(
   benchmarkHistoryBars = [],
   manualAnchorsBySymbol = {}
 ) {
-  if (!selectedSymbol) {
+  return buildChartDataFromBars(
+    selectedSymbol ? historyBarsBySymbol[selectedSymbol] || [] : [],
+    tradeReviewChartSettings,
+    benchmarkHistoryBars,
+    selectedSymbol,
+    manualAnchorsBySymbol
+  )
+}
+
+export function buildChartDataFromBars(
+  bars,
+  tradeReviewChartSettings,
+  benchmarkHistoryBars = [],
+  symbol = null,
+  manualAnchorsBySymbol = {}
+) {
+  if (!bars?.length) {
     return {
       dailyBars: [],
       weeklyBars: [],
@@ -120,7 +136,7 @@ export function buildTickerChartData(
       weeklyRollingRsGradient: [],
     }
   }
-  const dailyBars = normalizeChartBars(historyBarsBySymbol[selectedSymbol] || [])
+  const dailyBars = normalizeChartBars(bars || [])
   if (!dailyBars.length) {
     return {
       dailyBars: [],
@@ -139,7 +155,7 @@ export function buildTickerChartData(
   const latestAnchorDate = resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates)
   const avwapOverlays = buildAvwapOverlays(
     dailyBars,
-    selectedSymbol,
+    symbol,
     tradeReviewChartSettings,
     manualAnchorsBySymbol,
     new Date(),
