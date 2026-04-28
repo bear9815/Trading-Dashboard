@@ -46,6 +46,7 @@ const aiInfra = themeGroups.find(group => group.key === 'ai infra')
 const cloud = themeGroups.find(group => group.key === 'cloud')
 
 assert.equal(aiInfra.count, 2)
+assert.equal(aiInfra.breadthWeight, 0.333)
 assert.equal(aiInfra.greenPct, 50)
 assert.equal(aiInfra.orangePct, 50)
 assert.equal(aiInfra.redPct, 0)
@@ -59,8 +60,52 @@ assert.equal(aiInfra.members[0].fitColor, 'green')
 assert.ok(aiInfra.currentStrengthScore > cloud.currentStrengthScore)
 
 assert.equal(cloud.count, 1)
+assert.equal(cloud.breadthWeight, 0.2)
 assert.equal(cloud.redPct, 100)
 assert.equal(cloud.healthLabel, 'weak / deteriorating')
+
+const skewedRows = [
+  { symbol: 'ONE', theme: 'Skewed Solo', ecosystem: 'Skewed Solo' },
+  { symbol: 'TWO', theme: 'Broad Basket', ecosystem: 'Broad Basket' },
+  { symbol: 'THREE', theme: 'Broad Basket', ecosystem: 'Broad Basket' },
+  { symbol: 'FOUR', theme: 'Broad Basket', ecosystem: 'Broad Basket' },
+]
+
+const skewedFit = {
+  ONE: { fitScore: 90, fitColor: 'green', fitReady: true },
+  TWO: { fitScore: 55, fitColor: 'green', fitReady: true },
+  THREE: { fitScore: 52, fitColor: 'green', fitReady: true },
+  FOUR: { fitScore: 48, fitColor: 'orange', fitReady: true },
+}
+
+const skewedRolling = {
+  ONE: { zScore: 4.8, signalLine: 2.2, momentum: 'strengthening' },
+  TWO: { zScore: 2.2, signalLine: 1.1, momentum: 'strengthening' },
+  THREE: { zScore: 2.1, signalLine: 1.0, momentum: 'strengthening' },
+  FOUR: { zScore: 1.8, signalLine: 0.8, momentum: 'pulling_back' },
+}
+
+const skewedAnchored = {
+  ONE: { zScore: 3.7, signalLine: 1.8, momentum: 'strengthening' },
+  TWO: { zScore: 1.9, signalLine: 1.0, momentum: 'strengthening' },
+  THREE: { zScore: 1.7, signalLine: 0.9, momentum: 'strengthening' },
+  FOUR: { zScore: 1.3, signalLine: 0.6, momentum: 'pulling_back' },
+}
+
+const skewedGroups = buildThemeGroupMetrics({
+  rows: skewedRows,
+  groupBy: 'ecosystem',
+  fitBySymbol: skewedFit,
+  rollingRsBySymbol: skewedRolling,
+  anchoredRsBySymbol: skewedAnchored,
+})
+
+const broadBasket = skewedGroups.find(group => group.key === 'broad basket')
+const skewedSolo = skewedGroups.find(group => group.key === 'skewed solo')
+
+assert.ok(skewedSolo.currentStrengthScore > broadBasket.currentStrengthScore)
+assert.ok(broadBasket.sizeAdjustedStrengthScore > skewedSolo.sizeAdjustedStrengthScore)
+assert.equal(skewedGroups[0].key, 'broad basket')
 
 const marketLeadersGroup = buildMarketLeadersEcosystemGroup({
   rows,

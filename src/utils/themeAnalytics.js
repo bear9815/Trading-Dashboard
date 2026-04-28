@@ -30,6 +30,11 @@ function countPct(count, total) {
   return total > 0 ? round((count / total) * 100, 1) : 0
 }
 
+function breadthWeight(count, priorCount = 4) {
+  if (!Number.isFinite(count) || count <= 0) return 0
+  return round(count / (count + priorCount), 3)
+}
+
 const FIT_COLOR_SCORE = {
   neutral: 0,
   red: 1,
@@ -242,6 +247,7 @@ export function buildThemeGroupMetrics({
 
   return [...groups.values()].map(group => {
     const count = group.rows.length
+    const confidenceWeight = breadthWeight(count)
     const rollingValues = group.rows.map(row => rollingRsBySymbol[row.symbol]?.zScore).filter(Number.isFinite)
     const anchoredValues = group.rows.map(row => anchoredRsBySymbol[row.symbol]?.zScore).filter(Number.isFinite)
     const fitValues = group.rows.map(row => fitBySymbol[row.symbol]?.fitScore).filter(Number.isFinite)
@@ -285,15 +291,22 @@ export function buildThemeGroupMetrics({
       (redPct * 0.1),
       3
     )
+    const sizeAdjustedRollingZ = round((avgRollingZ ?? 0) * confidenceWeight)
+    const sizeAdjustedAnchoredZ = round((avgAnchoredZ ?? 0) * confidenceWeight)
+    const sizeAdjustedStrengthScore = round((currentStrengthScore ?? 0) * confidenceWeight)
 
     return {
       key: group.key,
       label: group.label,
       symbols: group.rows.map(row => row.symbol),
       count,
+      breadthWeight: confidenceWeight,
       avgRollingZ,
       avgAnchoredZ,
       avgFitScore,
+      sizeAdjustedRollingZ,
+      sizeAdjustedAnchoredZ,
+      sizeAdjustedStrengthScore,
       greenPct,
       orangePct,
       redPct,
@@ -311,7 +324,7 @@ export function buildThemeGroupMetrics({
       healthLabel: healthLabel({ count, greenPct, redPct, leaderSpread }),
       members: snapshotMembers(group.rows, fitBySymbol, rollingRsBySymbol, anchoredRsBySymbol),
     }
-  }).sort((a, b) => (b.currentStrengthScore ?? -Infinity) - (a.currentStrengthScore ?? -Infinity) || b.count - a.count || a.label.localeCompare(b.label))
+  }).sort((a, b) => (b.sizeAdjustedStrengthScore ?? -Infinity) - (a.sizeAdjustedStrengthScore ?? -Infinity) || b.count - a.count || a.label.localeCompare(b.label))
 }
 
 export function buildMarketLeadersEcosystemGroup({

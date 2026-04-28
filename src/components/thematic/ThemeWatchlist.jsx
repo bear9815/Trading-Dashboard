@@ -1052,13 +1052,13 @@ export default function ThemeWatchlist({
       if (ecosystemSortKey === 'ecosystem') return group.label || ''
       if (ecosystemSortKey === 'members') return group.count
       if (ecosystemSortKey === 'sources') return group.sourceEcosystems?.length || 0
-      if (ecosystemSortKey === 'rolling') return group.avgRollingZ
-      if (ecosystemSortKey === 'anchored') return group.avgAnchoredZ
+      if (ecosystemSortKey === 'rolling') return group.sizeAdjustedRollingZ
+      if (ecosystemSortKey === 'anchored') return group.sizeAdjustedAnchoredZ
       if (ecosystemSortKey === 'greenPct') return group.greenPct
       if (ecosystemSortKey === 'aboveSignal') return group.rollingAboveSignalPct
       if (ecosystemSortKey === 'leaderSpread') return group.leaderSpread
       if (ecosystemSortKey === 'status') return group.healthLabel || ''
-      return group.currentStrengthScore
+      return group.sizeAdjustedStrengthScore
     }
     const sortedGroups = groups.sort((a, b) => {
       const av = valueForSort(a)
