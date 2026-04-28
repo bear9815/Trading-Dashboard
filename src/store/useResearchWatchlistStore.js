@@ -81,6 +81,53 @@ function buildRememberedRow(row = {}) {
   }
 }
 
+function isTrustedCompanyVerification(verification = null) {
+  const status = verification?.status
+  return (status === 'verified' || status === 'confirmed_override') && !!verification?.officialName
+}
+
+export function syncListsWithTrustedCompanyMemory(listsById = {}, symbolMemoryBySymbol = {}) {
+  let changed = false
+  const nextListsById = { ...listsById }
+
+  for (const [listId, list] of Object.entries(listsById || {})) {
+    const rowsBySymbol = list?.rowsBySymbol || {}
+    let nextRowsBySymbol = null
+
+    for (const [symbol, row] of Object.entries(rowsBySymbol)) {
+      const remembered = symbolMemoryBySymbol?.[symbol]
+      const verification = remembered?.companyVerification
+      if (!isTrustedCompanyVerification(verification)) continue
+
+      const trustedName = verification.officialName
+      const sameName = String(row?.companyName || '') === String(trustedName || '')
+      const sameVerification = JSON.stringify(row?.companyVerification || null) === JSON.stringify(verification)
+      if (sameName && sameVerification) continue
+
+      if (!nextRowsBySymbol) nextRowsBySymbol = { ...rowsBySymbol }
+      nextRowsBySymbol[symbol] = {
+        ...row,
+        companyName: trustedName,
+        companyVerification: verification,
+        updatedAt: new Date().toISOString(),
+      }
+      changed = true
+    }
+
+    if (nextRowsBySymbol) {
+      nextListsById[listId] = makeListPatch(list, {
+        rowsBySymbol: nextRowsBySymbol,
+        lastUpdated: new Date().toISOString(),
+      })
+    }
+  }
+
+  return {
+    changed,
+    listsById: changed ? nextListsById : listsById,
+  }
+}
+
 function normalizeSymbols(symbols) {
   return [...new Set((symbols || []).map(s => (s || '').trim().toUpperCase()).filter(Boolean))]
 }
@@ -148,13 +195,14 @@ function ensureWorkspaceShape(state) {
   const symbolMemoryBySymbol = state?.symbolMemoryBySymbol || {}
 
   if (state?.listsById) {
-    const listsById = DEFAULT_LIST_ORDER.reduce((next, listId) => {
+    const rawListsById = DEFAULT_LIST_ORDER.reduce((next, listId) => {
       next[listId] = normalizeListLabel(makeListPatch(
         DEFAULT_LISTS[listId],
         state.listsById[listId] || {}
       ))
       return next
     }, {})
+    const { listsById } = syncListsWithTrustedCompanyMemory(rawListsById, symbolMemoryBySymbol)
     return {
       activeListId: listsById[activeListId] ? activeListId : MARKET_LEADERS_LIST_ID,
       listsById,
@@ -166,7 +214,7 @@ function ensureWorkspaceShape(state) {
   return {
     activeListId: MARKET_LEADERS_LIST_ID,
     symbolMemoryBySymbol,
-    listsById: {
+    listsById: syncListsWithTrustedCompanyMemory({
       [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {
         symbols: state?.symbols || [],
         rowsBySymbol: state?.rowsBySymbol || {},
@@ -175,7 +223,7 @@ function ensureWorkspaceShape(state) {
       }),
       [WATCHLIST_LIST_ID]: { ...DEFAULT_LISTS[WATCHLIST_LIST_ID] },
       [LIQUID_LIST_ID]: { ...DEFAULT_LISTS[LIQUID_LIST_ID] },
-    },
+    }, symbolMemoryBySymbol).listsById,
   }
 }
 
@@ -223,14 +271,15 @@ export const useResearchWatchlistStore = create(
           const remembered = buildRememberedRow(nextRow)
           if (remembered) nextMemory[symbol] = remembered
         }
+        const synchronized = syncListsWithTrustedCompanyMemory({
+          ...state.listsById,
+          [activeListId]: makeListPatch(current, {
+            rowsBySymbol: next,
+            lastUpdated: new Date().toISOString(),
+          }),
+        }, nextMemory)
         return {
-          listsById: {
-            ...state.listsById,
-            [activeListId]: makeListPatch(current, {
-              rowsBySymbol: next,
-              lastUpdated: new Date().toISOString(),
-            }),
-          },
+          listsById: synchronized.listsById,
           symbolMemoryBySymbol: nextMemory,
         }
       }),
@@ -251,17 +300,18 @@ export const useResearchWatchlistStore = create(
         const nextMemory = { ...(state.symbolMemoryBySymbol || {}) }
         const remembered = buildRememberedRow(nextRow)
         if (remembered) nextMemory[key] = remembered
+        const synchronized = syncListsWithTrustedCompanyMemory({
+          ...state.listsById,
+          [activeListId]: makeListPatch(current, {
+            rowsBySymbol: {
+              ...current.rowsBySymbol,
+              [key]: nextRow,
+            },
+            lastUpdated: new Date().toISOString(),
+          }),
+        }, nextMemory)
         return {
-          listsById: {
-            ...state.listsById,
-            [activeListId]: makeListPatch(current, {
-              rowsBySymbol: {
-                ...current.rowsBySymbol,
-                [key]: nextRow,
-              },
-              lastUpdated: new Date().toISOString(),
-            }),
-          },
+          listsById: synchronized.listsById,
           symbolMemoryBySymbol: nextMemory,
         }
       }),
