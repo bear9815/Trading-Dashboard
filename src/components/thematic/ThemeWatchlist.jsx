@@ -1841,7 +1841,7 @@ export default function ThemeWatchlist({
       setStatus(
         `Verifying ${candidates.length} company name${candidates.length === 1 ? '' : 's'}${tradingViewSource ? ` against ${tradingViewSource.title || 'the TradingView watchlist'}` : ''}…`
       )
-      const verifications = await mapWithConcurrency(candidates, 5, async row => {
+      const verificationRows = await mapWithConcurrency(candidates, 5, async row => {
         const symbol = String(row?.symbol || '').trim().toUpperCase()
         if (!symbol) return null
         const [quoteResolved, searchResolved] = await Promise.all([
@@ -1856,10 +1856,16 @@ export default function ThemeWatchlist({
           tradingViewResolved: tradingViewSource?.entriesBySymbol?.[symbol] || null,
           tradingViewRequired: !!tradingViewSource,
         })
-        updateRow(symbol, { companyVerification }, { manualOverride: !!row?.manualOverride })
-        return companyVerification
+        return {
+          symbol,
+          companyVerification,
+        }
       })
-      const summary = summarizeCompanyVerificationBatch(verifications)
+      const persistedRows = verificationRows.filter(Boolean)
+      if (persistedRows.length) upsertRows(persistedRows)
+      const summary = summarizeCompanyVerificationBatch(
+        persistedRows.map(row => row.companyVerification)
+      )
       setStatus(
         `Verified ${candidates.length} name${candidates.length === 1 ? '' : 's'} · ` +
         `${summary.verified} strong · ${summary.provisional} provisional · ${summary.review} review · ${summary.unresolved} unresolved.`
