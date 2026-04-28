@@ -13,6 +13,7 @@ import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEsti
 import {
   buildCompanyVerification,
   buildVerifiedCompanyOverride,
+  shouldTrustCompanyVerification,
   summarizeCompanyVerificationBatch,
 } from '../../utils/companyVerification.js'
 import {
@@ -1803,7 +1804,12 @@ export default function ThemeWatchlist({
         tradingViewResolved: tradingViewSource?.entriesBySymbol?.[symbol] || null,
         tradingViewRequired: !!tradingViewSource,
       })
-      updateRow(symbol, { companyVerification }, { manualOverride: !!row?.manualOverride })
+      updateRow(symbol, {
+        companyVerification,
+        ...(shouldTrustCompanyVerification(companyVerification)
+          ? { companyName: companyVerification.officialName }
+          : {}),
+      }, { manualOverride: !!row?.manualOverride })
       if (companyVerification.status === 'review') {
         setStatus(`${symbol} needs review: ${companyVerification.officialName || 'the source name'} does not cleanly match all verification sources.`)
       } else if (companyVerification.status === 'verified') {
@@ -1858,6 +1864,9 @@ export default function ThemeWatchlist({
         })
         return {
           symbol,
+          ...(shouldTrustCompanyVerification(companyVerification)
+            ? { companyName: companyVerification.officialName }
+            : {}),
           companyVerification,
         }
       })

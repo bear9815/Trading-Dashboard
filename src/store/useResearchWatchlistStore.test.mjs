@@ -9,6 +9,24 @@ import {
   useResearchWatchlistStore,
 } from './useResearchWatchlistStore.js'
 
+function createLocalStorageMock() {
+  const store = new Map()
+  return {
+    getItem(key) {
+      return store.has(key) ? store.get(key) : null
+    },
+    setItem(key, value) {
+      store.set(key, String(value))
+    },
+    removeItem(key) {
+      store.delete(key)
+    },
+    clear() {
+      store.clear()
+    },
+  }
+}
+
 test('research watchlist exposes the expected default list order and labels', () => {
   const lists = useResearchWatchlistStore.getState().getLists()
 
@@ -70,4 +88,63 @@ test('syncListsWithTrustedCompanyMemory propagates trusted company names across 
   assert.equal(result.listsById[LIQUID_LIST_ID].rowsBySymbol.APP.companyName, 'AppLovin Corporation')
   assert.equal(result.listsById[MARKET_LEADERS_LIST_ID].rowsBySymbol.APP.ecosystem, 'Software')
   assert.equal(result.listsById[LIQUID_TREND_LIST_ID].rowsBySymbol.APP.theme, 'Ad Tech')
+})
+
+test('upsertRows in Liquid propagates a trusted verified company name into sibling lists', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  globalThis.localStorage = createLocalStorageMock()
+
+  try {
+  useResearchWatchlistStore.setState({
+    activeListId: LIQUID_LIST_ID,
+    symbolMemoryBySymbol: {},
+    listsById: {
+      [MARKET_LEADERS_LIST_ID]: {
+        id: MARKET_LEADERS_LIST_ID,
+        name: 'Market Leaders',
+        symbols: ['APP'],
+        rowsBySymbol: {
+          APP: { symbol: 'APP', companyName: 'APP' },
+        },
+      },
+      [LIQUID_TREND_LIST_ID]: {
+        id: LIQUID_TREND_LIST_ID,
+        name: 'Liquid Trend',
+        symbols: ['APP'],
+        rowsBySymbol: {
+          APP: { symbol: 'APP', companyName: 'Applovin Holdings' },
+        },
+      },
+      [LIQUID_LIST_ID]: {
+        id: LIQUID_LIST_ID,
+        name: 'Liquid',
+        symbols: ['APP'],
+        rowsBySymbol: {
+          APP: { symbol: 'APP', companyName: 'Applovin Holdings' },
+        },
+      },
+    },
+  })
+
+  useResearchWatchlistStore.getState().upsertRows([{
+    symbol: 'APP',
+    companyName: 'AppLovin Corporation',
+    companyVerification: {
+      status: 'verified',
+      officialName: 'AppLovin Corporation',
+    },
+  }])
+
+  const state = useResearchWatchlistStore.getState()
+  assert.equal(state.listsById[LIQUID_LIST_ID].rowsBySymbol.APP.companyName, 'AppLovin Corporation')
+  assert.equal(state.listsById[LIQUID_TREND_LIST_ID].rowsBySymbol.APP.companyName, 'AppLovin Corporation')
+  assert.equal(state.listsById[MARKET_LEADERS_LIST_ID].rowsBySymbol.APP.companyName, 'AppLovin Corporation')
+  await new Promise(resolve => setTimeout(resolve, 0))
+  } finally {
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+  }
 })

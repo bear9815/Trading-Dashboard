@@ -6,6 +6,7 @@ import {
   normalizeColumnOrder,
 } from '../utils/watchlistTableConfig.js'
 import { normalizeEcosystemGroupingMode } from '../utils/condensedEcosystems.js'
+import { shouldTrustCompanyVerification } from '../utils/companyVerification.js'
 import { normalizeThemeAnalyticsHistory, upsertThemeAnalyticsSnapshot } from '../utils/themeAnalytics.js'
 import { idbStorage } from '../utils/idbStorage.js'
 
@@ -81,11 +82,6 @@ function buildRememberedRow(row = {}) {
   }
 }
 
-function isTrustedCompanyVerification(verification = null) {
-  const status = verification?.status
-  return (status === 'verified' || status === 'confirmed_override') && !!verification?.officialName
-}
-
 export function syncListsWithTrustedCompanyMemory(listsById = {}, symbolMemoryBySymbol = {}) {
   let changed = false
   const nextListsById = { ...listsById }
@@ -97,7 +93,7 @@ export function syncListsWithTrustedCompanyMemory(listsById = {}, symbolMemoryBy
     for (const [symbol, row] of Object.entries(rowsBySymbol)) {
       const remembered = symbolMemoryBySymbol?.[symbol]
       const verification = remembered?.companyVerification
-      if (!isTrustedCompanyVerification(verification)) continue
+      if (!shouldTrustCompanyVerification(verification)) continue
 
       const trustedName = verification.officialName
       const sameName = String(row?.companyName || '') === String(trustedName || '')

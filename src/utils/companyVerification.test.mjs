@@ -5,6 +5,7 @@ import {
   buildCompanyVerification,
   buildVerifiedCompanyOverride,
   normalizeCompanyNameForCompare,
+  shouldTrustCompanyVerification,
   summarizeCompanyVerificationBatch,
 } from './companyVerification.js'
 
@@ -136,6 +137,13 @@ test('buildVerifiedCompanyOverride creates a sticky trusted verification record'
   assert.equal(verification.officialName, 'AppLovin Corporation')
   assert.equal(verification.needsReview, false)
   assert.equal(verification.manuallyConfirmed, true)
+})
+
+test('shouldTrustCompanyVerification only trusts strong verified identities', () => {
+  assert.equal(shouldTrustCompanyVerification({ status: 'verified', officialName: 'NVIDIA Corporation' }), true)
+  assert.equal(shouldTrustCompanyVerification({ status: 'confirmed_override', officialName: 'AppLovin Corporation' }), true)
+  assert.equal(shouldTrustCompanyVerification({ status: 'provisional', officialName: 'CoreWeave, Inc.' }), false)
+  assert.equal(shouldTrustCompanyVerification({ status: 'review', officialName: 'CrowdStrike Holdings, Inc.' }), false)
 })
 
 test('summarizeCompanyVerificationBatch counts verification outcomes for status messaging', () => {

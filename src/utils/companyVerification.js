@@ -1,5 +1,10 @@
 const COMPANY_SUFFIX_RE = /\b(incorporated|inc|corporation|corp|company|co|limited|ltd|plc|class\s+[a-z]|common\s+stock|ordinary\s+shares|adr|ads)\b/gi
 
+export function shouldTrustCompanyVerification(verification = null) {
+  const status = verification?.status
+  return (status === 'verified' || status === 'confirmed_override') && !!verification?.officialName
+}
+
 export function normalizeCompanyNameForCompare(value = '') {
   return String(value || '')
     .toLowerCase()
