@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Upload, Settings2, X, Plus, Check, ChevronDown, ChevronUp, LogOut, Bell } from 'lucide-react'
+import { Upload, Settings2, X, Plus, Check, ChevronDown, ChevronUp, Bell } from 'lucide-react'
 import { useQuotesStore } from '../../store/useQuotesStore'
-import { useAuthStore } from '../../store/useAuthStore'
 import { useSchwabStore } from '../../store/useSchwabStore'
 
 // All unique authors in the default set
@@ -278,7 +277,6 @@ function QuotesTicker() {
 
 /* ─── TopBar ──────────────────────────────────────────────────────── */
 export default function TopBar({ page, onImport, onOpenReminder }) {
-  const { user, signOut } = useAuthStore()
   const { connected } = useSchwabStore()
 
   return (
@@ -311,16 +309,6 @@ export default function TopBar({ page, onImport, onOpenReminder }) {
           <Upload size={14} />
           <span className="hidden sm:inline">Import</span>
         </button>
-        {user && (
-          <button
-            onClick={() => signOut()}
-            title={`Sign out (${user.email})`}
-            className="btn-ghost flex items-center gap-1.5 text-[13px] xl:text-sm text-gray-300 hover:text-accent-red px-3 xl:px-4 py-2 xl:py-2.5"
-          >
-            <LogOut size={14} />
-            <span className="hidden sm:inline">Sign Out</span>
-          </button>
-        )}
       </div>
     </header>
   )

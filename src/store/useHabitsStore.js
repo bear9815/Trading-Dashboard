@@ -2,6 +2,14 @@ import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
 import { supabase } from '../lib/supabase.js'
 
+function persistLocal(state) {
+  try {
+    localStorage.setItem('risk-tool-habits', JSON.stringify({ state }))
+  } catch (error) {
+    console.error('[local] saveHabits:', error)
+  }
+}
+
 async function getUid() {
   const { useAuthStore } = await import('./useAuthStore.js')
   return useAuthStore.getState().user?.id
@@ -59,7 +67,7 @@ export const useHabitsStore = create((set, get) => ({
       const { habits = [], completions = [], reminders = [] } = data.data
       set({ habits, completions, reminders, cloudReady: true })
       // Back up locally so data survives if Supabase is removed
-      localStorage.setItem('risk-tool-habits', JSON.stringify({ state: { habits, completions, reminders } }))
+      persistLocal({ habits, completions, reminders })
     } else {
       set({ cloudReady: true })
     }
@@ -69,6 +77,7 @@ export const useHabitsStore = create((set, get) => ({
 
   _sync: () => {
     const { habits, completions, reminders } = get()
+    persistLocal({ habits, completions, reminders })
     saveToCloud({ habits, completions, reminders })
   },
 

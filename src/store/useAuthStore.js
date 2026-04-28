@@ -1,10 +1,15 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase.js'
+import { LOCAL_ONLY_MODE } from '../lib/appMode.js'
+
+function localOnlyAuthError() {
+  return new Error('Local-only mode is enabled — cloud sign-in is unavailable.')
+}
 
 export const useAuthStore = create((set) => ({
   user:    null,
   session: null,
-  loading: true,   // true while we're checking the existing session on startup
+  loading: false,
 
   /** Called by App on auth state change */
   setSession: (session) => set({
@@ -14,6 +19,7 @@ export const useAuthStore = create((set) => ({
   }),
 
   signIn: async (email, password) => {
+    if (LOCAL_ONLY_MODE) throw localOnlyAuthError()
     if (!supabase) throw new Error('Supabase not configured — add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY')
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
@@ -21,6 +27,7 @@ export const useAuthStore = create((set) => ({
   },
 
   signUp: async (email, password) => {
+    if (LOCAL_ONLY_MODE) throw localOnlyAuthError()
     if (!supabase) throw new Error('Supabase not configured — add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY')
     const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) throw error
@@ -28,6 +35,7 @@ export const useAuthStore = create((set) => ({
   },
 
   resetPassword: async (email) => {
+    if (LOCAL_ONLY_MODE) throw localOnlyAuthError()
     if (!supabase) throw new Error('Supabase not configured')
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: window.location.origin,
@@ -36,7 +44,7 @@ export const useAuthStore = create((set) => ({
   },
 
   signOut: async () => {
-    if (supabase) await supabase.auth.signOut()
-    set({ user: null, session: null })
+    if (!LOCAL_ONLY_MODE && supabase) await supabase.auth.signOut()
+    set({ user: null, session: null, loading: false })
   },
 }))

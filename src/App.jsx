@@ -14,8 +14,6 @@ import { useTradeStore } from './store/useTradeStore.js'
 import { useJournalStore } from './store/useJournalStore.js'
 import { useMorningStore } from './store/useMorningStore.js'
 import { useHabitsStore } from './store/useHabitsStore.js'
-import { useAuthStore } from './store/useAuthStore.js'
-import { supabase } from './lib/supabase.js'
 import { Loader } from 'lucide-react'
 import { APP_PAGE_STORAGE_KEY, buildPageHash, getPageFromLocationLike, getRestoredPage, isAppPage } from './utils/appNavigation.js'
 
@@ -146,8 +144,8 @@ export default function App() {
         token_exchange: 'Token exchange failed — check that SCHWAB_REDIRECT_URI matches exactly in both Vercel and the Schwab Developer Portal.',
         missing_params: 'OAuth callback missing code or state parameter.',
         bad_state:      'Could not decode state — try connecting again.',
-        db_write:       'Supabase write failed — the schwab_tokens table may not exist. See Settings for setup instructions.',
-        db_error:       'Supabase connection error — check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
+        db_write:       'Vercel KV write failed while storing Schwab tokens. Check your Vercel KV integration and environment variables.',
+        db_error:       'Schwab token storage is unavailable. Check your Vercel KV integration.',
         fetch_failed:   'Network error contacting Schwab token endpoint.',
       }
       window.history.replaceState({}, '', window.location.pathname)
@@ -178,33 +176,6 @@ export default function App() {
     loadMorningLocal()
     loadHabitsLocal()
     loadSchwabTokens()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Wire up Supabase auth — syncs all stores to cloud when user is logged in
-  useEffect(() => {
-    if (!supabase) return
-
-    const triggerCloudLoad = (uid) => {
-      useTradeStore.getState().loadFromCloud(uid)
-      useJournalStore.getState().loadFromCloud(uid)
-      useMorningStore.getState().loadFromCloud(uid)
-      useHabitsStore.getState().loadFromCloud(uid)
-      useSettingsStore.getState().loadFromCloud(uid)
-    }
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      useAuthStore.getState().setSession(session)
-      if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
-        triggerCloudLoad(session.user.id)
-      } else if (event === 'SIGNED_OUT') {
-        useTradeStore.getState().clearLocalState()
-        useJournalStore.getState().clearLocalState()
-        useMorningStore.getState().clearLocalState()
-        useHabitsStore.getState().clearLocalState()
-      }
-    })
-
-    return () => subscription.unsubscribe()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Main app ──────────────────────────────────────────────────────────────

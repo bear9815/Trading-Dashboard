@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase.js'
 
+function persistLocal(entries) {
+  try {
+    localStorage.setItem('risk-tool-morning', JSON.stringify({ state: { entries } }))
+  } catch (error) {
+    console.error('[local] saveMorning:', error)
+  }
+}
+
 async function getUid() {
   const { useAuthStore } = await import('./useAuthStore.js')
   return useAuthStore.getState().user?.id
@@ -54,7 +62,7 @@ export const useMorningStore = create((set, get) => ({
       const { entries = [] } = data.data
       set({ entries, cloudReady: true })
       // Back up locally so data survives if Supabase is removed
-      localStorage.setItem('risk-tool-morning', JSON.stringify({ state: { entries } }))
+      persistLocal(entries)
     } else {
       try {
         const raw = localStorage.getItem('risk-tool-morning')
@@ -78,6 +86,12 @@ export const useMorningStore = create((set, get) => ({
 
   clearLocalState: () => set({ entries: [], cloudReady: false }),
 
+  _sync: () => {
+    const { entries } = get()
+    persistLocal(entries)
+    saveToCloud(entries)
+  },
+
   // ── Entries ────────────────────────────────────────────────────────────────
 
   addEntry(data) {
@@ -87,7 +101,7 @@ export const useMorningStore = create((set, get) => ({
       ...data,
     }
     set(s => ({ entries: [entry, ...s.entries] }))
-    saveToCloud(get().entries)
+    get()._sync()
     return entry
   },
 
@@ -97,12 +111,12 @@ export const useMorningStore = create((set, get) => ({
         e.id === id ? { ...e, ...data, updatedAt: new Date().toISOString() } : e
       ),
     }))
-    saveToCloud(get().entries)
+    get()._sync()
   },
 
   deleteEntry(id) {
     set(s => ({ entries: s.entries.filter(e => e.id !== id) }))
-    saveToCloud(get().entries)
+    get()._sync()
   },
 
   getEntryByDate(dateStr) {

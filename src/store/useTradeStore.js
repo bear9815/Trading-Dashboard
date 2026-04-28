@@ -4,6 +4,7 @@ import { inferAccountBalance } from '../utils/equityCurve.js'
 import { enrichTrade } from '../utils/enrichTrade.js'
 import { buildActivityDedupKey, buildTradeDedupKey } from '../utils/tradeDedup.js'
 import { supabase } from '../lib/supabase.js'
+import { LOCAL_ONLY_MODE } from '../lib/appMode.js'
 import { idbStorage } from '../utils/idbStorage.js'
 import { useAuthStore } from './useAuthStore.js'
 
@@ -120,7 +121,7 @@ async function readLocalSnapshot(userId = null) {
     const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
     const snapshot = normalizeSnapshotData(parsed)
 
-    if (snapshot.ownerId && userId && snapshot.ownerId !== userId) {
+    if (!LOCAL_ONLY_MODE && snapshot.ownerId && userId && snapshot.ownerId !== userId) {
       console.warn('[trades] Ignoring local snapshot owned by a different user')
       return null
     }
@@ -164,7 +165,7 @@ export const useTradeStore = create((set, get) => ({
       const currentUid = getSnapshotOwnerId()
       const snapshot = await readLocalSnapshot(currentUid)
       if (!snapshot) { set({ cloudReady: true }); return }
-      if (snapshot.ownerId && !currentUid) { set({ cloudReady: true }); return }
+      if (!LOCAL_ONLY_MODE && snapshot.ownerId && !currentUid) { set({ cloudReady: true }); return }
 
       const {
         trades = [],

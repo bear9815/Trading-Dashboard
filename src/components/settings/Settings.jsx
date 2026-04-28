@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Trash2, Eye, EyeOff, Save, X, LogOut, Wifi, WifiOff, RefreshCw, ExternalLink, CheckCircle, AlertCircle, Clock } from 'lucide-react'
+import { Plus, Trash2, Eye, EyeOff, Save, X, Wifi, WifiOff, RefreshCw, ExternalLink, CheckCircle, AlertCircle, Clock } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useJournalStore } from '../../store/useJournalStore.js'
-import { useAuthStore } from '../../store/useAuthStore.js'
+import { useMorningStore } from '../../store/useMorningStore.js'
+import { useHabitsStore } from '../../store/useHabitsStore.js'
 import { useSchwabStore } from '../../store/useSchwabStore.js'
-import { supabase } from '../../lib/supabase.js'
+import { buildLocalBackupPayload } from '../../utils/localBackup.js'
 
 const IS_LOCALHOST = typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
@@ -43,34 +44,19 @@ export default function Settings() {
 
   const { trades, accountActivities, clearTrades, clearActivities, recalcAllTrades, addActivity, deleteActivity, compressAllScreenshots } = useTradeStore()
   const { entries } = useJournalStore()
-  const { user, signOut } = useAuthStore()
   const {
     connected: schwabConnected,
     loading: schwabLoading,
     accounts: schwabAccounts,
     lastSync: schwabLastSync,
     error: schwabError,
+    tokenLoaded: schwabTokenLoaded,
     startOAuth,
     disconnect: schwabDisconnect,
-    loadTokens: schwabLoadTokens,
     syncAccounts: schwabSyncAccounts,
   } = useSchwabStore()
-
-  // ── Schwab token status (reads Supabase directly — works on localhost too) ──
-  const [schwabRecord,     setSchwabRecord]     = useState(null)  // raw Supabase row
-  const [schwabRecordLoading, setSchwabRecordLoading] = useState(true)
   const [testResult,       setTestResult]       = useState(null)  // null | 'ok' | 'fail'
   const [testLoading,      setTestLoading]      = useState(false)
-
-  useEffect(() => {
-    if (!supabase || !user) { setSchwabRecordLoading(false); return }
-    supabase
-      .from('schwab_tokens')
-      .select('expires_at, updated_at')
-      .eq('user_id', user.id)
-      .single()
-      .then(({ data }) => { setSchwabRecord(data ?? null); setSchwabRecordLoading(false) })
-  }, [user])
 
   const handleTestConnection = useCallback(async () => {
     setTestLoading(true)
@@ -195,6 +181,35 @@ export default function Settings() {
     setOpenRouterApiKey(openRouterInput.trim())
     setOpenRouterSaved(true)
     setTimeout(() => setOpenRouterSaved(false), 2000)
+  }
+
+  function handleExportLocalBackup() {
+    const stripActions = (state) => Object.fromEntries(
+      Object.entries(state).filter(([, value]) => typeof value !== 'function')
+    )
+
+    const payload = buildLocalBackupPayload({
+      settings: stripActions(useSettingsStore.getState()),
+      trades: stripActions(useTradeStore.getState()),
+      journal: stripActions(useJournalStore.getState()),
+      morning: stripActions(useMorningStore.getState()),
+      habits: stripActions(useHabitsStore.getState()),
+    })
+
+    try {
+      localStorage.setItem('risk-tool-local-backup-last', JSON.stringify(payload))
+    } catch {
+      // Best effort only; the file export below is the primary backup artifact.
+    }
+
+    const stamp = payload.generatedAt.slice(0, 10)
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `trading-dashboard-local-backup-${stamp}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
   }
 
   function handleAddAccount() {
@@ -540,37 +555,31 @@ export default function Settings() {
           )}
         </div>
 
-        {/* ── Supabase token record (always visible, works on localhost) ── */}
+        {/* ── Token status ── */}
         <div className="rounded-lg bg-surface-200 border border-white/5 p-3 text-xs space-y-2">
           <p className="font-medium text-gray-300 flex items-center gap-1.5">
             <span>Token Status</span>
-            {schwabRecordLoading && <RefreshCw size={10} className="animate-spin text-gray-500" />}
           </p>
-          {schwabRecordLoading ? (
-            <p className="text-gray-600">Checking Supabase…</p>
-          ) : schwabRecord ? (
+          {schwabConnected ? (
             <>
               <div className="flex items-center gap-2">
                 <CheckCircle size={12} className="text-accent-green flex-shrink-0" />
-                <span className="text-gray-300">Tokens stored in Supabase</span>
+                <span className="text-gray-300">Schwab token loaded from secure server storage</span>
               </div>
-              {schwabRecord.expires_at && (() => {
-                const exp     = new Date(schwabRecord.expires_at)
-                const expired = exp < new Date()
-                const mins    = Math.round((exp - Date.now()) / 60000)
-                return (
-                  <div className={`flex items-center gap-2 ${expired ? 'text-accent-red' : mins < 10 ? 'text-accent-yellow' : 'text-gray-400'}`}>
-                    <Clock size={11} className="flex-shrink-0" />
-                    {expired
-                      ? `Access token expired ${Math.abs(mins)} min ago — will auto-refresh next page load`
-                      : `Access token valid for ~${mins} min`}
-                  </div>
-                )
-              })()}
-              {schwabRecord.updated_at && (
-                <p className="text-gray-600">Last auth: {new Date(schwabRecord.updated_at).toLocaleString()}</p>
+              {schwabLastSync && (
+                <p className="text-gray-600">Last sync: {schwabLastSync.toLocaleString()}</p>
               )}
             </>
+          ) : schwabTokenLoaded ? (
+            <div className="flex items-center gap-2 text-gray-500">
+              <AlertCircle size={12} className="flex-shrink-0" />
+              No active token loaded right now — reconnect below if needed
+            </div>
+          ) : IS_LOCALHOST ? (
+            <div className="flex items-center gap-2 text-gray-500">
+              <Clock size={12} className="flex-shrink-0" />
+              Token state is only available from your deployed app, not localhost
+            </div>
           ) : (
             <div className="flex items-center gap-2 text-gray-500">
               <AlertCircle size={12} className="flex-shrink-0" />
@@ -648,7 +657,7 @@ export default function Settings() {
               <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 p-3 text-xs text-amber-300 space-y-1">
                 <p className="font-medium">Running on localhost</p>
                 <p className="text-amber-400/70">Schwab API endpoints only run on Vercel. To connect or verify your connection, visit your <a href="https://vercel.com/dashboard" target="_blank" rel="noopener noreferrer" className="underline">deployed app URL</a>.</p>
-                <p className="text-amber-400/70">If you already connected on Vercel, the token status above confirms it's stored.</p>
+                <p className="text-amber-400/70">No Supabase setup is required for Schwab. The deployed app stores tokens in secure server-side KV.</p>
               </div>
             ) : (
               <>
@@ -667,18 +676,11 @@ export default function Settings() {
                   <p className="mono text-gray-300 bg-black/30 px-2 py-1 rounded">https://your-app.vercel.app/api/schwab/callback</p>
                   <p>2. Vercel environment variables:</p>
                   <div className="space-y-0.5 pl-2">
-                    {['SCHWAB_APP_KEY', 'SCHWAB_APP_SECRET', 'SCHWAB_REDIRECT_URI', 'APP_URL', 'SUPABASE_SERVICE_ROLE_KEY'].map(v => (
+                    {['SCHWAB_APP_KEY', 'SCHWAB_APP_SECRET', 'SCHWAB_REDIRECT_URI', 'APP_URL'].map(v => (
                       <p key={v} className="mono text-gray-300">{v}</p>
                     ))}
                   </div>
-                  <p>3. Supabase SQL Editor — run once to create the token table:</p>
-                  <pre className="bg-black/40 rounded p-2 text-[10px] text-gray-300 overflow-x-auto whitespace-pre">{`create table if not exists schwab_tokens (
-  user_id       uuid primary key references auth.users,
-  access_token  text not null,
-  refresh_token text,
-  expires_at    timestamptz,
-  updated_at    timestamptz default now()
-);`}</pre>
+                  <p>3. Attach Vercel KV to this project so the OAuth callback can store and refresh Schwab tokens server-side.</p>
                 </div>
 
                 <button
@@ -1030,27 +1032,24 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Account */}
-      {user && (
-        <div className="card flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-gray-300">Signed in as</p>
-            <p className="text-xs text-gray-500 mt-0.5">{user.email}</p>
-          </div>
-          <button
-            onClick={() => signOut()}
-            className="btn-ghost flex items-center gap-2 text-sm text-accent-red hover:text-accent-red border-accent-red/20 hover:border-accent-red/40"
-          >
-            <LogOut size={14} />
-            Sign Out
-          </button>
+      <div className="card flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-gray-300">Local-Only Mode</p>
+          <p className="text-xs text-gray-500 mt-0.5">Trades, journals, habits, and settings stay on this device unless you export a backup.</p>
         </div>
-      )}
+        <button
+          onClick={handleExportLocalBackup}
+          className="btn-ghost flex items-center gap-2 text-sm"
+        >
+          <Save size={14} />
+          Export Local Backup
+        </button>
+      </div>
 
       {/* About */}
       <div className="card text-xs text-gray-500 space-y-1">
         <p className="font-medium text-gray-400">Trading Dashboard v0.1.0</p>
-        <p>All data stored locally in your browser. No accounts, no cloud.</p>
+        <p>Core trading data stays local in your browser. Schwab live tokens stay in secure server-side KV when connected.</p>
         <p>Supports ThinkorSwim, Interactive Brokers, and Fidelity CSV imports.</p>
       </div>
     </div>

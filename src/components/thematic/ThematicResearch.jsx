@@ -1,7 +1,6 @@
 import { Component, useState, useRef, useMemo, useEffect } from 'react'
 import { useSettingsStore }        from '../../store/useSettingsStore.js'
 import { useThematicStore }        from '../../store/useThematicStore.js'
-import { useAuthStore }            from '../../store/useAuthStore.js'
 import {
   useResearchWatchlistStore,
 } from '../../store/useResearchWatchlistStore.js'
@@ -1443,7 +1442,6 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
 export default function ThematicResearch() {
   const { apiKey, openRouterApiKey, researchAiProvider, setResearchAiProvider, researchOpenRouterModel, setResearchOpenRouterModel, useLocalLLM, setUseLocalLLM } = useSettingsStore()
   const { themes, removeTheme, convictions, setConviction, patchThemeDossier } = useThematicStore()
-  const { user }   = useAuthStore()
   const { sources: librarySources, loadSources } = useResearchLibraryStore()
   const resetWorkspaceState = useResearchWatchlistStore(state => state.resetWorkspaceState)
   const watchlistCount = useResearchWatchlistStore(state =>
@@ -1464,8 +1462,8 @@ export default function ThematicResearch() {
   const [workspaceBoundaryKey, setWorkspaceBoundaryKey] = useState(0)
 
   useEffect(() => {
-    if (user?.id) loadSources()
-  }, [user?.id])
+    loadSources()
+  }, [loadSources])
 
   const [growthTab,  setGrowthTab]  = useState('watchlist') // 'watchlist' | 'ecosystems' | 'themes' | 'earnings'
   const [expanded,   setExpanded]   = useState(null)
