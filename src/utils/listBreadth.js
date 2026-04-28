@@ -116,7 +116,7 @@ const ATR_EXTENSION_BASE_PERIOD = 21
 const ATR_EXTENSION_MULTIPLE = 10
 const DAYS34_WINDOW = 34
 const NEW_HIGH_LOW_WINDOW = 63
-export const BREADTH_TABLE_SESSION_COUNT = 126
+export const BREADTH_TABLE_SESSION_COUNT = 252
 
 function pctChange(current, previous) {
   if (!Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) return null

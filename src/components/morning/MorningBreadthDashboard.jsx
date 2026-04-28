@@ -322,52 +322,72 @@ function HistoricalMetricCell({ entry, column }) {
 }
 
 function HistoricalBreadthMetricTable({ rows }) {
+  const [activeList, setActiveList] = useState('liquid')
+  const activeLabel = activeList === 'market' ? 'Market Leaders' : 'Liquid'
+
   return (
     <div className="rounded-xl border border-white/10 bg-[#10151d]">
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div>
           <p className="text-sm font-semibold text-white">Historical Breadth Metrics</p>
           <p className="mt-1 text-xs text-gray-500">
-            Six-month daily log of the same metrics in the current breadth comparison.
+            One-year daily log of the same metrics in the current breadth comparison.
           </p>
         </div>
-        <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-gray-400">
-          Last {BREADTH_TABLE_SESSION_COUNT} sessions
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-lg border border-white/10 bg-white/[0.02] p-1">
+            {[
+              ['liquid', 'Liquid'],
+              ['market', 'Market Leaders'],
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveList(id)}
+                className={`rounded-md px-2.5 py-1 text-xs transition-all ${
+                  activeList === id ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-gray-400">
+            Last {BREADTH_TABLE_SESSION_COUNT} sessions
+          </p>
+        </div>
       </div>
 
       <div className="overflow-x-auto border-t border-white/[0.06]">
-        <table className="min-w-[2800px] w-full border-collapse text-sm">
+        <table className="min-w-[1460px] w-full border-collapse text-sm">
           <thead>
             <tr className="text-center text-[11px] font-black uppercase tracking-wide text-gray-950">
               <th rowSpan="2" className="sticky left-0 z-20 border border-black/30 bg-[#efb800] px-3 py-3 text-left">Date</th>
-              <th colSpan={HISTORICAL_METRIC_COLUMNS.length} className="border border-black/30 bg-[#3d84ff] px-3 py-2">Market Leaders</th>
-              <th colSpan={HISTORICAL_METRIC_COLUMNS.length} className="border border-black/30 bg-[#22c55e] px-3 py-2">Liquid</th>
+              <th colSpan={HISTORICAL_METRIC_COLUMNS.length} className={`border border-black/30 px-3 py-2 ${activeList === 'market' ? 'bg-[#3d84ff]' : 'bg-[#22c55e]'}`}>
+                {activeLabel}
+              </th>
             </tr>
             <tr className="text-center text-[10px] font-black text-gray-950">
-              {['market', 'liquid'].flatMap(group => HISTORICAL_METRIC_COLUMNS.map(column => (
-                <th key={`${group}-${column.key}`} className="border border-black/30 bg-[#ffd21f] px-2 py-2">
+              {HISTORICAL_METRIC_COLUMNS.map(column => (
+                <th key={column.key} className="border border-black/30 bg-[#ffd21f] px-2 py-2">
                   {column.label}
                 </th>
-              )))}
+              ))}
             </tr>
           </thead>
           <tbody>
             {rows.length ? rows.map(row => (
-              <tr key={row.date} className="bg-[#111821] hover:bg-white/[0.04]">
+              <tr key={`${activeList}-${row.date}`} className="bg-[#111821] hover:bg-white/[0.04]">
                 <td className="sticky left-0 z-10 border border-white/[0.04] bg-[#111821] px-3 py-2 font-mono text-sm font-semibold text-gray-100">
                   {fmtDateLabel(row.date)}
                 </td>
                 {HISTORICAL_METRIC_COLUMNS.map(column => (
-                  <HistoricalMetricCell key={`market-${row.date}-${column.key}`} entry={row.market} column={column} />
-                ))}
-                {HISTORICAL_METRIC_COLUMNS.map(column => (
-                  <HistoricalMetricCell key={`liquid-${row.date}-${column.key}`} entry={row.liquid} column={column} />
+                  <HistoricalMetricCell key={`${activeList}-${row.date}-${column.key}`} entry={row[activeList]} column={column} />
                 ))}
               </tr>
             )) : (
               <tr>
-                <td colSpan={(HISTORICAL_METRIC_COLUMNS.length * 2) + 1} className="px-4 py-8 text-center text-sm text-gray-600">
+                <td colSpan={HISTORICAL_METRIC_COLUMNS.length + 1} className="px-4 py-8 text-center text-sm text-gray-600">
                   No historical breadth rows yet.
                 </td>
               </tr>
