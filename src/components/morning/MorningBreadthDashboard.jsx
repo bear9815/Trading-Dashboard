@@ -315,7 +315,7 @@ function formatMetricValue(value, type) {
 function HistoricalMetricCell({ entry, column }) {
   const value = entry?.[column.key]
   return (
-    <td className={`border border-white/[0.04] px-3 py-2 text-center font-mono text-xs tabular-nums ${metricCellClass(value, column.type)}`}>
+    <td className={`border-b border-r border-white/[0.045] px-3 py-2 text-center font-mono text-[11px] font-semibold tabular-nums ${metricCellClass(value, column.type)}`}>
       {formatMetricValue(value, column.type)}
     </td>
   )
@@ -324,18 +324,19 @@ function HistoricalMetricCell({ entry, column }) {
 function HistoricalBreadthMetricTable({ rows }) {
   const [activeList, setActiveList] = useState('liquid')
   const activeLabel = activeList === 'market' ? 'Market Leaders' : 'Liquid'
+  const activeAccent = activeList === 'market' ? 'from-accent-blue/35 via-accent-blue/15 to-white/[0.04]' : 'from-accent-green/35 via-accent-green/15 to-white/[0.04]'
 
   return (
-    <div className="rounded-xl border border-white/10 bg-[#10151d]">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+    <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#080d14] shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
+      <div className={`flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] bg-gradient-to-r ${activeAccent} px-4 py-3`}>
         <div>
-          <p className="text-sm font-semibold text-white">Historical Breadth Metrics</p>
-          <p className="mt-1 text-xs text-gray-500">
-            One-year daily log of the same metrics in the current breadth comparison.
+          <p className="text-[11px] font-black uppercase tracking-[0.22em] text-white/85">Historical Breadth Tape</p>
+          <p className="mt-1 text-[11px] font-medium text-slate-400">
+            One trading year of daily breadth metrics, latest session first.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-lg border border-white/10 bg-white/[0.02] p-1">
+          <div className="inline-flex rounded-xl border border-white/10 bg-black/25 p-1 shadow-inner shadow-black/30">
             {[
               ['liquid', 'Liquid'],
               ['market', 'Market Leaders'],
@@ -344,32 +345,32 @@ function HistoricalBreadthMetricTable({ rows }) {
                 key={id}
                 type="button"
                 onClick={() => setActiveList(id)}
-                className={`rounded-md px-2.5 py-1 text-xs transition-all ${
-                  activeList === id ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+                className={`rounded-lg px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] transition-all ${
+                  activeList === id ? 'bg-white/10 text-white shadow-sm shadow-black/20' : 'text-slate-500 hover:text-slate-300'
                 }`}
               >
                 {label}
               </button>
             ))}
           </div>
-          <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-gray-400">
+          <p className="rounded-xl border border-white/10 bg-black/25 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] text-slate-300">
             Last {BREADTH_TABLE_SESSION_COUNT} sessions
           </p>
         </div>
       </div>
 
-      <div className="overflow-x-auto border-t border-white/[0.06]">
-        <table className="min-w-[1460px] w-full border-collapse text-sm">
+      <div className="max-h-[72vh] overflow-auto">
+        <table className="min-w-[1460px] w-full border-separate border-spacing-0 text-sm">
           <thead>
-            <tr className="text-center text-[11px] font-black uppercase tracking-wide text-gray-950">
-              <th rowSpan="2" className="sticky left-0 z-20 border border-black/30 bg-[#efb800] px-3 py-3 text-left">Date</th>
-              <th colSpan={HISTORICAL_METRIC_COLUMNS.length} className={`border border-black/30 px-3 py-2 ${activeList === 'market' ? 'bg-[#3d84ff]' : 'bg-[#22c55e]'}`}>
+            <tr className="text-center text-[10px] font-black uppercase tracking-[0.2em] text-slate-200">
+              <th rowSpan="2" className="sticky left-0 top-0 z-40 border-b border-r border-white/10 bg-[#111827] px-3 py-3 text-left text-slate-300 shadow-[8px_0_18px_rgba(0,0,0,0.28)]">Date</th>
+              <th colSpan={HISTORICAL_METRIC_COLUMNS.length} className={`sticky top-0 z-30 border-b border-white/10 bg-gradient-to-r px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.28)] ${activeList === 'market' ? 'from-accent-blue/40 via-[#172036] to-[#101722]' : 'from-accent-green/35 via-[#14251e] to-[#101722]'}`}>
                 {activeLabel}
               </th>
             </tr>
-            <tr className="text-center text-[10px] font-black text-gray-950">
+            <tr className="text-center text-[10px] font-black uppercase tracking-[0.12em] text-slate-300">
               {HISTORICAL_METRIC_COLUMNS.map(column => (
-                <th key={column.key} className="border border-black/30 bg-[#ffd21f] px-2 py-2">
+                <th key={column.key} className="sticky top-[34px] z-30 border-b border-r border-white/[0.07] bg-[#0f1724] px-2 py-2.5 shadow-[0_10px_20px_rgba(0,0,0,0.22)]">
                   {column.label}
                 </th>
               ))}
@@ -377,8 +378,8 @@ function HistoricalBreadthMetricTable({ rows }) {
           </thead>
           <tbody>
             {rows.length ? rows.map(row => (
-              <tr key={`${activeList}-${row.date}`} className="bg-[#111821] hover:bg-white/[0.04]">
-                <td className="sticky left-0 z-10 border border-white/[0.04] bg-[#111821] px-3 py-2 font-mono text-sm font-semibold text-gray-100">
+              <tr key={`${activeList}-${row.date}`} className="bg-[#0b111a] odd:bg-[#0d1420] hover:bg-white/[0.045]">
+                <td className="sticky left-0 z-20 border-b border-r border-white/[0.06] bg-[#101722] px-3 py-2 font-mono text-xs font-black tabular-nums text-slate-200 shadow-[8px_0_18px_rgba(0,0,0,0.24)]">
                   {fmtDateLabel(row.date)}
                 </td>
                 {HISTORICAL_METRIC_COLUMNS.map(column => (
