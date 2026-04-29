@@ -24,6 +24,7 @@ export function isDashboardJournalEntry(entry) {
 
 export function extractJournalEntryText(entry) {
   if (!entry || typeof entry !== 'object') return ''
+  const seen = new Set()
   return [
     entry.noteText,
     entry.psychological,
@@ -34,6 +35,12 @@ export function extractJournalEntryText(entry) {
     .filter(Boolean)
     .map(value => String(value).trim())
     .filter(Boolean)
+    .filter(value => {
+      const key = value.toLocaleLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
     .join('\n\n')
     .trim()
 }

@@ -39,3 +39,14 @@ test('extractJournalEntryText prefers noteText and preserves multiline note cont
     'Wait for the pullback.\n\nOlder copy'
   )
 })
+
+test('extractJournalEntryText deduplicates identical dashboard note fields', () => {
+  assert.equal(
+    extractJournalEntryText({
+      entryType: 'dashboard-note',
+      noteText: 'Today is a reminder to stay patient.',
+      psychological: 'Today is a reminder to stay patient.',
+    }),
+    'Today is a reminder to stay patient.'
+  )
+})
