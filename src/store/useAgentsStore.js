@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { idbStorage } from '../utils/idbStorage.js'
+import { OPENROUTER_RECOMMENDED_MODELS } from '../utils/openRouterModels.js'
 
 // ── Config constants (used by Agents UI) ─────────────────────────────────────
 
@@ -19,22 +20,7 @@ export const GEMINI_MODELS = [
   { id: 'gemini-2.5-flash-lite-preview-06-17', label: 'Gemini 2.5 Flash Lite (fastest)' },
 ]
 
-export const OPENROUTER_MODELS = [
-  // Anthropic — most reliable through OpenRouter
-  { id: 'anthropic/claude-3.5-haiku',            label: 'Claude 3.5 Haiku (recommended)' },
-  { id: 'anthropic/claude-sonnet-4-5',           label: 'Claude Sonnet 4.5' },
-  { id: 'anthropic/claude-opus-4-5',             label: 'Claude Opus 4.5 (most capable)' },
-  // OpenAI
-  { id: 'openai/gpt-4o-mini',                    label: 'GPT-4o Mini' },
-  { id: 'openai/gpt-4o',                         label: 'GPT-4o' },
-  // Google — routes through OpenRouter to Google's API; can hit capacity limits
-  { id: 'google/gemini-2.5-flash',               label: 'Gemini 2.5 Flash (via OpenRouter — may hit capacity)' },
-  { id: 'google/gemini-2.5-pro',                 label: 'Gemini 2.5 Pro (via OpenRouter — may hit capacity)' },
-  // Open source
-  { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (free)' },
-  { id: 'deepseek/deepseek-chat',                label: 'DeepSeek Chat' },
-  { id: 'mistralai/mistral-7b-instruct:free',    label: 'Mistral 7B (free)' },
-]
+export const OPENROUTER_MODELS = OPENROUTER_RECOMMENDED_MODELS
 
 export const LOCAL_MODELS = [
   { id: 'gemma2',   label: 'Gemma 2' },

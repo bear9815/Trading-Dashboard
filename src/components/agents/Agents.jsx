@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useDeferredValue, useEffect, useRef, useState } from 'react'
 import {
   Bot, Plus, Pencil, Trash2, Copy, Mic, FileText, TrendingUp, Brain,
   BarChart2, Search, Zap, Target, BookOpen, Sparkles, FlaskConical,
-  X, Save, AlertTriangle, ChevronRight, Database, MessageSquare,
+  X, Save, AlertTriangle, ChevronRight, Database, MessageSquare, RefreshCw,
   Globe, Building2,
 } from 'lucide-react'
 import {
@@ -12,6 +12,12 @@ import {
   TRIGGER_AREAS,
 } from '../../store/useAgentsStore.js'
 import { useKnowledgeBaseStore } from '../../store/useKnowledgeBaseStore.js'
+import { useSettingsStore } from '../../store/useSettingsStore.js'
+import {
+  fetchOpenRouterModels,
+  filterOpenRouterModels,
+  OPENROUTER_RECOMMENDED_MODELS,
+} from '../../utils/openRouterModels.js'
 import KnowledgeBases from './KnowledgeBases.jsx'
 import AgentChat      from './AgentChat.jsx'
 
@@ -111,6 +117,7 @@ function AgentEditor({ agent, onSave, onClose }) {
   const isNew = !agent.id
 
   const { knowledgeBases } = useKnowledgeBaseStore()
+  const { openRouterApiKey } = useSettingsStore()
 
   const [form, setForm] = useState({
     name:            agent.name            || '',
@@ -125,12 +132,47 @@ function AgentEditor({ agent, onSave, onClose }) {
     tools:           agent.tools          ?? { webSearch: false, secEdgar: false },
   })
   const [savedFlash, setSavedFlash] = useState(false)
+  const [openRouterCatalog, setOpenRouterCatalog] = useState(OPENROUTER_MODELS)
+  const [openRouterLoading, setOpenRouterLoading] = useState(false)
+  const [openRouterAttempted, setOpenRouterAttempted] = useState(false)
+  const [openRouterError, setOpenRouterError] = useState('')
+  const [modelQuery, setModelQuery] = useState('')
+  const [freeOnly, setFreeOnly] = useState(false)
+  const [toolsOnly, setToolsOnly] = useState(false)
+  const deferredModelQuery = useDeferredValue(modelQuery)
 
-  const models = form.provider === 'gemini'
+  const providerModels = form.provider === 'gemini'
     ? GEMINI_MODELS
     : form.provider === 'openrouter'
-    ? OPENROUTER_MODELS
+    ? openRouterCatalog
     : LOCAL_MODELS
+
+  const filteredOpenRouterModels = filterOpenRouterModels(openRouterCatalog, {
+    query: deferredModelQuery,
+    freeOnly,
+    toolsOnly,
+  })
+  const selectedOpenRouterModel = openRouterCatalog.find(model => model.id === form.model) || null
+
+  async function refreshOpenRouterCatalog() {
+    setOpenRouterLoading(true)
+    setOpenRouterAttempted(true)
+    setOpenRouterError('')
+    try {
+      const liveModels = await fetchOpenRouterModels({ apiKey: openRouterApiKey })
+      setOpenRouterCatalog(liveModels)
+    } catch (err) {
+      setOpenRouterCatalog(OPENROUTER_RECOMMENDED_MODELS)
+      setOpenRouterError(err?.message || 'Could not load OpenRouter models.')
+    } finally {
+      setOpenRouterLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (form.provider !== 'openrouter' || openRouterAttempted || openRouterLoading) return
+    refreshOpenRouterCatalog()
+  }, [form.provider, openRouterAttempted, openRouterLoading, openRouterApiKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // When provider changes, reset model only if the current model isn't valid for that provider.
   // We track the PREVIOUS provider so this doesn't fire on mount — we never want to
@@ -140,11 +182,11 @@ function AgentEditor({ agent, onSave, onClose }) {
     const prev = prevProviderRef.current
     prevProviderRef.current = form.provider
     if (prev === form.provider) return   // initial mount — don't reset
-    const first = models[0]?.id
-    if (first && !models.find(m => m.id === form.model)) {
+    const first = providerModels[0]?.id
+    if (first && !providerModels.find(m => m.id === form.model)) {
       setForm(f => ({ ...f, model: first }))
     }
-  }, [form.provider]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [form.provider, providerModels]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function patch(key, val) { setForm(f => ({ ...f, [key]: val })) }
 
@@ -239,14 +281,87 @@ function AgentEditor({ agent, onSave, onClose }) {
                   </button>
                 ))}
               </div>
+              {form.provider === 'openrouter' && (
+                <div className="space-y-3 rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative flex-1 min-w-[220px]">
+                      <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600" />
+                      <input
+                        value={modelQuery}
+                        onChange={e => setModelQuery(e.target.value)}
+                        placeholder="Search OpenRouter models..."
+                        className="w-full bg-white/[0.04] border border-white/10 rounded-lg pl-8 pr-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={refreshOpenRouterCatalog}
+                      disabled={openRouterLoading}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-xs text-gray-400 hover:text-white hover:border-white/20 transition-all disabled:opacity-50"
+                    >
+                      <RefreshCw size={12} className={openRouterLoading ? 'animate-spin' : ''} />
+                      Refresh
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { key: 'free', active: freeOnly, label: 'Free only', onClick: () => setFreeOnly(v => !v) },
+                      { key: 'tools', active: toolsOnly, label: 'Tools support', onClick: () => setToolsOnly(v => !v) },
+                    ].map(filterChip => (
+                      <button
+                        key={filterChip.key}
+                        type="button"
+                        onClick={filterChip.onClick}
+                        className={`px-2.5 py-1 rounded-full border text-[11px] transition-all ${filterChip.active ? 'bg-accent-blue/15 border-accent-blue/40 text-accent-blue' : 'bg-white/[0.03] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'}`}
+                      >
+                        {filterChip.label}
+                      </button>
+                    ))}
+                    <span className="text-[11px] text-gray-600 self-center">
+                      {filteredOpenRouterModels.length.toLocaleString()} shown
+                    </span>
+                    <span className="text-[11px] text-gray-700 self-center">
+                      {openRouterApiKey ? 'Using your OpenRouter account view' : 'Public catalog fallback'}
+                    </span>
+                  </div>
+                </div>
+              )}
               <select value={form.model} onChange={e => patch('model', e.target.value)}
                 className="w-full bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-accent-blue/50 transition-colors">
-                {/* If saved model isn't in the list, show it as a custom option so it isn't silently dropped */}
-                {!models.find(m => m.id === form.model) && form.model && (
+                {/* If saved model isn't in the current list, show it as a custom option so it isn't silently dropped */}
+                {!providerModels.find(m => m.id === form.model) && form.model && (
                   <option value={form.model}>{form.model} (custom)</option>
                 )}
-                {models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                {form.provider === 'openrouter' && selectedOpenRouterModel && !filteredOpenRouterModels.find(m => m.id === form.model) && (
+                  <option value={selectedOpenRouterModel.id}>{selectedOpenRouterModel.label}</option>
+                )}
+                {(form.provider === 'openrouter' ? filteredOpenRouterModels : providerModels).map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
               </select>
+              {form.provider === 'openrouter' && selectedOpenRouterModel && (
+                <div className="flex flex-wrap gap-2 text-[11px] text-gray-500">
+                  <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1">
+                    {selectedOpenRouterModel.provider}
+                  </span>
+                  <span className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1">
+                    {selectedOpenRouterModel.contextLength ? `${selectedOpenRouterModel.contextLength.toLocaleString()} ctx` : 'context unknown'}
+                  </span>
+                  {selectedOpenRouterModel.isFree && (
+                    <span className="rounded-full border border-accent-green/20 bg-accent-green/10 px-2.5 py-1 text-accent-green">
+                      free
+                    </span>
+                  )}
+                  {selectedOpenRouterModel.supportsTools && (
+                    <span className="rounded-full border border-accent-blue/20 bg-accent-blue/10 px-2.5 py-1 text-accent-blue">
+                      tools
+                    </span>
+                  )}
+                </div>
+              )}
+              {form.provider === 'openrouter' && openRouterError && (
+                <p className="text-xs text-amber-500/80 bg-amber-500/[0.06] border border-amber-500/20 rounded-lg px-3 py-2 leading-relaxed">
+                  {openRouterError} Showing the recommended fallback list instead.
+                </p>
+              )}
               {form.provider === 'openrouter' && form.model?.startsWith('google/') && (
                 <p className="text-xs text-amber-500/80 bg-amber-500/[0.06] border border-amber-500/20 rounded-lg px-3 py-2 leading-relaxed">
                   ⚠ Gemini models routed through OpenRouter can hit Google's capacity limits ("high demand" errors) even when you're paying OpenRouter. For reliable Gemini access, switch to the <strong className="text-amber-400">Gemini Cloud</strong> provider above and use your Gemini API key directly.
