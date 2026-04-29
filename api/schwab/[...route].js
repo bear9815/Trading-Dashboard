@@ -1,14 +1,9 @@
 import { kv } from '@vercel/kv'
+import { getSchwabRoute } from '../../src/utils/schwabRoute.js'
 
 const SCHWAB_AUTH_URL = 'https://api.schwabapi.com/v1/oauth/authorize'
 const SCHWAB_TOKEN_URL = 'https://api.schwabapi.com/v1/oauth/token'
 const SCHWAB_BASE = 'https://api.schwabapi.com'
-
-function getRoute(req) {
-  const route = req.query.route
-  if (Array.isArray(route)) return route.join('/')
-  return route || ''
-}
 
 async function handleAuth(req, res) {
   const appKey      = process.env.SCHWAB_APP_KEY
@@ -197,7 +192,7 @@ async function handleProxy(req, res) {
 }
 
 export default async function handler(req, res) {
-  const route = getRoute(req)
+  const route = getSchwabRoute(req)
 
   switch (route) {
     case 'auth':
