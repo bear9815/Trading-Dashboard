@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Activity,
   BarChart3,
   ChevronDown,
   ChevronUp,
+  CircleHelp,
   Maximize2,
   RotateCcw,
   Gauge,
@@ -324,6 +326,78 @@ function ChartPopoutModal({ title, children, onClose }) {
   )
 }
 
+function useHoverTooltip(delay = 220) {
+  const [visible, setVisible] = useState(false)
+  const [style, setStyle] = useState({})
+  const ref = useRef(null)
+  const timer = useRef(null)
+
+  const open = useCallback(() => {
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      const rect = ref.current?.getBoundingClientRect()
+      if (!rect) return
+      const width = 320
+      let left = Math.round(rect.left)
+      if (left + width > window.innerWidth - 12) left = window.innerWidth - width - 12
+      setStyle({ top: Math.round(rect.bottom) + 8, left, width })
+      setVisible(true)
+    }, delay)
+  }, [delay])
+
+  const close = useCallback(() => {
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setVisible(false), 120)
+  }, [])
+
+  const cancelClose = useCallback(() => {
+    clearTimeout(timer.current)
+  }, [])
+
+  useEffect(() => () => clearTimeout(timer.current), [])
+
+  return { ref, visible, style, open, close, cancelClose }
+}
+
+function InfoBubble({ title, children }) {
+  const { ref, visible, style, open, close, cancelClose } = useHoverTooltip()
+  return (
+    <>
+      <span
+        ref={ref}
+        className="inline-flex h-4 w-4 cursor-default items-center justify-center rounded-full border border-white/10 text-gray-500"
+        onMouseEnter={open}
+        onMouseLeave={close}
+      >
+        <CircleHelp size={11} />
+      </span>
+      {visible && createPortal(
+        <div
+          className="fixed z-[9999] rounded-lg border border-white/10 bg-surface-100 p-4 text-xs shadow-2xl"
+          style={style}
+          onMouseEnter={cancelClose}
+          onMouseLeave={close}
+        >
+          <p className="mb-2 text-sm font-semibold text-white">{title}</p>
+          <div className="space-y-2 leading-relaxed text-gray-300">
+            {children}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
+function SectionTitleWithInfo({ title, infoTitle, children }) {
+  return (
+    <div className="flex items-center gap-2">
+      <p className="text-sm font-semibold text-white">{title}</p>
+      {children ? <InfoBubble title={infoTitle}>{children}</InfoBubble> : null}
+    </div>
+  )
+}
+
 function useInteractiveChartRows(rows, timeframe) {
   const timeframeRows = useMemo(
     () => applyTimeframeToRows(rows, timeframe),
@@ -520,7 +594,11 @@ function BreadthPhysicsChart({ rows, timeframe = '6M' }) {
       <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-white">Breadth State Vector</p>
+            <SectionTitleWithInfo title="Breadth State Vector" infoTitle="How to read the state vector">
+              <p><span className="font-medium text-white">Breadth Level</span> is the composite participation score across the growth lists.</p>
+              <p><span className="font-medium text-white">Velocity</span> is the 10-session rate of change in that score, while <span className="font-medium text-white">Acceleration</span> shows whether momentum is improving or fading.</p>
+              <p><span className="font-medium text-white">Damage</span> tracks downside pressure, so high damage with falling velocity usually means distribution instead of healthy consolidation.</p>
+            </SectionTitleWithInfo>
             <p className="mt-1 text-xs text-gray-600">Level, impulse, acceleration, and damage across the selected timeframe.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -617,7 +695,11 @@ function ParticipationStackChart({ rows, timeframe = '6M' }) {
       <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-white">Participation Stack</p>
+            <SectionTitleWithInfo title="Participation Stack" infoTitle="What the participation stack measures">
+              <p><span className="font-medium text-white">20DMA Participation</span> shows how many names are above a short trend filter.</p>
+              <p><span className="font-medium text-white">AVWAP Structure</span> summarizes whether names are holding the anchored VWAP ladder across YTD, 3M, 1M, and 1W anchors.</p>
+              <p>When participation, AVWAP structure, and leaders&apos; 5DMA all rise together, breadth is usually healthier than a move driven by only a small leadership pocket.</p>
+            </SectionTitleWithInfo>
             <p className="mt-1 text-xs text-gray-600">Breadth is strongest when short-term participation, AVWAP structure, and distance all agree.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -658,7 +740,10 @@ function PhaseSpaceChart({ rows, timeframe = '6M' }) {
       <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-white">Phase Space</p>
+            <SectionTitleWithInfo title="Phase Space" infoTitle="How phase space works">
+              <p>This chart plots <span className="font-medium text-white">velocity</span> on X and <span className="font-medium text-white">breadth level</span> on Y.</p>
+              <p>Upper-right means strong breadth with positive momentum. Lower-left means weak breadth with negative momentum. The color marks the classified breadth phase.</p>
+            </SectionTitleWithInfo>
             <p className="mt-1 text-xs text-gray-600">A physics-style view: breadth level on Y, impulse on X. Upper-right is broad momentum; lower-left is distribution.</p>
           </div>
           <div className="flex items-center gap-2">
@@ -729,33 +814,72 @@ function PhaseSpaceChart({ rows, timeframe = '6M' }) {
 
 function RegimeTimeline({ rows, timeframe = '6M' }) {
   const recent = applyTimeframeToRows(rows, timeframe)
-  return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-white">Regime Timeline</p>
-          <p className="mt-1 text-xs text-gray-600">Last six months by breadth phase.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {BREADTH_PHASES.map(phase => (
-            <span key={phase.key} className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-gray-500">
-              <span className="h-2 w-2 rounded-full" style={{ background: phase.color }} />
-              {phase.label}
-            </span>
-          ))}
-        </div>
-      </div>
-      <div className="flex h-9 overflow-hidden rounded-lg border border-white/10 bg-black/20">
-        {recent.map(row => (
-          <div
-            key={row.date}
-            title={`${row.date} · ${row.phase}`}
-            className="min-w-[3px] flex-1"
-            style={{ background: BREADTH_PHASE_COLOR_BY_KEY[row.phase] || '#94a3b8', opacity: 0.78 }}
-          />
-        ))}
-      </div>
+  const [popoutOpen, setPopoutOpen] = useState(false)
+  const [hoveredRow, setHoveredRow] = useState(null)
+
+  const timeline = (heightClass = 'h-9') => (
+    <div
+      className={`flex ${heightClass} overflow-hidden rounded-lg border border-white/10 bg-black/20`}
+      onMouseLeave={() => setHoveredRow(null)}
+    >
+      {recent.map(row => (
+        <div
+          key={row.date}
+          title={`${row.date} · ${row.phase}`}
+          className="min-w-[3px] flex-1"
+          style={{ background: BREADTH_PHASE_COLOR_BY_KEY[row.phase] || '#94a3b8', opacity: hoveredRow?.date === row.date ? 1 : 0.78 }}
+          onMouseEnter={() => setHoveredRow(row)}
+        />
+      ))}
     </div>
+  )
+
+  return (
+    <>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <SectionTitleWithInfo title="Regime Timeline" infoTitle="What the regime timeline shows">
+              <p>Each vertical block is one session, colored by the breadth phase classification for that day.</p>
+              <p>Expansion and Reset generally point to improving participation, while Exhaustion and Distribution warn that momentum is thinning or breaking down.</p>
+              <p>Hover any block to inspect the exact session date and phase, or open the popout for a larger timeline.</p>
+            </SectionTitleWithInfo>
+            <p className="mt-1 text-xs text-gray-600">Selected timeframe by breadth phase.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => setPopoutOpen(true)} className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200" aria-label="Open regime timeline popout">
+              <Maximize2 size={14} />
+            </button>
+            <div className="flex flex-wrap gap-2">
+              {BREADTH_PHASES.map(phase => (
+                <span key={phase.key} className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-gray-500">
+                  <span className="h-2 w-2 rounded-full" style={{ background: phase.color }} />
+                  {phase.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+        {timeline()}
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-[11px]">
+          <p className="text-gray-600">{recent.length} sessions visible</p>
+          <p className="font-medium text-gray-400">
+            {hoveredRow ? `${fmtDateLabel(hoveredRow.date)} · ${hoveredRow.phase}` : 'Hover the timeline to inspect a specific date.'}
+          </p>
+        </div>
+      </div>
+      {popoutOpen && (
+        <ChartPopoutModal title="Regime Timeline" onClose={() => setPopoutOpen(false)}>
+          {timeline('h-16')}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
+            <p className="text-gray-500">{recent.length} sessions in the current timeframe.</p>
+            <p className="font-medium text-gray-300">
+              {hoveredRow ? `${fmtDateLabel(hoveredRow.date)} · ${hoveredRow.phase}` : 'Move across the timeline to inspect dates and regimes.'}
+            </p>
+          </div>
+        </ChartPopoutModal>
+      )}
+    </>
   )
 }
 
@@ -766,7 +890,10 @@ function TradeAnalyticsPanel({ analytics }) {
     <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-white">Breadth x Trade Analytics</p>
+          <SectionTitleWithInfo title="Breadth x Trade Analytics" infoTitle="How trade performance is grouped">
+            <p>Each closed trade is mapped to the breadth phase on its entry date, after excluded symbols are filtered out.</p>
+            <p><span className="font-medium text-white">Avg R</span> uses ATR-based R when available, and <span className="font-medium text-white">Profit Factor</span> compares gross positive R to gross negative R inside each phase bucket.</p>
+          </SectionTitleWithInfo>
           <p className="mt-1 text-xs text-gray-600">Closed trades mapped to the breadth state on entry date.</p>
         </div>
         <div className="text-right">
@@ -1478,7 +1605,11 @@ export default function MorningBreadthDashboard() {
       <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-white">Chart Controls</p>
+            <SectionTitleWithInfo title="Chart Controls" infoTitle="Breadth overview controls">
+              <p><span className="font-medium text-white">Timeframe</span> changes the visible slice across the overview charts.</p>
+              <p><span className="font-medium text-white">All</span> shows the full two-year history loaded for the breadth dashboard.</p>
+              <p>On time-series charts, click-drag directly on the plot or use the lower brush to zoom into a smaller window, then use Reset Zoom to jump back out.</p>
+            </SectionTitleWithInfo>
             <p className="mt-1 text-xs text-gray-600">Use timeframe presets, drag across charts to zoom, and open popouts when you need more room.</p>
           </div>
           <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.02] p-1">
@@ -1525,7 +1656,10 @@ export default function MorningBreadthDashboard() {
           <div className="flex items-center gap-2">
             <BarChart3 size={14} className="text-accent-blue" />
             <div>
-              <p className="text-sm font-semibold text-white">Historical Breadth</p>
+              <SectionTitleWithInfo title="Historical Breadth" infoTitle="What this chart compares">
+                <p>This chart compares the selected metric family across <span className="font-medium text-white">Market Leaders</span>, <span className="font-medium text-white">Liquid Trend</span>, and <span className="font-medium text-white">Liquid</span>.</p>
+                <p><span className="font-medium text-white">5DMA</span> tracks short-term participation, <span className="font-medium text-white">AVWAP</span> tracks anchored structure, <span className="font-medium text-white">Distance</span> is average percent extension from anchored VWAPs, and <span className="font-medium text-white">Thrust</span> is the net 4% up-down count.</p>
+              </SectionTitleWithInfo>
               <p className="text-xs text-gray-600">Market Leaders, Liquid Trend, and Liquid, last {BREADTH_TABLE_SESSION_COUNT} sessions.</p>
             </div>
           </div>

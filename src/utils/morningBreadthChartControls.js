@@ -3,6 +3,7 @@ export const BREADTH_TIMEFRAMES = [
   { id: '3M', label: '3M', sessions: 63 },
   { id: '6M', label: '6M', sessions: 126 },
   { id: '1Y', label: '1Y', sessions: 252 },
+  { id: 'All', label: 'All', sessions: Infinity },
 ]
 
 function findTimeframe(timeframeId) {

@@ -14,13 +14,14 @@ const rows = Array.from({ length: 300 }, (_, index) => ({
 
 assert.deepEqual(
   BREADTH_TIMEFRAMES.map(option => option.id),
-  ['1M', '3M', '6M', '1Y']
+  ['1M', '3M', '6M', '1Y', 'All']
 )
 
 assert.equal(applyTimeframeToRows(rows, '1M').length, 21)
 assert.equal(applyTimeframeToRows(rows, '3M').length, 63)
 assert.equal(applyTimeframeToRows(rows, '6M').length, 126)
 assert.equal(applyTimeframeToRows(rows, '1Y').length, 252)
+assert.equal(applyTimeframeToRows(rows, 'All').length, 300)
 assert.equal(applyTimeframeToRows(rows.slice(0, 12), '1Y').length, 12)
 
 assert.deepEqual(
