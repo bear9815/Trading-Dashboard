@@ -1,8 +1,22 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { readFileSync } from 'node:fs'
+
+const packageJson = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf8')
+)
+
+const appVersion = packageJson.version || '0.0.0'
+const appCommitSha = process.env.VERCEL_GIT_COMMIT_SHA || process.env.GITHUB_SHA || ''
+const appDeployEnv = process.env.VERCEL_ENV || process.env.NODE_ENV || 'development'
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+    __APP_COMMIT_SHA__: JSON.stringify(appCommitSha),
+    __APP_DEPLOY_ENV__: JSON.stringify(appDeployEnv),
+  },
   optimizeDeps: {
     exclude: ['pdfjs-dist'],
   },

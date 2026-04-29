@@ -12,6 +12,7 @@ import {
   calculateRsGradient,
   resolveLatestAnchorDate,
 } from '../../utils/tradeReviewChart.js'
+import { buildSqueezeSeries } from '../../utils/squeezeAnalytics.js'
 
 const WATCHLIST_HISTORY_TTL_MS = 6 * 60 * 60 * 1000
 const WATCHLIST_HISTORY_CONCURRENCY = 8
@@ -134,6 +135,10 @@ export function buildChartDataFromBars(
       weeklyKeltnerShades: [],
       dailyAnchoredRsGradient: [],
       weeklyRollingRsGradient: [],
+      dailySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], snapshot: { stateLabel: 'No Data' } },
+      weeklySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], snapshot: { stateLabel: 'No Data' } },
+      dailySqueezeSnapshot: { stateLabel: 'No Data' },
+      weeklySqueezeSnapshot: { stateLabel: 'No Data' },
     }
   }
   const dailyBars = normalizeChartBars(bars || [])
@@ -146,6 +151,10 @@ export function buildChartDataFromBars(
       weeklyKeltnerShades: [],
       dailyAnchoredRsGradient: [],
       weeklyRollingRsGradient: [],
+      dailySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], snapshot: { stateLabel: 'No Data' } },
+      weeklySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], snapshot: { stateLabel: 'No Data' } },
+      dailySqueezeSnapshot: { stateLabel: 'No Data' },
+      weeklySqueezeSnapshot: { stateLabel: 'No Data' },
     }
   }
   const weeklyBars = normalizeChartBars(aggregateWeeklyBars(dailyBars))
@@ -171,6 +180,8 @@ export function buildChartDataFromBars(
     34: calculateKeltnerChannel(weeklyBars, 34, 0.25),
     65: calculateKeltnerChannel(weeklyBars, 65, 0.25),
   }
+  const dailySqueeze = buildSqueezeSeries(dailyBars)
+  const weeklySqueeze = buildSqueezeSeries(weeklyBars)
   return {
     dailyBars,
     weeklyBars,
@@ -187,6 +198,10 @@ export function buildChartDataFromBars(
       ? collapseRollingGradientToWeekly(weeklyBars, dailyRollingRsGradient)
       : calculateRsGradient(weeklyBars, benchmarkWeeklyBars, tradeReviewChartSettings?.weeklyRs)),
     ytdAvwap: buildYtdAvwapSnapshot(dailyBars, new Date()),
+    dailySqueeze,
+    weeklySqueeze,
+    dailySqueezeSnapshot: dailySqueeze.snapshot,
+    weeklySqueezeSnapshot: weeklySqueeze.snapshot,
   }
 }
 
@@ -195,6 +210,7 @@ export function useResearchChartUniverse({
   latestAnchorDate = null,
   rollingRsWindow = 63,
   rollingLookback = 50,
+  minimumHistoryDays = null,
   tradeReviewChartSettings,
 }) {
   const [historyBarsBySymbol, setHistoryBarsBySymbol] = useState({})
@@ -213,6 +229,10 @@ export function useResearchChartUniverse({
     const rollingStart = new Date()
     rollingStart.setDate(rollingStart.getDate() - rollingBufferDays)
     const weeklyStart = getWeeklyChartStartDate(end)
+    const minimumStart = Number.isFinite(Number(minimumHistoryDays)) && Number(minimumHistoryDays) > 0
+      ? new Date(end)
+      : null
+    if (minimumStart) minimumStart.setDate(minimumStart.getDate() - Number(minimumHistoryDays))
 
     let anchorStart = null
     if (latestAnchorDate) {
@@ -220,7 +240,7 @@ export function useResearchChartUniverse({
       anchorStart.setDate(anchorStart.getDate() - 90)
     }
 
-    const startCandidates = [finraStart, rollingStart, anchorStart, weeklyStart].filter(Boolean)
+    const startCandidates = [finraStart, rollingStart, anchorStart, weeklyStart, minimumStart].filter(Boolean)
     const start = new Date(Math.min(...startCandidates.map(date => date.getTime())))
     const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
     const cacheKey = [
@@ -234,7 +254,7 @@ export function useResearchChartUniverse({
     ].join('|')
 
     return { benchmarkSymbol, start, end, cacheKey }
-  }, [latestAnchorDate, rollingLookback, rollingRsWindow, symbolsKey, tradeReviewChartSettings])
+  }, [latestAnchorDate, minimumHistoryDays, rollingLookback, rollingRsWindow, symbolsKey, tradeReviewChartSettings])
 
   const loadHistoryUniverse = useCallback(async () => {
     if (!symbols.length) {

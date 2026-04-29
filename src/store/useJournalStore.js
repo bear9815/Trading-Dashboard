@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
 import { supabase } from '../lib/supabase.js'
+import { buildDashboardJournalEntry, extractJournalEntryText } from '../utils/dashboardThoughts.js'
 
 function persistLocal(state) {
   try {
@@ -209,6 +210,51 @@ export const useJournalStore = create((set, get) => ({
       timestamp: Date.now(),
     }
     set(s => ({ tradingThoughts: [thought, ...s.tradingThoughts] }))
+    get()._sync()
+  },
+
+  addJournalThought: (text, timestamp = new Date().toISOString()) => {
+    set(s => ({
+      entries: [
+        { ...buildDashboardJournalEntry(text, timestamp), id: uuidv4() },
+        ...s.entries,
+      ],
+    }))
+    get()._sync()
+  },
+
+  moveThoughtToJournal: (id) => {
+    set(s => {
+      const thought = s.tradingThoughts.find(item => item.id === id)
+      if (!thought?.text) return {}
+      const entry = {
+        ...buildDashboardJournalEntry(thought.text, new Date(thought.timestamp || Date.now()).toISOString()),
+        id: uuidv4(),
+      }
+      return {
+        tradingThoughts: s.tradingThoughts.filter(item => item.id !== id),
+        entries: [entry, ...s.entries],
+      }
+    })
+    get()._sync()
+  },
+
+  moveJournalToThought: (id, tag = 'note') => {
+    set(s => {
+      const entry = s.entries.find(item => item.id === id)
+      const text = extractJournalEntryText(entry)
+      if (!text) return {}
+      const thought = {
+        id: uuidv4(),
+        text,
+        tag,
+        timestamp: new Date(entry.timestamp || Date.now()).getTime(),
+      }
+      return {
+        entries: s.entries.filter(item => item.id !== id),
+        tradingThoughts: [thought, ...s.tradingThoughts],
+      }
+    })
     get()._sync()
   },
 

@@ -38,10 +38,49 @@ export function buildRightAnchoredLogicalRange(barCount, visibleBars, rightOffse
   }
 }
 
+export function buildRightAnchoredLogicalRangeFromStart(barCount, startIndex, rightOffset = DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET) {
+  const safeBarCount = Math.max(0, Number(barCount) || 0)
+  const safeStartIndex = Number.isFinite(Number(startIndex)) ? Number(startIndex) : 0
+  const anchor = Math.max(safeBarCount - 1, 0) + rightOffset
+  const visibleBars = Math.max(
+    MIN_LIGHTWEIGHT_VISIBLE_BARS,
+    Math.ceil(anchor - safeStartIndex)
+  )
+  return {
+    from: anchor - visibleBars,
+    to: anchor,
+  }
+}
+
 export function applyRightAnchoredLogicalRange(chart, barCount, visibleBars, rightOffset = DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET) {
   setVisibleLogicalRangeWithRightOffset(
     chart,
     buildRightAnchoredLogicalRange(barCount, visibleBars, rightOffset),
     rightOffset
   )
+}
+
+export function buildRightAnchoredZoomRange(currentRange, barCount, zoomDelta, rightOffset = DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET) {
+  const safeBarCount = Math.max(0, Number(barCount) || 0)
+  if (!safeBarCount || !currentRange) return null
+
+  const minimumAnchor = Math.max(safeBarCount - 1, 0) + rightOffset
+  const currentAnchor = Number.isFinite(Number(currentRange.to))
+    ? Number(currentRange.to)
+    : minimumAnchor
+  const currentSpan = Math.max(
+    MIN_LIGHTWEIGHT_VISIBLE_BARS,
+    Math.abs(Number(currentRange.to) - Number(currentRange.from)) || MIN_LIGHTWEIGHT_VISIBLE_BARS
+  )
+  const direction = Number(zoomDelta) < 0 ? 'in' : 'out'
+  const zoomFactor = direction === 'in' ? 0.84 : 1.2
+  const nextVisibleBars = Math.max(
+    MIN_LIGHTWEIGHT_VISIBLE_BARS,
+    Math.min(safeBarCount + rightOffset + MIN_LIGHTWEIGHT_VISIBLE_BARS, Math.round(currentSpan * zoomFactor))
+  )
+  const anchor = Math.max(currentAnchor, minimumAnchor)
+  return {
+    from: anchor - nextVisibleBars,
+    to: anchor,
+  }
 }

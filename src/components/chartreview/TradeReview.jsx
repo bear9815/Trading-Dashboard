@@ -4,13 +4,17 @@ import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useOpenRouterVoice } from '../../hooks/useOpenRouterVoice.js'
 import { formatCurrency } from '../../utils/formatters.js'
-import { fetchHistory } from '../../utils/marketData.js'
 import { analyzeTradeVoiceReview, generateTradeVoiceFollowUp } from '../../utils/ai.js'
-import { BEST_FIT_LOOKBACK_MONTH_DEFAULT, BEST_FIT_LOOKBACK_MONTH_OPTIONS } from '../../utils/tradeReviewChart.js'
+import {
+  BEST_FIT_LOOKBACK_MONTH_DEFAULT,
+  BEST_FIT_LOOKBACK_MONTH_OPTIONS,
+  normalizeTradeReviewChartType,
+  TRADE_REVIEW_CHART_TYPE_OPTIONS,
+} from '../../utils/tradeReviewChart.js'
+import { getTradeReviewState, hasTradeReviewInput, isTradeReviewComplete } from '../../utils/tradeReviewStatus.js'
 import TradeReviewChart from './TradeReviewChart.jsx'
 import SharedChartToolsSettingsModal from '../charts/ChartToolsSettingsModal.jsx'
-import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, Sparkles, Brain, CircleDot, RotateCcw, Mic, MicOff, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Volume2, Square, SlidersHorizontal, Trash2 } from 'lucide-react'
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine } from 'recharts'
+import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, Sparkles, Brain, CircleDot, RotateCcw, Mic, MicOff, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Volume2, Square, SlidersHorizontal, Trash2, Maximize2 } from 'lucide-react'
 
 // ── Duration helper ───────────────────────────────────────────────────────────
 function tradeDuration(trade) {
@@ -444,20 +448,12 @@ function avg(nums) {
   return nums.reduce((s, n) => s + n, 0) / nums.length
 }
 
-function hasTradeReview(trade) {
-  return Boolean(
-    trade?.quickReview ||
-    (trade?.reviewTags || []).length > 0 ||
-    (trade?.reviewNotes || '').trim()
-  )
-}
-
 function pickTopCount(counts) {
   return Object.entries(counts || {}).sort((a, b) => b[1] - a[1])[0] || null
 }
 
 function computeReviewIntelligence(trades) {
-  const reviewed = (trades || []).filter(hasTradeReview)
+  const reviewed = (trades || []).filter(hasTradeReviewInput)
   if (!reviewed.length) return null
 
   const verdictCounts = {}
@@ -664,100 +660,14 @@ function buildMorningEnvironmentNotes(trade, entry) {
   return notes
 }
 
-function EntryMarketChart({ symbol, trade }) {
-  const [series, setSeries] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  const entryDate = trade.entryDate ? new Date(trade.entryDate) : null
-  const entryDateStr = entryDate ? localDateString(entryDate) : ''
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function load() {
-      if (!entryDate) {
-        setSeries([])
-        setLoading(false)
-        return
-      }
-
-      setLoading(true)
-      setError('')
-      try {
-        const start = new Date(entryDate)
-        start.setDate(start.getDate() - 20)
-        const end = new Date(entryDate)
-        end.setDate(end.getDate() + 10)
-        const bars = await fetchHistory(symbol, start, end)
-        if (cancelled) return
-        setSeries(
-          bars.map(bar => ({
-            ...bar,
-            label: bar.time.slice(5),
-          }))
-        )
-      } catch (err) {
-        if (!cancelled) setError(err.message || 'Failed to load market context.')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    load()
-    return () => { cancelled = true }
-  }, [entryDate, symbol])
-
-  return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-semibold text-white mono">{symbol}</p>
-        <p className="text-[10px] text-gray-500">Entry marker shown</p>
-      </div>
-      {loading ? (
-        <div className="h-28 flex items-center justify-center text-xs text-gray-500">Loading {symbol}…</div>
-      ) : error ? (
-        <div className="h-28 flex items-center justify-center text-xs text-accent-red text-center">{error}</div>
-      ) : series.length === 0 ? (
-        <div className="h-28 flex items-center justify-center text-xs text-gray-500">No {symbol} data</div>
-      ) : (
-        <div className="h-28">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={series} margin={{ top: 4, right: 6, left: -20, bottom: 0 }}>
-              <XAxis dataKey="label" tick={{ fill: '#6b7280', fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={18} />
-              <YAxis hide domain={['dataMin', 'dataMax']} />
-              <Tooltip
-                contentStyle={{ background: '#0f1117', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10 }}
-                labelStyle={{ color: '#9ca3af', fontSize: 11 }}
-                formatter={(value) => [`$${Number(value).toFixed(2)}`, symbol]}
-              />
-              <ReferenceLine x={entryDateStr.slice(5)} stroke="#ffa502" strokeDasharray="3 3" />
-              <Line type="monotone" dataKey="close" stroke="#3d84ff" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function MarketContextSection({ trade }) {
+function MorningEnvironmentSection({ trade }) {
   const { getEntryByDate } = useMorningStore()
   const entryDateStr = trade.entryDate ? trade.entryDate.slice(0, 10) : null
   const morningEntry = entryDateStr ? getEntryByDate(entryDateStr) : null
   const notes = useMemo(() => buildMorningEnvironmentNotes(trade, morningEntry), [trade, morningEntry])
 
   return (
-    <div className="space-y-4">
-      <div>
-        <p className="label mb-2">Market Context</p>
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-          <EntryMarketChart symbol="SPY" trade={trade} />
-          <EntryMarketChart symbol="QQQ" trade={trade} />
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div>
             <p className="label text-white">Morning Environment</p>
@@ -845,7 +755,6 @@ function MarketContextSection({ trade }) {
             No morning journal entry was found for this trade date, so environment context can’t be matched yet.
           </p>
         )}
-      </div>
     </div>
   )
 }
@@ -1145,13 +1054,14 @@ function VoiceReviewSection({ trade, onUpdate }) {
   const [currentStep, setCurrentStep] = useState(0)
   const [questions, setQuestions] = useState(() => buildGuidedVoiceQuestions(trade))
   const [coachReason, setCoachReason] = useState('')
+  const [playedPromptKey, setPlayedPromptKey] = useState('')
   const recognitionRef = useRef(null)
   const partsRef = useRef([])
-  const spokenPromptRef = useRef('')
   const activeQuestion = questions[currentStep] || null
   const { isLoading: voiceLoading, isPlaying: voicePlaying, error: voiceError, playText, stop } = useOpenRouterVoice({
     apiKey: openRouterApiKey,
   })
+  const currentPromptKey = activeQuestion ? `${trade.id}:${activeQuestion.id}:${currentStep}` : ''
   const combinedTranscript = useMemo(() => (
     answers
       .filter(item => item?.answer)
@@ -1172,19 +1082,17 @@ function VoiceReviewSection({ trade, onUpdate }) {
     recognitionRef.current?.abort?.()
     recognitionRef.current = null
     partsRef.current = []
-    spokenPromptRef.current = ''
+    setPlayedPromptKey('')
   }, [trade.id])
 
-  useEffect(() => {
-    if (!openRouterApiKey || mode !== 'guided' || status !== 'idle' || !activeQuestion) return
-    const promptKey = `${trade.id}:${activeQuestion.id}:${currentStep}`
-    if (spokenPromptRef.current === promptKey) return
-    spokenPromptRef.current = promptKey
+  function playActivePrompt() {
+    if (!activeQuestion) return
+    setPlayedPromptKey(currentPromptKey)
     playText({
       text: activeQuestion.prompt,
       instructions: 'Speak like a calm, confident trading coach. Keep it direct, warm, and natural.',
     })
-  }, [activeQuestion, currentStep, mode, openRouterApiKey, playText, status, trade.id])
+  }
 
   async function applyVoiceAnalysis(nextAnswers, transcriptForAnalysis) {
     setStatus('processing')
@@ -1431,7 +1339,7 @@ function VoiceReviewSection({ trade, onUpdate }) {
               setCurrentStep(0)
               setQuestions(buildGuidedVoiceQuestions(trade))
               setCoachReason('')
-              spokenPromptRef.current = ''
+              setPlayedPromptKey('')
             }}
             className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${
               mode === item.id
@@ -1482,10 +1390,7 @@ function VoiceReviewSection({ trade, onUpdate }) {
             {openRouterApiKey && (
               <button
                 type="button"
-                onClick={() => voicePlaying ? stop() : playText({
-                  text: activeQuestion.prompt,
-                  instructions: 'Speak like a calm, confident trading coach. Keep it direct, warm, and natural.',
-                })}
+                onClick={() => voicePlaying ? stop() : playActivePrompt()}
                 className={`shrink-0 text-xs px-2.5 py-1.5 rounded-lg border transition-all ${
                   voicePlaying
                     ? 'bg-accent-red/10 text-accent-red border-accent-red/30'
@@ -1494,7 +1399,7 @@ function VoiceReviewSection({ trade, onUpdate }) {
               >
                 <span className="flex items-center gap-1">
                   {voicePlaying ? <Square size={12} /> : <Volume2 size={12} />}
-                  {voicePlaying ? 'Stop' : 'Replay'}
+                  {voicePlaying ? 'Stop' : playedPromptKey === currentPromptKey ? 'Replay' : 'Play prompt'}
                 </span>
               </button>
             )}
@@ -1945,8 +1850,9 @@ function ReviewNotesSection({ trade, onUpdate }) {
 }
 
 // ── Trade detail panel ────────────────────────────────────────────────────────
-function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, chartSettings }) {
+function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, onCompleteReview, chartSettings, onOpenChartSettings }) {
   const [lightboxIndex, setLightboxIndex] = useState(null)
+  const [chartFocusOpen, setChartFocusOpen] = useState(false)
 
   const shots = useMemo(() => {
     const s = []
@@ -1956,8 +1862,20 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, chartS
     return s
   }, [trade.screenshotEntry, trade.screenshotExit, trade.screenshotsAdditional])
 
-  // Reset lightbox when trade changes
-  useEffect(() => { setLightboxIndex(null) }, [trade.id])
+  // Reset transient overlays when trade changes
+  useEffect(() => {
+    setLightboxIndex(null)
+    setChartFocusOpen(false)
+  }, [trade.id])
+
+  useEffect(() => {
+    if (!chartFocusOpen) return undefined
+    const handler = (e) => {
+      if (e.key === 'Escape') setChartFocusOpen(false)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [chartFocusOpen])
 
   const entryDate = trade.entryDate
     ? new Date(trade.entryDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
@@ -1967,6 +1885,9 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, chartS
 
   const prevLightbox = useCallback(() => setLightboxIndex(i => (i > 0 ? i - 1 : i)), [])
   const nextLightbox = useCallback(() => setLightboxIndex(i => (i < shots.length - 1 ? i + 1 : i)), [shots.length])
+  const reviewState = getTradeReviewState(trade)
+  const hasReviewInput = hasTradeReviewInput(trade)
+  const completeDisabled = !hasReviewInput || reviewState === 'complete'
 
   return (
     <div className="flex-1 overflow-y-auto p-5 space-y-5">
@@ -2025,75 +1946,180 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, chartS
         )
       })()}
 
-      {/* Screenshots */}
-      <div>
-        <p className="label mb-2">Charts</p>
-        <div className="mb-3">
-          <TradeReviewChart trade={trade} chartSettings={chartSettings} onOpenSettings={() => setChartSettingsOpen(true)} />
-        </div>
-        <ScreenshotGallery trade={trade} onOpenLightbox={setLightboxIndex} />
-      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)] gap-5 items-start">
+        <div className="space-y-5 xl:sticky xl:top-5 self-start">
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <p className="label">Charts</p>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={onOpenChartSettings}
+                  className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-white/10 text-gray-400 hover:text-white hover:border-accent-blue/30 hover:bg-accent-blue/10 transition-all"
+                >
+                  <SlidersHorizontal size={12} />
+                  Settings
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChartFocusOpen(true)}
+                  className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-accent-blue/25 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 transition-all"
+                >
+                  <Maximize2 size={12} />
+                  Pop out
+                </button>
+              </div>
+            </div>
+            <div className="mb-3">
+              <TradeReviewChart trade={trade} chartSettings={chartSettings} onOpenSettings={onOpenChartSettings} />
+            </div>
+            <ScreenshotGallery trade={trade} onOpenLightbox={setLightboxIndex} />
+          </div>
 
-      {/* Process grade */}
-      {trade.processGrade && (
-        <div className="card-sm">
-          <p className="label mb-1.5">Process Grade</p>
-          <div className="flex items-baseline gap-2">
-            <span className={`text-2xl font-bold ${
-              trade.processGrade >= 4 ? 'text-accent-green' :
-              trade.processGrade === 3 ? 'text-accent-yellow' : 'text-accent-red'
+          <div className="space-y-4">
+            {trade.processGrade && (
+              <div className="card-sm">
+                <p className="label mb-1.5">Process Grade</p>
+                <div className="flex items-baseline gap-2">
+                  <span className={`text-2xl font-bold ${
+                    trade.processGrade >= 4 ? 'text-accent-green' :
+                    trade.processGrade === 3 ? 'text-accent-yellow' : 'text-accent-red'
+                  }`}>
+                    {['','F','D','C','B','A'][trade.processGrade]}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    {['','Broke rules','Major deviation','Some deviation','Minor issues','Perfect'][trade.processGrade]}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {edges.length > 0 && (
+              <div>
+                <p className="label mb-1.5">Edges at Entry</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {edges.map(e => (
+                    <span key={e} className="text-xs px-2 py-0.5 rounded-full bg-accent-blue/15 text-accent-blue border border-accent-blue/20">
+                      {e}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(trade.lessons || trade.exitNotes) && (
+              <div className="space-y-3">
+                {trade.lessons && (
+                  <div>
+                    <p className="label mb-1">Lessons</p>
+                    <p className="text-sm text-gray-300 leading-relaxed bg-surface-200 rounded-lg px-3 py-2.5 whitespace-pre-wrap">{trade.lessons}</p>
+                  </div>
+                )}
+                {trade.exitNotes && (
+                  <div>
+                    <p className="label mb-1">Exit Notes</p>
+                    <p className="text-sm text-gray-300 leading-relaxed bg-surface-200 rounded-lg px-3 py-2.5 whitespace-pre-wrap">{trade.exitNotes}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <MorningEnvironmentSection trade={trade} />
+          </div>
+        </div>
+
+        <div className="border border-white/10 bg-surface-50/60 rounded-xl p-4 space-y-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Post-Trade Review</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {reviewState === 'complete'
+                  ? 'Completed and ready for the archive.'
+                  : hasReviewInput
+                    ? 'Review input captured. Complete when you are ready to move on.'
+                    : 'Answer one quick prompt, record voice, add a tag, or write a note to complete.'}
+              </p>
+            </div>
+            <span className={`shrink-0 text-[10px] px-2 py-1 rounded-full border ${
+              reviewState === 'complete'
+                ? 'bg-accent-green/15 text-accent-green border-accent-green/25'
+                : reviewState === 'in_progress'
+                  ? 'bg-accent-blue/15 text-accent-blue border-accent-blue/25'
+                  : 'bg-accent-yellow/10 text-accent-yellow border-accent-yellow/25'
             }`}>
-              {['','F','D','C','B','A'][trade.processGrade]}
-            </span>
-            <span className="text-xs text-gray-400">
-              {['','Broke rules','Major deviation','Some deviation','Minor issues','Perfect'][trade.processGrade]}
+              {reviewState === 'complete' ? 'Complete' : reviewState === 'in_progress' ? 'In progress' : 'Needs input'}
             </span>
           </div>
-        </div>
-      )}
 
-      {/* Edges at entry */}
-      {edges.length > 0 && (
-        <div>
-          <p className="label mb-1.5">Edges at Entry</p>
-          <div className="flex flex-wrap gap-1.5">
-            {edges.map(e => (
-              <span key={e} className="text-xs px-2 py-0.5 rounded-full bg-accent-blue/15 text-accent-blue border border-accent-blue/20">
-                {e}
-              </span>
-            ))}
+          <QuickReviewSection trade={trade} onUpdate={onUpdate} />
+          <VoiceReviewSection trade={trade} onUpdate={onUpdate} />
+          <ReviewTagsSection  trade={trade} onUpdate={onUpdate} />
+          <ReviewNotesSection trade={trade} onUpdate={onUpdate} />
+
+          <div className="sticky bottom-0 -mx-4 -mb-4 px-4 py-3 border-t border-white/10 bg-surface-50/95 backdrop-blur rounded-b-xl">
+            {!hasReviewInput && (
+              <p className="text-[11px] text-accent-yellow mb-2">
+                Add at least one review input before completing this trade.
+              </p>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onNext}
+                disabled={!hasNext}
+                className="flex-1 px-3 py-2 rounded-lg border border-white/10 text-gray-400 hover:text-white hover:border-white/25 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-sm"
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                onClick={onCompleteReview}
+                disabled={completeDisabled}
+                className={`flex-[1.4] px-3 py-2 rounded-lg border transition-all text-sm font-semibold ${
+                  completeDisabled
+                    ? 'border-white/10 bg-white/[0.03] text-gray-600 cursor-not-allowed'
+                    : 'border-accent-green/30 bg-accent-green/15 text-accent-green hover:bg-accent-green/25'
+                }`}
+              >
+                {reviewState === 'complete' ? 'Review Complete' : 'Complete Review'}
+              </button>
+            </div>
           </div>
         </div>
-      )}
-
-      {/* Existing trade notes (read-only) */}
-      {(trade.lessons || trade.exitNotes) && (
-        <div className="space-y-3">
-          {trade.lessons && (
-            <div>
-              <p className="label mb-1">Lessons</p>
-              <p className="text-sm text-gray-300 leading-relaxed bg-surface-200 rounded-lg px-3 py-2.5 whitespace-pre-wrap">{trade.lessons}</p>
-            </div>
-          )}
-          {trade.exitNotes && (
-            <div>
-              <p className="label mb-1">Exit Notes</p>
-              <p className="text-sm text-gray-300 leading-relaxed bg-surface-200 rounded-lg px-3 py-2.5 whitespace-pre-wrap">{trade.exitNotes}</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      <MarketContextSection trade={trade} />
-
-      {/* ── Review section ── */}
-      <div className="border-t border-white/10 pt-5 space-y-5">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Post-Trade Review</p>
-        <QuickReviewSection trade={trade} onUpdate={onUpdate} />
-        <VoiceReviewSection trade={trade} onUpdate={onUpdate} />
-        <ReviewTagsSection  trade={trade} onUpdate={onUpdate} />
-        <ReviewNotesSection trade={trade} onUpdate={onUpdate} />
       </div>
+
+      {chartFocusOpen && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm p-4 md:p-6 flex flex-col">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-[0.16em] text-gray-500">Chart Focus</p>
+              <p className="text-lg font-bold mono text-white truncate">{trade.symbol}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onOpenChartSettings}
+                className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-white/10 text-gray-300 hover:text-white hover:border-accent-blue/30 hover:bg-accent-blue/10 transition-all"
+              >
+                <SlidersHorizontal size={13} />
+                Settings
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartFocusOpen(false)}
+                className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-white/10 text-gray-300 hover:text-white hover:border-white/25 transition-all"
+              >
+                <X size={13} />
+                Close
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 rounded-xl border border-white/10 bg-surface-50 p-3 overflow-hidden">
+            <TradeReviewChart trade={trade} chartSettings={chartSettings} onOpenSettings={onOpenChartSettings} expanded />
+          </div>
+          <p className="text-[11px] text-gray-600 mt-2">Press Escape to return the chart to the review workspace.</p>
+        </div>
+      )}
 
       {/* Lightbox */}
       {lightboxIndex !== null && shots.length > 0 && (
@@ -2117,7 +2143,9 @@ function TradeListItem({ trade, selected, onClick }) {
     ? new Date(trade.entryDate).toLocaleDateString([], { month: 'short', day: 'numeric' })
     : '—'
   const reviewTagCount = (trade.reviewTags || []).length
-  const reviewed = hasTradeReview(trade)
+  const reviewState = getTradeReviewState(trade)
+  const reviewed = reviewState === 'complete'
+  const inProgress = reviewState === 'in_progress'
   const quickSummary = trade.quickReview ? buildQuickReviewSummary(trade.quickReview) : null
 
   return (
@@ -2147,6 +2175,11 @@ function TradeListItem({ trade, selected, onClick }) {
               Reviewed
             </span>
           )}
+          {inProgress && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent-blue/15 text-accent-blue border border-accent-blue/20">
+              In progress
+            </span>
+          )}
         </div>
         <p className="text-xs text-gray-500 truncate">
           {entryDate}
@@ -2157,7 +2190,7 @@ function TradeListItem({ trade, selected, onClick }) {
             {quickSummary.verdict} · {quickSummary.focus}
           </p>
         )}
-        {!reviewed && (
+        {!reviewed && !inProgress && (
           <p className="text-[11px] text-accent-yellow/80 truncate mt-0.5">
             Needs review
           </p>
@@ -2185,7 +2218,7 @@ function TradeListItem({ trade, selected, onClick }) {
 function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
   const [draft, setDraft] = useState(() => ({
     benchmarkSymbol: settings?.benchmarkSymbol || 'SPY',
-    chartType: settings?.chartType === 'hlc' ? 'hlc' : 'candlestick',
+    chartType: normalizeTradeReviewChartType(settings?.chartType),
     anchorDates: Array.isArray(settings?.anchorDates) && settings.anchorDates.length ? settings.anchorDates : ['2026-01-01', '2026-04-02'],
     avwapPresets: Array.isArray(settings?.avwapPresets) && settings.avwapPresets.length
       ? settings.avwapPresets
@@ -2327,10 +2360,7 @@ function TradeReviewChartSettingsModal({ settings, onSave, onClose }) {
             <div>
               <p className="label mb-2">Price Style</p>
               <div className="inline-flex rounded-lg border border-white/10 bg-surface-200 p-1">
-                {[
-                  { value: 'candlestick', label: 'Candles' },
-                  { value: 'hlc', label: 'HLC Bars' },
-                ].map(option => (
+                {TRADE_REVIEW_CHART_TYPE_OPTIONS.map(option => (
                   <button
                     key={option.value}
                     onClick={() => setDraft(current => ({ ...current, chartType: option.value }))}
@@ -2506,14 +2536,14 @@ export default function TradeReview({ selectedAccount }) {
   const reviewTrades = useMemo(() => {
     return scopedTrades
       .filter(t => {
-        const reviewed = hasTradeReview(t)
+        const reviewed = isTradeReviewComplete(t)
         if (reviewFilter === 'Reviewed') return reviewed
         if (reviewFilter === 'Needs Review') return !reviewed
         return true
       })
       .sort((a, b) => {
-        const aReviewed = hasTradeReview(a)
-        const bReviewed = hasTradeReview(b)
+        const aReviewed = isTradeReviewComplete(a)
+        const bReviewed = isTradeReviewComplete(b)
         if (sortBy === 'queue' || reviewFilter === 'All') {
           if (aReviewed !== bReviewed) return Number(aReviewed) - Number(bReviewed)
         }
@@ -2531,7 +2561,7 @@ export default function TradeReview({ selectedAccount }) {
     const closed = reviewTrades.filter(t => t.status === 'Win' || t.status === 'Loss')
     const wins   = closed.filter(t => t.status === 'Win').length
     const totalR = closed.reduce((s, t) => s + (t.rMultiple || 0), 0)
-    const reviewedCount = reviewTrades.filter(hasTradeReview).length
+    const reviewedCount = reviewTrades.filter(isTradeReviewComplete).length
     return { wins, total: closed.length, totalR: Math.round(totalR * 100) / 100, reviewedCount, pendingCount: reviewTrades.length - reviewedCount }
   }, [reviewTrades])
 
@@ -2549,6 +2579,23 @@ export default function TradeReview({ selectedAccount }) {
 
   function handleUpdate(updates) {
     if (currentTrade) updateTrade(currentTrade.id, updates)
+  }
+
+  function handleCompleteReview() {
+    if (!currentTrade || !hasTradeReviewInput(currentTrade)) return
+    const nextPending = reviewTrades
+      .slice(currentIdx + 1)
+      .find(t => t.id !== currentTrade.id && !isTradeReviewComplete(t))
+      || reviewTrades
+        .slice(0, currentIdx)
+        .find(t => t.id !== currentTrade.id && !isTradeReviewComplete(t))
+
+    updateTrade(currentTrade.id, {
+      reviewCompletedAt: new Date().toISOString(),
+      reviewCompletedSource: 'manual',
+    })
+
+    if (nextPending) setSelectedId(nextPending.id)
   }
 
   return (
@@ -2692,7 +2739,9 @@ export default function TradeReview({ selectedAccount }) {
             hasPrev={currentIdx > 0}
             hasNext={currentIdx < reviewTrades.length - 1}
             onUpdate={handleUpdate}
+            onCompleteReview={handleCompleteReview}
             chartSettings={tradeReviewChartSettings}
+            onOpenChartSettings={() => setChartSettingsOpen(true)}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">

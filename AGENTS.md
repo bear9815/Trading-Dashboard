@@ -40,3 +40,11 @@ All AI prompts return **valid JSON only** — no markdown. Callers use `text.mat
 - `api/hunterbrook/` and `api/hunterbrook-sub/` are proprietary data proxies — do not modify routing logic
 - `public/data/theme_data.json` is the seed data for thematic research themes
 - The `dist/` folder is the Vite build output — never edit files there directly
+
+## Versioning Rule
+- Every user-visible feature, workflow change, or behavior change must bump `package.json` so the bottom-left app version updates automatically.
+- Use semver with pragmatic estimates:
+  - patch (`0.2.0` → `0.2.1`) for fixes and small polish
+  - minor (`0.2.0` → `0.3.0`) for meaningful new features or workflow additions
+  - major (`0.2.0` → `1.0.0`) only for large breaking changes
+- When in doubt, choose the smallest version that still reflects visible product progress.

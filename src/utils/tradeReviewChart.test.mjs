@@ -19,6 +19,7 @@ import {
   resolveAnchoredRsAnchorDate,
   buildTradeMarkers,
   calculateKeltnerChannel,
+  normalizeTradeReviewChartType,
 } from './tradeReviewChart.js'
 
 const bars = [
@@ -243,6 +244,12 @@ assert.equal(Math.round(avwapSeries[1].value * 1000) / 1000, 12.167)
 
 assert.ok(Array.isArray(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets))
 assert.equal(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets[0]?.id, 'ytd')
+assert.equal(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.chartType, 'ohlc')
+assert.equal(normalizeTradeReviewChartType('ohlc'), 'ohlc')
+assert.equal(normalizeTradeReviewChartType('hlc'), 'hlc')
+assert.equal(normalizeTradeReviewChartType('candlestick'), 'candlestick')
+assert.equal(normalizeTradeReviewChartType('anything-else'), 'ohlc')
+assert.equal(normalizeTradeReviewChartType(undefined), 'ohlc')
 assert.equal(
   resolveAvwapPresetAnchorDate({ mode: 'ytd' }, '2026-04-25'),
   '2026-01-01'

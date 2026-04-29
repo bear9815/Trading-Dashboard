@@ -24,10 +24,10 @@ import {
   buildAnchoredRsSnapshot,
   buildAvwapOverlays,
   buildYtdAvwapSnapshot,
-  buildKeltnerShadeBands,
   buildRollingRsSnapshot,
-  calculateKeltnerChannel,
+  normalizeTradeReviewChartType,
   resolveLatestAnchorDate,
+  aggregateWeeklyBars,
 } from '../../utils/tradeReviewChart.js'
 import { buildWatchlistFitMap, filterAndSortWatchlistRows } from '../../utils/watchlistFitSignal.js'
 import {
@@ -54,10 +54,16 @@ import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 import { collectReusableWatchlistRows, getSymbolsNeedingMapping, mergeTrustedCompanyIdentity } from '../../utils/watchlistReuse.js'
 import ResearchMultiTimeframeChart from '../charts/ResearchMultiTimeframeChart.jsx'
 import { buildTickerChartData, useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
+import { buildSqueezeSnapshot } from '../../utils/squeezeAnalytics.js'
+import { formatSqueezeMetric, formatSqueezeStateBadge, getSqueezeMetricTone, getSqueezeStateTone } from '../../utils/squeezeUi.js'
 
 const SORT_OPTIONS = [
   ['momentum', 'Momentum Rank'],
   ['fit', 'Fit Score'],
+  ['dailyCompression', 'Daily Compression'],
+  ['dailyExpansion', 'Daily Expansion'],
+  ['weeklyCompression', 'Weekly Compression'],
+  ['weeklyExpansion', 'Weekly Expansion'],
   ['symbol', 'Symbol'],
   ['ecosystem', 'Ecosystem'],
   ['theme', 'Theme'],
@@ -405,6 +411,29 @@ function YtdAvwapCell({ snapshot, loading = false }) {
       </span>
       <p className={`text-[10px] ${positive ? 'text-accent-green' : 'text-accent-red'}`}>
         {formatSignedPercent(snapshot.distancePct)} vs YTD
+      </p>
+    </div>
+  )
+}
+
+function SqueezeMetricCell({ value }) {
+  return (
+    <span className={`inline-flex min-w-[62px] items-center justify-center rounded border px-2 py-1 text-xs font-semibold ${getSqueezeMetricTone(value, { high: 70, medium: 50 })}`}>
+      {formatSqueezeMetric(value)}
+    </span>
+  )
+}
+
+function SqueezeStateCell({ snapshotPair }) {
+  const daily = snapshotPair?.daily || null
+  const weekly = snapshotPair?.weekly || null
+  return (
+    <div className="space-y-1">
+      <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold ${getSqueezeStateTone(daily?.stateLabel || 'No Data')}`}>
+        {formatSqueezeStateBadge({ daily, weekly })}
+      </span>
+      <p className="text-[10px] text-gray-600">
+        {daily?.stateLabel || 'No Data'} · {weekly?.stateLabel || 'No Data'}
       </p>
     </div>
   )
@@ -1020,6 +1049,16 @@ export default function ThemeWatchlist({
     }),
     [symbols, anchoredRsBySymbol, rollingRsBySymbol]
   )
+  const squeezeBySymbol = useMemo(
+    () => Object.fromEntries(symbols.map(symbol => {
+      const dailyBars = historyBarsBySymbol[symbol] || []
+      return [symbol, {
+        daily: buildSqueezeSnapshot(dailyBars),
+        weekly: buildSqueezeSnapshot(aggregateWeeklyBars(dailyBars)),
+      }]
+    })),
+    [historyBarsBySymbol, symbols]
+  )
 
   const latestAnchorDate = useMemo(
     () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
@@ -1231,31 +1270,13 @@ export default function ThemeWatchlist({
     if (!analyticsMode || !selectedThemeGroup || !selectedEcosystemComposite.dailyBars.length) {
       return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
     }
-    const avwapOverlays = buildAvwapOverlays(
-      selectedEcosystemComposite.dailyBars,
+    return buildTickerChartData(
       selectedThemeGroup.label,
+      { [selectedThemeGroup.label]: selectedEcosystemComposite.dailyBars },
       tradeReviewChartSettings,
-      {},
-      new Date(),
-      null
+      benchmarkHistoryBars,
+      {}
     )
-    const dailyKeltner = {
-      13: calculateKeltnerChannel(selectedEcosystemComposite.dailyBars, 13, 0.25),
-      34: calculateKeltnerChannel(selectedEcosystemComposite.dailyBars, 34, 0.25),
-      65: calculateKeltnerChannel(selectedEcosystemComposite.dailyBars, 65, 0.25),
-    }
-    const weeklyKeltner = {
-      13: calculateKeltnerChannel(selectedEcosystemComposite.weeklyBars, 13, 0.25),
-      34: calculateKeltnerChannel(selectedEcosystemComposite.weeklyBars, 34, 0.25),
-      65: calculateKeltnerChannel(selectedEcosystemComposite.weeklyBars, 65, 0.25),
-    }
-    return {
-      ...selectedEcosystemComposite,
-      benchmarkBars: benchmarkHistoryBars,
-      avwapOverlays,
-      keltnerShades: buildKeltnerShadeBands(dailyKeltner),
-      weeklyKeltnerShades: buildKeltnerShadeBands(weeklyKeltner),
-    }
   }, [analyticsMode, benchmarkHistoryBars, selectedEcosystemComposite, selectedThemeGroup, tradeReviewChartSettings])
 
   const handleColumnVisibilityToggle = useCallback((columnId) => {
@@ -1372,6 +1393,36 @@ export default function ThemeWatchlist({
       render: (row) => <YtdAvwapCell snapshot={ytdAvwapBySymbol[row.symbol]} loading={ytdAvwapLoading} />,
     },
     {
+      id: 'dailyCompression',
+      label: 'Daily Compression',
+      cellClassName: 'px-3 py-2.5 min-w-[128px]',
+      render: (row) => <SqueezeMetricCell value={squeezeBySymbol[row.symbol]?.daily?.compressionScore} />,
+    },
+    {
+      id: 'dailyExpansion',
+      label: 'Daily Expansion',
+      cellClassName: 'px-3 py-2.5 min-w-[128px]',
+      render: (row) => <SqueezeMetricCell value={squeezeBySymbol[row.symbol]?.daily?.expansionScore} />,
+    },
+    {
+      id: 'weeklyCompression',
+      label: 'Weekly Compression',
+      cellClassName: 'px-3 py-2.5 min-w-[132px]',
+      render: (row) => <SqueezeMetricCell value={squeezeBySymbol[row.symbol]?.weekly?.compressionScore} />,
+    },
+    {
+      id: 'weeklyExpansion',
+      label: 'Weekly Expansion',
+      cellClassName: 'px-3 py-2.5 min-w-[132px]',
+      render: (row) => <SqueezeMetricCell value={squeezeBySymbol[row.symbol]?.weekly?.expansionScore} />,
+    },
+    {
+      id: 'squeezeState',
+      label: 'Squeeze State',
+      cellClassName: 'px-3 py-2.5 min-w-[190px]',
+      render: (row) => <SqueezeStateCell snapshotPair={squeezeBySymbol[row.symbol]} />,
+    },
+    {
       id: 'finraShortInterest',
       label: 'Official FINRA SI',
       cellClassName: 'px-3 py-2.5 min-w-[150px]',
@@ -1452,6 +1503,7 @@ export default function ThemeWatchlist({
     rows,
     setQuery,
     sources,
+    squeezeBySymbol,
     themes,
     ytdAvwapBySymbol,
     ytdAvwapLoading,
@@ -1481,8 +1533,9 @@ export default function ThemeWatchlist({
       ytdAvwapBySymbol,
       finraBySymbol,
       finraEstimateBySymbol,
+      squeezeBySymbol,
     })
-  }, [anchoredRsBySymbol, finraBySymbol, finraEstimateBySymbol, fitBySymbol, fitFilter, query, rankBySymbol, rollingRsBySymbol, rows, selectedThemeGroupKey, sortDir, sortKey, themeGrouping, ytdAvwapBySymbol])
+  }, [anchoredRsBySymbol, finraBySymbol, finraEstimateBySymbol, fitBySymbol, fitFilter, query, rankBySymbol, rollingRsBySymbol, rows, selectedThemeGroupKey, sortDir, sortKey, squeezeBySymbol, themeGrouping, ytdAvwapBySymbol])
 
   const selectedDisplaySymbol = useMemo(() => {
     if (selectedSymbol && filteredRows.some(row => row.symbol === selectedSymbol)) return selectedSymbol
@@ -2270,7 +2323,7 @@ export default function ThemeWatchlist({
                 {selectedThemeGroup ? (
                   <ResearchMultiTimeframeChart
                     data={selectedEcosystemChartData}
-                    chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+                    chartType={normalizeTradeReviewChartType(tradeReviewChartSettings?.chartType)}
                     title={selectedThemeGroup.isMarketLeaders ? 'MARKET LEADERS' : `ECO:${String(selectedThemeGroup.label || '').toUpperCase()}`}
                     memberCount={selectedEcosystemComposite.memberCount}
                     dailyRangeMonths={growthResearchDailyRangeMonths}
@@ -2494,7 +2547,7 @@ export default function ThemeWatchlist({
           {selectedRow ? (
             <ResearchMultiTimeframeChart
               data={selectedTickerChartData}
-              chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+              chartType={normalizeTradeReviewChartType(tradeReviewChartSettings?.chartType)}
               title={selectedRow.symbol}
               memberCount={1}
               dailyRangeMonths={growthResearchDailyRangeMonths}

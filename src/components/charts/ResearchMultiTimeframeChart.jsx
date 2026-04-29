@@ -18,6 +18,8 @@ import {
   getVisibleLogicalRange,
 } from '../../utils/lightweightChartViewport.js'
 import { sliceWeeklyChartBars } from '../../utils/chartTimeframes.js'
+import { normalizeTradeReviewChartType } from '../../utils/tradeReviewChart.js'
+import { formatSqueezeMetric, formatSqueezeStateBadge, getSqueezeMetricTone, getSqueezeStateTone } from '../../utils/squeezeUi.js'
 
 const CHART_UP_COLOR = '#2877e3'
 const CHART_DOWN_COLOR = '#ea4ce7'
@@ -172,17 +174,11 @@ function LightweightPane({
       width: chartContainerRef.current.clientWidth,
     })
     const candles = kind === 'weekly' ? sliceWeeklyChartBars(data.weeklyBars) : data.dailyBars
+    const normalizedChartType = normalizeTradeReviewChartType(chartType)
     const priceSeries = chart.addSeries(
-      chartType === 'hlc' ? BarSeries : CandlestickSeries,
-      chartType === 'hlc'
+      normalizedChartType === 'candlestick' ? CandlestickSeries : BarSeries,
+      normalizedChartType === 'candlestick'
         ? {
-            upColor: CHART_UP_COLOR,
-            downColor: CHART_DOWN_COLOR,
-            openVisible: false,
-            thinBars: false,
-            priceLineVisible: false,
-          }
-        : {
             upColor: CHART_UP_COLOR,
             downColor: CHART_DOWN_COLOR,
             borderUpColor: CHART_UP_COLOR,
@@ -190,6 +186,13 @@ function LightweightPane({
             borderVisible: true,
             wickUpColor: CHART_UP_COLOR,
             wickDownColor: CHART_DOWN_COLOR,
+            priceLineVisible: false,
+          }
+        : {
+            upColor: CHART_UP_COLOR,
+            downColor: CHART_DOWN_COLOR,
+            openVisible: normalizedChartType === 'ohlc',
+            thinBars: false,
             priceLineVisible: false,
           }
     )
@@ -419,9 +422,85 @@ function LightweightPane({
   )
 }
 
+function SqueezePane({ data, kind, height = 96 }) {
+  const chartContainerRef = useRef(null)
+
+  useEffect(() => {
+    if (!chartContainerRef.current) return undefined
+    const squeeze = kind === 'weekly' ? data?.weeklySqueeze : data?.dailySqueeze
+    if (!(squeeze?.compression?.length || squeeze?.expansion?.length)) return undefined
+
+    const chart = createChart(chartContainerRef.current, {
+      ...CHART_OPTIONS,
+      height,
+      width: chartContainerRef.current.clientWidth,
+      layout: {
+        ...CHART_OPTIONS.layout,
+        background: { color: '#cdd1d5' },
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(95, 99, 106, 0.18)',
+        scaleMargins: { top: 0.08, bottom: 0.08 },
+      },
+    })
+
+    const percentileSeries = chart.addSeries(LineSeries, {
+      color: 'rgba(37, 99, 235, 0.7)',
+      lineWidth: 1,
+      lineStyle: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    percentileSeries.setData(squeeze.bbwPercentile || [])
+
+    const trueRangeSeries = chart.addSeries(LineSeries, {
+      color: 'rgba(245, 158, 11, 0.78)',
+      lineWidth: 1,
+      lineStyle: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    trueRangeSeries.setData(squeeze.trueRangePercentile || [])
+
+    const compressionSeries = chart.addSeries(LineSeries, {
+      color: '#6d28d9',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    compressionSeries.setData(squeeze.compression || [])
+
+    const expansionSeries = chart.addSeries(LineSeries, {
+      color: '#0891b2',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    expansionSeries.setData(squeeze.expansion || [])
+
+    chart.timeScale().fitContent()
+
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      chart.applyOptions({ width: Math.floor(entry.contentRect.width), height: Math.floor(entry.contentRect.height) })
+    })
+    resizeObserver.observe(chartContainerRef.current)
+
+    return () => {
+      resizeObserver.disconnect()
+      chart.remove()
+    }
+  }, [data, height, kind])
+
+  return <div ref={chartContainerRef} className="h-full w-full" />
+}
+
 export default function ResearchMultiTimeframeChart({
   data,
-  chartType = 'candlestick',
+  chartType = 'ohlc',
   title = 'Ecosystem',
   memberCount = 0,
   dailyRangeMonths = 6,
@@ -459,6 +538,9 @@ export default function ResearchMultiTimeframeChart({
   onToggleCollapse,
 }) {
   const hasBars = data?.dailyBars?.length
+  const dailySqueezeSnapshot = data?.dailySqueezeSnapshot || data?.dailySqueeze?.snapshot || null
+  const weeklySqueezeSnapshot = data?.weeklySqueezeSnapshot || data?.weeklySqueeze?.snapshot || null
+  const squeezeAvailable = Boolean((data?.dailySqueeze?.compression?.length || 0) || (data?.weeklySqueeze?.compression?.length || 0))
   return (
     <div className={`rounded-lg overflow-hidden border border-black/20 bg-[#d7d7d7] shadow-sm ${fillAvailableHeight ? 'h-full flex flex-col' : ''} ${className}`}>
       <div className="px-2 py-1.5 border-b border-black/15 text-[#242830]">
@@ -600,6 +682,16 @@ export default function ResearchMultiTimeframeChart({
             ))}
           </div>
         )}
+        {!collapsed && squeezeAvailable && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-black/10 pt-2">
+            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getSqueezeStateTone(dailySqueezeSnapshot?.stateLabel || 'No Data')}`}>
+              {formatSqueezeStateBadge({ daily: dailySqueezeSnapshot, weekly: weeklySqueezeSnapshot })}
+            </span>
+            <span className="text-[10px] uppercase tracking-[0.18em] text-[#5f666d]">
+              price-action squeeze
+            </span>
+          </div>
+        )}
       </div>
       {collapsed ? null : !hasBars ? (
         <div className="h-[520px] flex items-center justify-center text-xs text-[#505760]">{emptyLabel}</div>
@@ -644,6 +736,42 @@ export default function ResearchMultiTimeframeChart({
               {title}
             </div>
           </div>
+          {squeezeAvailable ? (
+            <div className="border-t border-black/15 bg-[#ced3d7] px-2 py-2">
+              <div className="grid gap-2 md:grid-cols-2">
+                {[
+                  ['1W', weeklySqueezeSnapshot, 'weekly'],
+                  ['1D', dailySqueezeSnapshot, 'daily'],
+                ].map(([label, snapshot, kind]) => (
+                  <div key={kind} className="overflow-hidden rounded-md border border-black/10 bg-[#d7d7d7]/80">
+                    <div className="flex items-center justify-between border-b border-black/10 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-[#5a6169]">
+                      <span>{label} squeeze</span>
+                      <span className={`rounded border px-1.5 py-0.5 tracking-normal normal-case ${getSqueezeStateTone(snapshot?.stateLabel || 'No Data')}`}>
+                        {snapshot?.stateLabel || 'No Data'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 border-b border-black/10 px-2 py-1.5 text-[10px]">
+                      <div className={`rounded border px-2 py-1 ${getSqueezeMetricTone(snapshot?.compressionScore, { high: 70, medium: 50 })}`}>
+                        <p className="uppercase tracking-[0.16em] opacity-70">Compression</p>
+                        <p className="mt-1 font-semibold">{formatSqueezeMetric(snapshot?.compressionScore)}</p>
+                      </div>
+                      <div className={`rounded border px-2 py-1 ${getSqueezeMetricTone(snapshot?.expansionScore, { high: 70, medium: 50 })}`}>
+                        <p className="uppercase tracking-[0.16em] opacity-70">Expansion</p>
+                        <p className="mt-1 font-semibold">{formatSqueezeMetric(snapshot?.expansionScore)}</p>
+                      </div>
+                      <div className={`rounded border px-2 py-1 ${getSqueezeMetricTone(snapshot?.trueRangePercentile, { high: 75, medium: 40 })}`}>
+                        <p className="uppercase tracking-[0.16em] opacity-70">TR %ile</p>
+                        <p className="mt-1 font-semibold">{formatSqueezeMetric(snapshot?.trueRangePercentile)}</p>
+                      </div>
+                    </div>
+                    <div className="h-[96px]">
+                      <SqueezePane data={data} kind={kind} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
     </div>

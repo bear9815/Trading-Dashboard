@@ -147,7 +147,7 @@ const tableRows = buildHistoricalBreadthMetricRows({
   limit: 3,
 })
 
-assert.equal(BREADTH_TABLE_SESSION_COUNT, 252)
+assert.equal(BREADTH_TABLE_SESSION_COUNT, 504)
 assert.equal(tableRows.length, 3)
 assert.equal(tableRows[0].date, latest.date)
 assert.equal(tableRows[0].market.sma5AbovePct, latest.sma5.abovePct)

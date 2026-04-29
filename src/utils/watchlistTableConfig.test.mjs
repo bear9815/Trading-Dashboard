@@ -9,10 +9,16 @@ import {
 
 assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('symbol'))
 assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('actions'))
+assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('dailyCompression'))
+assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('weeklyExpansion'))
 assert.ok(WATCHLIST_COLUMN_PRESETS.length >= 4)
 
 const compactPreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'compact')
+const squeezePreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'squeeze')
 assert.ok(compactPreset)
+assert.ok(squeezePreset)
+assert.ok(squeezePreset.columns.includes('dailyCompression'))
+assert.ok(squeezePreset.columns.includes('squeezeState'))
 assert.deepEqual(
   applyColumnPreset(compactPreset.key).hiddenColumns,
   DEFAULT_WATCHLIST_COLUMN_ORDER.filter(columnId => !compactPreset.columns.includes(columnId))

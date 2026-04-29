@@ -33,3 +33,4 @@ yarn-error.log*
 
 .vscode/cline_mcp_settings.json
 .vercel
+.worktrees

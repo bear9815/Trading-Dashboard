@@ -1,6 +1,8 @@
 import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, Sparkles, ScanLine, Sun, GitCompare, FlaskConical, Layers, Globe, Trophy, Bot, PanelLeftClose, PanelLeftOpen, CandlestickChart } from 'lucide-react'
+import { useState } from 'react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import AppLogo from './AppLogo.jsx'
+import { getAppVersionLabel } from '../../utils/appVersion.js'
 
 const NAV = [
   { id: 'dashboard',   label: 'Dashboard',     icon: LayoutDashboard },
@@ -38,17 +40,38 @@ export default function Sidebar({
   setCollapsed,
 }) {
   const { getAccounts } = useTradeStore()
+  const [hoveredNavTooltip, setHoveredNavTooltip] = useState(null)
   const accounts = getAccounts() // ['All', 'IBKR', 'Schwab', ...]
   const realAccounts = accounts.filter(a => a !== 'All')
+  const versionLabel = getAppVersionLabel({
+    version: __APP_VERSION__,
+    commitSha: __APP_COMMIT_SHA__,
+    deployEnv: __APP_DEPLOY_ENV__,
+    collapsed,
+  })
 
   const getColor = (accountName) => {
     const idx = realAccounts.indexOf(accountName)
     return ACCOUNT_COLORS[idx % ACCOUNT_COLORS.length] || ACCOUNT_COLORS[0]
   }
 
+  const showCollapsedTooltip = (event, label) => {
+    if (!collapsed) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    setHoveredNavTooltip({
+      label,
+      top: rect.top + rect.height / 2,
+      left: rect.right + 12,
+    })
+  }
+
+  const hideCollapsedTooltip = () => {
+    setHoveredNavTooltip(null)
+  }
+
   return (
     <aside
-      className={`luxury-panel flex flex-col shrink-0 h-screen sticky top-0 border-r border-white/10 bg-surface-50/80 overflow-hidden transition-[width] duration-300 ease-out
+      className={`luxury-panel flex flex-col shrink-0 h-screen sticky top-0 border-r border-white/10 bg-surface-50/80 overflow-x-visible overflow-y-hidden transition-[width] duration-300 ease-out
         ${collapsed ? 'w-16 lg:w-20' : 'w-16 lg:w-56 2xl:w-64'}`}
     >
 
@@ -128,24 +151,37 @@ export default function Sidebar({
         {NAV.map(({ id, label, icon: Icon }) => {
           const active = page === id
           return (
-            <button
-              key={id}
-              onClick={() => setPage(id)}
-              title={collapsed ? label : undefined}
-              aria-label={label}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 lg:px-3.5 lg:py-3 rounded-xl text-[13px] lg:text-sm font-medium transition-all
-                ${collapsed ? 'justify-center' : ''}
-                ${active
-                  ? 'bg-gradient-to-r from-accent-blue/18 to-accent-purple/12 text-white border border-accent-blue/20 shadow-lg shadow-accent-blue/10'
-                  : 'text-gray-300 hover:text-white hover:bg-white/5'
-                }`}
-            >
-              <Icon size={18} className={`shrink-0 ${active ? 'text-accent-blue' : ''}`} />
-              {!collapsed && <span className="hidden lg:block">{label}</span>}
-            </button>
+            <div key={id} className="group relative">
+              <button
+                onClick={() => setPage(id)}
+                aria-label={label}
+                onMouseEnter={event => showCollapsedTooltip(event, label)}
+                onMouseLeave={hideCollapsedTooltip}
+                onFocus={event => showCollapsedTooltip(event, label)}
+                onBlur={hideCollapsedTooltip}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 lg:px-3.5 lg:py-3 rounded-xl text-[13px] lg:text-sm font-medium transition-all
+                  ${collapsed ? 'justify-center' : ''}
+                  ${active
+                    ? 'bg-gradient-to-r from-accent-blue/18 to-accent-purple/12 text-white border border-accent-blue/20 shadow-lg shadow-accent-blue/10'
+                    : 'text-gray-300 hover:text-white hover:bg-white/5'
+                  }`}
+              >
+                <Icon size={18} className={`shrink-0 ${active ? 'text-accent-blue' : ''}`} />
+                {!collapsed && <span className="hidden lg:block">{label}</span>}
+              </button>
+            </div>
           )
         })}
       </nav>
+
+      {collapsed && hoveredNavTooltip ? (
+        <div
+          className="pointer-events-none fixed z-[120] -translate-y-1/2 whitespace-nowrap rounded-xl border border-accent-blue/25 bg-surface-50/95 px-4 py-2.5 text-sm font-semibold text-gray-100 shadow-2xl shadow-black/40 ring-1 ring-white/5 backdrop-blur"
+          style={{ top: hoveredNavTooltip.top, left: hoveredNavTooltip.left }}
+        >
+          {hoveredNavTooltip.label}
+        </div>
+      ) : null}
 
       {/* ── Mobile account select — pinned above footer ── */}
       {realAccounts.length > 0 && (
@@ -174,7 +210,7 @@ export default function Sidebar({
           )
         })()}
         <p className={`text-xs text-gray-500 uppercase tracking-[0.2em] ${collapsed ? 'text-center px-0' : 'px-1'}`}>
-          {collapsed ? 'v0.1.0' : 'v0.1.0 · Local'}
+          {versionLabel}
         </p>
       </div>
 

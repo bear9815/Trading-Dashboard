@@ -9,6 +9,7 @@ import { calcWinRate, calcAvgR, calcExpectancy, calcProfitFactor, calcAvgWinLoss
 import { formatCurrency } from './formatters.js'
 import { resolveTickerToName } from './marketData.js'
 import { parseJsonText } from './aiHelpers.js'
+import { resolveDashboardVoiceCleanupModel } from './dashboardVoiceModels.js'
 
 // ── Anthropic fallback key (set at app startup from useSettingsStore) ──────────
 let _anthropicFallbackKey = ''
@@ -76,6 +77,35 @@ async function callAI(geminiKey, prompt, opts = {}) {
     messages: [{ role: 'user', content }],
   })
   return resp.content[0].text
+}
+
+async function callOpenRouterJson(apiKey, model, prompt) {
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'https://localhost',
+      'X-Title': 'Trading Dashboard',
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  })
+
+  if (!res.ok) {
+    let message = `OpenRouter error ${res.status}`
+    try {
+      const err = await res.json()
+      message = err?.error?.message || message
+    } catch {}
+    throw new Error(message)
+  }
+
+  const json = await res.json()
+  return json?.choices?.[0]?.message?.content?.trim?.() || ''
 }
 
 export async function analyzePortfolio(trades, apiKey) {
@@ -1223,6 +1253,39 @@ export async function analyzeTradeVoiceReview(trade, transcript, apiKey) {
 
   const prompt = buildTradeVoiceReviewPrompt(trade, transcript.trim())
   const text = await callAI(apiKey, prompt)
+  return parseJsonText(text)
+}
+
+function buildDashboardVoiceCleanupPrompt(text, destination = 'thought') {
+  const targetLabel = destination === 'journal' ? 'journal note' : 'trading thought'
+  return `Clean up this spoken ${targetLabel}. Remove filler words, false starts, awkward pauses, and empty verbal clutter. Keep the meaning and tone. Rewrite into concise, readable sentences. Do not invent details.
+
+Return ONLY valid JSON:
+{
+  "cleanedText": "final cleaned text"
+}
+
+Raw transcript:
+${text}`
+}
+
+export async function cleanDashboardVoiceNote(
+  transcript,
+  {
+    geminiApiKey = '',
+    openRouterApiKey = '',
+    model = '',
+    destination = 'thought',
+  } = {}
+) {
+  const raw = String(transcript || '').trim()
+  if (!raw) throw new Error('No voice transcript to clean.')
+  if (!geminiApiKey && !openRouterApiKey) return { cleanedText: raw }
+
+  const prompt = buildDashboardVoiceCleanupPrompt(raw, destination)
+  const text = openRouterApiKey
+    ? await callOpenRouterJson(openRouterApiKey, resolveDashboardVoiceCleanupModel(model), prompt)
+    : await callAI(geminiApiKey, prompt)
   return parseJsonText(text)
 }
 

@@ -188,3 +188,39 @@ const rollingSorted = filterAndSortWatchlistRows({
 })
 
 assert.deepEqual(rollingSorted.map(row => row.symbol), ['BBB', 'DDD', 'AAA', 'CCC'])
+
+const dailyCompressionSorted = filterAndSortWatchlistRows({
+  rows,
+  query: '',
+  sortKey: 'dailyCompression',
+  sortDir: 'desc',
+  rankBySymbol,
+  fitBySymbol: fitMap,
+  fitFilter: 'all',
+  squeezeBySymbol: {
+    AAA: { daily: { compressionScore: 82, expansionScore: 28 }, weekly: { compressionScore: 66, expansionScore: 31 } },
+    BBB: { daily: { compressionScore: 64, expansionScore: 71 }, weekly: { compressionScore: 54, expansionScore: 52 } },
+    CCC: { daily: { compressionScore: 21, expansionScore: 18 }, weekly: { compressionScore: 18, expansionScore: 22 } },
+    DDD: { daily: { compressionScore: 74, expansionScore: 45 }, weekly: { compressionScore: 73, expansionScore: 33 } },
+  },
+})
+
+assert.deepEqual(dailyCompressionSorted.map(row => row.symbol), ['AAA', 'DDD', 'BBB', 'CCC'])
+
+const weeklyExpansionSorted = filterAndSortWatchlistRows({
+  rows,
+  query: '',
+  sortKey: 'weeklyExpansion',
+  sortDir: 'desc',
+  rankBySymbol,
+  fitBySymbol: fitMap,
+  fitFilter: 'all',
+  squeezeBySymbol: {
+    AAA: { daily: { compressionScore: 82, expansionScore: 28 }, weekly: { compressionScore: 66, expansionScore: 31 } },
+    BBB: { daily: { compressionScore: 64, expansionScore: 71 }, weekly: { compressionScore: 54, expansionScore: 52 } },
+    CCC: { daily: { compressionScore: 21, expansionScore: 18 }, weekly: { compressionScore: 18, expansionScore: 22 } },
+    DDD: { daily: { compressionScore: 74, expansionScore: 45 }, weekly: { compressionScore: 73, expansionScore: 33 } },
+  },
+})
+
+assert.deepEqual(weeklyExpansionSorted.map(row => row.symbol), ['BBB', 'DDD', 'AAA', 'CCC'])

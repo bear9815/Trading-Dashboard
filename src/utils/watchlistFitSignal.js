@@ -150,6 +150,10 @@ function numericSortValue(row, sortKey, snapshots) {
   if (sortKey === 'ytdAvwap') return snapshots.ytdAvwapBySymbol?.[symbol]?.distancePct
   if (sortKey === 'finraShortInterest') return snapshots.finraBySymbol?.[symbol]?.shortInterest
   if (sortKey === 'finraEstimatedShortInterest') return snapshots.finraEstimateBySymbol?.[symbol]?.estimatedShortInterest
+  if (sortKey === 'dailyCompression') return snapshots.squeezeBySymbol?.[symbol]?.daily?.compressionScore
+  if (sortKey === 'dailyExpansion') return snapshots.squeezeBySymbol?.[symbol]?.daily?.expansionScore
+  if (sortKey === 'weeklyCompression') return snapshots.squeezeBySymbol?.[symbol]?.weekly?.compressionScore
+  if (sortKey === 'weeklyExpansion') return snapshots.squeezeBySymbol?.[symbol]?.weekly?.expansionScore
   return null
 }
 
@@ -166,6 +170,7 @@ export function filterAndSortWatchlistRows({
   ytdAvwapBySymbol = {},
   finraBySymbol = {},
   finraEstimateBySymbol = {},
+  squeezeBySymbol = {},
 } = {}) {
   const base = rows
     .filter(row => matchesQuery(row, query))
@@ -182,7 +187,7 @@ export function filterAndSortWatchlistRows({
       return compareFitRows(a, b, fitBySymbol, rankBySymbol, sortDir)
     }
 
-    const numericSnapshots = { anchoredRsBySymbol, rollingRsBySymbol, ytdAvwapBySymbol, finraBySymbol, finraEstimateBySymbol }
+    const numericSnapshots = { anchoredRsBySymbol, rollingRsBySymbol, ytdAvwapBySymbol, finraBySymbol, finraEstimateBySymbol, squeezeBySymbol }
     const an = numericSortValue(a, sortKey, numericSnapshots)
     const bn = numericSortValue(b, sortKey, numericSnapshots)
     if (Number.isFinite(an) || Number.isFinite(bn)) {

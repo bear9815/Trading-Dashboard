@@ -1,24 +1,38 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Activity,
   BarChart3,
   ChevronDown,
   ChevronUp,
+  CircleHelp,
+  Maximize2,
+  RotateCcw,
   Gauge,
   RefreshCw,
   SlidersHorizontal,
   TrendingDown,
   TrendingUp,
+  X,
 } from 'lucide-react'
 import {
+  Area,
+  AreaChart,
+  Brush,
   CartesianGrid,
+  Cell,
+  ComposedChart,
   Line,
   LineChart,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
+  ZAxis,
 } from 'recharts'
 import {
   LIQUID_LIST_ID,
@@ -27,6 +41,13 @@ import {
   useResearchWatchlistStore,
 } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
+import { useTradeStore } from '../../store/useTradeStore.js'
+import {
+  BREADTH_PHASES,
+  buildBreadthSignalSummary,
+  buildBreadthStateRows,
+  buildBreadthTradeAnalytics,
+} from '../../utils/breadthAnalytics.js'
 import {
   BREADTH_TABLE_SESSION_COUNT,
   buildHistoricalBreadthMetricRows,
@@ -34,6 +55,14 @@ import {
   buildListBreadthSymbolSnapshots,
 } from '../../utils/listBreadth.js'
 import { resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
+import {
+  applyTimeframeToRows,
+  BREADTH_TIMEFRAMES,
+  buildDragZoomRange,
+  buildInitialBrushRange,
+  normalizeBrushRange,
+} from '../../utils/morningBreadthChartControls.js'
+import { filterBreadthHistoriesForFocus, trimOverviewHistoriesForDate } from '../../utils/morningBreadthFocus.js'
 import BreadthTableSettingsModal from './BreadthTableSettingsModal.jsx'
 import { useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
 
@@ -68,6 +97,9 @@ const BREADTH_VIEW_TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'table', label: 'Breadth Table' },
 ]
+
+const BREADTH_HISTORY_LOOKBACK_DAYS = 900
+const BREADTH_PHASE_COLOR_BY_KEY = Object.fromEntries(BREADTH_PHASES.map(phase => [phase.key, phase.color]))
 
 const HISTORICAL_COLUMN_GROUPS = [
   {
@@ -154,6 +186,11 @@ function fmtRatio(value) {
   return Number.isFinite(value) ? value.toFixed(2) : '—'
 }
 
+function fmtR(value) {
+  if (!Number.isFinite(value)) return '—'
+  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}R`
+}
+
 function fmtSigned(value, decimals = 1, suffix = '%') {
   if (!Number.isFinite(value)) return '—'
   const sign = value > 0 ? '+' : ''
@@ -195,12 +232,33 @@ function avgDistance(entry) {
   ])
 }
 
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 function regimeTone(label) {
   if (label === 'FOMO / Crowded' || label === 'Distribution') return 'border-accent-red/25 bg-accent-red/10 text-accent-red'
   if (label === 'Hot') return 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow'
   if (label === 'Healthy') return 'border-accent-green/25 bg-accent-green/10 text-accent-green'
   if (label === 'Resetting') return 'border-accent-blue/25 bg-accent-blue/10 text-accent-blue'
   return 'border-white/10 bg-white/[0.04] text-gray-400'
+}
+
+function postureTone(tone) {
+  if (tone === 'green') return 'border-accent-green/25 bg-accent-green/10 text-accent-green'
+  if (tone === 'yellow') return 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow'
+  if (tone === 'red') return 'border-accent-red/25 bg-accent-red/10 text-accent-red'
+  if (tone === 'blue') return 'border-accent-blue/25 bg-accent-blue/10 text-accent-blue'
+  return 'border-white/10 bg-white/[0.04] text-gray-300'
+}
+
+function metricColor(value, inverse = false) {
+  if (!Number.isFinite(value)) return 'text-gray-500'
+  const positive = inverse ? value <= 35 : value >= 0
+  return positive ? 'text-accent-green' : 'text-accent-red'
 }
 
 function mergeHistory(historiesById) {
@@ -220,7 +278,193 @@ function mergeHistory(historiesById) {
   for (const config of BREADTH_LISTS) {
     for (const entry of historiesById[config.id] || []) add(config.id, entry)
   }
-  return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-180)
+  return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-BREADTH_TABLE_SESSION_COUNT)
+}
+
+function SeriesTogglePills({ items, visibility, onToggle }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {items.map(item => {
+        const active = visibility[item.key] !== false
+        return (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => onToggle(item.key)}
+            className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-all"
+            style={{
+              borderColor: active ? `${item.color}55` : 'rgba(255,255,255,0.08)',
+              background: active ? `${item.color}18` : 'rgba(255,255,255,0.03)',
+              color: active ? item.color : '#6b7280',
+              opacity: active ? 1 : 0.7,
+            }}
+          >
+            <span className="h-2 w-2 rounded-full" style={{ background: active ? item.color : '#4b5563' }} />
+            {item.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function ChartPopoutModal({ title, children, onClose }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div className="w-full max-w-7xl overflow-auto rounded-2xl border border-white/10 bg-[#0f1117] p-5 shadow-2xl" style={{ maxHeight: '94vh' }}>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-white">{title}</p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200"
+            aria-label={`Close ${title}`}
+          >
+            <X size={15} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function useHoverTooltip(delay = 220) {
+  const [visible, setVisible] = useState(false)
+  const [style, setStyle] = useState({})
+  const ref = useRef(null)
+  const timer = useRef(null)
+
+  const open = useCallback(() => {
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      const rect = ref.current?.getBoundingClientRect()
+      if (!rect) return
+      const width = 320
+      let left = Math.round(rect.left)
+      if (left + width > window.innerWidth - 12) left = window.innerWidth - width - 12
+      setStyle({ top: Math.round(rect.bottom) + 8, left, width })
+      setVisible(true)
+    }, delay)
+  }, [delay])
+
+  const close = useCallback(() => {
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setVisible(false), 120)
+  }, [])
+
+  const cancelClose = useCallback(() => {
+    clearTimeout(timer.current)
+  }, [])
+
+  useEffect(() => () => clearTimeout(timer.current), [])
+
+  return { ref, visible, style, open, close, cancelClose }
+}
+
+function InfoBubble({ title, children }) {
+  const { ref, visible, style, open, close, cancelClose } = useHoverTooltip()
+  return (
+    <>
+      <span
+        ref={ref}
+        className="inline-flex h-4 w-4 cursor-default items-center justify-center rounded-full border border-white/10 text-gray-500"
+        onMouseEnter={open}
+        onMouseLeave={close}
+      >
+        <CircleHelp size={11} />
+      </span>
+      {visible && createPortal(
+        <div
+          className="fixed z-[9999] rounded-lg border border-white/10 bg-surface-100 p-4 text-xs shadow-2xl"
+          style={style}
+          onMouseEnter={cancelClose}
+          onMouseLeave={close}
+        >
+          <p className="mb-2 text-sm font-semibold text-white">{title}</p>
+          <div className="space-y-2 leading-relaxed text-gray-300">
+            {children}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
+function SectionTitleWithInfo({ title, infoTitle, children }) {
+  return (
+    <div className="flex items-center gap-2">
+      <p className="text-sm font-semibold text-white">{title}</p>
+      {children ? <InfoBubble title={infoTitle}>{children}</InfoBubble> : null}
+    </div>
+  )
+}
+
+function useInteractiveChartRows(rows, timeframe) {
+  const timeframeRows = useMemo(
+    () => applyTimeframeToRows(rows, timeframe),
+    [rows, timeframe]
+  )
+  const [brushRange, setBrushRange] = useState(() => buildInitialBrushRange(timeframeRows, { zoomed: false }))
+  const [dragRange, setDragRange] = useState({ startLabel: null, endLabel: null })
+
+  useEffect(() => {
+    setBrushRange(buildInitialBrushRange(timeframeRows, { zoomed: false }))
+    setDragRange({ startLabel: null, endLabel: null })
+  }, [timeframe, timeframeRows])
+
+  const handleBrushChange = useCallback((nextRange = {}) => {
+    setBrushRange(current => normalizeBrushRange(timeframeRows, {
+      ...current,
+      ...nextRange,
+      zoomed: true,
+    }))
+  }, [timeframeRows])
+
+  const handleMouseDown = useCallback((state) => {
+    if (!state?.activeLabel) return
+    setDragRange({ startLabel: state.activeLabel, endLabel: state.activeLabel })
+  }, [])
+
+  const handleMouseMove = useCallback((state) => {
+    if (!state?.activeLabel) return
+    setDragRange(current => {
+      if (!current.startLabel) return current
+      return { ...current, endLabel: state.activeLabel }
+    })
+  }, [])
+
+  const handleMouseUp = useCallback(() => {
+    setBrushRange(current => (
+      dragRange.startLabel
+        ? buildDragZoomRange(timeframeRows, dragRange.startLabel, dragRange.endLabel)
+        : current
+    ))
+    setDragRange({ startLabel: null, endLabel: null })
+  }, [dragRange.endLabel, dragRange.startLabel, timeframeRows])
+
+  const resetZoom = useCallback(() => {
+    setBrushRange(buildInitialBrushRange(timeframeRows, { zoomed: false }))
+    setDragRange({ startLabel: null, endLabel: null })
+  }, [timeframeRows])
+
+  return {
+    timeframeRows,
+    brushRange,
+    dragRange,
+    visibleSessions: Math.max(0, brushRange.endIndex - brushRange.startIndex + 1),
+    handleBrushChange,
+    handleMouseDown,
+    handleMouseMove,
+    handleMouseUp,
+    resetZoom,
+  }
 }
 
 function buildMorningRead(market, liquidTrend, liquid) {
@@ -245,12 +489,490 @@ function buildMorningRead(market, liquidTrend, liquid) {
   return 'Breadth is balanced enough for selective risk, with confirmation still coming from AVWAP structure.'
 }
 
-function ListScoreCard({ label, entry, tone = 'blue' }) {
+function ActionReadout({ summary }) {
+  const posture = summary?.riskPosture
+  return (
+    <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] via-white/[0.025] to-black/20 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-500">Actionable Breadth Read</p>
+          <p className="mt-2 max-w-4xl text-base font-semibold leading-relaxed text-white">{summary?.primaryRead || 'Breadth is loading.'}</p>
+          <p className="mt-2 max-w-4xl text-sm leading-relaxed text-gray-400">{posture?.action || 'Wait for enough history to form a risk posture.'}</p>
+        </div>
+        <div className="text-right">
+          <span className={`inline-flex rounded-xl border px-3 py-1.5 text-xs font-black uppercase tracking-[0.16em] ${postureTone(posture?.tone)}`}>
+            {posture?.label || 'No Read'}
+          </span>
+          <p className="mt-2 text-xs font-semibold text-gray-500">{summary?.growthTapeBias || '—'}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StateVectorCards({ cards = [] }) {
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      {cards.map(card => {
+        const value = Number.isFinite(card.value) ? card.value : null
+        const signed = card.key === 'velocity' || card.key === 'acceleration'
+        const inverse = card.key === 'damage'
+        return (
+          <div key={card.key} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-600">{card.label}</p>
+            <p className={`mt-2 text-2xl font-black tabular-nums ${metricColor(signed ? value : inverse ? value : 1, inverse)}`}>
+              {signed ? fmtSigned(value, 1, '') : value == null ? '—' : value.toFixed(0)}
+              <span className="ml-1 text-xs font-semibold text-gray-600">{card.unit}</span>
+            </p>
+            {Number.isFinite(card.delta) && (
+              <p className={`mt-1 text-[11px] font-semibold ${metricColor(card.delta)}`}>
+                {fmtSigned(card.delta, 1, ' pts')} today
+              </p>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function BreadthPhysicsChart({ rows, timeframe = '6M' }) {
+  const { timeframeRows, brushRange, dragRange, visibleSessions, handleBrushChange, handleMouseDown, handleMouseMove, handleMouseUp, resetZoom } = useInteractiveChartRows(rows, timeframe)
+  const [popoutOpen, setPopoutOpen] = useState(false)
+  const [seriesVisibility, setSeriesVisibility] = useState({
+    damage: true,
+    level: true,
+    velocity: true,
+    acceleration: true,
+  })
+  const series = [
+    { key: 'level', label: 'Breadth Level', color: '#3d84ff' },
+    { key: 'velocity', label: 'Velocity', color: '#22c55e' },
+    { key: 'acceleration', label: 'Acceleration', color: '#f5c542' },
+    { key: 'damage', label: 'Damage', color: '#ff6b6b' },
+  ]
+
+  const chart = (height = 330) => (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart
+        data={timeframeRows}
+        margin={{ top: 8, right: 16, left: -8, bottom: 0 }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+      >
+        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+        <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={34} />
+        <YAxis yAxisId="score" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+        <YAxis yAxisId="impulse" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+        <ReferenceLine yAxisId="score" y={70} stroke="#22c55e44" strokeDasharray="4 4" />
+        <ReferenceLine yAxisId="score" y={52} stroke="#ffffff22" strokeDasharray="4 4" />
+        <ReferenceLine yAxisId="score" y={38} stroke="#ff475744" strokeDasharray="4 4" />
+        <Tooltip
+          contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+          formatter={(value, name) => {
+            if (name === 'Damage') return [fmtPct(Number(value)), name]
+            if (name === 'Velocity' || name === 'Acceleration') return [fmtSigned(Number(value), 1, ' pts'), name]
+            return [Number.isFinite(Number(value)) ? Number(value).toFixed(0) : '—', name]
+          }}
+        />
+        {dragRange.startLabel && dragRange.endLabel && dragRange.startLabel !== dragRange.endLabel && (
+          <ReferenceArea yAxisId="score" x1={dragRange.startLabel} x2={dragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
+        )}
+        {seriesVisibility.damage && <Area yAxisId="score" type="monotone" dataKey="damagePressure" name="Damage" stroke="#ff475755" fill="#ff47571f" dot={false} />}
+        {seriesVisibility.level && <Line yAxisId="score" type="monotone" dataKey="level" name="Breadth Level" stroke="#3d84ff" strokeWidth={3} dot={false} />}
+        {seriesVisibility.velocity && <Line yAxisId="impulse" type="monotone" dataKey="velocity10" name="Velocity" stroke="#22c55e" strokeWidth={2} dot={false} />}
+        {seriesVisibility.acceleration && <Line yAxisId="impulse" type="monotone" dataKey="acceleration20" name="Acceleration" stroke="#f5c542" strokeWidth={2} dot={false} />}
+        <Brush
+          dataKey="date"
+          height={28}
+          stroke="rgba(61,132,255,0.45)"
+          fill="rgba(15,17,23,0.95)"
+          travellerWidth={8}
+          startIndex={brushRange.startIndex}
+          endIndex={brushRange.endIndex}
+          onChange={handleBrushChange}
+        />
+      </ComposedChart>
+    </ResponsiveContainer>
+  )
+
+  return (
+    <>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <SectionTitleWithInfo title="Breadth State Vector" infoTitle="How to read the state vector">
+              <p><span className="font-medium text-white">Breadth Level</span> is the composite participation score across the growth lists.</p>
+              <p><span className="font-medium text-white">Velocity</span> is the 10-session rate of change in that score, while <span className="font-medium text-white">Acceleration</span> shows whether momentum is improving or fading.</p>
+              <p><span className="font-medium text-white">Damage</span> tracks downside pressure, so high damage with falling velocity usually means distribution instead of healthy consolidation.</p>
+            </SectionTitleWithInfo>
+            <p className="mt-1 text-xs text-gray-600">Level, impulse, acceleration, and damage across the selected timeframe.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold text-gray-500">
+              {visibleSessions} visible
+            </p>
+            <button type="button" onClick={resetZoom} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1 text-[11px] font-semibold text-gray-400 hover:text-gray-200">
+              <RotateCcw size={12} />
+              Reset Zoom
+            </button>
+            <button type="button" onClick={() => setPopoutOpen(true)} className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200" aria-label="Open breadth state vector popout">
+              <Maximize2 size={14} />
+            </button>
+          </div>
+        </div>
+        <SeriesTogglePills items={series} visibility={seriesVisibility} onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))} />
+        <div className="mt-3">
+          {chart()}
+        </div>
+      </div>
+      {popoutOpen && (
+        <ChartPopoutModal title="Breadth State Vector" onClose={() => setPopoutOpen(false)}>
+          <SeriesTogglePills items={series} visibility={seriesVisibility} onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))} />
+          <div className="mt-4">
+            {chart(520)}
+          </div>
+        </ChartPopoutModal>
+      )}
+    </>
+  )
+}
+
+function ParticipationStackChart({ rows, timeframe = '6M', focusId = 'all', focusLabel = 'Composite' }) {
+  const { timeframeRows, brushRange, dragRange, visibleSessions, handleBrushChange, handleMouseDown, handleMouseMove, handleMouseUp, resetZoom } = useInteractiveChartRows(rows, timeframe)
+  const [popoutOpen, setPopoutOpen] = useState(false)
+  const [seriesVisibility, setSeriesVisibility] = useState({
+    participation: true,
+    structure: true,
+    leaders5dma: true,
+  })
+  const series = [
+    { key: 'participation', label: '20DMA Participation', color: '#22c55e' },
+    { key: 'structure', label: 'AVWAP Structure', color: '#3d84ff' },
+    { key: 'leaders5dma', label: `${focusLabel} 5DMA`, color: '#f5c542' },
+  ]
+  const focusDataKey = focusId === 'all' ? 'market.sma5' : `${focusId}.sma5`
+  const focusLineLabel = focusId === 'all' ? 'Leaders 5DMA' : `${focusLabel} 5DMA`
+
+  const chart = (height = 285) => (
+    <ResponsiveContainer width="100%" height={height}>
+      <AreaChart
+        data={timeframeRows}
+        margin={{ top: 8, right: 16, left: -8, bottom: 0 }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+      >
+        <defs>
+          <linearGradient id="breadthParticipation" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#22c55e" stopOpacity={0.34} />
+            <stop offset="95%" stopColor="#22c55e" stopOpacity={0.02} />
+          </linearGradient>
+          <linearGradient id="breadthStructure" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#3d84ff" stopOpacity={0.3} />
+            <stop offset="95%" stopColor="#3d84ff" stopOpacity={0.02} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+        <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={34} />
+        <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+        <ReferenceLine y={80} stroke="#f5c54255" strokeDasharray="4 4" />
+        <ReferenceLine y={50} stroke="#ffffff22" strokeDasharray="4 4" />
+        <Tooltip contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }} formatter={(value, name) => [fmtPct(Number(value)), name]} />
+        {dragRange.startLabel && dragRange.endLabel && dragRange.startLabel !== dragRange.endLabel && (
+          <ReferenceArea x1={dragRange.startLabel} x2={dragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
+        )}
+        {seriesVisibility.participation && <Area type="monotone" dataKey="participation" name="20DMA Participation" stroke="#22c55e" fill="url(#breadthParticipation)" strokeWidth={2} dot={false} />}
+        {seriesVisibility.structure && <Area type="monotone" dataKey="structure" name="AVWAP Structure" stroke="#3d84ff" fill="url(#breadthStructure)" strokeWidth={2} dot={false} />}
+        {seriesVisibility.leaders5dma && <Line type="monotone" dataKey={focusDataKey} name={focusLineLabel} stroke="#f5c542" strokeWidth={1.8} dot={false} />}
+        <Brush
+          dataKey="date"
+          height={28}
+          stroke="rgba(61,132,255,0.45)"
+          fill="rgba(15,17,23,0.95)"
+          travellerWidth={8}
+          startIndex={brushRange.startIndex}
+          endIndex={brushRange.endIndex}
+          onChange={handleBrushChange}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  )
+
+  return (
+    <>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <SectionTitleWithInfo title="Participation Stack" infoTitle="What the participation stack measures">
+              <p><span className="font-medium text-white">20DMA Participation</span> shows how many names are above a short trend filter.</p>
+              <p><span className="font-medium text-white">AVWAP Structure</span> summarizes whether names are holding the anchored VWAP ladder across YTD, 3M, 1M, and 1W anchors.</p>
+              <p>When participation, AVWAP structure, and leaders&apos; 5DMA all rise together, breadth is usually healthier than a move driven by only a small leadership pocket.</p>
+            </SectionTitleWithInfo>
+            <p className="mt-1 text-xs text-gray-600">Breadth is strongest when short-term participation, AVWAP structure, and distance all agree.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold text-gray-500">
+              {visibleSessions} visible
+            </p>
+            <button type="button" onClick={resetZoom} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1 text-[11px] font-semibold text-gray-400 hover:text-gray-200">
+              <RotateCcw size={12} />
+              Reset Zoom
+            </button>
+            <button type="button" onClick={() => setPopoutOpen(true)} className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200" aria-label="Open participation stack popout">
+              <Maximize2 size={14} />
+            </button>
+          </div>
+        </div>
+        <SeriesTogglePills items={series} visibility={seriesVisibility} onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))} />
+        <div className="mt-3">
+          {chart()}
+        </div>
+      </div>
+      {popoutOpen && (
+        <ChartPopoutModal title="Participation Stack" onClose={() => setPopoutOpen(false)}>
+          <SeriesTogglePills items={series} visibility={seriesVisibility} onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))} />
+          <div className="mt-4">
+            {chart(500)}
+          </div>
+        </ChartPopoutModal>
+      )}
+    </>
+  )
+}
+
+function PhaseSpaceChart({ rows, timeframe = '6M', focusLabel = 'Combined Breadth' }) {
+  const [popoutOpen, setPopoutOpen] = useState(false)
+  const data = applyTimeframeToRows(rows, timeframe).filter(row => Number.isFinite(row.level) && Number.isFinite(row.velocity10))
+  return (
+    <>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <SectionTitleWithInfo title="Phase Space" infoTitle="How to use phase space">
+              <p>This chart plots <span className="font-medium text-white">10-day velocity</span> on X and <span className="font-medium text-white">breadth level</span> on Y for <span className="font-medium text-white">{focusLabel}</span>.</p>
+              <p><span className="font-medium text-white">Upper-right</span> means strong breadth that is still improving. <span className="font-medium text-white">Upper-left</span> means breadth is still elevated, but momentum is fading and getting more fragile.</p>
+              <p><span className="font-medium text-white">Lower-right</span> is the early repair zone: weak breadth that is starting to improve. <span className="font-medium text-white">Lower-left</span> is deterioration, where failed breakouts and defense matter most.</p>
+              <p>Read the quadrant first, then use the phase color as a second layer of context.</p>
+            </SectionTitleWithInfo>
+            <p className="mt-1 text-xs text-gray-400">Breadth level on Y and momentum on X. The quadrant tells you whether the tape is accelerating, stalling, repairing, or breaking down.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold text-gray-500">
+              {data.length} sessions
+            </p>
+            <button type="button" onClick={() => setPopoutOpen(true)} className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200" aria-label="Open phase space popout">
+              <Maximize2 size={14} />
+            </button>
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={285}>
+          <ScatterChart margin={{ top: 10, right: 18, left: -8, bottom: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+            <XAxis type="number" dataKey="velocity10" name="10D Velocity" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={value => `${value}`} />
+            <YAxis type="number" dataKey="level" name="Breadth Level" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+            <ZAxis range={[35, 90]} />
+            <ReferenceLine x={0} stroke="#ffffff22" strokeDasharray="4 4" />
+            <ReferenceLine y={52} stroke="#ffffff22" strokeDasharray="4 4" />
+            <Tooltip
+              cursor={{ strokeDasharray: '3 3' }}
+              contentStyle={{ backgroundColor: '#151927', border: '1px solid #ffffff18', borderRadius: 8, fontSize: 12, color: '#e5e7eb' }}
+              itemStyle={{ color: '#e5e7eb' }}
+              labelStyle={{ color: '#f9fafb', fontWeight: 600 }}
+              formatter={(value, name) => [name === 'Breadth Level' ? `${Number(value).toFixed(0)}/100` : fmtSigned(Number(value), 1, ' pts'), name]}
+              labelFormatter={(_, payload) => {
+                const row = payload?.[0]?.payload
+                return row ? `${row.date} · ${row.phase}` : ''
+              }}
+            />
+            <Scatter data={data} dataKey="level">
+              {data.map(row => (
+                <Cell key={row.date} fill={BREADTH_PHASE_COLOR_BY_KEY[row.phase] || '#94a3b8'} fillOpacity={row === data.at(-1) ? 1 : 0.48} />
+              ))}
+            </Scatter>
+          </ScatterChart>
+        </ResponsiveContainer>
+      </div>
+      {popoutOpen && (
+        <ChartPopoutModal title="Phase Space" onClose={() => setPopoutOpen(false)}>
+          <ResponsiveContainer width="100%" height={560}>
+            <ScatterChart margin={{ top: 10, right: 18, left: -8, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+              <XAxis type="number" dataKey="velocity10" name="10D Velocity" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={value => `${value}`} />
+              <YAxis type="number" dataKey="level" name="Breadth Level" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+              <ZAxis range={[45, 110]} />
+              <ReferenceLine x={0} stroke="#ffffff22" strokeDasharray="4 4" />
+              <ReferenceLine y={52} stroke="#ffffff22" strokeDasharray="4 4" />
+              <Tooltip
+                cursor={{ strokeDasharray: '3 3' }}
+                contentStyle={{ backgroundColor: '#151927', border: '1px solid #ffffff18', borderRadius: 8, fontSize: 12, color: '#e5e7eb' }}
+                itemStyle={{ color: '#e5e7eb' }}
+                labelStyle={{ color: '#f9fafb', fontWeight: 600 }}
+                formatter={(value, name) => [name === 'Breadth Level' ? `${Number(value).toFixed(0)}/100` : fmtSigned(Number(value), 1, ' pts'), name]}
+                labelFormatter={(_, payload) => {
+                  const row = payload?.[0]?.payload
+                  return row ? `${row.date} · ${row.phase}` : ''
+                }}
+              />
+              <Scatter data={data} dataKey="level">
+                {data.map(row => (
+                  <Cell key={`popout-${row.date}`} fill={BREADTH_PHASE_COLOR_BY_KEY[row.phase] || '#94a3b8'} fillOpacity={row === data.at(-1) ? 1 : 0.55} />
+                ))}
+              </Scatter>
+            </ScatterChart>
+          </ResponsiveContainer>
+        </ChartPopoutModal>
+      )}
+    </>
+  )
+}
+
+function RegimeTimeline({ rows, timeframe = '6M' }) {
+  const recent = applyTimeframeToRows(rows, timeframe)
+  const [popoutOpen, setPopoutOpen] = useState(false)
+  const [hoveredRow, setHoveredRow] = useState(null)
+
+  const timeline = (heightClass = 'h-9') => (
+    <div
+      className={`flex ${heightClass} overflow-hidden rounded-lg border border-white/10 bg-black/20`}
+      onMouseLeave={() => setHoveredRow(null)}
+    >
+      {recent.map(row => (
+        <div
+          key={row.date}
+          title={`${row.date} · ${row.phase}`}
+          className="min-w-[3px] flex-1"
+          style={{ background: BREADTH_PHASE_COLOR_BY_KEY[row.phase] || '#94a3b8', opacity: hoveredRow?.date === row.date ? 1 : 0.78 }}
+          onMouseEnter={() => setHoveredRow(row)}
+        />
+      ))}
+    </div>
+  )
+
+  return (
+    <>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <SectionTitleWithInfo title="Regime Timeline" infoTitle="What the regime timeline shows">
+              <p>Each vertical block is one session, colored by the breadth phase classification for that day.</p>
+              <p>Expansion and Reset generally point to improving participation, while Exhaustion and Distribution warn that momentum is thinning or breaking down.</p>
+              <p>Hover any block to inspect the exact session date and phase, or open the popout for a larger timeline.</p>
+            </SectionTitleWithInfo>
+            <p className="mt-1 text-xs text-gray-600">Selected timeframe by breadth phase.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => setPopoutOpen(true)} className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200" aria-label="Open regime timeline popout">
+              <Maximize2 size={14} />
+            </button>
+            <div className="flex flex-wrap gap-2">
+              {BREADTH_PHASES.map(phase => (
+                <span key={phase.key} className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-gray-500">
+                  <span className="h-2 w-2 rounded-full" style={{ background: phase.color }} />
+                  {phase.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+        {timeline()}
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-[11px]">
+          <p className="text-gray-600">{recent.length} sessions visible</p>
+          <p className="font-medium text-gray-400">
+            {hoveredRow ? `${fmtDateLabel(hoveredRow.date)} · ${hoveredRow.phase}` : 'Hover the timeline to inspect a specific date.'}
+          </p>
+        </div>
+      </div>
+      {popoutOpen && (
+        <ChartPopoutModal title="Regime Timeline" onClose={() => setPopoutOpen(false)}>
+          {timeline('h-16')}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
+            <p className="text-gray-500">{recent.length} sessions in the current timeframe.</p>
+            <p className="font-medium text-gray-300">
+              {hoveredRow ? `${fmtDateLabel(hoveredRow.date)} · ${hoveredRow.phase}` : 'Move across the timeline to inspect dates and regimes.'}
+            </p>
+          </div>
+        </ChartPopoutModal>
+      )}
+    </>
+  )
+}
+
+function TradeAnalyticsPanel({ analytics }) {
+  const phaseRows = analytics?.byPhase?.filter(group => group.count > 0) || []
+  const best = analytics?.bestPhase
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <SectionTitleWithInfo title="Breadth x Trade Analytics" infoTitle="How trade performance is grouped">
+            <p>Each closed trade is mapped to the breadth phase on its entry date, after excluded symbols are filtered out.</p>
+            <p><span className="font-medium text-white">Avg R</span> uses ATR-based R when available, and <span className="font-medium text-white">Profit Factor</span> compares gross positive R to gross negative R inside each phase bucket.</p>
+          </SectionTitleWithInfo>
+          <p className="mt-1 text-xs text-gray-600">Closed trades mapped to the breadth state on entry date.</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] uppercase tracking-wider text-gray-600">Coverage</p>
+          <p className="text-sm font-semibold text-accent-blue">{fmtPct(analytics?.coverage?.coveragePct, 0)}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="rounded-lg bg-surface-200 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">Matched Trades</p>
+          <p className="mt-1 text-2xl font-black text-white">{analytics?.coverage?.matched || 0}</p>
+          <p className="text-[10px] text-gray-600">of {analytics?.coverage?.total || 0} closed</p>
+        </div>
+        <div className="rounded-lg bg-surface-200 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">Avg R</p>
+          <p className={`mt-1 text-2xl font-black ${metricColor(analytics?.summary?.avgR)}`}>{fmtR(analytics?.summary?.avgR)}</p>
+          <p className="text-[10px] text-gray-600">ATR R preferred</p>
+        </div>
+        <div className="rounded-lg bg-surface-200 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">Best Phase</p>
+          <p className="mt-1 truncate text-lg font-black text-white">{best?.count ? best.label : '—'}</p>
+          <p className="text-[10px] text-gray-600">{best?.count ? `${fmtR(best.avgR)} · ${best.count} trades` : 'Need history'}</p>
+        </div>
+        <div className="rounded-lg bg-surface-200 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">Profit Factor</p>
+          <p className="mt-1 text-2xl font-black text-white">{analytics?.summary?.profitFactor === Infinity ? '∞' : fmtRatio(analytics?.summary?.profitFactor)}</p>
+          <p className="text-[10px] text-gray-600">{analytics?.summary?.lowSample ? 'low sample' : 'sample ready'}</p>
+        </div>
+      </div>
+
+      {phaseRows.length ? (
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          {phaseRows.map(group => (
+            <div key={group.key} className="rounded-lg border border-white/8 bg-white/[0.025] px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold text-gray-300">{group.label}</p>
+                <span className="h-2 w-2 rounded-full" style={{ background: BREADTH_PHASE_COLOR_BY_KEY[group.key] || '#94a3b8' }} />
+              </div>
+              <p className={`mt-2 text-xl font-black ${metricColor(group.avgR)}`}>{fmtR(group.avgR)}</p>
+              <p className="text-[10px] text-gray-600">{group.count} trades · {group.winRate == null ? '—' : `${group.winRate.toFixed(0)}%`} win · PF {group.profitFactor === Infinity ? '∞' : fmtRatio(group.profitFactor)}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-4 rounded-lg bg-surface-200 px-4 py-5 text-center text-xs text-gray-600">
+          No closed trades matched to breadth history yet.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function ListScoreCard({ label, entry, tone = 'blue', active = false, onClick }) {
   const border = tone === 'green' ? 'border-accent-green/20' : tone === 'yellow' ? 'border-accent-yellow/20' : 'border-accent-blue/20'
   const bg = tone === 'green' ? 'bg-accent-green/8' : tone === 'yellow' ? 'bg-accent-yellow/8' : 'bg-accent-blue/8'
 
   return (
-    <div className={`rounded-xl border ${border} ${bg} p-4`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full rounded-xl border ${border} ${bg} p-4 text-left transition-all hover:border-white/20 hover:bg-white/[0.04] ${active ? 'ring-1 ring-white/20 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : ''}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-widest text-gray-500">{label}</p>
@@ -261,6 +983,12 @@ function ListScoreCard({ label, entry, tone = 'blue' }) {
         </div>
         <span className={`rounded border px-2 py-1 text-[10px] font-semibold ${regimeTone(entry?.regimeLabel)}`}>
           {entry?.regimeLabel || 'No data'}
+        </span>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <span className={`text-[10px] font-semibold uppercase tracking-[0.16em] ${active ? 'text-white' : 'text-gray-600'}`}>
+          {active ? 'Overview Focus' : 'Click To Focus'}
         </span>
       </div>
 
@@ -284,7 +1012,7 @@ function ListScoreCard({ label, entry, tone = 'blue' }) {
           </p>
         </div>
       </div>
-    </div>
+    </button>
   )
 }
 
@@ -523,7 +1251,7 @@ function HistoricalBreadthMetricTable({ rows, settings, onSettingsChange }) {
             <div>
               <p className="text-[11px] font-black uppercase tracking-[0.22em] text-white/85">Historical Breadth Tape</p>
               <p className="mt-1 text-[11px] font-medium text-slate-400">
-                One trading year of daily breadth metrics, latest session first.
+                Two trading years of daily breadth metrics, latest session first.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -704,10 +1432,19 @@ function Drilldowns({ snapshotsById }) {
 
 export default function MorningBreadthDashboard() {
   const { listsById } = useResearchWatchlistStore()
-  const { tradeReviewChartSettings, breadthTableSettings, setBreadthTableSettings } = useSettingsStore()
+  const { trades } = useTradeStore()
+  const { tradeReviewChartSettings, breadthTableSettings, setBreadthTableSettings, excludedSymbols } = useSettingsStore()
   const [activeBreadthView, setActiveBreadthView] = useState('overview')
+  const [activeOverviewFocus, setActiveOverviewFocus] = useState('liquid')
+  const [activeTimeframe, setActiveTimeframe] = useState('6M')
   const [metricFamily, setMetricFamily] = useState('sma')
   const [chartCollapsed, setChartCollapsed] = useState(false)
+  const [historyPopoutOpen, setHistoryPopoutOpen] = useState(false)
+  const [historySeriesVisibility, setHistorySeriesVisibility] = useState({
+    market: true,
+    liquidTrend: true,
+    liquid: true,
+  })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -733,6 +1470,7 @@ export default function MorningBreadthDashboard() {
     latestAnchorDate,
     rollingRsWindow,
     rollingLookback: tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50,
+    minimumHistoryDays: BREADTH_HISTORY_LOOKBACK_DAYS,
     tradeReviewChartSettings,
   })
 
@@ -774,17 +1512,46 @@ export default function MorningBreadthDashboard() {
     }, {}),
     [historyBarsBySymbol, symbolsById]
   )
+  const overviewDateExclusion = useMemo(() => localDateKey(), [])
+  const overviewHistoriesById = useMemo(
+    () => trimOverviewHistoriesForDate(historiesById, overviewDateExclusion),
+    [historiesById, overviewDateExclusion]
+  )
   const latestById = useMemo(
     () => BREADTH_LISTS.reduce((next, config) => {
-      next[config.id] = latest(historiesById[config.id])
+      next[config.id] = latest(overviewHistoriesById[config.id])
       return next
     }, {}),
-    [historiesById]
+    [overviewHistoriesById]
+  )
+  const focusedHistoriesById = useMemo(
+    () => filterBreadthHistoriesForFocus(overviewHistoriesById, activeOverviewFocus),
+    [activeOverviewFocus, overviewHistoriesById]
   )
   const marketLatest = latestById.market
   const liquidTrendLatest = latestById.liquidTrend
   const liquidLatest = latestById.liquid
-  const chartData = useMemo(() => mergeHistory(historiesById), [historiesById])
+  const chartData = useMemo(() => mergeHistory(overviewHistoriesById), [overviewHistoriesById])
+  const breadthStateRows = useMemo(
+    () => buildBreadthStateRows({
+      marketHistory: focusedHistoriesById.market,
+      liquidTrendHistory: focusedHistoriesById.liquidTrend,
+      liquidHistory: focusedHistoriesById.liquid,
+      limit: BREADTH_TABLE_SESSION_COUNT,
+    }),
+    [focusedHistoriesById]
+  )
+  const breadthSignalSummary = useMemo(
+    () => buildBreadthSignalSummary(breadthStateRows),
+    [breadthStateRows]
+  )
+  const breadthTradeAnalytics = useMemo(() => {
+    const excluded = new Set((excludedSymbols || []).map(symbol => String(symbol || '').toUpperCase()))
+    return buildBreadthTradeAnalytics({
+      trades: (trades || []).filter(trade => !excluded.has(String(trade?.symbol || '').toUpperCase())),
+      breadthRows: breadthStateRows,
+    })
+  }, [breadthStateRows, excludedSymbols, trades])
   const historicalMetricRows = useMemo(
     () => buildHistoricalBreadthMetricRows({
       marketHistory: historiesById.market,
@@ -800,8 +1567,21 @@ export default function MorningBreadthDashboard() {
     }, {}),
     [historyBarsBySymbol, symbolsById]
   )
+  const {
+    timeframeRows: filteredChartData,
+    brushRange: historyBrushRange,
+    dragRange: historyDragRange,
+    visibleSessions: historyVisibleSessions,
+    handleBrushChange: handleHistoryBrushChange,
+    handleMouseDown: handleHistoryMouseDown,
+    handleMouseMove: handleHistoryMouseMove,
+    handleMouseUp: handleHistoryMouseUp,
+    resetZoom: resetHistoryZoom,
+  } = useInteractiveChartRows(chartData, activeTimeframe)
   const activeMetric = METRIC_FAMILIES.find(metric => metric.id === metricFamily) || METRIC_FAMILIES[0]
   const morningRead = buildMorningRead(marketLatest, liquidTrendLatest, liquidLatest)
+  const activeOverviewConfig = BREADTH_LISTS.find(config => config.id === activeOverviewFocus) || null
+  const activeOverviewLabel = activeOverviewConfig?.label || 'Combined Breadth'
 
   if (!allSymbols.length) {
     return (
@@ -860,10 +1640,86 @@ export default function MorningBreadthDashboard() {
 
       {activeBreadthView === 'overview' ? (
         <>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <SectionTitleWithInfo title="Chart Controls" infoTitle="Breadth overview controls">
+              <p><span className="font-medium text-white">Timeframe</span> changes the visible slice across the overview charts.</p>
+              <p><span className="font-medium text-white">All</span> shows the full two-year history loaded for the breadth dashboard.</p>
+              <p>On time-series charts, click-drag directly on the plot or use the lower brush to zoom into a smaller window, then use Reset Zoom to jump back out.</p>
+            </SectionTitleWithInfo>
+            <p className="mt-1 text-xs text-gray-600">Use timeframe presets, drag across charts to zoom, and open popouts when you need more room.</p>
+            <p className="mt-2 text-[11px] font-medium text-gray-400">Overview focus: <span className="text-white">{activeOverviewLabel}</span></p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.02] p-1">
+              <button
+                type="button"
+                onClick={() => setActiveOverviewFocus('all')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                  activeOverviewFocus === 'all' ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                Combined
+              </button>
+              {BREADTH_LISTS.map(config => (
+                <button
+                  key={config.id}
+                  type="button"
+                  onClick={() => setActiveOverviewFocus(config.id)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                    activeOverviewFocus === config.id ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {config.label}
+                </button>
+              ))}
+            </div>
+            <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.02] p-1">
+              {BREADTH_TIMEFRAMES.map(option => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setActiveTimeframe(option.id)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                    activeTimeframe === option.id ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         {BREADTH_LISTS.map(config => (
-          <ListScoreCard key={config.id} label={config.label} entry={latestById[config.id]} tone={config.tone} />
+          <ListScoreCard
+            key={config.id}
+            label={config.label}
+            entry={latestById[config.id]}
+            tone={config.tone}
+            active={activeOverviewFocus === config.id}
+            onClick={() => setActiveOverviewFocus(current => current === config.id ? 'all' : config.id)}
+          />
         ))}
+      </div>
+
+      <ActionReadout summary={breadthSignalSummary} />
+      <StateVectorCards cards={breadthSignalSummary.cards} />
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <BreadthPhysicsChart rows={breadthStateRows} timeframe={activeTimeframe} />
+        <ParticipationStackChart rows={breadthStateRows} timeframe={activeTimeframe} focusId={activeOverviewFocus} focusLabel={activeOverviewLabel} />
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <PhaseSpaceChart rows={breadthStateRows} timeframe={activeTimeframe} focusLabel={activeOverviewLabel} />
+        <div className="space-y-4">
+          <RegimeTimeline rows={breadthStateRows} timeframe={activeTimeframe} />
+          <TradeAnalyticsPanel analytics={breadthTradeAnalytics} />
+        </div>
       </div>
 
       <div className="rounded-xl border border-white/10 bg-white/[0.02]">
@@ -871,8 +1727,11 @@ export default function MorningBreadthDashboard() {
           <div className="flex items-center gap-2">
             <BarChart3 size={14} className="text-accent-blue" />
             <div>
-              <p className="text-sm font-semibold text-white">Historical Breadth</p>
-              <p className="text-xs text-gray-600">Market Leaders, Liquid Trend, and Liquid, last 180 sessions.</p>
+              <SectionTitleWithInfo title="Historical Breadth" infoTitle="What this chart compares">
+                <p>This chart compares the selected metric family across <span className="font-medium text-white">Market Leaders</span>, <span className="font-medium text-white">Liquid Trend</span>, and <span className="font-medium text-white">Liquid</span>.</p>
+                <p><span className="font-medium text-white">5DMA</span> tracks short-term participation, <span className="font-medium text-white">AVWAP</span> tracks anchored structure, <span className="font-medium text-white">Distance</span> is average percent extension from anchored VWAPs, and <span className="font-medium text-white">Thrust</span> is the net 4% up-down count.</p>
+              </SectionTitleWithInfo>
+              <p className="text-xs text-gray-600">Market Leaders, Liquid Trend, and Liquid, last {BREADTH_TABLE_SESSION_COUNT} sessions.</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -892,6 +1751,22 @@ export default function MorningBreadthDashboard() {
             </div>
             <button
               type="button"
+              onClick={resetHistoryZoom}
+              className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-gray-400 hover:text-gray-200"
+            >
+              <RotateCcw size={12} />
+              Reset Zoom
+            </button>
+            <button
+              type="button"
+              onClick={() => setHistoryPopoutOpen(true)}
+              className="rounded-lg border border-white/10 p-1.5 text-gray-500 transition-colors hover:text-gray-300"
+              aria-label="Open historical breadth popout"
+            >
+              <Maximize2 size={15} />
+            </button>
+            <button
+              type="button"
               onClick={() => setChartCollapsed(current => !current)}
               className="rounded-lg border border-white/10 p-1.5 text-gray-500 transition-colors hover:text-gray-300"
               aria-label={chartCollapsed ? 'Expand breadth chart' : 'Collapse breadth chart'}
@@ -903,8 +1778,20 @@ export default function MorningBreadthDashboard() {
 
         {!chartCollapsed && (
           <div className="border-t border-white/[0.06] p-4">
+            <SeriesTogglePills
+              items={BREADTH_LISTS.map(config => ({ key: config.id, label: config.label, color: config.color }))}
+              visibility={historySeriesVisibility}
+              onToggle={(key) => setHistorySeriesVisibility(current => ({ ...current, [key]: !current[key] }))}
+            />
+            <div className="mt-3">
             <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={chartData} margin={{ top: 8, right: 18, left: -10, bottom: 4 }}>
+              <LineChart
+                data={filteredChartData}
+                margin={{ top: 8, right: 18, left: -10, bottom: 4 }}
+                onMouseDown={handleHistoryMouseDown}
+                onMouseMove={handleHistoryMouseMove}
+                onMouseUp={handleHistoryMouseUp}
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
                 <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={28} />
                 <YAxis domain={activeMetric.domain} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
@@ -912,6 +1799,9 @@ export default function MorningBreadthDashboard() {
                 {activeMetric.domain?.[1] === 100 && <ReferenceLine y={50} stroke="#ffffff22" strokeDasharray="4 4" />}
                 {activeMetric.id === 'distance' && <ReferenceLine y={0} stroke="#ffffff25" strokeDasharray="4 4" />}
                 {activeMetric.id === 'thrust' && <ReferenceLine y={0} stroke="#ffffff25" strokeDasharray="4 4" />}
+                {historyDragRange.startLabel && historyDragRange.endLabel && historyDragRange.startLabel !== historyDragRange.endLabel && (
+                  <ReferenceArea x1={historyDragRange.startLabel} x2={historyDragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
+                )}
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
                   formatter={(value, name) => [
@@ -919,25 +1809,39 @@ export default function MorningBreadthDashboard() {
                       ? fmtSigned(Number(value), 1, '%')
                       : activeMetric.unit === '%'
                         ? fmtPct(Number(value))
-                        : fmtNumber(Number(value)),
+                      : fmtNumber(Number(value)),
                     name,
                   ]}
                 />
                 {BREADTH_LISTS.map(config => (
-                  <Line
-                    key={config.id}
-                    type="monotone"
-                    dataKey={`${config.id}${activeMetric.suffix}`}
-                    name={config.label}
-                    stroke={config.color}
-                    strokeWidth={2.5}
-                    dot={false}
-                    activeDot={{ r: 4 }}
-                    connectNulls
-                  />
+                  historySeriesVisibility[config.id] !== false && (
+                    <Line
+                      key={config.id}
+                      type="monotone"
+                      dataKey={`${config.id}${activeMetric.suffix}`}
+                      name={config.label}
+                      stroke={config.color}
+                      strokeWidth={2.5}
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                      connectNulls
+                    />
+                  )
                 ))}
+                <Brush
+                  dataKey="date"
+                  height={28}
+                  stroke="rgba(61,132,255,0.45)"
+                  fill="rgba(15,17,23,0.95)"
+                  travellerWidth={8}
+                  startIndex={historyBrushRange.startIndex}
+                  endIndex={historyBrushRange.endIndex}
+                  onChange={handleHistoryBrushChange}
+                />
               </LineChart>
             </ResponsiveContainer>
+            </div>
+            <p className="mt-3 text-[11px] text-gray-600">{historyVisibleSessions} visible sessions in the current zoom window.</p>
           </div>
         )}
       </div>
@@ -972,6 +1876,73 @@ export default function MorningBreadthDashboard() {
       </div>
 
       <Drilldowns snapshotsById={snapshotsById} />
+      {historyPopoutOpen && (
+        <ChartPopoutModal title="Historical Breadth" onClose={() => setHistoryPopoutOpen(false)}>
+          <SeriesTogglePills
+            items={BREADTH_LISTS.map(config => ({ key: config.id, label: config.label, color: config.color }))}
+            visibility={historySeriesVisibility}
+            onToggle={(key) => setHistorySeriesVisibility(current => ({ ...current, [key]: !current[key] }))}
+          />
+          <div className="mt-4">
+            <ResponsiveContainer width="100%" height={560}>
+              <LineChart
+                data={filteredChartData}
+                margin={{ top: 8, right: 18, left: -10, bottom: 4 }}
+                onMouseDown={handleHistoryMouseDown}
+                onMouseMove={handleHistoryMouseMove}
+                onMouseUp={handleHistoryMouseUp}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={28} />
+                <YAxis domain={activeMetric.domain} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                {activeMetric.domain?.[1] === 100 && <ReferenceLine y={80} stroke="#ff475755" strokeDasharray="4 4" />}
+                {activeMetric.domain?.[1] === 100 && <ReferenceLine y={50} stroke="#ffffff22" strokeDasharray="4 4" />}
+                {activeMetric.id === 'distance' && <ReferenceLine y={0} stroke="#ffffff25" strokeDasharray="4 4" />}
+                {activeMetric.id === 'thrust' && <ReferenceLine y={0} stroke="#ffffff25" strokeDasharray="4 4" />}
+                {historyDragRange.startLabel && historyDragRange.endLabel && historyDragRange.startLabel !== historyDragRange.endLabel && (
+                  <ReferenceArea x1={historyDragRange.startLabel} x2={historyDragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
+                )}
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+                  formatter={(value, name) => [
+                    activeMetric.id === 'distance'
+                      ? fmtSigned(Number(value), 1, '%')
+                      : activeMetric.unit === '%'
+                        ? fmtPct(Number(value))
+                        : fmtNumber(Number(value)),
+                    name,
+                  ]}
+                />
+                {BREADTH_LISTS.map(config => (
+                  historySeriesVisibility[config.id] !== false && (
+                    <Line
+                      key={`popout-${config.id}`}
+                      type="monotone"
+                      dataKey={`${config.id}${activeMetric.suffix}`}
+                      name={config.label}
+                      stroke={config.color}
+                      strokeWidth={2.5}
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                      connectNulls
+                    />
+                  )
+                ))}
+                <Brush
+                  dataKey="date"
+                  height={28}
+                  stroke="rgba(61,132,255,0.45)"
+                  fill="rgba(15,17,23,0.95)"
+                  travellerWidth={8}
+                  startIndex={historyBrushRange.startIndex}
+                  endIndex={historyBrushRange.endIndex}
+                  onChange={handleHistoryBrushChange}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartPopoutModal>
+      )}
         </>
       ) : (
           <HistoricalBreadthMetricTable
