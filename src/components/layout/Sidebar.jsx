@@ -55,7 +55,7 @@ export default function Sidebar({
 
   return (
     <aside
-      className={`luxury-panel flex flex-col shrink-0 h-screen sticky top-0 border-r border-white/10 bg-surface-50/80 overflow-hidden transition-[width] duration-300 ease-out
+      className={`luxury-panel flex flex-col shrink-0 h-screen sticky top-0 border-r border-white/10 bg-surface-50/80 overflow-x-visible overflow-y-hidden transition-[width] duration-300 ease-out
         ${collapsed ? 'w-16 lg:w-20' : 'w-16 lg:w-56 2xl:w-64'}`}
     >
 
@@ -135,21 +135,27 @@ export default function Sidebar({
         {NAV.map(({ id, label, icon: Icon }) => {
           const active = page === id
           return (
-            <button
-              key={id}
-              onClick={() => setPage(id)}
-              title={collapsed ? label : undefined}
-              aria-label={label}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 lg:px-3.5 lg:py-3 rounded-xl text-[13px] lg:text-sm font-medium transition-all
-                ${collapsed ? 'justify-center' : ''}
-                ${active
-                  ? 'bg-gradient-to-r from-accent-blue/18 to-accent-purple/12 text-white border border-accent-blue/20 shadow-lg shadow-accent-blue/10'
-                  : 'text-gray-300 hover:text-white hover:bg-white/5'
-                }`}
-            >
-              <Icon size={18} className={`shrink-0 ${active ? 'text-accent-blue' : ''}`} />
-              {!collapsed && <span className="hidden lg:block">{label}</span>}
-            </button>
+            <div key={id} className="group relative">
+              <button
+                onClick={() => setPage(id)}
+                title={collapsed ? label : undefined}
+                aria-label={label}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 lg:px-3.5 lg:py-3 rounded-xl text-[13px] lg:text-sm font-medium transition-all
+                  ${collapsed ? 'justify-center' : ''}
+                  ${active
+                    ? 'bg-gradient-to-r from-accent-blue/18 to-accent-purple/12 text-white border border-accent-blue/20 shadow-lg shadow-accent-blue/10'
+                    : 'text-gray-300 hover:text-white hover:bg-white/5'
+                  }`}
+              >
+                <Icon size={18} className={`shrink-0 ${active ? 'text-accent-blue' : ''}`} />
+                {!collapsed && <span className="hidden lg:block">{label}</span>}
+              </button>
+              {collapsed && (
+                <div className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-lg border border-white/10 bg-surface-100/95 px-2.5 py-1.5 text-xs font-medium text-white shadow-xl shadow-black/30 backdrop-blur group-hover:block">
+                  {label}
+                </div>
+              )}
+            </div>
           )
         })}
       </nav>

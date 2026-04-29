@@ -50,6 +50,10 @@ export function buildRightAnchoredZoomRange(currentRange, barCount, zoomDelta, r
   const safeBarCount = Math.max(0, Number(barCount) || 0)
   if (!safeBarCount || !currentRange) return null
 
+  const minimumAnchor = Math.max(safeBarCount - 1, 0) + rightOffset
+  const currentAnchor = Number.isFinite(Number(currentRange.to))
+    ? Number(currentRange.to)
+    : minimumAnchor
   const currentSpan = Math.max(
     MIN_LIGHTWEIGHT_VISIBLE_BARS,
     Math.abs(Number(currentRange.to) - Number(currentRange.from)) || MIN_LIGHTWEIGHT_VISIBLE_BARS
@@ -60,6 +64,9 @@ export function buildRightAnchoredZoomRange(currentRange, barCount, zoomDelta, r
     MIN_LIGHTWEIGHT_VISIBLE_BARS,
     Math.min(safeBarCount + rightOffset + MIN_LIGHTWEIGHT_VISIBLE_BARS, Math.round(currentSpan * zoomFactor))
   )
-
-  return buildRightAnchoredLogicalRange(safeBarCount, nextVisibleBars, rightOffset)
+  const anchor = Math.max(currentAnchor, minimumAnchor)
+  return {
+    from: anchor - nextVisibleBars,
+    to: anchor,
+  }
 }

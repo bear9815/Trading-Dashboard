@@ -1049,13 +1049,14 @@ function VoiceReviewSection({ trade, onUpdate }) {
   const [currentStep, setCurrentStep] = useState(0)
   const [questions, setQuestions] = useState(() => buildGuidedVoiceQuestions(trade))
   const [coachReason, setCoachReason] = useState('')
+  const [playedPromptKey, setPlayedPromptKey] = useState('')
   const recognitionRef = useRef(null)
   const partsRef = useRef([])
-  const spokenPromptRef = useRef('')
   const activeQuestion = questions[currentStep] || null
   const { isLoading: voiceLoading, isPlaying: voicePlaying, error: voiceError, playText, stop } = useOpenRouterVoice({
     apiKey: openRouterApiKey,
   })
+  const currentPromptKey = activeQuestion ? `${trade.id}:${activeQuestion.id}:${currentStep}` : ''
   const combinedTranscript = useMemo(() => (
     answers
       .filter(item => item?.answer)
@@ -1076,19 +1077,17 @@ function VoiceReviewSection({ trade, onUpdate }) {
     recognitionRef.current?.abort?.()
     recognitionRef.current = null
     partsRef.current = []
-    spokenPromptRef.current = ''
+    setPlayedPromptKey('')
   }, [trade.id])
 
-  useEffect(() => {
-    if (!openRouterApiKey || mode !== 'guided' || status !== 'idle' || !activeQuestion) return
-    const promptKey = `${trade.id}:${activeQuestion.id}:${currentStep}`
-    if (spokenPromptRef.current === promptKey) return
-    spokenPromptRef.current = promptKey
+  function playActivePrompt() {
+    if (!activeQuestion) return
+    setPlayedPromptKey(currentPromptKey)
     playText({
       text: activeQuestion.prompt,
       instructions: 'Speak like a calm, confident trading coach. Keep it direct, warm, and natural.',
     })
-  }, [activeQuestion, currentStep, mode, openRouterApiKey, playText, status, trade.id])
+  }
 
   async function applyVoiceAnalysis(nextAnswers, transcriptForAnalysis) {
     setStatus('processing')
@@ -1335,7 +1334,7 @@ function VoiceReviewSection({ trade, onUpdate }) {
               setCurrentStep(0)
               setQuestions(buildGuidedVoiceQuestions(trade))
               setCoachReason('')
-              spokenPromptRef.current = ''
+              setPlayedPromptKey('')
             }}
             className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${
               mode === item.id
@@ -1386,10 +1385,7 @@ function VoiceReviewSection({ trade, onUpdate }) {
             {openRouterApiKey && (
               <button
                 type="button"
-                onClick={() => voicePlaying ? stop() : playText({
-                  text: activeQuestion.prompt,
-                  instructions: 'Speak like a calm, confident trading coach. Keep it direct, warm, and natural.',
-                })}
+                onClick={() => voicePlaying ? stop() : playActivePrompt()}
                 className={`shrink-0 text-xs px-2.5 py-1.5 rounded-lg border transition-all ${
                   voicePlaying
                     ? 'bg-accent-red/10 text-accent-red border-accent-red/30'
@@ -1398,7 +1394,7 @@ function VoiceReviewSection({ trade, onUpdate }) {
               >
                 <span className="flex items-center gap-1">
                   {voicePlaying ? <Square size={12} /> : <Volume2 size={12} />}
-                  {voicePlaying ? 'Stop' : 'Replay'}
+                  {voicePlaying ? 'Stop' : playedPromptKey === currentPromptKey ? 'Replay' : 'Play prompt'}
                 </span>
               </button>
             )}
