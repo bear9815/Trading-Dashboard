@@ -660,17 +660,9 @@ function AgentPicker({ sourceType, selectedAgentId, onSelect }) {
   )
 }
 
-// ── earningscall.biz quick-access panel ──────────────────────────────────────
-const EXCHANGES = [
-  { value: 'nasdaq', label: 'NASDAQ' },
-  { value: 'nyse',   label: 'NYSE'   },
-  { value: 'nysearca', label: 'NYSE Arca' },
-  { value: 'otcmkts', label: 'OTC'   },
-]
-
-function EarningsCallBizPanel({ tickerHint }) {
-  const [ticker,   setTicker]   = useState('')
-  const [exchange, setExchange] = useState('nasdaq')
+// ── Perplexity Finance quick-access panel ────────────────────────────────────
+function PerplexityTranscriptPanel({ tickerHint }) {
+  const [ticker, setTicker] = useState('')
 
   // Keep ticker input synced when parent tickerHint changes
   useEffect(() => {
@@ -679,12 +671,12 @@ function EarningsCallBizPanel({ tickerHint }) {
   }, [tickerHint])
 
   function openTranscript() {
-    const t = ticker.trim().toLowerCase()
+    const t = ticker.trim().toUpperCase()
     if (!t) {
-      window.open('https://earningscall.biz', '_blank', 'noopener')
+      window.open('https://www.perplexity.ai/finance', '_blank', 'noopener')
       return
     }
-    window.open(`https://earningscall.biz/e/${exchange}/s/${t}`, '_blank', 'noopener')
+    window.open(`https://www.perplexity.ai/finance/${encodeURIComponent(t)}`, '_blank', 'noopener')
   }
 
   function handleKey(e) {
@@ -696,37 +688,24 @@ function EarningsCallBizPanel({ tickerHint }) {
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          {/* earningscall.biz wordmark / logo area */}
-          <div className="w-6 h-6 rounded-md bg-accent-blue/20 border border-accent-blue/30 flex items-center justify-center">
-            <span className="text-[9px] font-black text-accent-blue leading-none">EC</span>
+          <div className="w-6 h-6 rounded-md bg-accent-green/20 border border-accent-green/30 flex items-center justify-center">
+            <span className="text-[9px] font-black text-accent-green leading-none">PX</span>
           </div>
-          <span className="text-xs font-semibold text-gray-300">earningscall.biz</span>
-          <span className="text-[10px] text-gray-600">· transcript source</span>
+          <span className="text-xs font-semibold text-gray-300">Perplexity Finance</span>
+          <span className="text-[10px] text-gray-600">· transcript import</span>
         </div>
         <a
-          href="https://earningscall.biz"
+          href="https://www.perplexity.ai/finance"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1 text-[10px] text-gray-600 hover:text-accent-blue transition-colors"
+          className="flex items-center gap-1 text-[10px] text-gray-600 hover:text-accent-green transition-colors"
         >
-          Browse all <ExternalLink size={9} />
+          Open Finance <ExternalLink size={9} />
         </a>
       </div>
 
       {/* Search row */}
       <div className="flex items-center gap-2">
-        {/* Exchange selector */}
-        <select
-          value={exchange}
-          onChange={e => setExchange(e.target.value)}
-          className="bg-white/[0.04] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-gray-400 focus:outline-none focus:border-accent-blue/40 transition-colors appearance-none cursor-pointer"
-        >
-          {EXCHANGES.map(ex => (
-            <option key={ex.value} value={ex.value} className="bg-gray-900">{ex.label}</option>
-          ))}
-        </select>
-
-        {/* Ticker input */}
         <div className="flex-1 relative">
           <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-600 pointer-events-none" />
           <input
@@ -743,14 +722,14 @@ function EarningsCallBizPanel({ tickerHint }) {
         {/* Open button */}
         <button
           onClick={openTranscript}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-blue/15 border border-accent-blue/30 text-xs font-semibold text-accent-blue hover:bg-accent-blue/25 hover:border-accent-blue/50 transition-all"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-green/15 border border-accent-green/30 text-xs font-semibold text-accent-green hover:bg-accent-green/25 hover:border-accent-green/50 transition-all"
         >
           Open <ExternalLink size={10} />
         </button>
       </div>
 
       <p className="text-[10px] text-gray-700 mt-2.5 leading-relaxed">
-        Find & download the transcript PDF, then drop it in the upload zone below.
+        Open the company page in Perplexity Finance, switch to the earnings transcript view, then paste that URL into the import field below.
       </p>
     </div>
   )
@@ -1224,20 +1203,20 @@ export default function ResearchLibrary({ earningsMode = false }) {
         {viewMode === 'upload' && (
           <div className="space-y-4">
 
-            {/* ── earningscall.biz quick-access panel ── */}
-            <EarningsCallBizPanel tickerHint={tickerInput} />
+            {/* ── Perplexity Finance quick-access panel ── */}
+            <PerplexityTranscriptPanel tickerHint={tickerInput} />
 
             <div className="bg-white/[0.02] border border-white/10 rounded-xl p-4 space-y-3">
               <div>
                 <p className="text-sm font-semibold text-white">Import From Transcript Link</p>
-                <p className="text-xs text-gray-600 mt-1">Paste a CapEdge transcript page URL and let your selected earnings agent analyze it directly.</p>
+                <p className="text-xs text-gray-600 mt-1">Paste a Perplexity Finance transcript URL and let your selected earnings agent analyze it directly.</p>
               </div>
               <div className="flex flex-col lg:flex-row gap-2">
                 <input
                   type="url"
                   value={transcriptUrl}
                   onChange={e => setTranscriptUrl(e.target.value)}
-                  placeholder="https://capedge.com/company/1674101/transcripts/2026/q1"
+                  placeholder="https://www.perplexity.ai/finance/GNRC/earnings?eventId=555216&tab=transcript"
                   className="flex-1 bg-white/[0.04] border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors"
                 />
                 <button
