@@ -62,6 +62,7 @@ import {
   buildInitialBrushRange,
   normalizeBrushRange,
 } from '../../utils/morningBreadthChartControls.js'
+import { filterBreadthHistoriesForFocus } from '../../utils/morningBreadthFocus.js'
 import BreadthTableSettingsModal from './BreadthTableSettingsModal.jsx'
 import { useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
 
@@ -631,7 +632,7 @@ function BreadthPhysicsChart({ rows, timeframe = '6M' }) {
   )
 }
 
-function ParticipationStackChart({ rows, timeframe = '6M' }) {
+function ParticipationStackChart({ rows, timeframe = '6M', focusId = 'all', focusLabel = 'Composite' }) {
   const { timeframeRows, brushRange, dragRange, visibleSessions, handleBrushChange, handleMouseDown, handleMouseMove, handleMouseUp, resetZoom } = useInteractiveChartRows(rows, timeframe)
   const [popoutOpen, setPopoutOpen] = useState(false)
   const [seriesVisibility, setSeriesVisibility] = useState({
@@ -642,8 +643,10 @@ function ParticipationStackChart({ rows, timeframe = '6M' }) {
   const series = [
     { key: 'participation', label: '20DMA Participation', color: '#22c55e' },
     { key: 'structure', label: 'AVWAP Structure', color: '#3d84ff' },
-    { key: 'leaders5dma', label: 'Leaders 5DMA', color: '#f5c542' },
+    { key: 'leaders5dma', label: `${focusLabel} 5DMA`, color: '#f5c542' },
   ]
+  const focusDataKey = focusId === 'all' ? 'market.sma5' : `${focusId}.sma5`
+  const focusLineLabel = focusId === 'all' ? 'Leaders 5DMA' : `${focusLabel} 5DMA`
 
   const chart = (height = 285) => (
     <ResponsiveContainer width="100%" height={height}>
@@ -675,7 +678,7 @@ function ParticipationStackChart({ rows, timeframe = '6M' }) {
         )}
         {seriesVisibility.participation && <Area type="monotone" dataKey="participation" name="20DMA Participation" stroke="#22c55e" fill="url(#breadthParticipation)" strokeWidth={2} dot={false} />}
         {seriesVisibility.structure && <Area type="monotone" dataKey="structure" name="AVWAP Structure" stroke="#3d84ff" fill="url(#breadthStructure)" strokeWidth={2} dot={false} />}
-        {seriesVisibility.leaders5dma && <Line type="monotone" dataKey="market.sma5" name="Leaders 5DMA" stroke="#f5c542" strokeWidth={1.8} dot={false} />}
+        {seriesVisibility.leaders5dma && <Line type="monotone" dataKey={focusDataKey} name={focusLineLabel} stroke="#f5c542" strokeWidth={1.8} dot={false} />}
         <Brush
           dataKey="date"
           height={28}
@@ -947,12 +950,16 @@ function TradeAnalyticsPanel({ analytics }) {
   )
 }
 
-function ListScoreCard({ label, entry, tone = 'blue' }) {
+function ListScoreCard({ label, entry, tone = 'blue', active = false, onClick }) {
   const border = tone === 'green' ? 'border-accent-green/20' : tone === 'yellow' ? 'border-accent-yellow/20' : 'border-accent-blue/20'
   const bg = tone === 'green' ? 'bg-accent-green/8' : tone === 'yellow' ? 'bg-accent-yellow/8' : 'bg-accent-blue/8'
 
   return (
-    <div className={`rounded-xl border ${border} ${bg} p-4`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full rounded-xl border ${border} ${bg} p-4 text-left transition-all hover:border-white/20 hover:bg-white/[0.04] ${active ? 'ring-1 ring-white/20 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]' : ''}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-widest text-gray-500">{label}</p>
@@ -963,6 +970,12 @@ function ListScoreCard({ label, entry, tone = 'blue' }) {
         </div>
         <span className={`rounded border px-2 py-1 text-[10px] font-semibold ${regimeTone(entry?.regimeLabel)}`}>
           {entry?.regimeLabel || 'No data'}
+        </span>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <span className={`text-[10px] font-semibold uppercase tracking-[0.16em] ${active ? 'text-white' : 'text-gray-600'}`}>
+          {active ? 'Overview Focus' : 'Click To Focus'}
         </span>
       </div>
 
@@ -986,7 +999,7 @@ function ListScoreCard({ label, entry, tone = 'blue' }) {
           </p>
         </div>
       </div>
-    </div>
+    </button>
   )
 }
 
@@ -1409,6 +1422,7 @@ export default function MorningBreadthDashboard() {
   const { trades } = useTradeStore()
   const { tradeReviewChartSettings, breadthTableSettings, setBreadthTableSettings, excludedSymbols } = useSettingsStore()
   const [activeBreadthView, setActiveBreadthView] = useState('overview')
+  const [activeOverviewFocus, setActiveOverviewFocus] = useState('all')
   const [activeTimeframe, setActiveTimeframe] = useState('6M')
   const [metricFamily, setMetricFamily] = useState('sma')
   const [chartCollapsed, setChartCollapsed] = useState(false)
@@ -1492,18 +1506,22 @@ export default function MorningBreadthDashboard() {
     }, {}),
     [historiesById]
   )
+  const focusedHistoriesById = useMemo(
+    () => filterBreadthHistoriesForFocus(historiesById, activeOverviewFocus),
+    [activeOverviewFocus, historiesById]
+  )
   const marketLatest = latestById.market
   const liquidTrendLatest = latestById.liquidTrend
   const liquidLatest = latestById.liquid
   const chartData = useMemo(() => mergeHistory(historiesById), [historiesById])
   const breadthStateRows = useMemo(
     () => buildBreadthStateRows({
-      marketHistory: historiesById.market,
-      liquidTrendHistory: historiesById.liquidTrend,
-      liquidHistory: historiesById.liquid,
+      marketHistory: focusedHistoriesById.market,
+      liquidTrendHistory: focusedHistoriesById.liquidTrend,
+      liquidHistory: focusedHistoriesById.liquid,
       limit: BREADTH_TABLE_SESSION_COUNT,
     }),
-    [historiesById]
+    [focusedHistoriesById]
   )
   const breadthSignalSummary = useMemo(
     () => buildBreadthSignalSummary(breadthStateRows),
@@ -1544,6 +1562,8 @@ export default function MorningBreadthDashboard() {
   } = useInteractiveChartRows(chartData, activeTimeframe)
   const activeMetric = METRIC_FAMILIES.find(metric => metric.id === metricFamily) || METRIC_FAMILIES[0]
   const morningRead = buildMorningRead(marketLatest, liquidTrendLatest, liquidLatest)
+  const activeOverviewConfig = BREADTH_LISTS.find(config => config.id === activeOverviewFocus) || null
+  const activeOverviewLabel = activeOverviewConfig?.label || 'Combined Breadth'
 
   if (!allSymbols.length) {
     return (
@@ -1611,27 +1631,60 @@ export default function MorningBreadthDashboard() {
               <p>On time-series charts, click-drag directly on the plot or use the lower brush to zoom into a smaller window, then use Reset Zoom to jump back out.</p>
             </SectionTitleWithInfo>
             <p className="mt-1 text-xs text-gray-600">Use timeframe presets, drag across charts to zoom, and open popouts when you need more room.</p>
+            <p className="mt-2 text-[11px] font-medium text-gray-400">Overview focus: <span className="text-white">{activeOverviewLabel}</span></p>
           </div>
-          <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.02] p-1">
-            {BREADTH_TIMEFRAMES.map(option => (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.02] p-1">
               <button
-                key={option.id}
                 type="button"
-                onClick={() => setActiveTimeframe(option.id)}
+                onClick={() => setActiveOverviewFocus('all')}
                 className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
-                  activeTimeframe === option.id ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+                  activeOverviewFocus === 'all' ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'
                 }`}
               >
-                {option.label}
+                Combined
               </button>
-            ))}
+              {BREADTH_LISTS.map(config => (
+                <button
+                  key={config.id}
+                  type="button"
+                  onClick={() => setActiveOverviewFocus(config.id)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                    activeOverviewFocus === config.id ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {config.label}
+                </button>
+              ))}
+            </div>
+            <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.02] p-1">
+              {BREADTH_TIMEFRAMES.map(option => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setActiveTimeframe(option.id)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                    activeTimeframe === option.id ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         {BREADTH_LISTS.map(config => (
-          <ListScoreCard key={config.id} label={config.label} entry={latestById[config.id]} tone={config.tone} />
+          <ListScoreCard
+            key={config.id}
+            label={config.label}
+            entry={latestById[config.id]}
+            tone={config.tone}
+            active={activeOverviewFocus === config.id}
+            onClick={() => setActiveOverviewFocus(current => current === config.id ? 'all' : config.id)}
+          />
         ))}
       </div>
 
@@ -1640,7 +1693,7 @@ export default function MorningBreadthDashboard() {
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <BreadthPhysicsChart rows={breadthStateRows} timeframe={activeTimeframe} />
-        <ParticipationStackChart rows={breadthStateRows} timeframe={activeTimeframe} />
+        <ParticipationStackChart rows={breadthStateRows} timeframe={activeTimeframe} focusId={activeOverviewFocus} focusLabel={activeOverviewLabel} />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
