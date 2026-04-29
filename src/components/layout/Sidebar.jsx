@@ -1,6 +1,7 @@
 import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, Sparkles, ScanLine, Sun, GitCompare, FlaskConical, Layers, Globe, Trophy, Bot, PanelLeftClose, PanelLeftOpen, CandlestickChart } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import AppLogo from './AppLogo.jsx'
+import { getAppVersionLabel } from '../../utils/appVersion.js'
 
 const NAV = [
   { id: 'dashboard',   label: 'Dashboard',     icon: LayoutDashboard },
@@ -40,6 +41,12 @@ export default function Sidebar({
   const { getAccounts } = useTradeStore()
   const accounts = getAccounts() // ['All', 'IBKR', 'Schwab', ...]
   const realAccounts = accounts.filter(a => a !== 'All')
+  const versionLabel = getAppVersionLabel({
+    version: __APP_VERSION__,
+    commitSha: __APP_COMMIT_SHA__,
+    deployEnv: __APP_DEPLOY_ENV__,
+    collapsed,
+  })
 
   const getColor = (accountName) => {
     const idx = realAccounts.indexOf(accountName)
@@ -174,7 +181,7 @@ export default function Sidebar({
           )
         })()}
         <p className={`text-xs text-gray-500 uppercase tracking-[0.2em] ${collapsed ? 'text-center px-0' : 'px-1'}`}>
-          {collapsed ? 'v0.1.0' : 'v0.1.0 · Local'}
+          {versionLabel}
         </p>
       </div>
 
