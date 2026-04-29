@@ -5,6 +5,7 @@ import {
   WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET,
   applyRightOffset,
   applyRightAnchoredLogicalRange,
+  buildRightAnchoredLogicalRangeFromStart,
   buildRightAnchoredZoomRange,
   buildRightAnchoredLogicalRange,
   fitContentWithRightOffset,
@@ -61,6 +62,8 @@ assert.deepEqual(calls.slice(-2), [
 
 assert.deepEqual(buildRightAnchoredLogicalRange(120, 40), { from: 84, to: 124 })
 assert.deepEqual(buildRightAnchoredLogicalRange(8, 1, 1), { from: -2, to: 8 })
+assert.deepEqual(buildRightAnchoredLogicalRangeFromStart(120, 40, 3), { from: 40, to: 122 })
+assert.deepEqual(buildRightAnchoredLogicalRangeFromStart(8, 7, 1), { from: -2, to: 8 })
 assert.deepEqual(buildRightAnchoredZoomRange({ from: 20, to: 80 }, 120, -100, 1), { from: 70, to: 120 })
 assert.deepEqual(buildRightAnchoredZoomRange({ from: 20, to: 80 }, 120, 100, 1), { from: 48, to: 120 })
 assert.equal(buildRightAnchoredZoomRange(null, 120, -100, 1), null)

@@ -1226,6 +1226,29 @@ export async function analyzeTradeVoiceReview(trade, transcript, apiKey) {
   return parseJsonText(text)
 }
 
+function buildDashboardVoiceCleanupPrompt(text, destination = 'thought') {
+  const targetLabel = destination === 'journal' ? 'journal note' : 'trading thought'
+  return `Clean up this spoken ${targetLabel}. Remove filler words, false starts, awkward pauses, and empty verbal clutter. Keep the meaning and tone. Rewrite into concise, readable sentences. Do not invent details.
+
+Return ONLY valid JSON:
+{
+  "cleanedText": "final cleaned text"
+}
+
+Raw transcript:
+${text}`
+}
+
+export async function cleanDashboardVoiceNote(transcript, apiKey, destination = 'thought') {
+  const raw = String(transcript || '').trim()
+  if (!raw) throw new Error('No voice transcript to clean.')
+  if (!apiKey) return { cleanedText: raw }
+
+  const prompt = buildDashboardVoiceCleanupPrompt(raw, destination)
+  const text = await callAI(apiKey, prompt)
+  return parseJsonText(text)
+}
+
 function buildTradeVoiceFollowUpPrompt(trade, answers) {
   const tradeContext = {
     symbol: trade.symbol || null,

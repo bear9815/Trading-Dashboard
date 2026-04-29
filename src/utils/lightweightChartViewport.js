@@ -38,6 +38,20 @@ export function buildRightAnchoredLogicalRange(barCount, visibleBars, rightOffse
   }
 }
 
+export function buildRightAnchoredLogicalRangeFromStart(barCount, startIndex, rightOffset = DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET) {
+  const safeBarCount = Math.max(0, Number(barCount) || 0)
+  const safeStartIndex = Number.isFinite(Number(startIndex)) ? Number(startIndex) : 0
+  const anchor = Math.max(safeBarCount - 1, 0) + rightOffset
+  const visibleBars = Math.max(
+    MIN_LIGHTWEIGHT_VISIBLE_BARS,
+    Math.ceil(anchor - safeStartIndex)
+  )
+  return {
+    from: anchor - visibleBars,
+    to: anchor,
+  }
+}
+
 export function applyRightAnchoredLogicalRange(chart, barCount, visibleBars, rightOffset = DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET) {
   setVisibleLogicalRangeWithRightOffset(
     chart,

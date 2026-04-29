@@ -73,6 +73,7 @@ function JournalEntryCard({ entry, onDelete }) {
       {open && (
         <div className="mt-3 space-y-3 text-sm">
           {[
+            ['Journal Note', entry.noteText],
             ['Market State / Conditions', entry.marketState],
             ['Trading Objective', entry.objective],
             ['Psychological Check', entry.psychological],
