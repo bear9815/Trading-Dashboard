@@ -18,6 +18,7 @@ import {
   getVisibleLogicalRange,
 } from '../../utils/lightweightChartViewport.js'
 import { sliceWeeklyChartBars } from '../../utils/chartTimeframes.js'
+import { normalizeTradeReviewChartType } from '../../utils/tradeReviewChart.js'
 
 const CHART_UP_COLOR = '#2877e3'
 const CHART_DOWN_COLOR = '#ea4ce7'
@@ -172,17 +173,11 @@ function LightweightPane({
       width: chartContainerRef.current.clientWidth,
     })
     const candles = kind === 'weekly' ? sliceWeeklyChartBars(data.weeklyBars) : data.dailyBars
+    const normalizedChartType = normalizeTradeReviewChartType(chartType)
     const priceSeries = chart.addSeries(
-      chartType === 'hlc' ? BarSeries : CandlestickSeries,
-      chartType === 'hlc'
+      normalizedChartType === 'candlestick' ? CandlestickSeries : BarSeries,
+      normalizedChartType === 'candlestick'
         ? {
-            upColor: CHART_UP_COLOR,
-            downColor: CHART_DOWN_COLOR,
-            openVisible: false,
-            thinBars: false,
-            priceLineVisible: false,
-          }
-        : {
             upColor: CHART_UP_COLOR,
             downColor: CHART_DOWN_COLOR,
             borderUpColor: CHART_UP_COLOR,
@@ -190,6 +185,13 @@ function LightweightPane({
             borderVisible: true,
             wickUpColor: CHART_UP_COLOR,
             wickDownColor: CHART_DOWN_COLOR,
+            priceLineVisible: false,
+          }
+        : {
+            upColor: CHART_UP_COLOR,
+            downColor: CHART_DOWN_COLOR,
+            openVisible: normalizedChartType === 'ohlc',
+            thinBars: false,
             priceLineVisible: false,
           }
     )
@@ -421,7 +423,7 @@ function LightweightPane({
 
 export default function ResearchMultiTimeframeChart({
   data,
-  chartType = 'candlestick',
+  chartType = 'ohlc',
   title = 'Ecosystem',
   memberCount = 0,
   dailyRangeMonths = 6,

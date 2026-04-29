@@ -9,7 +9,11 @@ import {
   createSeriesMarkers,
 } from 'lightweight-charts'
 import { fetchHistory } from '../../utils/marketData.js'
-import { buildTradeReviewChartData } from '../../utils/tradeReviewChart.js'
+import {
+  buildTradeReviewChartData,
+  normalizeTradeReviewChartType,
+  TRADE_REVIEW_CHART_TYPE_OPTIONS,
+} from '../../utils/tradeReviewChart.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { buildManualAnchorDragUpdate } from '../charts/chartInteractions.js'
 import {
@@ -99,6 +103,18 @@ function addHlcBars(chart, candles) {
     upColor: '#2877e3',
     downColor: '#ea4ce7',
     openVisible: false,
+    thinBars: false,
+    priceLineVisible: false,
+  })
+  series.setData(candles)
+  return series
+}
+
+function addOhlcBars(chart, candles) {
+  const series = chart.addSeries(BarSeries, {
+    upColor: '#2877e3',
+    downColor: '#ea4ce7',
+    openVisible: true,
     thinBars: false,
     priceLineVisible: false,
   })
@@ -246,9 +262,11 @@ function LightweightPane({
     const effectiveRightOffset = kind === 'weekly'
       ? (rightOffset ?? WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET)
       : rightOffset
-    const candleSeries = chartType === 'hlc'
-      ? addHlcBars(chart, candles)
-      : addCandles(chart, candles)
+    const candleSeries = chartType === 'candlestick'
+      ? addCandles(chart, candles)
+      : chartType === 'hlc'
+        ? addHlcBars(chart, candles)
+        : addOhlcBars(chart, candles)
     if (kind === 'daily') addAvwapLines(chart, data.avwapOverlays)
     const shadeBands = kind === 'weekly' ? data.weeklyKeltnerShades : data.keltnerShades
     const rsGradient = kind === 'weekly' ? data.weeklyRsGradient : data.dailyAnchoredRsGradient
@@ -430,7 +448,7 @@ export default function TradeReviewChart({ trade, chartSettings, onOpenSettings,
   const [error, setError] = useState('')
   const [addAnchorMode, setAddAnchorMode] = useState(false)
   const [activeSymbol, setActiveSymbol] = useState('')
-  const chartType = chartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'
+  const chartType = normalizeTradeReviewChartType(chartSettings?.chartType)
   const tradeSymbol = String(trade?.symbol || '').trim().toUpperCase()
   const benchmarkSymbol = String(chartSettings?.benchmarkSymbol || 'SPY').trim().toUpperCase() || 'SPY'
   const displaySymbolOptions = useMemo(
@@ -597,10 +615,7 @@ export default function TradeReviewChart({ trade, chartSettings, onOpenSettings,
               </button>
             ) : null}
             <div className="inline-flex rounded-md border border-black/10 bg-white/70 p-0.5">
-              {[
-                { value: 'candlestick', label: 'Candles' },
-                { value: 'hlc', label: 'HLC' },
-              ].map(option => (
+              {TRADE_REVIEW_CHART_TYPE_OPTIONS.map(option => (
                 <button
                   key={option.value}
                   onClick={() => setTradeReviewChartSettings({ chartType: option.value })}

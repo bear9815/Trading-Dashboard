@@ -1,11 +1,16 @@
 import { Plus, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
-import { BEST_FIT_LOOKBACK_MONTH_DEFAULT, BEST_FIT_LOOKBACK_MONTH_OPTIONS } from '../../utils/tradeReviewChart.js'
+import {
+  BEST_FIT_LOOKBACK_MONTH_DEFAULT,
+  BEST_FIT_LOOKBACK_MONTH_OPTIONS,
+  normalizeTradeReviewChartType,
+  TRADE_REVIEW_CHART_TYPE_OPTIONS,
+} from '../../utils/tradeReviewChart.js'
 
 export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
   const [draft, setDraft] = useState(() => ({
     benchmarkSymbol: settings?.benchmarkSymbol || 'SPY',
-    chartType: settings?.chartType === 'hlc' ? 'hlc' : 'candlestick',
+    chartType: normalizeTradeReviewChartType(settings?.chartType),
     anchorDates: Array.isArray(settings?.anchorDates) && settings.anchorDates.length ? settings.anchorDates : ['2026-01-01', '2026-04-02'],
     avwapPresets: Array.isArray(settings?.avwapPresets) && settings.avwapPresets.length
       ? settings.avwapPresets
@@ -159,10 +164,7 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
             <div>
               <p className="label mb-2">Price Style</p>
               <div className="inline-flex rounded-lg border border-white/10 bg-surface-200 p-1">
-                {[
-                  { value: 'candlestick', label: 'Candles' },
-                  { value: 'hlc', label: 'HLC Bars' },
-                ].map(option => (
+                {TRADE_REVIEW_CHART_TYPE_OPTIONS.map(option => (
                   <button
                     key={option.value}
                     onClick={() => setDraft(current => ({ ...current, chartType: option.value }))}

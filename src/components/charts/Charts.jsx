@@ -13,6 +13,7 @@ import {
   buildAnchoredRsSnapshot,
   buildRollingRsSnapshot,
   buildYtdAvwapSnapshot,
+  normalizeTradeReviewChartType,
   resolveLatestAnchorDate,
 } from '../../utils/tradeReviewChart.js'
 import { buildChartDataFromBars, buildTickerChartData, useResearchChartUniverse } from './useResearchChartUniverse.js'
@@ -732,7 +733,7 @@ export default function Charts() {
           ) : (
             <ResearchMultiTimeframeChart
               data={activeChartData}
-              chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+              chartType={normalizeTradeReviewChartType(tradeReviewChartSettings?.chartType)}
               title={activeChartTitle}
               memberCount={activeChartMemberCount}
               dailyRangeMonths={growthResearchDailyRangeMonths}

@@ -2,14 +2,18 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { supabase } from '../lib/supabase.js'
 import { DEFAULT_DASHBOARD_VOICE_MODEL } from '../utils/dashboardVoiceModels.js'
-import { BEST_FIT_LOOKBACK_MONTH_DEFAULT, BEST_FIT_LOOKBACK_MONTH_OPTIONS } from '../utils/tradeReviewChart.js'
+import {
+  BEST_FIT_LOOKBACK_MONTH_DEFAULT,
+  BEST_FIT_LOOKBACK_MONTH_OPTIONS,
+  normalizeTradeReviewChartType,
+} from '../utils/tradeReviewChart.js'
 
 // Module-level flag — prevents re-fetching settings more than once per page load
 let settingsSessionLoaded = false
 
 const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
-  chartType: 'candlestick',
+  chartType: 'ohlc',
   growthResearchDailyRangeMonths: 6,
   showTradeEntryAvwap: false,
   researchChartsShowDailyAnchoredRs: true,
@@ -129,6 +133,7 @@ function normalizeTradeReviewChartSettings(settings) {
   return {
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
     ...current,
+    chartType: normalizeTradeReviewChartType(current.chartType),
     researchChartsShowDailyAnchoredRs: current.researchChartsShowDailyAnchoredRs ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowDailyAnchoredRs,
     researchChartsShowWeeklyRollingRs: current.researchChartsShowWeeklyRollingRs ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowWeeklyRollingRs,
     researchChartsWeeklyRightOffset: Number.isFinite(Number(current.researchChartsWeeklyRightOffset)) ? Number(current.researchChartsWeeklyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsWeeklyRightOffset,

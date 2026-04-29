@@ -27,6 +27,7 @@ import {
   buildKeltnerShadeBands,
   buildRollingRsSnapshot,
   calculateKeltnerChannel,
+  normalizeTradeReviewChartType,
   resolveLatestAnchorDate,
 } from '../../utils/tradeReviewChart.js'
 import { buildWatchlistFitMap, filterAndSortWatchlistRows } from '../../utils/watchlistFitSignal.js'
@@ -2270,7 +2271,7 @@ export default function ThemeWatchlist({
                 {selectedThemeGroup ? (
                   <ResearchMultiTimeframeChart
                     data={selectedEcosystemChartData}
-                    chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+                    chartType={normalizeTradeReviewChartType(tradeReviewChartSettings?.chartType)}
                     title={selectedThemeGroup.isMarketLeaders ? 'MARKET LEADERS' : `ECO:${String(selectedThemeGroup.label || '').toUpperCase()}`}
                     memberCount={selectedEcosystemComposite.memberCount}
                     dailyRangeMonths={growthResearchDailyRangeMonths}
@@ -2494,7 +2495,7 @@ export default function ThemeWatchlist({
           {selectedRow ? (
             <ResearchMultiTimeframeChart
               data={selectedTickerChartData}
-              chartType={tradeReviewChartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'}
+              chartType={normalizeTradeReviewChartType(tradeReviewChartSettings?.chartType)}
               title={selectedRow.symbol}
               memberCount={1}
               dailyRangeMonths={growthResearchDailyRangeMonths}

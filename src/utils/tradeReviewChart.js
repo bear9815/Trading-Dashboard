@@ -2,6 +2,11 @@ export const REVIEW_CHART_UP_COLOR = '#2877e3'
 export const REVIEW_CHART_DOWN_COLOR = '#ea4ce7'
 export const BEST_FIT_LOOKBACK_MONTH_OPTIONS = [1, 3, 6, 12]
 export const BEST_FIT_LOOKBACK_MONTH_DEFAULT = 3
+export const TRADE_REVIEW_CHART_TYPE_OPTIONS = [
+  { value: 'ohlc', label: 'OHLC Bars' },
+  { value: 'hlc', label: 'HLC Bars' },
+  { value: 'candlestick', label: 'Candles' },
+]
 
 const KELTNER_SHADE_COLORS = {
   13: 'rgba(69, 207, 219, 0.22)',
@@ -16,7 +21,7 @@ export const DEFAULT_ANCHORED_RS_ANCHOR_RULES = [
 
 export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
-  chartType: 'candlestick',
+  chartType: 'ohlc',
   showTradeEntryAvwap: false,
   researchChartsShowDailyAnchoredRs: true,
   researchChartsShowWeeklyRollingRs: true,
@@ -31,6 +36,12 @@ export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
   dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
   dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
+}
+
+export function normalizeTradeReviewChartType(chartType) {
+  return TRADE_REVIEW_CHART_TYPE_OPTIONS.some(option => option.value === chartType)
+    ? chartType
+    : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.chartType
 }
 
 function toDateKey(value) {
