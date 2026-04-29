@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { supabase } from '../lib/supabase.js'
+import { DEFAULT_DASHBOARD_VOICE_MODEL } from '../utils/dashboardVoiceModels.js'
 import { BEST_FIT_LOOKBACK_MONTH_DEFAULT, BEST_FIT_LOOKBACK_MONTH_OPTIONS } from '../utils/tradeReviewChart.js'
 
 // Module-level flag — prevents re-fetching settings more than once per page load
@@ -152,7 +153,7 @@ function cleanKey(key) {
 // Fields synced to Supabase (business data that must match across devices)
 const CLOUD_FIELDS = [
   'apiKey', 'anthropicApiKey', 'alpacaApiKey', 'alpacaApiSecret', 'finnhubApiKey',
-  'openRouterApiKey', 'researchAiProvider', 'researchOpenRouterModel',
+  'openRouterApiKey', 'researchAiProvider', 'researchOpenRouterModel', 'dashboardVoiceModel',
   'theme', 'accounts', 'dailyLossLimit', 'maxDrawdownLimit',
   'benchmarkSymbol', 'tpMultiplier',
   'equityCurveRange', 'analyticsTimeframe', 'analyticsTradeMode', 'analyticsWinLossMode',
@@ -231,6 +232,7 @@ export const useSettingsStore = create(
 
       researchAiProvider: 'gemini',
       researchOpenRouterModel: 'openai/gpt-4o-mini',
+      dashboardVoiceModel: DEFAULT_DASHBOARD_VOICE_MODEL,
       useLocalLLM: false,
 
       reminderTimes: ['10:00', '14:00'],
@@ -393,6 +395,11 @@ export const useSettingsStore = create(
         saveToCloud({ ...get(), researchAiProvider: nextProvider })
       },
       setResearchOpenRouterModel: (model) => { set({ researchOpenRouterModel: model }); saveToCloud({ ...get(), researchOpenRouterModel: model }) },
+      setDashboardVoiceModel: (model) => {
+        const nextModel = String(model || '').trim() || DEFAULT_DASHBOARD_VOICE_MODEL
+        set({ dashboardVoiceModel: nextModel })
+        saveToCloud({ ...get(), dashboardVoiceModel: nextModel })
+      },
       setUseLocalLLM: (v) => {
         const nextProvider = v ? 'local' : 'gemini'
         set({ useLocalLLM: v, researchAiProvider: nextProvider })
@@ -435,6 +442,9 @@ export const useSettingsStore = create(
         const merged = { ...currentState, ...persistedState }
         if (!persistedState?.researchAiProvider) {
           merged.researchAiProvider = persistedState?.useLocalLLM ? 'local' : 'gemini'
+        }
+        if (!persistedState?.dashboardVoiceModel) {
+          merged.dashboardVoiceModel = currentState?.dashboardVoiceModel || DEFAULT_DASHBOARD_VOICE_MODEL
         }
         merged.useLocalLLM = merged.researchAiProvider === 'local'
         merged.tradeReviewChartSettings = normalizeTradeReviewChartSettings(

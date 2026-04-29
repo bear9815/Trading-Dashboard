@@ -21,10 +21,11 @@ import { buildDashboardVoiceBrief } from '../../utils/openrouterVoice.js'
 
 export default function Dashboard({ selectedAccount }) {
   const { trades, accountActivities } = useTradeStore()
-  const { dailyLossLimit, excludedSymbols, openRouterApiKey } = useSettingsStore()
+  const { dailyLossLimit, excludedSymbols, openRouterApiKey, dashboardVoiceModel } = useSettingsStore()
   const liveAccountBalance = useLiveMarketStore(s => s.liveAccountBalance)
   const { isLoading: voiceLoading, isPlaying: voicePlaying, error: voiceError, playText, stop } = useOpenRouterVoice({
     apiKey: openRouterApiKey,
+    model: dashboardVoiceModel,
   })
 
   // Uppercase set for fast lookup

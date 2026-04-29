@@ -5,6 +5,7 @@ import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { analyzeTradingMindset, cleanDashboardVoiceNote } from '../../utils/ai.js'
 import { extractJournalEntryText, isDashboardJournalEntry, normalizeVoiceNoteFallback } from '../../utils/dashboardThoughts.js'
+import { DASHBOARD_VOICE_MODEL_OPTIONS, resolveDashboardVoiceModel } from '../../utils/dashboardVoiceModels.js'
 
 const TAGS = [
   { id: 'discipline', label: 'Discipline', emoji: '💪', colorCls: 'text-accent-green bg-accent-green/10 border-accent-green/20' },
@@ -167,7 +168,12 @@ export default function TradingThoughts() {
     moveThoughtToJournal,
     moveJournalToThought,
   } = useJournalStore()
-  const { apiKey } = useSettingsStore()
+  const {
+    apiKey,
+    openRouterApiKey,
+    dashboardVoiceModel,
+    setDashboardVoiceModel,
+  } = useSettingsStore()
   const { trades } = useTradeStore()
 
   const [entryType, setEntryType] = useState('thought')
@@ -212,6 +218,7 @@ export default function TradingThoughts() {
 
   const tag = tagInfo(selectedTag)
   const canAnalyze = entryType === 'thought' && tradingThoughts.length >= 3
+  const selectedVoiceModel = resolveDashboardVoiceModel(dashboardVoiceModel)
 
   useEffect(() => {
     setShowAll(false)
@@ -305,8 +312,13 @@ export default function TradingThoughts() {
       setVoiceStatus('cleaning')
       try {
         const fallback = normalizeVoiceNoteFallback(rawTranscript)
-        const cleaned = apiKey
-          ? (await cleanDashboardVoiceNote(rawTranscript, apiKey, entryType === 'journal' ? 'journal' : 'thought')).cleanedText
+        const cleaned = (apiKey || openRouterApiKey)
+          ? (await cleanDashboardVoiceNote(rawTranscript, {
+              geminiApiKey: apiKey,
+              openRouterApiKey,
+              model: dashboardVoiceModel,
+              destination: entryType === 'journal' ? 'journal' : 'thought',
+            })).cleanedText
           : fallback
         const finalText = normalizeVoiceNoteFallback(cleaned || fallback)
         if (!finalText) throw new Error('Voice note was empty after cleanup.')
@@ -365,6 +377,20 @@ export default function TradingThoughts() {
             </button>
           )}
         </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+        <span className="font-medium uppercase tracking-wide text-gray-600">Voice Model</span>
+        <select
+          value={selectedVoiceModel.id}
+          onChange={event => setDashboardVoiceModel(event.target.value)}
+          className="rounded-md border border-white/10 bg-surface-200 px-2.5 py-1.5 text-xs text-gray-300 focus:border-accent-blue/30 focus:outline-none"
+        >
+          {DASHBOARD_VOICE_MODEL_OPTIONS.map(option => (
+            <option key={option.id} value={option.id}>{option.label}</option>
+          ))}
+        </select>
+        <span>Defaulted to your OpenRouter voice path for dashboard notes.</span>
       </div>
 
       {recentInsight && (
@@ -435,8 +461,11 @@ export default function TradingThoughts() {
           {voiceTranscript && voiceStatus !== 'cleaning' && !voiceError && (
             <p className="text-xs text-gray-500">Last transcript: {voiceTranscript}</p>
           )}
-          {!apiKey && (voiceStatus === 'idle' || voiceStatus === 'error') && (
-            <p className="mt-1 text-xs text-gray-500">Add your Gemini API key in Settings for smarter cleanup. Basic cleanup still works without it.</p>
+          {!apiKey && !openRouterApiKey && (voiceStatus === 'idle' || voiceStatus === 'error') && (
+            <p className="mt-1 text-xs text-gray-500">Add an OpenRouter or Gemini API key in Settings for smarter cleanup. Basic cleanup still works without it.</p>
+          )}
+          {openRouterApiKey && (voiceStatus === 'idle' || voiceStatus === 'error') && (
+            <p className="mt-1 text-xs text-gray-500">Using {selectedVoiceModel.label} for dashboard voice, with automatic cleanup-model matching.</p>
           )}
         </div>
       )}
