@@ -4,14 +4,12 @@ import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useOpenRouterVoice } from '../../hooks/useOpenRouterVoice.js'
 import { formatCurrency } from '../../utils/formatters.js'
-import { fetchHistory } from '../../utils/marketData.js'
 import { analyzeTradeVoiceReview, generateTradeVoiceFollowUp } from '../../utils/ai.js'
 import { BEST_FIT_LOOKBACK_MONTH_DEFAULT, BEST_FIT_LOOKBACK_MONTH_OPTIONS } from '../../utils/tradeReviewChart.js'
 import { getTradeReviewState, hasTradeReviewInput, isTradeReviewComplete } from '../../utils/tradeReviewStatus.js'
 import TradeReviewChart from './TradeReviewChart.jsx'
 import SharedChartToolsSettingsModal from '../charts/ChartToolsSettingsModal.jsx'
 import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, Sparkles, Brain, CircleDot, RotateCcw, Mic, MicOff, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Volume2, Square, SlidersHorizontal, Trash2, Maximize2 } from 'lucide-react'
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine } from 'recharts'
 
 // ── Duration helper ───────────────────────────────────────────────────────────
 function tradeDuration(trade) {
@@ -657,100 +655,14 @@ function buildMorningEnvironmentNotes(trade, entry) {
   return notes
 }
 
-function EntryMarketChart({ symbol, trade }) {
-  const [series, setSeries] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  const entryDate = trade.entryDate ? new Date(trade.entryDate) : null
-  const entryDateStr = entryDate ? localDateString(entryDate) : ''
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function load() {
-      if (!entryDate) {
-        setSeries([])
-        setLoading(false)
-        return
-      }
-
-      setLoading(true)
-      setError('')
-      try {
-        const start = new Date(entryDate)
-        start.setDate(start.getDate() - 20)
-        const end = new Date(entryDate)
-        end.setDate(end.getDate() + 10)
-        const bars = await fetchHistory(symbol, start, end)
-        if (cancelled) return
-        setSeries(
-          bars.map(bar => ({
-            ...bar,
-            label: bar.time.slice(5),
-          }))
-        )
-      } catch (err) {
-        if (!cancelled) setError(err.message || 'Failed to load market context.')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    load()
-    return () => { cancelled = true }
-  }, [entryDate, symbol])
-
-  return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-semibold text-white mono">{symbol}</p>
-        <p className="text-[10px] text-gray-500">Entry marker shown</p>
-      </div>
-      {loading ? (
-        <div className="h-28 flex items-center justify-center text-xs text-gray-500">Loading {symbol}…</div>
-      ) : error ? (
-        <div className="h-28 flex items-center justify-center text-xs text-accent-red text-center">{error}</div>
-      ) : series.length === 0 ? (
-        <div className="h-28 flex items-center justify-center text-xs text-gray-500">No {symbol} data</div>
-      ) : (
-        <div className="h-28">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={series} margin={{ top: 4, right: 6, left: -20, bottom: 0 }}>
-              <XAxis dataKey="label" tick={{ fill: '#6b7280', fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={18} />
-              <YAxis hide domain={['dataMin', 'dataMax']} />
-              <Tooltip
-                contentStyle={{ background: '#0f1117', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10 }}
-                labelStyle={{ color: '#9ca3af', fontSize: 11 }}
-                formatter={(value) => [`$${Number(value).toFixed(2)}`, symbol]}
-              />
-              <ReferenceLine x={entryDateStr.slice(5)} stroke="#ffa502" strokeDasharray="3 3" />
-              <Line type="monotone" dataKey="close" stroke="#3d84ff" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function MarketContextSection({ trade }) {
+function MorningEnvironmentSection({ trade }) {
   const { getEntryByDate } = useMorningStore()
   const entryDateStr = trade.entryDate ? trade.entryDate.slice(0, 10) : null
   const morningEntry = entryDateStr ? getEntryByDate(entryDateStr) : null
   const notes = useMemo(() => buildMorningEnvironmentNotes(trade, morningEntry), [trade, morningEntry])
 
   return (
-    <div className="space-y-4">
-      <div>
-        <p className="label mb-2">Market Context</p>
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-          <EntryMarketChart symbol="SPY" trade={trade} />
-          <EntryMarketChart symbol="QQQ" trade={trade} />
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div>
             <p className="label text-white">Morning Environment</p>
@@ -838,7 +750,6 @@ function MarketContextSection({ trade }) {
             No morning journal entry was found for this trade date, so environment context can’t be matched yet.
           </p>
         )}
-      </div>
     </div>
   )
 }
@@ -2112,7 +2023,7 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, onComp
               </div>
             )}
 
-            <MarketContextSection trade={trade} />
+            <MorningEnvironmentSection trade={trade} />
           </div>
         </div>
 
@@ -2203,7 +2114,7 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, onComp
             </div>
           </div>
           <div className="flex-1 min-h-0 rounded-xl border border-white/10 bg-surface-50 p-3 overflow-hidden">
-            <TradeReviewChart trade={trade} chartSettings={chartSettings} onOpenSettings={onOpenChartSettings} />
+            <TradeReviewChart trade={trade} chartSettings={chartSettings} onOpenSettings={onOpenChartSettings} expanded />
           </div>
           <p className="text-[11px] text-gray-600 mt-2">Press Escape to return the chart to the review workspace.</p>
         </div>

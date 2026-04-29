@@ -11,7 +11,13 @@ import {
 import { fetchHistory } from '../../utils/marketData.js'
 import { buildTradeReviewChartData } from '../../utils/tradeReviewChart.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
-import { setVisibleRangeWithRightOffset, WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET } from '../../utils/lightweightChartViewport.js'
+import {
+  buildRightAnchoredZoomRange,
+  getVisibleLogicalRange,
+  setVisibleLogicalRangeWithRightOffset,
+  setVisibleRangeWithRightOffset,
+  WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET,
+} from '../../utils/lightweightChartViewport.js'
 import { WEEKLY_CHART_BARS, sliceWeeklyChartBars } from '../../utils/chartTimeframes.js'
 
 const CHART_OPTIONS = {
@@ -32,13 +38,27 @@ const CHART_OPTIONS = {
     borderColor: 'rgba(95, 99, 106, 0.22)',
     timeVisible: false,
     secondsVisible: false,
+    fixRightEdge: true,
+    rightBarStaysOnScroll: true,
   },
   crosshair: {
     vertLine: { color: 'rgba(43, 48, 55, 0.35)' },
     horzLine: { color: 'rgba(43, 48, 55, 0.35)' },
   },
-  handleScroll: true,
-  handleScale: true,
+  handleScroll: {
+    mouseWheel: false,
+    pressedMouseMove: true,
+    horzTouchDrag: true,
+    vertTouchDrag: false,
+  },
+  handleScale: {
+    mouseWheel: false,
+    pinch: true,
+    axisPressedMouseMove: {
+      time: true,
+      price: false,
+    },
+  },
 }
 
 function chartRangeForTrade(trade) {
@@ -201,20 +221,24 @@ function drawOverlays(canvas, chart, priceSeries, bands, rsGradient = []) {
   }
 }
 
-function LightweightPane({ data, kind, height, chartType, onChartClick, rightOffset }) {
+function LightweightPane({ data, kind, height, chartType, onChartClick, rightOffset, fillParent = false }) {
   const containerRef = useRef(null)
   const chartContainerRef = useRef(null)
   const shadeCanvasRef = useRef(null)
 
   useEffect(() => {
     if (!chartContainerRef.current) return undefined
+    const fallbackHeight = typeof height === 'number' ? height : kind === 'weekly' ? 190 : 350
     const chart = createChart(chartContainerRef.current, {
       ...CHART_OPTIONS,
-      height,
+      height: chartContainerRef.current.clientHeight || fallbackHeight,
       width: chartContainerRef.current.clientWidth,
     })
 
     const candles = kind === 'weekly' ? sliceWeeklyChartBars(data.weeklyCandles) : data.dailyCandles
+    const effectiveRightOffset = kind === 'weekly'
+      ? (rightOffset ?? WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET)
+      : rightOffset
     const candleSeries = chartType === 'hlc'
       ? addHlcBars(chart, candles)
       : addCandles(chart, candles)
@@ -239,11 +263,11 @@ function LightweightPane({ data, kind, height, chartType, onChartClick, rightOff
         scaleMargins: { top: 0.84, bottom: 0 },
       })
       createSeriesMarkers(candleSeries, [...data.dailyAnchorMarkers, ...data.markers])
-      fitToData(chart, data.markers, candles, rightOffset)
+      fitToData(chart, data.markers, candles, effectiveRightOffset)
       redrawShades()
       chart.timeScale().subscribeVisibleTimeRangeChange(redrawShades)
     } else {
-      fitToData(chart, data.markers, candles, rightOffset ?? WEEKLY_LIGHTWEIGHT_RIGHT_OFFSET, WEEKLY_CHART_BARS, false)
+      fitToData(chart, data.markers, candles, effectiveRightOffset, WEEKLY_CHART_BARS, false)
       redrawShades()
       chart.timeScale().subscribeVisibleTimeRangeChange(redrawShades)
     }
@@ -253,8 +277,24 @@ function LightweightPane({ data, kind, height, chartType, onChartClick, rightOff
       : null
     if (clickHandler) chart.subscribeClick(clickHandler)
 
+    const wheelHandler = event => {
+      if (!candles.length || !Number.isFinite(event.deltaY) || event.deltaY === 0) return
+      event.preventDefault()
+
+      const currentRange = getVisibleLogicalRange(chart)
+      const nextRange = buildRightAnchoredZoomRange(currentRange, candles.length, event.deltaY, effectiveRightOffset)
+      if (!nextRange) return
+
+      setVisibleLogicalRangeWithRightOffset(chart, nextRange, effectiveRightOffset)
+      redrawShades()
+    }
+    chartContainerRef.current.addEventListener('wheel', wheelHandler, { passive: false })
+
     const resizeObserver = new ResizeObserver(([entry]) => {
-      chart.applyOptions({ width: Math.floor(entry.contentRect.width), height })
+      chart.applyOptions({
+        width: Math.floor(entry.contentRect.width),
+        height: Math.max(1, Math.floor(entry.contentRect.height || fallbackHeight)),
+      })
       redrawShades()
     })
     resizeObserver.observe(chartContainerRef.current)
@@ -262,13 +302,18 @@ function LightweightPane({ data, kind, height, chartType, onChartClick, rightOff
     return () => {
       if (clickHandler) chart.unsubscribeClick(clickHandler)
       chart.timeScale().unsubscribeVisibleTimeRangeChange(redrawShades)
+      chartContainerRef.current?.removeEventListener('wheel', wheelHandler)
       resizeObserver.disconnect()
       chart.remove()
     }
   }, [chartType, data, height, kind, onChartClick, rightOffset])
 
   return (
-    <div ref={containerRef} className="relative w-full" style={{ height }}>
+    <div
+      ref={containerRef}
+      className={`relative w-full ${fillParent ? 'h-full' : ''}`}
+      style={fillParent ? undefined : { height }}
+    >
       <div ref={chartContainerRef} className="absolute inset-0" />
       <canvas
         ref={shadeCanvasRef}
@@ -279,35 +324,48 @@ function LightweightPane({ data, kind, height, chartType, onChartClick, rightOff
   )
 }
 
-export default function TradeReviewChart({ trade, chartSettings, onOpenSettings }) {
+export default function TradeReviewChart({ trade, chartSettings, onOpenSettings, expanded = false }) {
   const setTradeReviewChartSettings = useSettingsStore(state => state.setTradeReviewChartSettings)
   const tradeReviewManualAnchorsBySymbol = useSettingsStore(state => state.tradeReviewManualAnchorsBySymbol)
   const addTradeReviewManualAnchor = useSettingsStore(state => state.addTradeReviewManualAnchor)
   const updateTradeReviewManualAnchor = useSettingsStore(state => state.updateTradeReviewManualAnchor)
   const removeTradeReviewManualAnchor = useSettingsStore(state => state.removeTradeReviewManualAnchor)
-  const [bars, setBars] = useState([])
-  const [benchmarkBars, setBenchmarkBars] = useState([])
+  const [barsBySymbol, setBarsBySymbol] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [addAnchorMode, setAddAnchorMode] = useState(false)
+  const [activeSymbol, setActiveSymbol] = useState('')
   const chartType = chartSettings?.chartType === 'hlc' ? 'hlc' : 'candlestick'
-  const symbol = String(trade?.symbol || '').trim().toUpperCase()
+  const tradeSymbol = String(trade?.symbol || '').trim().toUpperCase()
+  const benchmarkSymbol = String(chartSettings?.benchmarkSymbol || 'SPY').trim().toUpperCase() || 'SPY'
+  const displaySymbolOptions = useMemo(
+    () => [...new Set([tradeSymbol, 'SPY', 'QQQ'].filter(Boolean))],
+    [tradeSymbol]
+  )
+  const symbol = activeSymbol || tradeSymbol
   const manualAnchors = useMemo(
-    () => tradeReviewManualAnchorsBySymbol?.[symbol] || [],
-    [symbol, tradeReviewManualAnchorsBySymbol]
+    () => tradeReviewManualAnchorsBySymbol?.[tradeSymbol] || [],
+    [tradeSymbol, tradeReviewManualAnchorsBySymbol]
   )
   const ytdEnabled = Boolean(chartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
   const tradeEntryAvwapEnabled = Boolean(chartSettings?.showTradeEntryAvwap)
   const tradeReviewWeeklyRightOffset = Number.isFinite(chartSettings?.tradeReviewWeeklyRightOffset) ? chartSettings.tradeReviewWeeklyRightOffset : 1
   const tradeReviewDailyRightOffset = Number.isFinite(chartSettings?.tradeReviewDailyRightOffset) ? chartSettings.tradeReviewDailyRightOffset : 3
+  const bars = barsBySymbol[symbol] || []
+  const benchmarkBars = barsBySymbol[benchmarkSymbol] || []
+  const isPrimaryTradeSymbol = symbol === tradeSymbol
+
+  useEffect(() => {
+    setActiveSymbol(tradeSymbol)
+    setAddAnchorMode(false)
+  }, [tradeSymbol])
 
   useEffect(() => {
     let cancelled = false
 
     async function load() {
       if (!trade?.symbol) {
-        setBars([])
-        setBenchmarkBars([])
+        setBarsBySymbol({})
         setLoading(false)
         return
       }
@@ -316,13 +374,12 @@ export default function TradeReviewChart({ trade, chartSettings, onOpenSettings 
       setError('')
       try {
         const { start, end } = chartRangeForTrade(trade)
-        const [history, benchmarkHistory] = await Promise.all([
-          fetchHistory(trade.symbol, start, end),
-          fetchHistory(chartSettings?.benchmarkSymbol || 'SPY', start, end),
-        ])
+        const symbolsToLoad = [...new Set([tradeSymbol, 'SPY', 'QQQ', benchmarkSymbol].filter(Boolean))]
+        const series = await Promise.all(
+          symbolsToLoad.map(async currentSymbol => [currentSymbol, await fetchHistory(currentSymbol, start, end)])
+        )
         if (!cancelled) {
-          setBars(history)
-          setBenchmarkBars(benchmarkHistory)
+          setBarsBySymbol(Object.fromEntries(series))
         }
       } catch (err) {
         if (!cancelled) setError(err.message || 'Failed to load chart data.')
@@ -333,7 +390,7 @@ export default function TradeReviewChart({ trade, chartSettings, onOpenSettings 
 
     load()
     return () => { cancelled = true }
-  }, [trade, chartSettings?.benchmarkSymbol])
+  }, [benchmarkSymbol, trade, tradeSymbol])
 
   const data = useMemo(
     () => buildTradeReviewChartData(bars, trade, benchmarkBars, chartSettings, tradeReviewManualAnchorsBySymbol),
@@ -352,12 +409,12 @@ export default function TradeReviewChart({ trade, chartSettings, onOpenSettings 
   }
 
   function handleChartClick(param, dailyBars) {
-    if (!addAnchorMode || !symbol) return
+    if (!addAnchorMode || !tradeSymbol || !isPrimaryTradeSymbol) return
     const anchorDate = nearestDailyBarAtOrBefore(param?.time, dailyBars)
     if (!anchorDate) return
 
-    addTradeReviewManualAnchor(symbol, {
-      id: `manual-${symbol.toLowerCase()}-${anchorDate}-${Date.now()}`,
+    addTradeReviewManualAnchor(tradeSymbol, {
+      id: `manual-${tradeSymbol.toLowerCase()}-${anchorDate}-${Date.now()}`,
       anchorDate,
       label: formatAnchorLabel(anchorDate),
       enabled: true,
@@ -367,14 +424,32 @@ export default function TradeReviewChart({ trade, chartSettings, onOpenSettings 
   }
 
   return (
-    <div className="rounded-lg overflow-hidden border border-black/20 bg-[#d7d7d7] shadow-sm">
+    <div className={`overflow-hidden rounded-lg border border-black/20 bg-[#d7d7d7] shadow-sm ${expanded ? 'flex h-full flex-col' : ''}`}>
       <div className="px-2 py-1.5 border-b border-black/15 text-[#242830]">
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-xs font-semibold mono">{trade.symbol} · Review Chart</p>
-            <p className="text-[10px] text-[#505760]">Weekly RS · Daily anchored RS · KC13/34/65</p>
+            <p className="text-[10px] text-[#505760]">{symbol} view · Weekly RS · Daily anchored RS · KC13/34/65</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="inline-flex rounded-md border border-black/10 bg-white/70 p-0.5">
+              {displaySymbolOptions.map(option => (
+                <button
+                  key={option}
+                  onClick={() => {
+                    setActiveSymbol(option)
+                    setAddAnchorMode(false)
+                  }}
+                  className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-colors ${
+                    symbol === option
+                      ? 'bg-[#242830] text-white'
+                      : 'text-[#505760] hover:text-[#242830]'
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">
               Anchor {data.dailyRsAnchorDate || '—'}
             </span>
@@ -400,11 +475,13 @@ export default function TradeReviewChart({ trade, chartSettings, onOpenSettings 
             </button>
             <button
               onClick={() => setAddAnchorMode(current => !current)}
+              disabled={!isPrimaryTradeSymbol}
               className={`px-2 py-0.5 text-[10px] font-semibold rounded border transition-colors ${
                 addAnchorMode
                   ? 'bg-[#22c55e]/20 border-[#22c55e]/40 text-[#14532d]'
                   : 'bg-white/70 border-black/10 text-[#505760]'
-              }`}
+              } ${!isPrimaryTradeSymbol ? 'cursor-not-allowed opacity-50' : ''}`}
+              title={isPrimaryTradeSymbol ? 'Add a manual anchor to this trade chart' : `Switch back to ${tradeSymbol} to add manual anchors`}
             >
               {addAnchorMode ? 'Click Chart…' : 'Add Anchor'}
             </button>
@@ -438,7 +515,12 @@ export default function TradeReviewChart({ trade, chartSettings, onOpenSettings 
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-white/80 border border-black/10 text-[#343941]">USD</span>
           </div>
         </div>
-        {!!manualAnchors.length && (
+        {!isPrimaryTradeSymbol ? (
+          <div className="mt-2 text-[10px] text-[#505760]">
+            Showing {symbol} over the same trade window, with your entry and exit timing preserved.
+          </div>
+        ) : null}
+        {isPrimaryTradeSymbol && !!manualAnchors.length && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {manualAnchors.map(anchor => (
               <div
@@ -455,13 +537,13 @@ export default function TradeReviewChart({ trade, chartSettings, onOpenSettings 
                 />
                 <span>{anchor.label}</span>
                 <button
-                  onClick={() => updateTradeReviewManualAnchor(symbol, anchor.id, { enabled: !anchor.enabled })}
+                  onClick={() => updateTradeReviewManualAnchor(tradeSymbol, anchor.id, { enabled: !anchor.enabled })}
                   className="text-[9px] uppercase tracking-wide text-[#505760] hover:text-[#242830]"
                 >
                   {anchor.enabled ? 'Hide' : 'Show'}
                 </button>
                 <button
-                  onClick={() => removeTradeReviewManualAnchor(symbol, anchor.id)}
+                  onClick={() => removeTradeReviewManualAnchor(tradeSymbol, anchor.id)}
                   className="text-[11px] text-[#7a4b4b] hover:text-[#3b1d1d]"
                   aria-label={`Remove ${anchor.label}`}
                 >
@@ -474,25 +556,41 @@ export default function TradeReviewChart({ trade, chartSettings, onOpenSettings 
       </div>
 
       {loading ? (
-        <div className="h-[520px] flex items-center justify-center text-xs text-[#505760]">Loading chart…</div>
+        <div className={`${expanded ? 'flex-1 min-h-0' : 'h-[520px]'} flex items-center justify-center text-xs text-[#505760]`}>Loading chart…</div>
       ) : error ? (
-        <div className="h-[520px] flex items-center justify-center text-xs text-accent-red text-center px-4">{error}</div>
+        <div className={`${expanded ? 'flex-1 min-h-0' : 'h-[520px]'} flex items-center justify-center text-xs text-accent-red text-center px-4`}>{error}</div>
       ) : bars.length === 0 ? (
-        <div className="h-[520px] flex items-center justify-center text-xs text-[#505760]">No chart data for {trade.symbol}</div>
+        <div className={`${expanded ? 'flex-1 min-h-0' : 'h-[520px]'} flex items-center justify-center text-xs text-[#505760]`}>No chart data for {symbol}</div>
       ) : (
-        <div>
-          <div className="relative border-b-4 border-[#242424]">
+        <div className={expanded ? 'flex min-h-0 flex-1 flex-col' : ''}>
+          <div className={`relative border-b-4 border-[#242424] ${expanded ? 'min-h-[240px] flex-[0.42]' : ''}`}>
             <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1W</span>
-            <LightweightPane data={data} kind="weekly" height={190} chartType={chartType} onChartClick={handleChartClick} rightOffset={tradeReviewWeeklyRightOffset} />
+            <LightweightPane
+              data={data}
+              kind="weekly"
+              height={190}
+              fillParent={expanded}
+              chartType={chartType}
+              onChartClick={handleChartClick}
+              rightOffset={tradeReviewWeeklyRightOffset}
+            />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
-              {trade.symbol}
+              {symbol}
             </div>
           </div>
-          <div className="relative">
+          <div className={`relative ${expanded ? 'min-h-[360px] flex-1' : ''}`}>
             <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1D</span>
-            <LightweightPane data={data} kind="daily" height={350} chartType={chartType} onChartClick={handleChartClick} rightOffset={tradeReviewDailyRightOffset} />
+            <LightweightPane
+              data={data}
+              kind="daily"
+              height={350}
+              fillParent={expanded}
+              chartType={chartType}
+              onChartClick={handleChartClick}
+              rightOffset={tradeReviewDailyRightOffset}
+            />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
-              {trade.symbol}
+              {symbol}
             </div>
           </div>
         </div>

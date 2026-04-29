@@ -45,3 +45,21 @@ export function applyRightAnchoredLogicalRange(chart, barCount, visibleBars, rig
     rightOffset
   )
 }
+
+export function buildRightAnchoredZoomRange(currentRange, barCount, zoomDelta, rightOffset = DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET) {
+  const safeBarCount = Math.max(0, Number(barCount) || 0)
+  if (!safeBarCount || !currentRange) return null
+
+  const currentSpan = Math.max(
+    MIN_LIGHTWEIGHT_VISIBLE_BARS,
+    Math.abs(Number(currentRange.to) - Number(currentRange.from)) || MIN_LIGHTWEIGHT_VISIBLE_BARS
+  )
+  const direction = Number(zoomDelta) < 0 ? 'in' : 'out'
+  const zoomFactor = direction === 'in' ? 0.84 : 1.2
+  const nextVisibleBars = Math.max(
+    MIN_LIGHTWEIGHT_VISIBLE_BARS,
+    Math.min(safeBarCount + rightOffset + MIN_LIGHTWEIGHT_VISIBLE_BARS, Math.round(currentSpan * zoomFactor))
+  )
+
+  return buildRightAnchoredLogicalRange(safeBarCount, nextVisibleBars, rightOffset)
+}
