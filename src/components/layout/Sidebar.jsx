@@ -1,4 +1,5 @@
 import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, Sparkles, ScanLine, Sun, GitCompare, FlaskConical, Layers, Globe, Trophy, Bot, PanelLeftClose, PanelLeftOpen, CandlestickChart } from 'lucide-react'
+import { useState } from 'react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import AppLogo from './AppLogo.jsx'
 import { getAppVersionLabel } from '../../utils/appVersion.js'
@@ -39,6 +40,7 @@ export default function Sidebar({
   setCollapsed,
 }) {
   const { getAccounts } = useTradeStore()
+  const [hoveredNavTooltip, setHoveredNavTooltip] = useState(null)
   const accounts = getAccounts() // ['All', 'IBKR', 'Schwab', ...]
   const realAccounts = accounts.filter(a => a !== 'All')
   const versionLabel = getAppVersionLabel({
@@ -51,6 +53,20 @@ export default function Sidebar({
   const getColor = (accountName) => {
     const idx = realAccounts.indexOf(accountName)
     return ACCOUNT_COLORS[idx % ACCOUNT_COLORS.length] || ACCOUNT_COLORS[0]
+  }
+
+  const showCollapsedTooltip = (event, label) => {
+    if (!collapsed) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    setHoveredNavTooltip({
+      label,
+      top: rect.top + rect.height / 2,
+      left: rect.right + 12,
+    })
+  }
+
+  const hideCollapsedTooltip = () => {
+    setHoveredNavTooltip(null)
   }
 
   return (
@@ -140,6 +156,10 @@ export default function Sidebar({
                 onClick={() => setPage(id)}
                 title={collapsed ? label : undefined}
                 aria-label={label}
+                onMouseEnter={event => showCollapsedTooltip(event, label)}
+                onMouseLeave={hideCollapsedTooltip}
+                onFocus={event => showCollapsedTooltip(event, label)}
+                onBlur={hideCollapsedTooltip}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 lg:px-3.5 lg:py-3 rounded-xl text-[13px] lg:text-sm font-medium transition-all
                   ${collapsed ? 'justify-center' : ''}
                   ${active
@@ -150,15 +170,19 @@ export default function Sidebar({
                 <Icon size={18} className={`shrink-0 ${active ? 'text-accent-blue' : ''}`} />
                 {!collapsed && <span className="hidden lg:block">{label}</span>}
               </button>
-              {collapsed && (
-                <div className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-lg border border-white/10 bg-surface-100/95 px-2.5 py-1.5 text-xs font-medium text-white shadow-xl shadow-black/30 backdrop-blur group-hover:block">
-                  {label}
-                </div>
-              )}
             </div>
           )
         })}
       </nav>
+
+      {collapsed && hoveredNavTooltip ? (
+        <div
+          className="pointer-events-none fixed z-[120] -translate-y-1/2 whitespace-nowrap rounded-lg border border-white/10 bg-surface-100/95 px-2.5 py-1.5 text-xs font-medium text-white shadow-xl shadow-black/30 backdrop-blur"
+          style={{ top: hoveredNavTooltip.top, left: hoveredNavTooltip.left }}
+        >
+          {hoveredNavTooltip.label}
+        </div>
+      ) : null}
 
       {/* ── Mobile account select — pinned above footer ── */}
       {realAccounts.length > 0 && (
