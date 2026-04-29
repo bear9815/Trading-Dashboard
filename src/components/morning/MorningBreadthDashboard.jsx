@@ -4,20 +4,25 @@ import {
   BarChart3,
   ChevronDown,
   ChevronUp,
+  Maximize2,
+  RotateCcw,
   Gauge,
   RefreshCw,
   SlidersHorizontal,
   TrendingDown,
   TrendingUp,
+  X,
 } from 'lucide-react'
 import {
   Area,
   AreaChart,
+  Brush,
   CartesianGrid,
   Cell,
   ComposedChart,
   Line,
   LineChart,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Scatter,
@@ -48,6 +53,13 @@ import {
   buildListBreadthSymbolSnapshots,
 } from '../../utils/listBreadth.js'
 import { resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
+import {
+  applyTimeframeToRows,
+  BREADTH_TIMEFRAMES,
+  buildDragZoomRange,
+  buildInitialBrushRange,
+  normalizeBrushRange,
+} from '../../utils/morningBreadthChartControls.js'
 import BreadthTableSettingsModal from './BreadthTableSettingsModal.jsx'
 import { useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
 
@@ -259,6 +271,120 @@ function mergeHistory(historiesById) {
   return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-BREADTH_TABLE_SESSION_COUNT)
 }
 
+function SeriesTogglePills({ items, visibility, onToggle }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {items.map(item => {
+        const active = visibility[item.key] !== false
+        return (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => onToggle(item.key)}
+            className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-all"
+            style={{
+              borderColor: active ? `${item.color}55` : 'rgba(255,255,255,0.08)',
+              background: active ? `${item.color}18` : 'rgba(255,255,255,0.03)',
+              color: active ? item.color : '#6b7280',
+              opacity: active ? 1 : 0.7,
+            }}
+          >
+            <span className="h-2 w-2 rounded-full" style={{ background: active ? item.color : '#4b5563' }} />
+            {item.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function ChartPopoutModal({ title, children, onClose }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div className="w-full max-w-7xl overflow-auto rounded-2xl border border-white/10 bg-[#0f1117] p-5 shadow-2xl" style={{ maxHeight: '94vh' }}>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-white">{title}</p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200"
+            aria-label={`Close ${title}`}
+          >
+            <X size={15} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function useInteractiveChartRows(rows, timeframe) {
+  const timeframeRows = useMemo(
+    () => applyTimeframeToRows(rows, timeframe),
+    [rows, timeframe]
+  )
+  const [brushRange, setBrushRange] = useState(() => buildInitialBrushRange(timeframeRows, { zoomed: false }))
+  const [dragRange, setDragRange] = useState({ startLabel: null, endLabel: null })
+
+  useEffect(() => {
+    setBrushRange(buildInitialBrushRange(timeframeRows, { zoomed: false }))
+    setDragRange({ startLabel: null, endLabel: null })
+  }, [timeframe, timeframeRows])
+
+  const handleBrushChange = useCallback((nextRange = {}) => {
+    setBrushRange(current => normalizeBrushRange(timeframeRows, {
+      ...current,
+      ...nextRange,
+      zoomed: true,
+    }))
+  }, [timeframeRows])
+
+  const handleMouseDown = useCallback((state) => {
+    if (!state?.activeLabel) return
+    setDragRange({ startLabel: state.activeLabel, endLabel: state.activeLabel })
+  }, [])
+
+  const handleMouseMove = useCallback((state) => {
+    if (!state?.activeLabel) return
+    setDragRange(current => {
+      if (!current.startLabel) return current
+      return { ...current, endLabel: state.activeLabel }
+    })
+  }, [])
+
+  const handleMouseUp = useCallback(() => {
+    setBrushRange(current => (
+      dragRange.startLabel
+        ? buildDragZoomRange(timeframeRows, dragRange.startLabel, dragRange.endLabel)
+        : current
+    ))
+    setDragRange({ startLabel: null, endLabel: null })
+  }, [dragRange.endLabel, dragRange.startLabel, timeframeRows])
+
+  const resetZoom = useCallback(() => {
+    setBrushRange(buildInitialBrushRange(timeframeRows, { zoomed: false }))
+    setDragRange({ startLabel: null, endLabel: null })
+  }, [timeframeRows])
+
+  return {
+    timeframeRows,
+    brushRange,
+    dragRange,
+    visibleSessions: Math.max(0, brushRange.endIndex - brushRange.startIndex + 1),
+    handleBrushChange,
+    handleMouseDown,
+    handleMouseMove,
+    handleMouseUp,
+    resetZoom,
+  }
+}
+
 function buildMorningRead(market, liquidTrend, liquid) {
   if (!market && !liquidTrend && !liquid) return 'Import Market Leaders, Liquid Trend, and Liquid lists in Growth Research to unlock breadth reads.'
   if (!market) return 'Market Leaders need data before breadth can be compared cleanly.'
@@ -328,117 +454,281 @@ function StateVectorCards({ cards = [] }) {
   )
 }
 
-function BreadthPhysicsChart({ rows }) {
+function BreadthPhysicsChart({ rows, timeframe = '6M' }) {
+  const { timeframeRows, brushRange, dragRange, visibleSessions, handleBrushChange, handleMouseDown, handleMouseMove, handleMouseUp, resetZoom } = useInteractiveChartRows(rows, timeframe)
+  const [popoutOpen, setPopoutOpen] = useState(false)
+  const [seriesVisibility, setSeriesVisibility] = useState({
+    damage: true,
+    level: true,
+    velocity: true,
+    acceleration: true,
+  })
+  const series = [
+    { key: 'level', label: 'Breadth Level', color: '#3d84ff' },
+    { key: 'velocity', label: 'Velocity', color: '#22c55e' },
+    { key: 'acceleration', label: 'Acceleration', color: '#f5c542' },
+    { key: 'damage', label: 'Damage', color: '#ff6b6b' },
+  ]
+
+  const chart = (height = 330) => (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart
+        data={timeframeRows}
+        margin={{ top: 8, right: 16, left: -8, bottom: 0 }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+      >
+        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+        <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={34} />
+        <YAxis yAxisId="score" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+        <YAxis yAxisId="impulse" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+        <ReferenceLine yAxisId="score" y={70} stroke="#22c55e44" strokeDasharray="4 4" />
+        <ReferenceLine yAxisId="score" y={52} stroke="#ffffff22" strokeDasharray="4 4" />
+        <ReferenceLine yAxisId="score" y={38} stroke="#ff475744" strokeDasharray="4 4" />
+        <Tooltip
+          contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+          formatter={(value, name) => {
+            if (name === 'Damage') return [fmtPct(Number(value)), name]
+            if (name === 'Velocity' || name === 'Acceleration') return [fmtSigned(Number(value), 1, ' pts'), name]
+            return [Number.isFinite(Number(value)) ? Number(value).toFixed(0) : '—', name]
+          }}
+        />
+        {dragRange.startLabel && dragRange.endLabel && dragRange.startLabel !== dragRange.endLabel && (
+          <ReferenceArea yAxisId="score" x1={dragRange.startLabel} x2={dragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
+        )}
+        {seriesVisibility.damage && <Area yAxisId="score" type="monotone" dataKey="damagePressure" name="Damage" stroke="#ff475755" fill="#ff47571f" dot={false} />}
+        {seriesVisibility.level && <Line yAxisId="score" type="monotone" dataKey="level" name="Breadth Level" stroke="#3d84ff" strokeWidth={3} dot={false} />}
+        {seriesVisibility.velocity && <Line yAxisId="impulse" type="monotone" dataKey="velocity10" name="Velocity" stroke="#22c55e" strokeWidth={2} dot={false} />}
+        {seriesVisibility.acceleration && <Line yAxisId="impulse" type="monotone" dataKey="acceleration20" name="Acceleration" stroke="#f5c542" strokeWidth={2} dot={false} />}
+        <Brush
+          dataKey="date"
+          height={28}
+          stroke="rgba(61,132,255,0.45)"
+          fill="rgba(15,17,23,0.95)"
+          travellerWidth={8}
+          startIndex={brushRange.startIndex}
+          endIndex={brushRange.endIndex}
+          onChange={handleBrushChange}
+        />
+      </ComposedChart>
+    </ResponsiveContainer>
+  )
+
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-white">Breadth State Vector</p>
-          <p className="mt-1 text-xs text-gray-600">Level, impulse, acceleration, and damage across the last two years.</p>
+    <>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-white">Breadth State Vector</p>
+            <p className="mt-1 text-xs text-gray-600">Level, impulse, acceleration, and damage across the selected timeframe.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold text-gray-500">
+              {visibleSessions} visible
+            </p>
+            <button type="button" onClick={resetZoom} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1 text-[11px] font-semibold text-gray-400 hover:text-gray-200">
+              <RotateCcw size={12} />
+              Reset Zoom
+            </button>
+            <button type="button" onClick={() => setPopoutOpen(true)} className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200" aria-label="Open breadth state vector popout">
+              <Maximize2 size={14} />
+            </button>
+          </div>
         </div>
-        <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold text-gray-500">
-          {rows.length} sessions
-        </p>
+        <SeriesTogglePills items={series} visibility={seriesVisibility} onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))} />
+        <div className="mt-3">
+          {chart()}
+        </div>
       </div>
-      <ResponsiveContainer width="100%" height={330}>
-        <ComposedChart data={rows} margin={{ top: 8, right: 16, left: -8, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
-          <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={34} />
-          <YAxis yAxisId="score" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
-          <YAxis yAxisId="impulse" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
-          <ReferenceLine yAxisId="score" y={70} stroke="#22c55e44" strokeDasharray="4 4" />
-          <ReferenceLine yAxisId="score" y={52} stroke="#ffffff22" strokeDasharray="4 4" />
-          <ReferenceLine yAxisId="score" y={38} stroke="#ff475744" strokeDasharray="4 4" />
-          <Tooltip
-            contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
-            formatter={(value, name) => {
-              if (name === 'Damage') return [fmtPct(Number(value)), name]
-              if (name === 'Velocity' || name === 'Acceleration') return [fmtSigned(Number(value), 1, ' pts'), name]
-              return [Number.isFinite(Number(value)) ? Number(value).toFixed(0) : '—', name]
-            }}
-          />
-          <Area yAxisId="score" type="monotone" dataKey="damagePressure" name="Damage" stroke="#ff475755" fill="#ff47571f" dot={false} />
-          <Line yAxisId="score" type="monotone" dataKey="level" name="Breadth Level" stroke="#3d84ff" strokeWidth={3} dot={false} />
-          <Line yAxisId="impulse" type="monotone" dataKey="velocity10" name="Velocity" stroke="#22c55e" strokeWidth={2} dot={false} />
-          <Line yAxisId="impulse" type="monotone" dataKey="acceleration20" name="Acceleration" stroke="#f5c542" strokeWidth={2} dot={false} />
-        </ComposedChart>
-      </ResponsiveContainer>
-    </div>
+      {popoutOpen && (
+        <ChartPopoutModal title="Breadth State Vector" onClose={() => setPopoutOpen(false)}>
+          <SeriesTogglePills items={series} visibility={seriesVisibility} onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))} />
+          <div className="mt-4">
+            {chart(520)}
+          </div>
+        </ChartPopoutModal>
+      )}
+    </>
   )
 }
 
-function ParticipationStackChart({ rows }) {
+function ParticipationStackChart({ rows, timeframe = '6M' }) {
+  const { timeframeRows, brushRange, dragRange, visibleSessions, handleBrushChange, handleMouseDown, handleMouseMove, handleMouseUp, resetZoom } = useInteractiveChartRows(rows, timeframe)
+  const [popoutOpen, setPopoutOpen] = useState(false)
+  const [seriesVisibility, setSeriesVisibility] = useState({
+    participation: true,
+    structure: true,
+    leaders5dma: true,
+  })
+  const series = [
+    { key: 'participation', label: '20DMA Participation', color: '#22c55e' },
+    { key: 'structure', label: 'AVWAP Structure', color: '#3d84ff' },
+    { key: 'leaders5dma', label: 'Leaders 5DMA', color: '#f5c542' },
+  ]
+
+  const chart = (height = 285) => (
+    <ResponsiveContainer width="100%" height={height}>
+      <AreaChart
+        data={timeframeRows}
+        margin={{ top: 8, right: 16, left: -8, bottom: 0 }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+      >
+        <defs>
+          <linearGradient id="breadthParticipation" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#22c55e" stopOpacity={0.34} />
+            <stop offset="95%" stopColor="#22c55e" stopOpacity={0.02} />
+          </linearGradient>
+          <linearGradient id="breadthStructure" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor="#3d84ff" stopOpacity={0.3} />
+            <stop offset="95%" stopColor="#3d84ff" stopOpacity={0.02} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+        <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={34} />
+        <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+        <ReferenceLine y={80} stroke="#f5c54255" strokeDasharray="4 4" />
+        <ReferenceLine y={50} stroke="#ffffff22" strokeDasharray="4 4" />
+        <Tooltip contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }} formatter={(value, name) => [fmtPct(Number(value)), name]} />
+        {dragRange.startLabel && dragRange.endLabel && dragRange.startLabel !== dragRange.endLabel && (
+          <ReferenceArea x1={dragRange.startLabel} x2={dragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
+        )}
+        {seriesVisibility.participation && <Area type="monotone" dataKey="participation" name="20DMA Participation" stroke="#22c55e" fill="url(#breadthParticipation)" strokeWidth={2} dot={false} />}
+        {seriesVisibility.structure && <Area type="monotone" dataKey="structure" name="AVWAP Structure" stroke="#3d84ff" fill="url(#breadthStructure)" strokeWidth={2} dot={false} />}
+        {seriesVisibility.leaders5dma && <Line type="monotone" dataKey="market.sma5" name="Leaders 5DMA" stroke="#f5c542" strokeWidth={1.8} dot={false} />}
+        <Brush
+          dataKey="date"
+          height={28}
+          stroke="rgba(61,132,255,0.45)"
+          fill="rgba(15,17,23,0.95)"
+          travellerWidth={8}
+          startIndex={brushRange.startIndex}
+          endIndex={brushRange.endIndex}
+          onChange={handleBrushChange}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  )
+
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-      <div className="mb-3">
-        <p className="text-sm font-semibold text-white">Participation Stack</p>
-        <p className="mt-1 text-xs text-gray-600">Breadth is strongest when short-term participation, AVWAP structure, and distance all agree.</p>
+    <>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-white">Participation Stack</p>
+            <p className="mt-1 text-xs text-gray-600">Breadth is strongest when short-term participation, AVWAP structure, and distance all agree.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold text-gray-500">
+              {visibleSessions} visible
+            </p>
+            <button type="button" onClick={resetZoom} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1 text-[11px] font-semibold text-gray-400 hover:text-gray-200">
+              <RotateCcw size={12} />
+              Reset Zoom
+            </button>
+            <button type="button" onClick={() => setPopoutOpen(true)} className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200" aria-label="Open participation stack popout">
+              <Maximize2 size={14} />
+            </button>
+          </div>
+        </div>
+        <SeriesTogglePills items={series} visibility={seriesVisibility} onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))} />
+        <div className="mt-3">
+          {chart()}
+        </div>
       </div>
-      <ResponsiveContainer width="100%" height={285}>
-        <AreaChart data={rows} margin={{ top: 8, right: 16, left: -8, bottom: 0 }}>
-          <defs>
-            <linearGradient id="breadthParticipation" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#22c55e" stopOpacity={0.34} />
-              <stop offset="95%" stopColor="#22c55e" stopOpacity={0.02} />
-            </linearGradient>
-            <linearGradient id="breadthStructure" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#3d84ff" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="#3d84ff" stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
-          <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={34} />
-          <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
-          <ReferenceLine y={80} stroke="#f5c54255" strokeDasharray="4 4" />
-          <ReferenceLine y={50} stroke="#ffffff22" strokeDasharray="4 4" />
-          <Tooltip contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }} formatter={(value, name) => [fmtPct(Number(value)), name]} />
-          <Area type="monotone" dataKey="participation" name="20DMA Participation" stroke="#22c55e" fill="url(#breadthParticipation)" strokeWidth={2} dot={false} />
-          <Area type="monotone" dataKey="structure" name="AVWAP Structure" stroke="#3d84ff" fill="url(#breadthStructure)" strokeWidth={2} dot={false} />
-          <Line type="monotone" dataKey="market.sma5" name="Leaders 5DMA" stroke="#f5c542" strokeWidth={1.8} dot={false} />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
+      {popoutOpen && (
+        <ChartPopoutModal title="Participation Stack" onClose={() => setPopoutOpen(false)}>
+          <SeriesTogglePills items={series} visibility={seriesVisibility} onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))} />
+          <div className="mt-4">
+            {chart(500)}
+          </div>
+        </ChartPopoutModal>
+      )}
+    </>
   )
 }
 
-function PhaseSpaceChart({ rows }) {
-  const data = rows.filter(row => Number.isFinite(row.level) && Number.isFinite(row.velocity10))
+function PhaseSpaceChart({ rows, timeframe = '6M' }) {
+  const [popoutOpen, setPopoutOpen] = useState(false)
+  const data = applyTimeframeToRows(rows, timeframe).filter(row => Number.isFinite(row.level) && Number.isFinite(row.velocity10))
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-      <div className="mb-3">
-        <p className="text-sm font-semibold text-white">Phase Space</p>
-        <p className="mt-1 text-xs text-gray-600">A physics-style view: breadth level on Y, impulse on X. Upper-right is broad momentum; lower-left is distribution.</p>
+    <>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-white">Phase Space</p>
+            <p className="mt-1 text-xs text-gray-600">A physics-style view: breadth level on Y, impulse on X. Upper-right is broad momentum; lower-left is distribution.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold text-gray-500">
+              {data.length} sessions
+            </p>
+            <button type="button" onClick={() => setPopoutOpen(true)} className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200" aria-label="Open phase space popout">
+              <Maximize2 size={14} />
+            </button>
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={285}>
+          <ScatterChart margin={{ top: 10, right: 18, left: -8, bottom: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+            <XAxis type="number" dataKey="velocity10" name="10D Velocity" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={value => `${value}`} />
+            <YAxis type="number" dataKey="level" name="Breadth Level" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+            <ZAxis range={[35, 90]} />
+            <ReferenceLine x={0} stroke="#ffffff22" strokeDasharray="4 4" />
+            <ReferenceLine y={52} stroke="#ffffff22" strokeDasharray="4 4" />
+            <Tooltip
+              cursor={{ strokeDasharray: '3 3' }}
+              contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+              formatter={(value, name) => [name === 'Breadth Level' ? `${Number(value).toFixed(0)}/100` : fmtSigned(Number(value), 1, ' pts'), name]}
+              labelFormatter={(_, payload) => {
+                const row = payload?.[0]?.payload
+                return row ? `${row.date} · ${row.phase}` : ''
+              }}
+            />
+            <Scatter data={data} dataKey="level">
+              {data.map(row => (
+                <Cell key={row.date} fill={BREADTH_PHASE_COLOR_BY_KEY[row.phase] || '#94a3b8'} fillOpacity={row === data.at(-1) ? 1 : 0.48} />
+              ))}
+            </Scatter>
+          </ScatterChart>
+        </ResponsiveContainer>
       </div>
-      <ResponsiveContainer width="100%" height={285}>
-        <ScatterChart margin={{ top: 10, right: 18, left: -8, bottom: 4 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
-          <XAxis type="number" dataKey="velocity10" name="10D Velocity" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={value => `${value}`} />
-          <YAxis type="number" dataKey="level" name="Breadth Level" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
-          <ZAxis range={[35, 90]} />
-          <ReferenceLine x={0} stroke="#ffffff22" strokeDasharray="4 4" />
-          <ReferenceLine y={52} stroke="#ffffff22" strokeDasharray="4 4" />
-          <Tooltip
-            cursor={{ strokeDasharray: '3 3' }}
-            contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
-            formatter={(value, name) => [name === 'Breadth Level' ? `${Number(value).toFixed(0)}/100` : fmtSigned(Number(value), 1, ' pts'), name]}
-            labelFormatter={(_, payload) => {
-              const row = payload?.[0]?.payload
-              return row ? `${row.date} · ${row.phase}` : ''
-            }}
-          />
-          <Scatter data={data} dataKey="level">
-            {data.map(row => (
-              <Cell key={row.date} fill={BREADTH_PHASE_COLOR_BY_KEY[row.phase] || '#94a3b8'} fillOpacity={row === data.at(-1) ? 1 : 0.48} />
-            ))}
-          </Scatter>
-        </ScatterChart>
-      </ResponsiveContainer>
-    </div>
+      {popoutOpen && (
+        <ChartPopoutModal title="Phase Space" onClose={() => setPopoutOpen(false)}>
+          <ResponsiveContainer width="100%" height={560}>
+            <ScatterChart margin={{ top: 10, right: 18, left: -8, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+              <XAxis type="number" dataKey="velocity10" name="10D Velocity" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={value => `${value}`} />
+              <YAxis type="number" dataKey="level" name="Breadth Level" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+              <ZAxis range={[45, 110]} />
+              <ReferenceLine x={0} stroke="#ffffff22" strokeDasharray="4 4" />
+              <ReferenceLine y={52} stroke="#ffffff22" strokeDasharray="4 4" />
+              <Tooltip
+                cursor={{ strokeDasharray: '3 3' }}
+                contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+                formatter={(value, name) => [name === 'Breadth Level' ? `${Number(value).toFixed(0)}/100` : fmtSigned(Number(value), 1, ' pts'), name]}
+                labelFormatter={(_, payload) => {
+                  const row = payload?.[0]?.payload
+                  return row ? `${row.date} · ${row.phase}` : ''
+                }}
+              />
+              <Scatter data={data} dataKey="level">
+                {data.map(row => (
+                  <Cell key={`popout-${row.date}`} fill={BREADTH_PHASE_COLOR_BY_KEY[row.phase] || '#94a3b8'} fillOpacity={row === data.at(-1) ? 1 : 0.55} />
+                ))}
+              </Scatter>
+            </ScatterChart>
+          </ResponsiveContainer>
+        </ChartPopoutModal>
+      )}
+    </>
   )
 }
 
-function RegimeTimeline({ rows }) {
-  const recent = rows.slice(-126)
+function RegimeTimeline({ rows, timeframe = '6M' }) {
+  const recent = applyTimeframeToRows(rows, timeframe)
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -992,8 +1282,15 @@ export default function MorningBreadthDashboard() {
   const { trades } = useTradeStore()
   const { tradeReviewChartSettings, breadthTableSettings, setBreadthTableSettings, excludedSymbols } = useSettingsStore()
   const [activeBreadthView, setActiveBreadthView] = useState('overview')
+  const [activeTimeframe, setActiveTimeframe] = useState('6M')
   const [metricFamily, setMetricFamily] = useState('sma')
   const [chartCollapsed, setChartCollapsed] = useState(false)
+  const [historyPopoutOpen, setHistoryPopoutOpen] = useState(false)
+  const [historySeriesVisibility, setHistorySeriesVisibility] = useState({
+    market: true,
+    liquidTrend: true,
+    liquid: true,
+  })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -1107,6 +1404,17 @@ export default function MorningBreadthDashboard() {
     }, {}),
     [historyBarsBySymbol, symbolsById]
   )
+  const {
+    timeframeRows: filteredChartData,
+    brushRange: historyBrushRange,
+    dragRange: historyDragRange,
+    visibleSessions: historyVisibleSessions,
+    handleBrushChange: handleHistoryBrushChange,
+    handleMouseDown: handleHistoryMouseDown,
+    handleMouseMove: handleHistoryMouseMove,
+    handleMouseUp: handleHistoryMouseUp,
+    resetZoom: resetHistoryZoom,
+  } = useInteractiveChartRows(chartData, activeTimeframe)
   const activeMetric = METRIC_FAMILIES.find(metric => metric.id === metricFamily) || METRIC_FAMILIES[0]
   const morningRead = buildMorningRead(marketLatest, liquidTrendLatest, liquidLatest)
 
@@ -1167,6 +1475,29 @@ export default function MorningBreadthDashboard() {
 
       {activeBreadthView === 'overview' ? (
         <>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-white">Chart Controls</p>
+            <p className="mt-1 text-xs text-gray-600">Use timeframe presets, drag across charts to zoom, and open popouts when you need more room.</p>
+          </div>
+          <div className="inline-flex rounded-xl border border-white/10 bg-white/[0.02] p-1">
+            {BREADTH_TIMEFRAMES.map(option => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setActiveTimeframe(option.id)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                  activeTimeframe === option.id ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         {BREADTH_LISTS.map(config => (
           <ListScoreCard key={config.id} label={config.label} entry={latestById[config.id]} tone={config.tone} />
@@ -1177,14 +1508,14 @@ export default function MorningBreadthDashboard() {
       <StateVectorCards cards={breadthSignalSummary.cards} />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <BreadthPhysicsChart rows={breadthStateRows} />
-        <ParticipationStackChart rows={breadthStateRows} />
+        <BreadthPhysicsChart rows={breadthStateRows} timeframe={activeTimeframe} />
+        <ParticipationStackChart rows={breadthStateRows} timeframe={activeTimeframe} />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <PhaseSpaceChart rows={breadthStateRows} />
+        <PhaseSpaceChart rows={breadthStateRows} timeframe={activeTimeframe} />
         <div className="space-y-4">
-          <RegimeTimeline rows={breadthStateRows} />
+          <RegimeTimeline rows={breadthStateRows} timeframe={activeTimeframe} />
           <TradeAnalyticsPanel analytics={breadthTradeAnalytics} />
         </div>
       </div>
@@ -1215,6 +1546,22 @@ export default function MorningBreadthDashboard() {
             </div>
             <button
               type="button"
+              onClick={resetHistoryZoom}
+              className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-gray-400 hover:text-gray-200"
+            >
+              <RotateCcw size={12} />
+              Reset Zoom
+            </button>
+            <button
+              type="button"
+              onClick={() => setHistoryPopoutOpen(true)}
+              className="rounded-lg border border-white/10 p-1.5 text-gray-500 transition-colors hover:text-gray-300"
+              aria-label="Open historical breadth popout"
+            >
+              <Maximize2 size={15} />
+            </button>
+            <button
+              type="button"
               onClick={() => setChartCollapsed(current => !current)}
               className="rounded-lg border border-white/10 p-1.5 text-gray-500 transition-colors hover:text-gray-300"
               aria-label={chartCollapsed ? 'Expand breadth chart' : 'Collapse breadth chart'}
@@ -1226,8 +1573,20 @@ export default function MorningBreadthDashboard() {
 
         {!chartCollapsed && (
           <div className="border-t border-white/[0.06] p-4">
+            <SeriesTogglePills
+              items={BREADTH_LISTS.map(config => ({ key: config.id, label: config.label, color: config.color }))}
+              visibility={historySeriesVisibility}
+              onToggle={(key) => setHistorySeriesVisibility(current => ({ ...current, [key]: !current[key] }))}
+            />
+            <div className="mt-3">
             <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={chartData} margin={{ top: 8, right: 18, left: -10, bottom: 4 }}>
+              <LineChart
+                data={filteredChartData}
+                margin={{ top: 8, right: 18, left: -10, bottom: 4 }}
+                onMouseDown={handleHistoryMouseDown}
+                onMouseMove={handleHistoryMouseMove}
+                onMouseUp={handleHistoryMouseUp}
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
                 <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={28} />
                 <YAxis domain={activeMetric.domain} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
@@ -1235,6 +1594,9 @@ export default function MorningBreadthDashboard() {
                 {activeMetric.domain?.[1] === 100 && <ReferenceLine y={50} stroke="#ffffff22" strokeDasharray="4 4" />}
                 {activeMetric.id === 'distance' && <ReferenceLine y={0} stroke="#ffffff25" strokeDasharray="4 4" />}
                 {activeMetric.id === 'thrust' && <ReferenceLine y={0} stroke="#ffffff25" strokeDasharray="4 4" />}
+                {historyDragRange.startLabel && historyDragRange.endLabel && historyDragRange.startLabel !== historyDragRange.endLabel && (
+                  <ReferenceArea x1={historyDragRange.startLabel} x2={historyDragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
+                )}
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
                   formatter={(value, name) => [
@@ -1242,25 +1604,39 @@ export default function MorningBreadthDashboard() {
                       ? fmtSigned(Number(value), 1, '%')
                       : activeMetric.unit === '%'
                         ? fmtPct(Number(value))
-                        : fmtNumber(Number(value)),
+                      : fmtNumber(Number(value)),
                     name,
                   ]}
                 />
                 {BREADTH_LISTS.map(config => (
-                  <Line
-                    key={config.id}
-                    type="monotone"
-                    dataKey={`${config.id}${activeMetric.suffix}`}
-                    name={config.label}
-                    stroke={config.color}
-                    strokeWidth={2.5}
-                    dot={false}
-                    activeDot={{ r: 4 }}
-                    connectNulls
-                  />
+                  historySeriesVisibility[config.id] !== false && (
+                    <Line
+                      key={config.id}
+                      type="monotone"
+                      dataKey={`${config.id}${activeMetric.suffix}`}
+                      name={config.label}
+                      stroke={config.color}
+                      strokeWidth={2.5}
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                      connectNulls
+                    />
+                  )
                 ))}
+                <Brush
+                  dataKey="date"
+                  height={28}
+                  stroke="rgba(61,132,255,0.45)"
+                  fill="rgba(15,17,23,0.95)"
+                  travellerWidth={8}
+                  startIndex={historyBrushRange.startIndex}
+                  endIndex={historyBrushRange.endIndex}
+                  onChange={handleHistoryBrushChange}
+                />
               </LineChart>
             </ResponsiveContainer>
+            </div>
+            <p className="mt-3 text-[11px] text-gray-600">{historyVisibleSessions} visible sessions in the current zoom window.</p>
           </div>
         )}
       </div>
@@ -1295,6 +1671,73 @@ export default function MorningBreadthDashboard() {
       </div>
 
       <Drilldowns snapshotsById={snapshotsById} />
+      {historyPopoutOpen && (
+        <ChartPopoutModal title="Historical Breadth" onClose={() => setHistoryPopoutOpen(false)}>
+          <SeriesTogglePills
+            items={BREADTH_LISTS.map(config => ({ key: config.id, label: config.label, color: config.color }))}
+            visibility={historySeriesVisibility}
+            onToggle={(key) => setHistorySeriesVisibility(current => ({ ...current, [key]: !current[key] }))}
+          />
+          <div className="mt-4">
+            <ResponsiveContainer width="100%" height={560}>
+              <LineChart
+                data={filteredChartData}
+                margin={{ top: 8, right: 18, left: -10, bottom: 4 }}
+                onMouseDown={handleHistoryMouseDown}
+                onMouseMove={handleHistoryMouseMove}
+                onMouseUp={handleHistoryMouseUp}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={28} />
+                <YAxis domain={activeMetric.domain} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+                {activeMetric.domain?.[1] === 100 && <ReferenceLine y={80} stroke="#ff475755" strokeDasharray="4 4" />}
+                {activeMetric.domain?.[1] === 100 && <ReferenceLine y={50} stroke="#ffffff22" strokeDasharray="4 4" />}
+                {activeMetric.id === 'distance' && <ReferenceLine y={0} stroke="#ffffff25" strokeDasharray="4 4" />}
+                {activeMetric.id === 'thrust' && <ReferenceLine y={0} stroke="#ffffff25" strokeDasharray="4 4" />}
+                {historyDragRange.startLabel && historyDragRange.endLabel && historyDragRange.startLabel !== historyDragRange.endLabel && (
+                  <ReferenceArea x1={historyDragRange.startLabel} x2={historyDragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
+                )}
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+                  formatter={(value, name) => [
+                    activeMetric.id === 'distance'
+                      ? fmtSigned(Number(value), 1, '%')
+                      : activeMetric.unit === '%'
+                        ? fmtPct(Number(value))
+                        : fmtNumber(Number(value)),
+                    name,
+                  ]}
+                />
+                {BREADTH_LISTS.map(config => (
+                  historySeriesVisibility[config.id] !== false && (
+                    <Line
+                      key={`popout-${config.id}`}
+                      type="monotone"
+                      dataKey={`${config.id}${activeMetric.suffix}`}
+                      name={config.label}
+                      stroke={config.color}
+                      strokeWidth={2.5}
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                      connectNulls
+                    />
+                  )
+                ))}
+                <Brush
+                  dataKey="date"
+                  height={28}
+                  stroke="rgba(61,132,255,0.45)"
+                  fill="rgba(15,17,23,0.95)"
+                  travellerWidth={8}
+                  startIndex={historyBrushRange.startIndex}
+                  endIndex={historyBrushRange.endIndex}
+                  onChange={handleHistoryBrushChange}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartPopoutModal>
+      )}
         </>
       ) : (
           <HistoricalBreadthMetricTable
