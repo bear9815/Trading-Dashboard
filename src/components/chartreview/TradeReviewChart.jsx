@@ -39,8 +39,6 @@ const CHART_OPTIONS = {
     borderColor: 'rgba(95, 99, 106, 0.22)',
     timeVisible: false,
     secondsVisible: false,
-    fixRightEdge: true,
-    rightBarStaysOnScroll: true,
   },
   crosshair: {
     vertLine: { color: 'rgba(43, 48, 55, 0.35)' },

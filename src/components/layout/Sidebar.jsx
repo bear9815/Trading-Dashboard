@@ -154,7 +154,6 @@ export default function Sidebar({
             <div key={id} className="group relative">
               <button
                 onClick={() => setPage(id)}
-                title={collapsed ? label : undefined}
                 aria-label={label}
                 onMouseEnter={event => showCollapsedTooltip(event, label)}
                 onMouseLeave={hideCollapsedTooltip}
@@ -177,7 +176,7 @@ export default function Sidebar({
 
       {collapsed && hoveredNavTooltip ? (
         <div
-          className="pointer-events-none fixed z-[120] -translate-y-1/2 whitespace-nowrap rounded-lg border border-white/10 bg-surface-100/95 px-2.5 py-1.5 text-xs font-medium text-white shadow-xl shadow-black/30 backdrop-blur"
+          className="pointer-events-none fixed z-[120] -translate-y-1/2 whitespace-nowrap rounded-xl border border-accent-blue/25 bg-surface-50/95 px-4 py-2.5 text-sm font-semibold text-gray-100 shadow-2xl shadow-black/40 ring-1 ring-white/5 backdrop-blur"
           style={{ top: hoveredNavTooltip.top, left: hoveredNavTooltip.left }}
         >
           {hoveredNavTooltip.label}
