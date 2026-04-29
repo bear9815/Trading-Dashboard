@@ -24,6 +24,16 @@ function extractTitle(html) {
   ).trim()
 }
 
+function stripTags(html = '') {
+  return decodeEntities(html.replace(/<[^>]+>/g, ' '))
+    .replace(/\r/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 function cleanHtmlToText(html) {
   const body = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] || html
   const stripped = body
@@ -36,13 +46,7 @@ function cleanHtmlToText(html) {
     .replace(/<li[^>]*>/gi, '\n- ')
     .replace(/<[^>]+>/g, ' ')
 
-  return decodeEntities(stripped)
-    .replace(/\r/g, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n[ \t]+/g, '\n')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
+  return stripTags(stripped)
 }
 
 function findTranscriptWindow(text) {
@@ -69,6 +73,117 @@ function normalizeTranscriptText(text) {
     .replace(/\n{3,}/g, '\n\n')
     .replace(/[^\S\n]{2,}/g, ' ')
     .trim()
+}
+
+function isPerplexityFinanceTranscriptUrl(url = '') {
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname.includes('perplexity.ai')
+      && parsed.pathname.includes('/finance/')
+      && parsed.pathname.includes('/earnings')
+      && parsed.searchParams.get('tab') === 'transcript'
+  } catch {
+    return false
+  }
+}
+
+function collectTranscriptStrings(value, results = []) {
+  if (!value) return results
+
+  if (typeof value === 'string') {
+    const normalized = value.trim()
+    if (normalized.length >= 20) results.push(normalized)
+    return results
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) collectTranscriptStrings(item, results)
+    return results
+  }
+
+  if (typeof value === 'object') {
+    const speaker = typeof value.speaker === 'string' ? value.speaker.trim() : ''
+    const name = typeof value.name === 'string' ? value.name.trim() : ''
+    const text = ['text', 'content', 'body', 'paragraph', 'value']
+      .map(key => typeof value[key] === 'string' ? value[key].trim() : '')
+      .find(Boolean)
+
+    if (text && (speaker || name)) {
+      results.push(`${speaker || name}: ${text}`)
+    }
+
+    for (const nested of Object.values(value)) collectTranscriptStrings(nested, results)
+  }
+
+  return results
+}
+
+function extractJsonScriptPayloads(html) {
+  const scripts = [...html.matchAll(/<script[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi)]
+  const payloads = []
+
+  for (const match of scripts) {
+    const raw = match[1]?.trim()
+    if (!raw) continue
+    try {
+      payloads.push(JSON.parse(raw))
+    } catch {
+      // Ignore non-JSON script bodies.
+    }
+  }
+
+  return payloads
+}
+
+function extractPerplexityTranscript(html) {
+  const jsonPayloads = extractJsonScriptPayloads(html)
+  const jsonCandidates = []
+
+  for (const payload of jsonPayloads) {
+    collectTranscriptStrings(payload, jsonCandidates)
+  }
+
+  const jsonText = normalizeTranscriptText(jsonCandidates.join('\n\n'))
+  if (jsonText.length >= 120) return jsonText
+
+  const body = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] || html
+  const blockMatches = [...body.matchAll(/<(div|p|span|li|section|article)[^>]*>([\s\S]*?)<\/\1>/gi)]
+  const blocks = blockMatches
+    .map(([, , inner]) => stripTags(inner))
+    .filter(Boolean)
+
+  const transcriptLike = []
+  for (let index = 0; index < blocks.length; index += 1) {
+    const current = blocks[index]
+    const next = blocks[index + 1] || ''
+    if (!current || !next) continue
+
+    const speakerish = /^[A-Z][A-Za-z .,&\-]{1,80}$/.test(current)
+    const transcriptish = next.length >= 20
+      && !/^(share|watchlist|gainers|losers|active|peers|read more)$/i.test(next)
+
+    if (speakerish && transcriptish) {
+      transcriptLike.push(`${current}: ${next}`)
+      index += 1
+    } else if (/operator|question-and-answer|conference call participants|company participants/i.test(current)) {
+      transcriptLike.push(current)
+    }
+  }
+
+  return normalizeTranscriptText(transcriptLike.join('\n\n'))
+}
+
+export function extractTranscriptPayload(html, sourceUrl = '') {
+  const title = extractTitle(html) || 'Transcript Import'
+  const perplexityText = isPerplexityFinanceTranscriptUrl(sourceUrl) ? extractPerplexityTranscript(html) : ''
+  const genericText = normalizeTranscriptText(findTranscriptWindow(cleanHtmlToText(html)))
+  const text = perplexityText.length > genericText.length ? perplexityText : genericText
+
+  return {
+    title,
+    sourceUrl,
+    text: text.slice(0, 120000),
+  }
 }
 
 export default async function handler(req, res) {
@@ -114,8 +229,8 @@ export default async function handler(req, res) {
     }
 
     const html = await upstream.text()
-    const title = extractTitle(html) || 'Transcript Import'
-    const text = normalizeTranscriptText(findTranscriptWindow(cleanHtmlToText(html)))
+    const payload = extractTranscriptPayload(html, parsed.toString())
+    const { title, text } = payload
 
     if (!text || text.length < 1200) {
       return res.status(422).json({
@@ -126,7 +241,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       title,
       sourceUrl: parsed.toString(),
-      text: text.slice(0, 120000),
+      text,
     })
   } catch (error) {
     console.error('[api/transcript]', error)
