@@ -13,6 +13,7 @@ import {
   buildAnchoredRsSnapshot,
   buildRollingRsSnapshot,
   buildYtdAvwapSnapshot,
+  aggregateWeeklyBars,
   normalizeTradeReviewChartType,
   resolveLatestAnchorDate,
 } from '../../utils/tradeReviewChart.js'
@@ -21,6 +22,8 @@ import { buildWatchlistFitMap } from '../../utils/watchlistFitSignal.js'
 import { resolveTickerToName } from '../../utils/marketData.js'
 import { buildCondensedEcosystemRows, normalizeEcosystemGroupingMode, normalizeEcosystemKey } from '../../utils/condensedEcosystems.js'
 import { buildEcosystemCompositeBars } from '../../utils/ecosystemCompositeChart.js'
+import { buildSqueezeSnapshot } from '../../utils/squeezeAnalytics.js'
+import { formatSqueezeMetric } from '../../utils/squeezeUi.js'
 
 const WATCHLIST_ORDER = DEFAULT_LIST_ORDER.reduce((next, id, index) => {
   next[id] = index
@@ -41,6 +44,10 @@ const SORT_OPTIONS = [
   ['rollingRs', 'Rolling Z'],
   ['anchoredRs', 'Anchored Z'],
   ['ytdAvwap', 'YTD AVWAP'],
+  ['dailyCompression', 'Daily Compression'],
+  ['dailyExpansion', 'Daily Expansion'],
+  ['weeklyCompression', 'Weekly Compression'],
+  ['weeklyExpansion', 'Weekly Expansion'],
 ]
 
 function isTypingTarget(target) {
@@ -377,6 +384,16 @@ export default function Charts() {
     () => buildWatchlistFitMap({ symbols, anchoredRsBySymbol, rollingRsBySymbol }),
     [anchoredRsBySymbol, rollingRsBySymbol, symbols]
   )
+  const squeezeBySymbol = useMemo(
+    () => Object.fromEntries(symbols.map(symbol => {
+      const dailyBars = historyBarsBySymbol[symbol] || []
+      return [symbol, {
+        daily: buildSqueezeSnapshot(dailyBars),
+        weekly: buildSqueezeSnapshot(aggregateWeeklyBars(dailyBars)),
+      }]
+    })),
+    [historyBarsBySymbol, symbols]
+  )
 
   const filteredEcosystemGroups = useMemo(() => {
     const groups = buildEcosystemSidebarGroups(
@@ -402,6 +419,10 @@ export default function Charts() {
       if (sortKey === 'rollingRs') return rollingRsBySymbol[row.symbol]?.zScore
       if (sortKey === 'anchoredRs') return anchoredRsBySymbol[row.symbol]?.zScore
       if (sortKey === 'ytdAvwap') return ytdAvwapBySymbol[row.symbol]?.distancePct
+      if (sortKey === 'dailyCompression') return squeezeBySymbol[row.symbol]?.daily?.compressionScore
+      if (sortKey === 'dailyExpansion') return squeezeBySymbol[row.symbol]?.daily?.expansionScore
+      if (sortKey === 'weeklyCompression') return squeezeBySymbol[row.symbol]?.weekly?.compressionScore
+      if (sortKey === 'weeklyExpansion') return squeezeBySymbol[row.symbol]?.weekly?.expansionScore
       return null
     }
 
@@ -418,7 +439,7 @@ export default function Charts() {
       if (aSafe !== bSafe) return sortDir === 'asc' ? aSafe - bSafe : bSafe - aSafe
       return a.symbol.localeCompare(b.symbol)
     })
-  }, [anchoredRsBySymbol, filteredRows, rollingRsBySymbol, sortDir, sortKey, ytdAvwapBySymbol])
+  }, [anchoredRsBySymbol, filteredRows, rollingRsBySymbol, sortDir, sortKey, squeezeBySymbol, ytdAvwapBySymbol])
 
   const sortedEcosystemGroups = useMemo(() => {
     const base = [...filteredEcosystemGroups]
@@ -968,6 +989,7 @@ export default function Charts() {
                   const rolling = rollingRsBySymbol[row.symbol]
                   const anchored = anchoredRsBySymbol[row.symbol]
                   const ytd = ytdAvwapBySymbol[row.symbol]
+                  const squeeze = squeezeBySymbol[row.symbol]
                   return (
                     <button
                       key={row.symbol}
@@ -996,6 +1018,12 @@ export default function Charts() {
                             </span>
                             <span className="rounded-full border border-violet-400/15 bg-violet-400/[0.08] px-2 py-1 text-violet-100">
                               A {formatSigned(anchored?.zScore, 1, 'z')}
+                            </span>
+                            <span className="rounded-full border border-sky-400/15 bg-sky-400/[0.08] px-2 py-1 text-sky-100">
+                              DC {formatSqueezeMetric(squeeze?.daily?.compressionScore)}
+                            </span>
+                            <span className="rounded-full border border-emerald-400/15 bg-emerald-400/[0.08] px-2 py-1 text-emerald-100">
+                              DE {formatSqueezeMetric(squeeze?.daily?.expansionScore)}
                             </span>
                           </div>
                         </div>

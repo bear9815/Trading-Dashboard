@@ -12,6 +12,7 @@ import {
   calculateRsGradient,
   resolveLatestAnchorDate,
 } from '../../utils/tradeReviewChart.js'
+import { buildSqueezeSeries } from '../../utils/squeezeAnalytics.js'
 
 const WATCHLIST_HISTORY_TTL_MS = 6 * 60 * 60 * 1000
 const WATCHLIST_HISTORY_CONCURRENCY = 8
@@ -134,6 +135,10 @@ export function buildChartDataFromBars(
       weeklyKeltnerShades: [],
       dailyAnchoredRsGradient: [],
       weeklyRollingRsGradient: [],
+      dailySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], snapshot: { stateLabel: 'No Data' } },
+      weeklySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], snapshot: { stateLabel: 'No Data' } },
+      dailySqueezeSnapshot: { stateLabel: 'No Data' },
+      weeklySqueezeSnapshot: { stateLabel: 'No Data' },
     }
   }
   const dailyBars = normalizeChartBars(bars || [])
@@ -146,6 +151,10 @@ export function buildChartDataFromBars(
       weeklyKeltnerShades: [],
       dailyAnchoredRsGradient: [],
       weeklyRollingRsGradient: [],
+      dailySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], snapshot: { stateLabel: 'No Data' } },
+      weeklySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], snapshot: { stateLabel: 'No Data' } },
+      dailySqueezeSnapshot: { stateLabel: 'No Data' },
+      weeklySqueezeSnapshot: { stateLabel: 'No Data' },
     }
   }
   const weeklyBars = normalizeChartBars(aggregateWeeklyBars(dailyBars))
@@ -171,6 +180,8 @@ export function buildChartDataFromBars(
     34: calculateKeltnerChannel(weeklyBars, 34, 0.25),
     65: calculateKeltnerChannel(weeklyBars, 65, 0.25),
   }
+  const dailySqueeze = buildSqueezeSeries(dailyBars)
+  const weeklySqueeze = buildSqueezeSeries(weeklyBars)
   return {
     dailyBars,
     weeklyBars,
@@ -187,6 +198,10 @@ export function buildChartDataFromBars(
       ? collapseRollingGradientToWeekly(weeklyBars, dailyRollingRsGradient)
       : calculateRsGradient(weeklyBars, benchmarkWeeklyBars, tradeReviewChartSettings?.weeklyRs)),
     ytdAvwap: buildYtdAvwapSnapshot(dailyBars, new Date()),
+    dailySqueeze,
+    weeklySqueeze,
+    dailySqueezeSnapshot: dailySqueeze.snapshot,
+    weeklySqueezeSnapshot: weeklySqueeze.snapshot,
   }
 }
 
