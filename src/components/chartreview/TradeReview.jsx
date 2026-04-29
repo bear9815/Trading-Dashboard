@@ -7,9 +7,10 @@ import { formatCurrency } from '../../utils/formatters.js'
 import { fetchHistory } from '../../utils/marketData.js'
 import { analyzeTradeVoiceReview, generateTradeVoiceFollowUp } from '../../utils/ai.js'
 import { BEST_FIT_LOOKBACK_MONTH_DEFAULT, BEST_FIT_LOOKBACK_MONTH_OPTIONS } from '../../utils/tradeReviewChart.js'
+import { getTradeReviewState, hasTradeReviewInput, isTradeReviewComplete } from '../../utils/tradeReviewStatus.js'
 import TradeReviewChart from './TradeReviewChart.jsx'
 import SharedChartToolsSettingsModal from '../charts/ChartToolsSettingsModal.jsx'
-import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, Sparkles, Brain, CircleDot, RotateCcw, Mic, MicOff, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Volume2, Square, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, Sparkles, Brain, CircleDot, RotateCcw, Mic, MicOff, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Volume2, Square, SlidersHorizontal, Trash2, Maximize2 } from 'lucide-react'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine } from 'recharts'
 
 // ── Duration helper ───────────────────────────────────────────────────────────
@@ -444,20 +445,12 @@ function avg(nums) {
   return nums.reduce((s, n) => s + n, 0) / nums.length
 }
 
-function hasTradeReview(trade) {
-  return Boolean(
-    trade?.quickReview ||
-    (trade?.reviewTags || []).length > 0 ||
-    (trade?.reviewNotes || '').trim()
-  )
-}
-
 function pickTopCount(counts) {
   return Object.entries(counts || {}).sort((a, b) => b[1] - a[1])[0] || null
 }
 
 function computeReviewIntelligence(trades) {
-  const reviewed = (trades || []).filter(hasTradeReview)
+  const reviewed = (trades || []).filter(hasTradeReviewInput)
   if (!reviewed.length) return null
 
   const verdictCounts = {}
@@ -1945,8 +1938,9 @@ function ReviewNotesSection({ trade, onUpdate }) {
 }
 
 // ── Trade detail panel ────────────────────────────────────────────────────────
-function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, chartSettings }) {
+function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, onCompleteReview, chartSettings, onOpenChartSettings }) {
   const [lightboxIndex, setLightboxIndex] = useState(null)
+  const [chartFocusOpen, setChartFocusOpen] = useState(false)
 
   const shots = useMemo(() => {
     const s = []
@@ -1956,8 +1950,20 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, chartS
     return s
   }, [trade.screenshotEntry, trade.screenshotExit, trade.screenshotsAdditional])
 
-  // Reset lightbox when trade changes
-  useEffect(() => { setLightboxIndex(null) }, [trade.id])
+  // Reset transient overlays when trade changes
+  useEffect(() => {
+    setLightboxIndex(null)
+    setChartFocusOpen(false)
+  }, [trade.id])
+
+  useEffect(() => {
+    if (!chartFocusOpen) return undefined
+    const handler = (e) => {
+      if (e.key === 'Escape') setChartFocusOpen(false)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [chartFocusOpen])
 
   const entryDate = trade.entryDate
     ? new Date(trade.entryDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
@@ -1967,6 +1973,9 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, chartS
 
   const prevLightbox = useCallback(() => setLightboxIndex(i => (i > 0 ? i - 1 : i)), [])
   const nextLightbox = useCallback(() => setLightboxIndex(i => (i < shots.length - 1 ? i + 1 : i)), [shots.length])
+  const reviewState = getTradeReviewState(trade)
+  const hasReviewInput = hasTradeReviewInput(trade)
+  const completeDisabled = !hasReviewInput || reviewState === 'complete'
 
   return (
     <div className="flex-1 overflow-y-auto p-5 space-y-5">
@@ -2025,75 +2034,180 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, chartS
         )
       })()}
 
-      {/* Screenshots */}
-      <div>
-        <p className="label mb-2">Charts</p>
-        <div className="mb-3">
-          <TradeReviewChart trade={trade} chartSettings={chartSettings} onOpenSettings={() => setChartSettingsOpen(true)} />
-        </div>
-        <ScreenshotGallery trade={trade} onOpenLightbox={setLightboxIndex} />
-      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)] gap-5 items-start">
+        <div className="space-y-5 xl:sticky xl:top-5 self-start">
+          <div>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <p className="label">Charts</p>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={onOpenChartSettings}
+                  className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-white/10 text-gray-400 hover:text-white hover:border-accent-blue/30 hover:bg-accent-blue/10 transition-all"
+                >
+                  <SlidersHorizontal size={12} />
+                  Settings
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChartFocusOpen(true)}
+                  className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-accent-blue/25 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 transition-all"
+                >
+                  <Maximize2 size={12} />
+                  Pop out
+                </button>
+              </div>
+            </div>
+            <div className="mb-3">
+              <TradeReviewChart trade={trade} chartSettings={chartSettings} onOpenSettings={onOpenChartSettings} />
+            </div>
+            <ScreenshotGallery trade={trade} onOpenLightbox={setLightboxIndex} />
+          </div>
 
-      {/* Process grade */}
-      {trade.processGrade && (
-        <div className="card-sm">
-          <p className="label mb-1.5">Process Grade</p>
-          <div className="flex items-baseline gap-2">
-            <span className={`text-2xl font-bold ${
-              trade.processGrade >= 4 ? 'text-accent-green' :
-              trade.processGrade === 3 ? 'text-accent-yellow' : 'text-accent-red'
+          <div className="space-y-4">
+            {trade.processGrade && (
+              <div className="card-sm">
+                <p className="label mb-1.5">Process Grade</p>
+                <div className="flex items-baseline gap-2">
+                  <span className={`text-2xl font-bold ${
+                    trade.processGrade >= 4 ? 'text-accent-green' :
+                    trade.processGrade === 3 ? 'text-accent-yellow' : 'text-accent-red'
+                  }`}>
+                    {['','F','D','C','B','A'][trade.processGrade]}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    {['','Broke rules','Major deviation','Some deviation','Minor issues','Perfect'][trade.processGrade]}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {edges.length > 0 && (
+              <div>
+                <p className="label mb-1.5">Edges at Entry</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {edges.map(e => (
+                    <span key={e} className="text-xs px-2 py-0.5 rounded-full bg-accent-blue/15 text-accent-blue border border-accent-blue/20">
+                      {e}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(trade.lessons || trade.exitNotes) && (
+              <div className="space-y-3">
+                {trade.lessons && (
+                  <div>
+                    <p className="label mb-1">Lessons</p>
+                    <p className="text-sm text-gray-300 leading-relaxed bg-surface-200 rounded-lg px-3 py-2.5 whitespace-pre-wrap">{trade.lessons}</p>
+                  </div>
+                )}
+                {trade.exitNotes && (
+                  <div>
+                    <p className="label mb-1">Exit Notes</p>
+                    <p className="text-sm text-gray-300 leading-relaxed bg-surface-200 rounded-lg px-3 py-2.5 whitespace-pre-wrap">{trade.exitNotes}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <MarketContextSection trade={trade} />
+          </div>
+        </div>
+
+        <div className="border border-white/10 bg-surface-50/60 rounded-xl p-4 space-y-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Post-Trade Review</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {reviewState === 'complete'
+                  ? 'Completed and ready for the archive.'
+                  : hasReviewInput
+                    ? 'Review input captured. Complete when you are ready to move on.'
+                    : 'Answer one quick prompt, record voice, add a tag, or write a note to complete.'}
+              </p>
+            </div>
+            <span className={`shrink-0 text-[10px] px-2 py-1 rounded-full border ${
+              reviewState === 'complete'
+                ? 'bg-accent-green/15 text-accent-green border-accent-green/25'
+                : reviewState === 'in_progress'
+                  ? 'bg-accent-blue/15 text-accent-blue border-accent-blue/25'
+                  : 'bg-accent-yellow/10 text-accent-yellow border-accent-yellow/25'
             }`}>
-              {['','F','D','C','B','A'][trade.processGrade]}
-            </span>
-            <span className="text-xs text-gray-400">
-              {['','Broke rules','Major deviation','Some deviation','Minor issues','Perfect'][trade.processGrade]}
+              {reviewState === 'complete' ? 'Complete' : reviewState === 'in_progress' ? 'In progress' : 'Needs input'}
             </span>
           </div>
-        </div>
-      )}
 
-      {/* Edges at entry */}
-      {edges.length > 0 && (
-        <div>
-          <p className="label mb-1.5">Edges at Entry</p>
-          <div className="flex flex-wrap gap-1.5">
-            {edges.map(e => (
-              <span key={e} className="text-xs px-2 py-0.5 rounded-full bg-accent-blue/15 text-accent-blue border border-accent-blue/20">
-                {e}
-              </span>
-            ))}
+          <QuickReviewSection trade={trade} onUpdate={onUpdate} />
+          <VoiceReviewSection trade={trade} onUpdate={onUpdate} />
+          <ReviewTagsSection  trade={trade} onUpdate={onUpdate} />
+          <ReviewNotesSection trade={trade} onUpdate={onUpdate} />
+
+          <div className="sticky bottom-0 -mx-4 -mb-4 px-4 py-3 border-t border-white/10 bg-surface-50/95 backdrop-blur rounded-b-xl">
+            {!hasReviewInput && (
+              <p className="text-[11px] text-accent-yellow mb-2">
+                Add at least one review input before completing this trade.
+              </p>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onNext}
+                disabled={!hasNext}
+                className="flex-1 px-3 py-2 rounded-lg border border-white/10 text-gray-400 hover:text-white hover:border-white/25 disabled:opacity-30 disabled:cursor-not-allowed transition-all text-sm"
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                onClick={onCompleteReview}
+                disabled={completeDisabled}
+                className={`flex-[1.4] px-3 py-2 rounded-lg border transition-all text-sm font-semibold ${
+                  completeDisabled
+                    ? 'border-white/10 bg-white/[0.03] text-gray-600 cursor-not-allowed'
+                    : 'border-accent-green/30 bg-accent-green/15 text-accent-green hover:bg-accent-green/25'
+                }`}
+              >
+                {reviewState === 'complete' ? 'Review Complete' : 'Complete Review'}
+              </button>
+            </div>
           </div>
         </div>
-      )}
-
-      {/* Existing trade notes (read-only) */}
-      {(trade.lessons || trade.exitNotes) && (
-        <div className="space-y-3">
-          {trade.lessons && (
-            <div>
-              <p className="label mb-1">Lessons</p>
-              <p className="text-sm text-gray-300 leading-relaxed bg-surface-200 rounded-lg px-3 py-2.5 whitespace-pre-wrap">{trade.lessons}</p>
-            </div>
-          )}
-          {trade.exitNotes && (
-            <div>
-              <p className="label mb-1">Exit Notes</p>
-              <p className="text-sm text-gray-300 leading-relaxed bg-surface-200 rounded-lg px-3 py-2.5 whitespace-pre-wrap">{trade.exitNotes}</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      <MarketContextSection trade={trade} />
-
-      {/* ── Review section ── */}
-      <div className="border-t border-white/10 pt-5 space-y-5">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Post-Trade Review</p>
-        <QuickReviewSection trade={trade} onUpdate={onUpdate} />
-        <VoiceReviewSection trade={trade} onUpdate={onUpdate} />
-        <ReviewTagsSection  trade={trade} onUpdate={onUpdate} />
-        <ReviewNotesSection trade={trade} onUpdate={onUpdate} />
       </div>
+
+      {chartFocusOpen && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm p-4 md:p-6 flex flex-col">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-[0.16em] text-gray-500">Chart Focus</p>
+              <p className="text-lg font-bold mono text-white truncate">{trade.symbol}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onOpenChartSettings}
+                className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-white/10 text-gray-300 hover:text-white hover:border-accent-blue/30 hover:bg-accent-blue/10 transition-all"
+              >
+                <SlidersHorizontal size={13} />
+                Settings
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartFocusOpen(false)}
+                className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-white/10 text-gray-300 hover:text-white hover:border-white/25 transition-all"
+              >
+                <X size={13} />
+                Close
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 rounded-xl border border-white/10 bg-surface-50 p-3 overflow-hidden">
+            <TradeReviewChart trade={trade} chartSettings={chartSettings} onOpenSettings={onOpenChartSettings} />
+          </div>
+          <p className="text-[11px] text-gray-600 mt-2">Press Escape to return the chart to the review workspace.</p>
+        </div>
+      )}
 
       {/* Lightbox */}
       {lightboxIndex !== null && shots.length > 0 && (
@@ -2117,7 +2231,9 @@ function TradeListItem({ trade, selected, onClick }) {
     ? new Date(trade.entryDate).toLocaleDateString([], { month: 'short', day: 'numeric' })
     : '—'
   const reviewTagCount = (trade.reviewTags || []).length
-  const reviewed = hasTradeReview(trade)
+  const reviewState = getTradeReviewState(trade)
+  const reviewed = reviewState === 'complete'
+  const inProgress = reviewState === 'in_progress'
   const quickSummary = trade.quickReview ? buildQuickReviewSummary(trade.quickReview) : null
 
   return (
@@ -2147,6 +2263,11 @@ function TradeListItem({ trade, selected, onClick }) {
               Reviewed
             </span>
           )}
+          {inProgress && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent-blue/15 text-accent-blue border border-accent-blue/20">
+              In progress
+            </span>
+          )}
         </div>
         <p className="text-xs text-gray-500 truncate">
           {entryDate}
@@ -2157,7 +2278,7 @@ function TradeListItem({ trade, selected, onClick }) {
             {quickSummary.verdict} · {quickSummary.focus}
           </p>
         )}
-        {!reviewed && (
+        {!reviewed && !inProgress && (
           <p className="text-[11px] text-accent-yellow/80 truncate mt-0.5">
             Needs review
           </p>
@@ -2506,14 +2627,14 @@ export default function TradeReview({ selectedAccount }) {
   const reviewTrades = useMemo(() => {
     return scopedTrades
       .filter(t => {
-        const reviewed = hasTradeReview(t)
+        const reviewed = isTradeReviewComplete(t)
         if (reviewFilter === 'Reviewed') return reviewed
         if (reviewFilter === 'Needs Review') return !reviewed
         return true
       })
       .sort((a, b) => {
-        const aReviewed = hasTradeReview(a)
-        const bReviewed = hasTradeReview(b)
+        const aReviewed = isTradeReviewComplete(a)
+        const bReviewed = isTradeReviewComplete(b)
         if (sortBy === 'queue' || reviewFilter === 'All') {
           if (aReviewed !== bReviewed) return Number(aReviewed) - Number(bReviewed)
         }
@@ -2531,7 +2652,7 @@ export default function TradeReview({ selectedAccount }) {
     const closed = reviewTrades.filter(t => t.status === 'Win' || t.status === 'Loss')
     const wins   = closed.filter(t => t.status === 'Win').length
     const totalR = closed.reduce((s, t) => s + (t.rMultiple || 0), 0)
-    const reviewedCount = reviewTrades.filter(hasTradeReview).length
+    const reviewedCount = reviewTrades.filter(isTradeReviewComplete).length
     return { wins, total: closed.length, totalR: Math.round(totalR * 100) / 100, reviewedCount, pendingCount: reviewTrades.length - reviewedCount }
   }, [reviewTrades])
 
@@ -2549,6 +2670,23 @@ export default function TradeReview({ selectedAccount }) {
 
   function handleUpdate(updates) {
     if (currentTrade) updateTrade(currentTrade.id, updates)
+  }
+
+  function handleCompleteReview() {
+    if (!currentTrade || !hasTradeReviewInput(currentTrade)) return
+    const nextPending = reviewTrades
+      .slice(currentIdx + 1)
+      .find(t => t.id !== currentTrade.id && !isTradeReviewComplete(t))
+      || reviewTrades
+        .slice(0, currentIdx)
+        .find(t => t.id !== currentTrade.id && !isTradeReviewComplete(t))
+
+    updateTrade(currentTrade.id, {
+      reviewCompletedAt: new Date().toISOString(),
+      reviewCompletedSource: 'manual',
+    })
+
+    if (nextPending) setSelectedId(nextPending.id)
   }
 
   return (
@@ -2692,7 +2830,9 @@ export default function TradeReview({ selectedAccount }) {
             hasPrev={currentIdx > 0}
             hasNext={currentIdx < reviewTrades.length - 1}
             onUpdate={handleUpdate}
+            onCompleteReview={handleCompleteReview}
             chartSettings={tradeReviewChartSettings}
+            onOpenChartSettings={() => setChartSettingsOpen(true)}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
