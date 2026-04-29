@@ -11,14 +11,21 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import {
+  Area,
+  AreaChart,
   CartesianGrid,
+  Cell,
+  ComposedChart,
   Line,
   LineChart,
   ReferenceLine,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
+  ZAxis,
 } from 'recharts'
 import {
   LIQUID_LIST_ID,
@@ -27,6 +34,13 @@ import {
   useResearchWatchlistStore,
 } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
+import { useTradeStore } from '../../store/useTradeStore.js'
+import {
+  BREADTH_PHASES,
+  buildBreadthSignalSummary,
+  buildBreadthStateRows,
+  buildBreadthTradeAnalytics,
+} from '../../utils/breadthAnalytics.js'
 import {
   BREADTH_TABLE_SESSION_COUNT,
   buildHistoricalBreadthMetricRows,
@@ -68,6 +82,9 @@ const BREADTH_VIEW_TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'table', label: 'Breadth Table' },
 ]
+
+const BREADTH_HISTORY_LOOKBACK_DAYS = 900
+const BREADTH_PHASE_COLOR_BY_KEY = Object.fromEntries(BREADTH_PHASES.map(phase => [phase.key, phase.color]))
 
 const HISTORICAL_COLUMN_GROUPS = [
   {
@@ -154,6 +171,11 @@ function fmtRatio(value) {
   return Number.isFinite(value) ? value.toFixed(2) : '—'
 }
 
+function fmtR(value) {
+  if (!Number.isFinite(value)) return '—'
+  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}R`
+}
+
 function fmtSigned(value, decimals = 1, suffix = '%') {
   if (!Number.isFinite(value)) return '—'
   const sign = value > 0 ? '+' : ''
@@ -203,6 +225,20 @@ function regimeTone(label) {
   return 'border-white/10 bg-white/[0.04] text-gray-400'
 }
 
+function postureTone(tone) {
+  if (tone === 'green') return 'border-accent-green/25 bg-accent-green/10 text-accent-green'
+  if (tone === 'yellow') return 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow'
+  if (tone === 'red') return 'border-accent-red/25 bg-accent-red/10 text-accent-red'
+  if (tone === 'blue') return 'border-accent-blue/25 bg-accent-blue/10 text-accent-blue'
+  return 'border-white/10 bg-white/[0.04] text-gray-300'
+}
+
+function metricColor(value, inverse = false) {
+  if (!Number.isFinite(value)) return 'text-gray-500'
+  const positive = inverse ? value <= 35 : value >= 0
+  return positive ? 'text-accent-green' : 'text-accent-red'
+}
+
 function mergeHistory(historiesById) {
   const rows = new Map()
   const add = (prefix, entry) => {
@@ -220,7 +256,7 @@ function mergeHistory(historiesById) {
   for (const config of BREADTH_LISTS) {
     for (const entry of historiesById[config.id] || []) add(config.id, entry)
   }
-  return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-180)
+  return [...rows.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-BREADTH_TABLE_SESSION_COUNT)
 }
 
 function buildMorningRead(market, liquidTrend, liquid) {
@@ -243,6 +279,255 @@ function buildMorningRead(market, liquidTrend, liquid) {
   if (marketHot && liquidHot) return 'Both lists are hot, so momentum is strong but fresh entries need discipline.'
   if ((market.regimeScore ?? 50) < 38 && (comparison.regimeScore ?? 50) < 38) return 'Both lists are washed out or distributing, so patience beats forcing breakouts.'
   return 'Breadth is balanced enough for selective risk, with confirmation still coming from AVWAP structure.'
+}
+
+function ActionReadout({ summary }) {
+  const posture = summary?.riskPosture
+  return (
+    <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] via-white/[0.025] to-black/20 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-gray-500">Actionable Breadth Read</p>
+          <p className="mt-2 max-w-4xl text-base font-semibold leading-relaxed text-white">{summary?.primaryRead || 'Breadth is loading.'}</p>
+          <p className="mt-2 max-w-4xl text-sm leading-relaxed text-gray-400">{posture?.action || 'Wait for enough history to form a risk posture.'}</p>
+        </div>
+        <div className="text-right">
+          <span className={`inline-flex rounded-xl border px-3 py-1.5 text-xs font-black uppercase tracking-[0.16em] ${postureTone(posture?.tone)}`}>
+            {posture?.label || 'No Read'}
+          </span>
+          <p className="mt-2 text-xs font-semibold text-gray-500">{summary?.growthTapeBias || '—'}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StateVectorCards({ cards = [] }) {
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      {cards.map(card => {
+        const value = Number.isFinite(card.value) ? card.value : null
+        const signed = card.key === 'velocity' || card.key === 'acceleration'
+        const inverse = card.key === 'damage'
+        return (
+          <div key={card.key} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-600">{card.label}</p>
+            <p className={`mt-2 text-2xl font-black tabular-nums ${metricColor(signed ? value : inverse ? value : 1, inverse)}`}>
+              {signed ? fmtSigned(value, 1, '') : value == null ? '—' : value.toFixed(0)}
+              <span className="ml-1 text-xs font-semibold text-gray-600">{card.unit}</span>
+            </p>
+            {Number.isFinite(card.delta) && (
+              <p className={`mt-1 text-[11px] font-semibold ${metricColor(card.delta)}`}>
+                {fmtSigned(card.delta, 1, ' pts')} today
+              </p>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function BreadthPhysicsChart({ rows }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-white">Breadth State Vector</p>
+          <p className="mt-1 text-xs text-gray-600">Level, impulse, acceleration, and damage across the last two years.</p>
+        </div>
+        <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold text-gray-500">
+          {rows.length} sessions
+        </p>
+      </div>
+      <ResponsiveContainer width="100%" height={330}>
+        <ComposedChart data={rows} margin={{ top: 8, right: 16, left: -8, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+          <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={34} />
+          <YAxis yAxisId="score" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+          <YAxis yAxisId="impulse" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+          <ReferenceLine yAxisId="score" y={70} stroke="#22c55e44" strokeDasharray="4 4" />
+          <ReferenceLine yAxisId="score" y={52} stroke="#ffffff22" strokeDasharray="4 4" />
+          <ReferenceLine yAxisId="score" y={38} stroke="#ff475744" strokeDasharray="4 4" />
+          <Tooltip
+            contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+            formatter={(value, name) => {
+              if (name === 'Damage') return [fmtPct(Number(value)), name]
+              if (name === 'Velocity' || name === 'Acceleration') return [fmtSigned(Number(value), 1, ' pts'), name]
+              return [Number.isFinite(Number(value)) ? Number(value).toFixed(0) : '—', name]
+            }}
+          />
+          <Area yAxisId="score" type="monotone" dataKey="damagePressure" name="Damage" stroke="#ff475755" fill="#ff47571f" dot={false} />
+          <Line yAxisId="score" type="monotone" dataKey="level" name="Breadth Level" stroke="#3d84ff" strokeWidth={3} dot={false} />
+          <Line yAxisId="impulse" type="monotone" dataKey="velocity10" name="Velocity" stroke="#22c55e" strokeWidth={2} dot={false} />
+          <Line yAxisId="impulse" type="monotone" dataKey="acceleration20" name="Acceleration" stroke="#f5c542" strokeWidth={2} dot={false} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+function ParticipationStackChart({ rows }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="mb-3">
+        <p className="text-sm font-semibold text-white">Participation Stack</p>
+        <p className="mt-1 text-xs text-gray-600">Breadth is strongest when short-term participation, AVWAP structure, and distance all agree.</p>
+      </div>
+      <ResponsiveContainer width="100%" height={285}>
+        <AreaChart data={rows} margin={{ top: 8, right: 16, left: -8, bottom: 0 }}>
+          <defs>
+            <linearGradient id="breadthParticipation" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#22c55e" stopOpacity={0.34} />
+              <stop offset="95%" stopColor="#22c55e" stopOpacity={0.02} />
+            </linearGradient>
+            <linearGradient id="breadthStructure" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#3d84ff" stopOpacity={0.3} />
+              <stop offset="95%" stopColor="#3d84ff" stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+          <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={34} />
+          <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+          <ReferenceLine y={80} stroke="#f5c54255" strokeDasharray="4 4" />
+          <ReferenceLine y={50} stroke="#ffffff22" strokeDasharray="4 4" />
+          <Tooltip contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }} formatter={(value, name) => [fmtPct(Number(value)), name]} />
+          <Area type="monotone" dataKey="participation" name="20DMA Participation" stroke="#22c55e" fill="url(#breadthParticipation)" strokeWidth={2} dot={false} />
+          <Area type="monotone" dataKey="structure" name="AVWAP Structure" stroke="#3d84ff" fill="url(#breadthStructure)" strokeWidth={2} dot={false} />
+          <Line type="monotone" dataKey="market.sma5" name="Leaders 5DMA" stroke="#f5c542" strokeWidth={1.8} dot={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+function PhaseSpaceChart({ rows }) {
+  const data = rows.filter(row => Number.isFinite(row.level) && Number.isFinite(row.velocity10))
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="mb-3">
+        <p className="text-sm font-semibold text-white">Phase Space</p>
+        <p className="mt-1 text-xs text-gray-600">A physics-style view: breadth level on Y, impulse on X. Upper-right is broad momentum; lower-left is distribution.</p>
+      </div>
+      <ResponsiveContainer width="100%" height={285}>
+        <ScatterChart margin={{ top: 10, right: 18, left: -8, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+          <XAxis type="number" dataKey="velocity10" name="10D Velocity" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={value => `${value}`} />
+          <YAxis type="number" dataKey="level" name="Breadth Level" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+          <ZAxis range={[35, 90]} />
+          <ReferenceLine x={0} stroke="#ffffff22" strokeDasharray="4 4" />
+          <ReferenceLine y={52} stroke="#ffffff22" strokeDasharray="4 4" />
+          <Tooltip
+            cursor={{ strokeDasharray: '3 3' }}
+            contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+            formatter={(value, name) => [name === 'Breadth Level' ? `${Number(value).toFixed(0)}/100` : fmtSigned(Number(value), 1, ' pts'), name]}
+            labelFormatter={(_, payload) => {
+              const row = payload?.[0]?.payload
+              return row ? `${row.date} · ${row.phase}` : ''
+            }}
+          />
+          <Scatter data={data} dataKey="level">
+            {data.map(row => (
+              <Cell key={row.date} fill={BREADTH_PHASE_COLOR_BY_KEY[row.phase] || '#94a3b8'} fillOpacity={row === data.at(-1) ? 1 : 0.48} />
+            ))}
+          </Scatter>
+        </ScatterChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+function RegimeTimeline({ rows }) {
+  const recent = rows.slice(-126)
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-white">Regime Timeline</p>
+          <p className="mt-1 text-xs text-gray-600">Last six months by breadth phase.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {BREADTH_PHASES.map(phase => (
+            <span key={phase.key} className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-gray-500">
+              <span className="h-2 w-2 rounded-full" style={{ background: phase.color }} />
+              {phase.label}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="flex h-9 overflow-hidden rounded-lg border border-white/10 bg-black/20">
+        {recent.map(row => (
+          <div
+            key={row.date}
+            title={`${row.date} · ${row.phase}`}
+            className="min-w-[3px] flex-1"
+            style={{ background: BREADTH_PHASE_COLOR_BY_KEY[row.phase] || '#94a3b8', opacity: 0.78 }}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function TradeAnalyticsPanel({ analytics }) {
+  const phaseRows = analytics?.byPhase?.filter(group => group.count > 0) || []
+  const best = analytics?.bestPhase
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-white">Breadth x Trade Analytics</p>
+          <p className="mt-1 text-xs text-gray-600">Closed trades mapped to the breadth state on entry date.</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] uppercase tracking-wider text-gray-600">Coverage</p>
+          <p className="text-sm font-semibold text-accent-blue">{fmtPct(analytics?.coverage?.coveragePct, 0)}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="rounded-lg bg-surface-200 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">Matched Trades</p>
+          <p className="mt-1 text-2xl font-black text-white">{analytics?.coverage?.matched || 0}</p>
+          <p className="text-[10px] text-gray-600">of {analytics?.coverage?.total || 0} closed</p>
+        </div>
+        <div className="rounded-lg bg-surface-200 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">Avg R</p>
+          <p className={`mt-1 text-2xl font-black ${metricColor(analytics?.summary?.avgR)}`}>{fmtR(analytics?.summary?.avgR)}</p>
+          <p className="text-[10px] text-gray-600">ATR R preferred</p>
+        </div>
+        <div className="rounded-lg bg-surface-200 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">Best Phase</p>
+          <p className="mt-1 truncate text-lg font-black text-white">{best?.count ? best.label : '—'}</p>
+          <p className="text-[10px] text-gray-600">{best?.count ? `${fmtR(best.avgR)} · ${best.count} trades` : 'Need history'}</p>
+        </div>
+        <div className="rounded-lg bg-surface-200 px-3 py-3">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">Profit Factor</p>
+          <p className="mt-1 text-2xl font-black text-white">{analytics?.summary?.profitFactor === Infinity ? '∞' : fmtRatio(analytics?.summary?.profitFactor)}</p>
+          <p className="text-[10px] text-gray-600">{analytics?.summary?.lowSample ? 'low sample' : 'sample ready'}</p>
+        </div>
+      </div>
+
+      {phaseRows.length ? (
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          {phaseRows.map(group => (
+            <div key={group.key} className="rounded-lg border border-white/8 bg-white/[0.025] px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold text-gray-300">{group.label}</p>
+                <span className="h-2 w-2 rounded-full" style={{ background: BREADTH_PHASE_COLOR_BY_KEY[group.key] || '#94a3b8' }} />
+              </div>
+              <p className={`mt-2 text-xl font-black ${metricColor(group.avgR)}`}>{fmtR(group.avgR)}</p>
+              <p className="text-[10px] text-gray-600">{group.count} trades · {group.winRate == null ? '—' : `${group.winRate.toFixed(0)}%`} win · PF {group.profitFactor === Infinity ? '∞' : fmtRatio(group.profitFactor)}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-4 rounded-lg bg-surface-200 px-4 py-5 text-center text-xs text-gray-600">
+          No closed trades matched to breadth history yet.
+        </p>
+      )}
+    </div>
+  )
 }
 
 function ListScoreCard({ label, entry, tone = 'blue' }) {
@@ -523,7 +808,7 @@ function HistoricalBreadthMetricTable({ rows, settings, onSettingsChange }) {
             <div>
               <p className="text-[11px] font-black uppercase tracking-[0.22em] text-white/85">Historical Breadth Tape</p>
               <p className="mt-1 text-[11px] font-medium text-slate-400">
-                One trading year of daily breadth metrics, latest session first.
+                Two trading years of daily breadth metrics, latest session first.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -704,7 +989,8 @@ function Drilldowns({ snapshotsById }) {
 
 export default function MorningBreadthDashboard() {
   const { listsById } = useResearchWatchlistStore()
-  const { tradeReviewChartSettings, breadthTableSettings, setBreadthTableSettings } = useSettingsStore()
+  const { trades } = useTradeStore()
+  const { tradeReviewChartSettings, breadthTableSettings, setBreadthTableSettings, excludedSymbols } = useSettingsStore()
   const [activeBreadthView, setActiveBreadthView] = useState('overview')
   const [metricFamily, setMetricFamily] = useState('sma')
   const [chartCollapsed, setChartCollapsed] = useState(false)
@@ -733,6 +1019,7 @@ export default function MorningBreadthDashboard() {
     latestAnchorDate,
     rollingRsWindow,
     rollingLookback: tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50,
+    minimumHistoryDays: BREADTH_HISTORY_LOOKBACK_DAYS,
     tradeReviewChartSettings,
   })
 
@@ -785,6 +1072,26 @@ export default function MorningBreadthDashboard() {
   const liquidTrendLatest = latestById.liquidTrend
   const liquidLatest = latestById.liquid
   const chartData = useMemo(() => mergeHistory(historiesById), [historiesById])
+  const breadthStateRows = useMemo(
+    () => buildBreadthStateRows({
+      marketHistory: historiesById.market,
+      liquidTrendHistory: historiesById.liquidTrend,
+      liquidHistory: historiesById.liquid,
+      limit: BREADTH_TABLE_SESSION_COUNT,
+    }),
+    [historiesById]
+  )
+  const breadthSignalSummary = useMemo(
+    () => buildBreadthSignalSummary(breadthStateRows),
+    [breadthStateRows]
+  )
+  const breadthTradeAnalytics = useMemo(() => {
+    const excluded = new Set((excludedSymbols || []).map(symbol => String(symbol || '').toUpperCase()))
+    return buildBreadthTradeAnalytics({
+      trades: (trades || []).filter(trade => !excluded.has(String(trade?.symbol || '').toUpperCase())),
+      breadthRows: breadthStateRows,
+    })
+  }, [breadthStateRows, excludedSymbols, trades])
   const historicalMetricRows = useMemo(
     () => buildHistoricalBreadthMetricRows({
       marketHistory: historiesById.market,
@@ -866,13 +1173,29 @@ export default function MorningBreadthDashboard() {
         ))}
       </div>
 
+      <ActionReadout summary={breadthSignalSummary} />
+      <StateVectorCards cards={breadthSignalSummary.cards} />
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <BreadthPhysicsChart rows={breadthStateRows} />
+        <ParticipationStackChart rows={breadthStateRows} />
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <PhaseSpaceChart rows={breadthStateRows} />
+        <div className="space-y-4">
+          <RegimeTimeline rows={breadthStateRows} />
+          <TradeAnalyticsPanel analytics={breadthTradeAnalytics} />
+        </div>
+      </div>
+
       <div className="rounded-xl border border-white/10 bg-white/[0.02]">
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-2">
             <BarChart3 size={14} className="text-accent-blue" />
             <div>
               <p className="text-sm font-semibold text-white">Historical Breadth</p>
-              <p className="text-xs text-gray-600">Market Leaders, Liquid Trend, and Liquid, last 180 sessions.</p>
+              <p className="text-xs text-gray-600">Market Leaders, Liquid Trend, and Liquid, last {BREADTH_TABLE_SESSION_COUNT} sessions.</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">

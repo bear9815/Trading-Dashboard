@@ -195,6 +195,7 @@ export function useResearchChartUniverse({
   latestAnchorDate = null,
   rollingRsWindow = 63,
   rollingLookback = 50,
+  minimumHistoryDays = null,
   tradeReviewChartSettings,
 }) {
   const [historyBarsBySymbol, setHistoryBarsBySymbol] = useState({})
@@ -213,6 +214,10 @@ export function useResearchChartUniverse({
     const rollingStart = new Date()
     rollingStart.setDate(rollingStart.getDate() - rollingBufferDays)
     const weeklyStart = getWeeklyChartStartDate(end)
+    const minimumStart = Number.isFinite(Number(minimumHistoryDays)) && Number(minimumHistoryDays) > 0
+      ? new Date(end)
+      : null
+    if (minimumStart) minimumStart.setDate(minimumStart.getDate() - Number(minimumHistoryDays))
 
     let anchorStart = null
     if (latestAnchorDate) {
@@ -220,7 +225,7 @@ export function useResearchChartUniverse({
       anchorStart.setDate(anchorStart.getDate() - 90)
     }
 
-    const startCandidates = [finraStart, rollingStart, anchorStart, weeklyStart].filter(Boolean)
+    const startCandidates = [finraStart, rollingStart, anchorStart, weeklyStart, minimumStart].filter(Boolean)
     const start = new Date(Math.min(...startCandidates.map(date => date.getTime())))
     const benchmarkSymbol = tradeReviewChartSettings?.benchmarkSymbol || 'SPY'
     const cacheKey = [
@@ -234,7 +239,7 @@ export function useResearchChartUniverse({
     ].join('|')
 
     return { benchmarkSymbol, start, end, cacheKey }
-  }, [latestAnchorDate, rollingLookback, rollingRsWindow, symbolsKey, tradeReviewChartSettings])
+  }, [latestAnchorDate, minimumHistoryDays, rollingLookback, rollingRsWindow, symbolsKey, tradeReviewChartSettings])
 
   const loadHistoryUniverse = useCallback(async () => {
     if (!symbols.length) {
