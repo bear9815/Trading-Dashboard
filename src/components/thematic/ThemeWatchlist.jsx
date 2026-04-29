@@ -1049,17 +1049,6 @@ export default function ThemeWatchlist({
     }),
     [symbols, anchoredRsBySymbol, rollingRsBySymbol]
   )
-  const squeezeBySymbol = useMemo(
-    () => Object.fromEntries(symbols.map(symbol => {
-      const dailyBars = historyBarsBySymbol[symbol] || []
-      return [symbol, {
-        daily: buildSqueezeSnapshot(dailyBars),
-        weekly: buildSqueezeSnapshot(aggregateWeeklyBars(dailyBars)),
-      }]
-    })),
-    [historyBarsBySymbol, symbols]
-  )
-
   const latestAnchorDate = useMemo(
     () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
     [tradeReviewChartSettings?.anchorDates]
@@ -1081,6 +1070,16 @@ export default function ThemeWatchlist({
     rollingLookback: tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50,
     tradeReviewChartSettings,
   })
+  const squeezeBySymbol = useMemo(
+    () => Object.fromEntries(symbols.map(symbol => {
+      const dailyBars = historyBarsBySymbol[symbol] || []
+      return [symbol, {
+        daily: buildSqueezeSnapshot(dailyBars),
+        weekly: buildSqueezeSnapshot(aggregateWeeklyBars(dailyBars)),
+      }]
+    })),
+    [historyBarsBySymbol, symbols]
+  )
 
   const visibleColumnOrder = useMemo(
     () => buildVisibleColumnOrder({ columnOrder, hiddenColumns }),
