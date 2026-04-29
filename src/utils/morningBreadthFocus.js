@@ -11,3 +11,14 @@ export function filterBreadthHistoriesForFocus(historiesById = {}, focusId = 'al
     liquid: focusId === 'liquid' ? (historiesById.liquid || []) : [],
   }
 }
+
+export function trimOverviewHistoriesForDate(historiesById = {}, excludedDate = '') {
+  if (!excludedDate) return historiesById
+
+  return Object.fromEntries(
+    Object.entries(historiesById).map(([key, rows]) => [
+      key,
+      (rows || []).filter(row => row?.date !== excludedDate),
+    ])
+  )
+}

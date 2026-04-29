@@ -62,7 +62,7 @@ import {
   buildInitialBrushRange,
   normalizeBrushRange,
 } from '../../utils/morningBreadthChartControls.js'
-import { filterBreadthHistoriesForFocus } from '../../utils/morningBreadthFocus.js'
+import { filterBreadthHistoriesForFocus, trimOverviewHistoriesForDate } from '../../utils/morningBreadthFocus.js'
 import BreadthTableSettingsModal from './BreadthTableSettingsModal.jsx'
 import { useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
 
@@ -230,6 +230,13 @@ function avgDistance(entry) {
     entry.avwap?.m1?.avgDistancePct,
     entry.avwap?.w1?.avgDistancePct,
   ])
+}
+
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function regimeTone(label) {
@@ -735,7 +742,7 @@ function ParticipationStackChart({ rows, timeframe = '6M', focusId = 'all', focu
   )
 }
 
-function PhaseSpaceChart({ rows, timeframe = '6M' }) {
+function PhaseSpaceChart({ rows, timeframe = '6M', focusLabel = 'Combined Breadth' }) {
   const [popoutOpen, setPopoutOpen] = useState(false)
   const data = applyTimeframeToRows(rows, timeframe).filter(row => Number.isFinite(row.level) && Number.isFinite(row.velocity10))
   return (
@@ -743,11 +750,13 @@ function PhaseSpaceChart({ rows, timeframe = '6M' }) {
       <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <SectionTitleWithInfo title="Phase Space" infoTitle="How phase space works">
-              <p>This chart plots <span className="font-medium text-white">velocity</span> on X and <span className="font-medium text-white">breadth level</span> on Y.</p>
-              <p>Upper-right means strong breadth with positive momentum. Lower-left means weak breadth with negative momentum. The color marks the classified breadth phase.</p>
+            <SectionTitleWithInfo title="Phase Space" infoTitle="How to use phase space">
+              <p>This chart plots <span className="font-medium text-white">10-day velocity</span> on X and <span className="font-medium text-white">breadth level</span> on Y for <span className="font-medium text-white">{focusLabel}</span>.</p>
+              <p><span className="font-medium text-white">Upper-right</span> means strong breadth that is still improving. <span className="font-medium text-white">Upper-left</span> means breadth is still elevated, but momentum is fading and getting more fragile.</p>
+              <p><span className="font-medium text-white">Lower-right</span> is the early repair zone: weak breadth that is starting to improve. <span className="font-medium text-white">Lower-left</span> is deterioration, where failed breakouts and defense matter most.</p>
+              <p>Read the quadrant first, then use the phase color as a second layer of context.</p>
             </SectionTitleWithInfo>
-            <p className="mt-1 text-xs text-gray-600">A physics-style view: breadth level on Y, impulse on X. Upper-right is broad momentum; lower-left is distribution.</p>
+            <p className="mt-1 text-xs text-gray-400">Breadth level on Y and momentum on X. The quadrant tells you whether the tape is accelerating, stalling, repairing, or breaking down.</p>
           </div>
           <div className="flex items-center gap-2">
             <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold text-gray-500">
@@ -768,7 +777,9 @@ function PhaseSpaceChart({ rows, timeframe = '6M' }) {
             <ReferenceLine y={52} stroke="#ffffff22" strokeDasharray="4 4" />
             <Tooltip
               cursor={{ strokeDasharray: '3 3' }}
-              contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+              contentStyle={{ backgroundColor: '#151927', border: '1px solid #ffffff18', borderRadius: 8, fontSize: 12, color: '#e5e7eb' }}
+              itemStyle={{ color: '#e5e7eb' }}
+              labelStyle={{ color: '#f9fafb', fontWeight: 600 }}
               formatter={(value, name) => [name === 'Breadth Level' ? `${Number(value).toFixed(0)}/100` : fmtSigned(Number(value), 1, ' pts'), name]}
               labelFormatter={(_, payload) => {
                 const row = payload?.[0]?.payload
@@ -795,7 +806,9 @@ function PhaseSpaceChart({ rows, timeframe = '6M' }) {
               <ReferenceLine y={52} stroke="#ffffff22" strokeDasharray="4 4" />
               <Tooltip
                 cursor={{ strokeDasharray: '3 3' }}
-                contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+                contentStyle={{ backgroundColor: '#151927', border: '1px solid #ffffff18', borderRadius: 8, fontSize: 12, color: '#e5e7eb' }}
+                itemStyle={{ color: '#e5e7eb' }}
+                labelStyle={{ color: '#f9fafb', fontWeight: 600 }}
                 formatter={(value, name) => [name === 'Breadth Level' ? `${Number(value).toFixed(0)}/100` : fmtSigned(Number(value), 1, ' pts'), name]}
                 labelFormatter={(_, payload) => {
                   const row = payload?.[0]?.payload
@@ -1422,7 +1435,7 @@ export default function MorningBreadthDashboard() {
   const { trades } = useTradeStore()
   const { tradeReviewChartSettings, breadthTableSettings, setBreadthTableSettings, excludedSymbols } = useSettingsStore()
   const [activeBreadthView, setActiveBreadthView] = useState('overview')
-  const [activeOverviewFocus, setActiveOverviewFocus] = useState('all')
+  const [activeOverviewFocus, setActiveOverviewFocus] = useState('liquid')
   const [activeTimeframe, setActiveTimeframe] = useState('6M')
   const [metricFamily, setMetricFamily] = useState('sma')
   const [chartCollapsed, setChartCollapsed] = useState(false)
@@ -1499,21 +1512,26 @@ export default function MorningBreadthDashboard() {
     }, {}),
     [historyBarsBySymbol, symbolsById]
   )
+  const overviewDateExclusion = useMemo(() => localDateKey(), [])
+  const overviewHistoriesById = useMemo(
+    () => trimOverviewHistoriesForDate(historiesById, overviewDateExclusion),
+    [historiesById, overviewDateExclusion]
+  )
   const latestById = useMemo(
     () => BREADTH_LISTS.reduce((next, config) => {
-      next[config.id] = latest(historiesById[config.id])
+      next[config.id] = latest(overviewHistoriesById[config.id])
       return next
     }, {}),
-    [historiesById]
+    [overviewHistoriesById]
   )
   const focusedHistoriesById = useMemo(
-    () => filterBreadthHistoriesForFocus(historiesById, activeOverviewFocus),
-    [activeOverviewFocus, historiesById]
+    () => filterBreadthHistoriesForFocus(overviewHistoriesById, activeOverviewFocus),
+    [activeOverviewFocus, overviewHistoriesById]
   )
   const marketLatest = latestById.market
   const liquidTrendLatest = latestById.liquidTrend
   const liquidLatest = latestById.liquid
-  const chartData = useMemo(() => mergeHistory(historiesById), [historiesById])
+  const chartData = useMemo(() => mergeHistory(overviewHistoriesById), [overviewHistoriesById])
   const breadthStateRows = useMemo(
     () => buildBreadthStateRows({
       marketHistory: focusedHistoriesById.market,
@@ -1697,7 +1715,7 @@ export default function MorningBreadthDashboard() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <PhaseSpaceChart rows={breadthStateRows} timeframe={activeTimeframe} />
+        <PhaseSpaceChart rows={breadthStateRows} timeframe={activeTimeframe} focusLabel={activeOverviewLabel} />
         <div className="space-y-4">
           <RegimeTimeline rows={breadthStateRows} timeframe={activeTimeframe} />
           <TradeAnalyticsPanel analytics={breadthTradeAnalytics} />
