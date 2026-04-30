@@ -15,9 +15,11 @@ const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
   chartType: 'ohlc',
   growthResearchDailyRangeMonths: 6,
+  growthResearchChartRangeYears: 5,
   showTradeEntryAvwap: false,
   researchChartsShowDailyAnchoredRs: true,
   researchChartsShowWeeklyRollingRs: true,
+  researchChartsShowSqueeze: true,
   researchChartsWeeklyRightOffset: 3,
   researchChartsDailyRightOffset: 3,
   tradeReviewWeeklyRightOffset: 1,
@@ -130,12 +132,20 @@ function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol) {
 
 function normalizeTradeReviewChartSettings(settings) {
   const current = settings || {}
+  const legacyMonths = Number(current.growthResearchDailyRangeMonths)
+  const normalizedRangeYears = [2, 5].includes(Number(current.growthResearchChartRangeYears))
+    ? Number(current.growthResearchChartRangeYears)
+    : legacyMonths >= 24
+      ? 2
+      : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.growthResearchChartRangeYears
   return {
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
     ...current,
     chartType: normalizeTradeReviewChartType(current.chartType),
+    growthResearchChartRangeYears: normalizedRangeYears,
     researchChartsShowDailyAnchoredRs: current.researchChartsShowDailyAnchoredRs ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowDailyAnchoredRs,
     researchChartsShowWeeklyRollingRs: current.researchChartsShowWeeklyRollingRs ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowWeeklyRollingRs,
+    researchChartsShowSqueeze: current.researchChartsShowSqueeze ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowSqueeze,
     researchChartsWeeklyRightOffset: Number.isFinite(Number(current.researchChartsWeeklyRightOffset)) ? Number(current.researchChartsWeeklyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsWeeklyRightOffset,
     researchChartsDailyRightOffset: Number.isFinite(Number(current.researchChartsDailyRightOffset)) ? Number(current.researchChartsDailyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsDailyRightOffset,
     tradeReviewWeeklyRightOffset: Number.isFinite(Number(current.tradeReviewWeeklyRightOffset)) ? Number(current.tradeReviewWeeklyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.tradeReviewWeeklyRightOffset,

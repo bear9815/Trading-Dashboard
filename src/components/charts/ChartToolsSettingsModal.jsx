@@ -34,6 +34,8 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
       opacity: settings?.dailyRollingRs?.opacity ?? 85,
       maLen: settings?.dailyRollingRs?.maLen ?? 9,
     },
+    growthResearchChartRangeYears: settings?.growthResearchChartRangeYears ?? 5,
+    researchChartsShowSqueeze: settings?.researchChartsShowSqueeze !== false,
     researchChartsWeeklyRightOffset: settings?.researchChartsWeeklyRightOffset ?? 3,
     researchChartsDailyRightOffset: settings?.researchChartsDailyRightOffset ?? 3,
     tradeReviewWeeklyRightOffset: settings?.tradeReviewWeeklyRightOffset ?? 1,
@@ -178,6 +180,44 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
                   </button>
                 ))}
               </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
+              <p className="label text-white">Growth Research Range</p>
+              <div className="inline-flex rounded-lg border border-white/10 bg-surface-200 p-1">
+                {[2, 5].map(years => (
+                  <button
+                    key={years}
+                    onClick={() => updateRoot('growthResearchChartRangeYears', years)}
+                    className={`px-3 py-1.5 text-xs rounded-md border transition-all ${
+                      Number(draft.growthResearchChartRangeYears) === years
+                        ? 'bg-accent-blue/20 text-accent-blue border-accent-blue/30'
+                        : 'text-gray-400 border-transparent hover:text-white'
+                    }`}
+                  >
+                    {years}Y
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-500">Controls the default Growth Research daily and weekly chart history window.</p>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
+              <p className="label text-white">Indicator Visibility</p>
+              <button
+                type="button"
+                onClick={() => setDraft(current => ({ ...current, researchChartsShowSqueeze: !current.researchChartsShowSqueeze }))}
+                className={`inline-flex items-center rounded-lg border px-3 py-2 text-xs font-semibold transition-all ${
+                  draft.researchChartsShowSqueeze
+                    ? 'border-accent-blue/30 bg-accent-blue/15 text-accent-blue'
+                    : 'border-white/10 bg-surface-200 text-gray-400'
+                }`}
+              >
+                {draft.researchChartsShowSqueeze ? 'Hide Price-Action Squeeze' : 'Show Price-Action Squeeze'}
+              </button>
+              <p className="text-[11px] text-gray-500">Show Price-Action Squeeze strips on Growth Research charts.</p>
             </div>
           </div>
 

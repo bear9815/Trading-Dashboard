@@ -5,9 +5,13 @@ import { fileURLToPath } from 'node:url'
 
 const componentPath = fileURLToPath(new URL('./ThemeWatchlist.jsx', import.meta.url))
 
-test('ThemeWatchlist renders ecosystem volatility map and table headings', async () => {
+test('ThemeWatchlist renders ecosystem regime board and table headings', async () => {
   const source = await readFile(componentPath, 'utf8')
-  assert.match(source, /Ecosystem Volatility Map/)
+  assert.match(source, /Ecosystem Regime Board/)
+  assert.match(source, /Power Coil/)
+  assert.match(source, /Early Coil/)
+  assert.match(source, /Extended Leadership/)
+  assert.match(source, /Lagging \/ Loose/)
   assert.match(source, /Daily Compression/)
   assert.match(source, /Weekly Compression/)
   assert.match(source, /Daily Expansion/)

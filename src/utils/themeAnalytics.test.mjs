@@ -365,6 +365,15 @@ assert.ok(mixedBasket.dailyCompressionBreadthPct < broadCompressed.dailyCompress
 assert.ok(mixedBasket.volatilitySetupScore < broadCompressed.volatilitySetupScore)
 assert.ok(Number.isFinite(broadCompressed.historicalCompressionPercentile))
 assert.ok(Number.isFinite(crowdedLeader.historicalExpansionPercentile))
+assert.ok(Number.isFinite(broadCompressed.trendLeadershipScore))
+assert.ok(Number.isFinite(broadCompressed.setupReadinessScore))
+assert.ok(Number.isFinite(broadCompressed.alignmentBreadthPct))
+assert.ok(Number.isFinite(broadCompressed.momentumTurnScore))
+assert.equal(broadCompressed.quadrantLabel, 'Power Coil')
+assert.equal(crowdedLeader.quadrantLabel, 'Extended Leadership')
+assert.equal(freshMover.quadrantLabel, 'Early Coil')
+assert.ok(broadCompressed.setupReadinessScore > crowdedLeader.setupReadinessScore)
+assert.ok(broadCompressed.alignmentBreadthPct > crowdedLeader.alignmentBreadthPct)
 
 const sparseVolatilityGroup = withGroupVolatilityMetrics({
   groups: [{ key: 'sparse', label: 'Sparse', symbols: ['ZZZ'], count: 1, currentStrengthScore: 8 }],
@@ -375,3 +384,4 @@ const sparseVolatilityGroup = withGroupVolatilityMetrics({
 assert.equal(sparseVolatilityGroup.dailyCompressionAvg, null)
 assert.equal(sparseVolatilityGroup.volatilitySetupScore, null)
 assert.equal(sparseVolatilityGroup.volatilityState, 'Loose')
+assert.equal(sparseVolatilityGroup.quadrantLabel, 'Lagging / Loose')

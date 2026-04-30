@@ -17,13 +17,12 @@ import {
   fitContentWithRightOffset,
   getVisibleLogicalRange,
 } from '../../utils/lightweightChartViewport.js'
-import { sliceWeeklyChartBars } from '../../utils/chartTimeframes.js'
 import { normalizeTradeReviewChartType } from '../../utils/tradeReviewChart.js'
-import { formatSqueezeMetric, formatSqueezeStateBadge, getSqueezeMetricTone, getSqueezeStateTone } from '../../utils/squeezeUi.js'
+import { formatSqueezeMetric, formatSqueezeStateBadge, getSqueezeStateTone } from '../../utils/squeezeUi.js'
 
 const CHART_UP_COLOR = '#2877e3'
 const CHART_DOWN_COLOR = '#ea4ce7'
-const DEFAULT_DAILY_RANGE_OPTIONS = [6, 9]
+const DEFAULT_DAILY_RANGE_OPTIONS = [2, 5] // Growth Research quick ranges render as 2Y / 5Y.
 
 const CHART_OPTIONS = {
   layout: {
@@ -145,6 +144,28 @@ function nearestDailyBarAtOrBefore(time, bars) {
   return match || bars[0]?.time || null
 }
 
+function createViewportSyncState() {
+  return {
+    chart: null,
+    peer: null,
+    isApplying: false,
+  }
+}
+
+function syncViewportToPeer(sourceState, targetState, rightOffset) {
+  if (!sourceState?.chart || !targetState?.chart || targetState.isApplying) return
+  const range = getVisibleLogicalRange(sourceState.chart)
+  if (!range) return
+  targetState.isApplying = true
+  targetState.chart.timeScale().setVisibleLogicalRange(range)
+  targetState.chart.timeScale().applyOptions({ rightOffset })
+  targetState.isApplying = false
+}
+
+function stateBandGradient() {
+  return 'linear-gradient(180deg, rgba(139,92,246,0.18) 0%, rgba(139,92,246,0.18) 34%, rgba(96,165,250,0.16) 34%, rgba(96,165,250,0.16) 60%, rgba(34,211,238,0.15) 60%, rgba(34,211,238,0.15) 78%, rgba(251,113,133,0.16) 78%, rgba(251,113,133,0.16) 100%)'
+}
+
 function LightweightPane({
   data,
   kind,
@@ -160,6 +181,7 @@ function LightweightPane({
   selectedAnchorId = null,
   onSelectAnchor,
   onEditAnchor,
+  viewportSync = null,
 }) {
   const chartContainerRef = useRef(null)
   const shadeCanvasRef = useRef(null)
@@ -173,7 +195,7 @@ function LightweightPane({
       height: height ?? chartContainerRef.current.clientHeight,
       width: chartContainerRef.current.clientWidth,
     })
-    const candles = kind === 'weekly' ? sliceWeeklyChartBars(data.weeklyBars) : data.dailyBars
+    const candles = kind === 'weekly' ? data.weeklyBars : data.dailyBars
     const normalizedChartType = normalizeTradeReviewChartType(chartType)
     const priceSeries = chart.addSeries(
       normalizedChartType === 'candlestick' ? CandlestickSeries : BarSeries,
@@ -249,15 +271,24 @@ function LightweightPane({
       })
     }
 
-    if (kind === 'daily') {
-      const visibleBars = countVisibleBarsForMonths(candles, dailyRangeMonths)
-      applyRightAnchoredLogicalRange(chart, candles.length, visibleBars, resolvedRightOffset)
-    } else {
-      fitContentWithRightOffset(chart, resolvedRightOffset)
-    }
+    const visibleBars = countVisibleBarsForMonths(candles, dailyRangeMonths)
+    applyRightAnchoredLogicalRange(chart, candles.length, visibleBars, resolvedRightOffset)
 
     redraw()
     chart.timeScale().subscribeVisibleTimeRangeChange(redraw)
+    chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+      if (viewportSync?.current) {
+        if (viewportSync.current.isApplying) return
+        viewportSync.current.chart = chart
+        syncViewportToPeer(viewportSync.current, viewportSync.current.peer, resolvedRightOffset)
+      }
+    })
+    if (viewportSync?.current) {
+      viewportSync.current.chart = chart
+      if (viewportSync.current.peer?.chart) {
+        syncViewportToPeer(viewportSync.current.peer, viewportSync.current, resolvedRightOffset)
+      }
+    }
 
     const clickHandler = onChartClick
       ? param => {
@@ -410,9 +441,10 @@ function LightweightPane({
       chartContainerRef.current?.removeEventListener?.('dblclick', handleDoubleClick)
       resizeObserver.disconnect()
       resetDrag()
+      if (viewportSync?.current?.chart === chart) viewportSync.current.chart = null
       chart.remove()
     }
-  }, [chartType, dailyRangeMonths, data, draggableAnchors, height, kind, onChartClick, onEditAnchor, onMoveAnchor, onSelectAnchor, rightOffset, selectedAnchorId, showRsGradient])
+  }, [chartType, dailyRangeMonths, data, draggableAnchors, height, kind, onChartClick, onEditAnchor, onMoveAnchor, onSelectAnchor, rightOffset, selectedAnchorId, showRsGradient, viewportSync])
 
   return (
     <div className={`relative w-full ${className}`} style={height ? { height } : undefined}>
@@ -422,13 +454,13 @@ function LightweightPane({
   )
 }
 
-function SqueezePane({ data, kind, height = 96 }) {
+function SqueezePane({ data, kind, height = 84, rightOffset, viewportSync = null, dailyRangeMonths = 60 }) {
   const chartContainerRef = useRef(null)
 
   useEffect(() => {
     if (!chartContainerRef.current) return undefined
     const squeeze = kind === 'weekly' ? data?.weeklySqueeze : data?.dailySqueeze
-    if (!(squeeze?.compression?.length || squeeze?.expansion?.length)) return undefined
+    if (!(squeeze?.setupReadiness?.length || squeeze?.compression?.length || squeeze?.expansion?.length)) return undefined
 
     const chart = createChart(chartContainerRef.current, {
       ...CHART_OPTIONS,
@@ -442,39 +474,43 @@ function SqueezePane({ data, kind, height = 96 }) {
         borderColor: 'rgba(95, 99, 106, 0.18)',
         scaleMargins: { top: 0.08, bottom: 0.08 },
       },
+      grid: {
+        vertLines: { color: 'rgba(120, 126, 136, 0.08)' },
+        horzLines: { color: 'rgba(120, 126, 136, 0.16)' },
+      },
     })
 
-    const percentileSeries = chart.addSeries(LineSeries, {
-      color: 'rgba(37, 99, 235, 0.7)',
-      lineWidth: 1,
-      lineStyle: 2,
+    const setupSeries = chart.addSeries(HistogramSeries, {
       priceLineVisible: false,
       lastValueVisible: false,
-      crosshairMarkerVisible: false,
+      base: 0,
     })
-    percentileSeries.setData(squeeze.bbwPercentile || [])
-
-    const trueRangeSeries = chart.addSeries(LineSeries, {
-      color: 'rgba(245, 158, 11, 0.78)',
-      lineWidth: 1,
-      lineStyle: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    })
-    trueRangeSeries.setData(squeeze.trueRangePercentile || [])
-
-    const compressionSeries = chart.addSeries(LineSeries, {
-      color: '#6d28d9',
-      lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    })
-    compressionSeries.setData(squeeze.compression || [])
+    setupSeries.setData(
+      (squeeze.setupReadiness || []).map(row => {
+        const value = Number(row?.value)
+        const state = value >= 78
+          ? 'Crowded'
+          : value >= 60
+            ? 'Firing'
+            : value >= 35
+              ? 'Turning'
+              : 'Compressed'
+        return {
+          time: row.time,
+          value,
+          color: state === 'Crowded'
+            ? 'rgba(251, 113, 133, 0.78)'
+            : state === 'Firing'
+              ? 'rgba(34, 211, 238, 0.78)'
+              : state === 'Turning'
+                ? 'rgba(96, 165, 250, 0.78)'
+                : 'rgba(139, 92, 246, 0.72)',
+        }
+      })
+    )
 
     const expansionSeries = chart.addSeries(LineSeries, {
-      color: '#0891b2',
+      color: '#22d3ee',
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -482,7 +518,42 @@ function SqueezePane({ data, kind, height = 96 }) {
     })
     expansionSeries.setData(squeeze.expansion || [])
 
-    chart.timeScale().fitContent()
+    const trendSeries = chart.addSeries(LineSeries, {
+      color: 'rgba(245, 158, 11, 0.85)',
+      lineWidth: 1,
+      lineStyle: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    trendSeries.setData(squeeze.trueRangePercentile || [])
+
+    createSeriesMarkers(expansionSeries, (squeeze.triggerMarkers || []).map(marker => ({
+      time: marker.time,
+      position: 'aboveBar',
+      color: marker.type === 'expansion-start' ? '#22d3ee' : '#60a5fa',
+      shape: marker.type === 'expansion-start' ? 'arrowUp' : 'circle',
+      text: marker.type === 'expansion-start' ? 'fire' : 'turn',
+      size: 0.7,
+    })))
+
+    const resolvedRightOffset = rightOffset ?? DEFAULT_LIGHTWEIGHT_RIGHT_OFFSET
+    const sourceBars = kind === 'weekly' ? data?.weeklyBars : data?.dailyBars
+    const visibleBars = countVisibleBarsForMonths(sourceBars, dailyRangeMonths)
+    applyRightAnchoredLogicalRange(chart, sourceBars?.length || 0, visibleBars, resolvedRightOffset)
+    chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+      if (viewportSync?.current) {
+        if (viewportSync.current.isApplying) return
+        viewportSync.current.chart = chart
+        syncViewportToPeer(viewportSync.current, viewportSync.current.peer, resolvedRightOffset)
+      }
+    })
+    if (viewportSync?.current) {
+      viewportSync.current.chart = chart
+      if (viewportSync.current.peer?.chart) {
+        syncViewportToPeer(viewportSync.current.peer, viewportSync.current, resolvedRightOffset)
+      }
+    }
 
     const resizeObserver = new ResizeObserver(([entry]) => {
       chart.applyOptions({ width: Math.floor(entry.contentRect.width), height: Math.floor(entry.contentRect.height) })
@@ -491,11 +562,23 @@ function SqueezePane({ data, kind, height = 96 }) {
 
     return () => {
       resizeObserver.disconnect()
+      if (viewportSync?.current?.chart === chart) viewportSync.current.chart = null
       chart.remove()
     }
-  }, [data, height, kind])
+  }, [dailyRangeMonths, data, height, kind, rightOffset, viewportSync])
 
-  return <div ref={chartContainerRef} className="h-full w-full" />
+  return (
+    <div className="relative h-full w-full overflow-hidden rounded-b-md border-t border-black/10">
+      <div className="absolute inset-0 opacity-80" style={{ background: stateBandGradient() }} />
+      <div ref={chartContainerRef} className="absolute inset-0" />
+      <div className="pointer-events-none absolute right-2 top-1 flex gap-1 text-[9px] uppercase tracking-[0.14em] text-[#505760]">
+        <span>Compressed</span>
+        <span>Turning</span>
+        <span>Firing</span>
+        <span>Crowded</span>
+      </div>
+    </div>
+  )
 }
 
 export default function ResearchMultiTimeframeChart({
@@ -506,6 +589,7 @@ export default function ResearchMultiTimeframeChart({
   dailyRangeMonths = 6,
   dailyRangeOptions = DEFAULT_DAILY_RANGE_OPTIONS,
   onChangeDailyRangeMonths,
+  showSqueeze = true,
   ytdEnabled = false,
   onToggleYtd,
   chartLabel = 'Ecosystem Symbol',
@@ -540,7 +624,15 @@ export default function ResearchMultiTimeframeChart({
   const hasBars = data?.dailyBars?.length
   const dailySqueezeSnapshot = data?.dailySqueezeSnapshot || data?.dailySqueeze?.snapshot || null
   const weeklySqueezeSnapshot = data?.weeklySqueezeSnapshot || data?.weeklySqueeze?.snapshot || null
-  const squeezeAvailable = Boolean((data?.dailySqueeze?.compression?.length || 0) || (data?.weeklySqueeze?.compression?.length || 0))
+  const squeezeAvailable = showSqueeze && Boolean((data?.dailySqueeze?.compression?.length || 0) || (data?.weeklySqueeze?.compression?.length || 0))
+  const weeklyPriceViewportRef = useRef(createViewportSyncState())
+  const weeklyStripViewportRef = useRef(createViewportSyncState())
+  const dailyPriceViewportRef = useRef(createViewportSyncState())
+  const dailyStripViewportRef = useRef(createViewportSyncState())
+  weeklyPriceViewportRef.current.peer = weeklyStripViewportRef.current
+  weeklyStripViewportRef.current.peer = weeklyPriceViewportRef.current
+  dailyPriceViewportRef.current.peer = dailyStripViewportRef.current
+  dailyStripViewportRef.current.peer = dailyPriceViewportRef.current
   return (
     <div className={`rounded-lg overflow-hidden border border-black/20 bg-[#d7d7d7] shadow-sm ${fillAvailableHeight ? 'h-full flex flex-col' : ''} ${className}`}>
       <div className="px-2 py-1.5 border-b border-black/15 text-[#242830]">
@@ -559,13 +651,13 @@ export default function ResearchMultiTimeframeChart({
                     type="button"
                     onClick={() => onChangeDailyRangeMonths(months)}
                     className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-colors ${
-                      dailyRangeMonths === months
+                      dailyRangeMonths === months || dailyRangeMonths === months * 12
                         ? 'bg-[#242830] text-white'
                         : 'text-[#505760] hover:bg-black/5'
                     }`}
-                    title={`Show ${months} months on the daily chart`}
+                    title={`Show ${months} years on the chart`}
                   >
-                    {months}M
+                    {months}Y
                   </button>
                 ))}
               </div>
@@ -688,7 +780,7 @@ export default function ResearchMultiTimeframeChart({
               {formatSqueezeStateBadge({ daily: dailySqueezeSnapshot, weekly: weeklySqueezeSnapshot })}
             </span>
             <span className="text-[10px] uppercase tracking-[0.18em] text-[#5f666d]">
-              price-action squeeze
+              setup readiness
             </span>
           </div>
         )}
@@ -708,6 +800,7 @@ export default function ResearchMultiTimeframeChart({
               rightOffset={weeklyRightOffset}
               showRsGradient={weeklyRsEnabled}
               onChartClick={addAvwapMode ? onChartClick : null}
+              viewportSync={weeklyPriceViewportRef}
               className={fillAvailableHeight ? 'h-full' : ''}
             />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
@@ -730,6 +823,7 @@ export default function ResearchMultiTimeframeChart({
               selectedAnchorId={selectedManualAnchorId}
               onSelectAnchor={onSelectManualAnchor}
               onEditAnchor={onEditManualAnchor}
+              viewportSync={dailyPriceViewportRef}
               className={fillAvailableHeight ? 'h-full' : ''}
             />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
@@ -745,27 +839,38 @@ export default function ResearchMultiTimeframeChart({
                 ].map(([label, snapshot, kind]) => (
                   <div key={kind} className="overflow-hidden rounded-md border border-black/10 bg-[#d7d7d7]/80">
                     <div className="flex items-center justify-between border-b border-black/10 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-[#5a6169]">
-                      <span>{label} squeeze</span>
+                      <span>{label} setup readiness</span>
                       <span className={`rounded border px-1.5 py-0.5 tracking-normal normal-case ${getSqueezeStateTone(snapshot?.stateLabel || 'No Data')}`}>
                         {snapshot?.stateLabel || 'No Data'}
                       </span>
                     </div>
-                    <div className="grid grid-cols-3 gap-1 border-b border-black/10 px-2 py-1.5 text-[10px]">
-                      <div className={`rounded border px-2 py-1 ${getSqueezeMetricTone(snapshot?.compressionScore, { high: 70, medium: 50 })}`}>
+                    <div className="grid grid-cols-4 gap-1 border-b border-black/10 px-2 py-1.5 text-[10px] text-[#39414a]">
+                      <div className="rounded border border-black/10 bg-white/40 px-2 py-1">
+                        <p className="uppercase tracking-[0.16em] opacity-70">Setup Readiness</p>
+                        <p className="mt-1 font-semibold">{formatSqueezeMetric(snapshot?.setupReadinessScore ?? ((snapshot?.compressionScore ?? 0) * 0.62 + (snapshot?.expansionScore ?? 0) * 0.38))}</p>
+                      </div>
+                      <div className="rounded border border-black/10 bg-white/40 px-2 py-1">
                         <p className="uppercase tracking-[0.16em] opacity-70">Compression</p>
                         <p className="mt-1 font-semibold">{formatSqueezeMetric(snapshot?.compressionScore)}</p>
                       </div>
-                      <div className={`rounded border px-2 py-1 ${getSqueezeMetricTone(snapshot?.expansionScore, { high: 70, medium: 50 })}`}>
+                      <div className="rounded border border-black/10 bg-white/40 px-2 py-1">
                         <p className="uppercase tracking-[0.16em] opacity-70">Expansion</p>
                         <p className="mt-1 font-semibold">{formatSqueezeMetric(snapshot?.expansionScore)}</p>
                       </div>
-                      <div className={`rounded border px-2 py-1 ${getSqueezeMetricTone(snapshot?.trueRangePercentile, { high: 75, medium: 40 })}`}>
+                      <div className="rounded border border-black/10 bg-white/40 px-2 py-1">
                         <p className="uppercase tracking-[0.16em] opacity-70">TR %ile</p>
                         <p className="mt-1 font-semibold">{formatSqueezeMetric(snapshot?.trueRangePercentile)}</p>
                       </div>
                     </div>
-                    <div className="h-[96px]">
-                      <SqueezePane data={data} kind={kind} />
+                    <div className="h-[84px]">
+                      <SqueezePane
+                        data={data}
+                        kind={kind}
+                        height={84}
+                        dailyRangeMonths={dailyRangeMonths}
+                        rightOffset={kind === 'weekly' ? weeklyRightOffset : dailyRightOffset}
+                        viewportSync={kind === 'weekly' ? weeklyStripViewportRef : dailyStripViewportRef}
+                      />
                     </div>
                   </div>
                 ))}

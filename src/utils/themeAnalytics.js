@@ -128,6 +128,41 @@ function buildAverageBlend(primary, secondary, primaryWeight = 0.5) {
   return round(values.reduce((sum, item) => sum + (item.value * item.weight), 0) / totalWeight, 3)
 }
 
+function normalizedTrendLeadershipScore(group = {}) {
+  const confidence = 0.55 + (breadthWeight(group.count, 3) * 0.45)
+  const strength = Number.isFinite(group.currentStrengthScore)
+    ? clamp((50 + (group.currentStrengthScore * 1.8)) * confidence, 0, 100)
+    : null
+  const rolling = Number.isFinite(group.avgRollingZ)
+    ? clamp((50 + (group.avgRollingZ * 14)) * confidence, 0, 100)
+    : null
+  const anchored = Number.isFinite(group.avgAnchoredZ)
+    ? clamp((50 + (group.avgAnchoredZ * 10)) * confidence, 0, 100)
+    : null
+  const aboveSignal = Number.isFinite(group.rollingAboveSignalPct)
+    ? group.rollingAboveSignalPct
+    : null
+
+  const values = [
+    Number.isFinite(strength) ? { value: strength, weight: 0.42 } : null,
+    Number.isFinite(rolling) ? { value: rolling, weight: 0.28 } : null,
+    Number.isFinite(anchored) ? { value: anchored, weight: 0.15 } : null,
+    Number.isFinite(aboveSignal) ? { value: aboveSignal, weight: 0.15 } : null,
+  ].filter(Boolean)
+
+  if (!values.length) return null
+  const totalWeight = values.reduce((sum, item) => sum + item.weight, 0)
+  return round(values.reduce((sum, item) => sum + (item.value * item.weight), 0) / totalWeight, 3)
+}
+
+function setupQuadrantLabel(trendLeadershipScore, setupReadinessScore) {
+  if (!Number.isFinite(trendLeadershipScore) || !Number.isFinite(setupReadinessScore)) return 'Lagging / Loose'
+  if (trendLeadershipScore >= 62 && setupReadinessScore >= 58) return 'Power Coil'
+  if (trendLeadershipScore < 62 && setupReadinessScore >= 58) return 'Early Coil'
+  if (trendLeadershipScore >= 62) return 'Extended Leadership'
+  return 'Lagging / Loose'
+}
+
 function volatilityStateForMetrics({
   compressionBlend,
   expansionBlend,
@@ -254,6 +289,11 @@ function normalizeSnapshotGroup(group) {
     weeklyExpansionBreadthPct: Number.isFinite(group.weeklyExpansionBreadthPct) ? group.weeklyExpansionBreadthPct : 0,
     historicalCompressionPercentile: Number.isFinite(group.historicalCompressionPercentile) ? group.historicalCompressionPercentile : null,
     historicalExpansionPercentile: Number.isFinite(group.historicalExpansionPercentile) ? group.historicalExpansionPercentile : null,
+    trendLeadershipScore: Number.isFinite(group.trendLeadershipScore) ? group.trendLeadershipScore : null,
+    setupReadinessScore: Number.isFinite(group.setupReadinessScore) ? group.setupReadinessScore : null,
+    alignmentBreadthPct: Number.isFinite(group.alignmentBreadthPct) ? group.alignmentBreadthPct : 0,
+    momentumTurnScore: Number.isFinite(group.momentumTurnScore) ? group.momentumTurnScore : null,
+    quadrantLabel: typeof group.quadrantLabel === 'string' ? group.quadrantLabel : 'Lagging / Loose',
     volatilitySetupScore: Number.isFinite(group.volatilitySetupScore) ? group.volatilitySetupScore : null,
     volatilityState: typeof group.volatilityState === 'string' ? group.volatilityState : 'Loose',
     volatilityCoveragePct: Number.isFinite(group.volatilityCoveragePct) ? group.volatilityCoveragePct : 0,
@@ -434,6 +474,53 @@ export function withGroupVolatilityMetrics({
       (group.symbols || []).length
     )
 
+    const trendLeadershipScore = normalizedTrendLeadershipScore(group)
+    const momentumTurnScore = round(clamp(
+      (
+        (Number(group.rollingAboveSignalPct) || 0) * 0.45 +
+        (Number(group.anchoredAboveSignalPct) || 0) * 0.15 +
+        (Number(group.strengtheningPct) || 0) * 0.25 +
+        (Number(group.bouncingPct) || 0) * 0.15 -
+        (Number(group.weakeningPct) || 0) * 0.12
+      ),
+      0,
+      100
+    ), 3)
+
+    const membersForAlignment = (group.members?.length
+      ? group.members
+      : (group.symbols || []).map(symbol => ({ symbol })))
+    const alignedMembers = membersForAlignment.filter(member => {
+      const symbolSqueeze = squeezeBySymbol?.[member.symbol]
+      const dailyCompression = symbolSqueeze?.daily?.compressionScore
+      const weeklyCompression = symbolSqueeze?.weekly?.compressionScore
+      const dailyExpansion = symbolSqueeze?.daily?.expansionScore
+      const weeklyExpansion = symbolSqueeze?.weekly?.expansionScore
+      const trendAligned = (
+        (Number.isFinite(member.rollingZ) && member.rollingZ >= 0.5) ||
+        (Number.isFinite(member.anchoredZ) && member.anchoredZ >= 0.25) ||
+        member.rollingAboveSignal === true ||
+        Number(group.avgRollingZ) >= 0.75 ||
+        Number(group.avgAnchoredZ) >= 0.35 ||
+        Number(group.currentStrengthScore) >= 18
+      )
+      const compressionAligned = (
+        (Number.isFinite(dailyCompression) && dailyCompression >= 58) ||
+        (Number.isFinite(weeklyCompression) && weeklyCompression >= 58)
+      )
+      const expansionAligned = (
+        (Number.isFinite(dailyExpansion) && dailyExpansion >= 45) ||
+        (Number.isFinite(weeklyExpansion) && weeklyExpansion >= 42) ||
+        member.rollingAboveSignal === true
+      )
+      return trendAligned && compressionAligned && (
+        expansionAligned ||
+        (Number.isFinite(dailyCompression) && dailyCompression >= 72) ||
+        (Number.isFinite(weeklyCompression) && weeklyCompression >= 72)
+      )
+    })
+    const alignmentBreadthPct = countPct(alignedMembers.length, membersForAlignment.length || (group.symbols || []).length)
+
     const previousGroups = historyByKey.get(group.key) || []
     const historicalCompressionPercentile = buildPercentRank(
       compressionBlend,
@@ -456,13 +543,15 @@ export function withGroupVolatilityMetrics({
     const turnBonus = Number.isFinite(expansionBlend)
       ? clamp((expansionBlend - 35) * 0.45, 0, 18)
       : 0
-    const volatilitySetupScore = Number.isFinite(compressionBlend)
+    const setupReadinessScore = Number.isFinite(compressionBlend)
       ? round(clamp(
           (compressionBlend * 0.27) +
           ((historicalCompressionPercentile ?? compressionBlend) * 0.23) +
           ((compressionBreadthBlend ?? 0) * 0.18) +
           ((expansionBreadthBlend ?? 0) * 0.08) +
           ((expansionBlend ?? 0) * 0.12) +
+          ((alignmentBreadthPct ?? 0) * 0.08) +
+          ((momentumTurnScore ?? 0) * 0.12) +
           turnBonus -
           crowdPenalty -
           participationPenalty -
@@ -471,6 +560,7 @@ export function withGroupVolatilityMetrics({
           100
         ), 3)
       : null
+    const quadrantLabel = setupQuadrantLabel(trendLeadershipScore, setupReadinessScore)
 
     return {
       ...group,
@@ -484,7 +574,12 @@ export function withGroupVolatilityMetrics({
       weeklyExpansionBreadthPct,
       historicalCompressionPercentile,
       historicalExpansionPercentile,
-      volatilitySetupScore,
+      trendLeadershipScore,
+      setupReadinessScore,
+      alignmentBreadthPct,
+      momentumTurnScore,
+      quadrantLabel,
+      volatilitySetupScore: setupReadinessScore,
       volatilityCoveragePct: coveragePct,
       volatilityState: volatilityStateForMetrics({
         compressionBlend,
@@ -561,6 +656,11 @@ function snapshotGroup(group) {
     weeklyExpansionBreadthPct: group.weeklyExpansionBreadthPct,
     historicalCompressionPercentile: group.historicalCompressionPercentile,
     historicalExpansionPercentile: group.historicalExpansionPercentile,
+    trendLeadershipScore: group.trendLeadershipScore,
+    setupReadinessScore: group.setupReadinessScore,
+    alignmentBreadthPct: group.alignmentBreadthPct,
+    momentumTurnScore: group.momentumTurnScore,
+    quadrantLabel: group.quadrantLabel,
     volatilitySetupScore: group.volatilitySetupScore,
     volatilityState: group.volatilityState,
     volatilityCoveragePct: group.volatilityCoveragePct,
