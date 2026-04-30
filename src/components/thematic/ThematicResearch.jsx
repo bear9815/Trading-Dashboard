@@ -12,6 +12,7 @@ import { refreshNewFieldsWithOpenRouter } from '../../utils/researchAi.js'
 import { refreshNewFieldsWithOllama } from '../../utils/localResearch.js'
 import { chatWithOpenRouter } from '../../utils/researchAi.js'
 import { ollamaChatStream, checkOllama } from '../../utils/ollama.js'
+import { buildGrowthResearchSynthesis } from '../../utils/growthResearchSynthesis.js'
 import {
   ChevronDown, AlertTriangle, Gem, Zap, FileText,
   Trash2, Send, Bot, TrendingUp,
@@ -1340,6 +1341,197 @@ function FundamentalMomentumBoard({ themes, convictions, librarySources }) {
   )
 }
 
+function ReadMetric({ label, value, accent = 'text-gray-200' }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wider text-gray-600">{label}</p>
+      <p className={`mt-1 text-sm font-semibold ${accent}`}>{value}</p>
+    </div>
+  )
+}
+
+function ConfirmationBadge({ confirmation }) {
+  const tone = confirmation?.tone === 'green'
+    ? 'border-accent-green/25 bg-accent-green/10 text-accent-green'
+    : confirmation?.tone === 'red'
+      ? 'border-red-400/25 bg-red-500/10 text-red-300'
+      : confirmation?.tone === 'yellow'
+        ? 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow'
+        : 'border-white/10 bg-white/[0.03] text-gray-500'
+  return (
+    <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold ${tone}`}>
+      {confirmation?.label || 'No read'}
+    </span>
+  )
+}
+
+function GrowthResearchCommandCenter({ synthesis, onOpenTab }) {
+  const topTheme = synthesis.currentRead.topTheme
+  const strongestSetup = synthesis.currentRead.strongestSetup
+  const biggestBottleneck = synthesis.currentRead.biggestBottleneck
+  const topThemes = synthesis.themeRows.slice(0, 5)
+  const leaders = synthesis.marketLeaderAlignment.slice(0, 8)
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl border border-accent-blue/15 bg-gradient-to-br from-accent-blue/8 via-white/[0.02] to-accent-green/8 p-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="max-w-3xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-blue">Command Center</p>
+            <h2 className="mt-2 text-xl font-bold text-white">What the growth universe is saying now</h2>
+            <p className="mt-2 text-sm leading-relaxed text-gray-400">{synthesis.currentRead.summary}</p>
+          </div>
+          <div className="grid min-w-full grid-cols-2 gap-3 sm:min-w-[520px] sm:grid-cols-4">
+            <ReadMetric label="Themes" value={synthesis.stats.themeCount} />
+            <ReadMetric label="Market Leaders" value={synthesis.stats.marketLeaderCount} accent="text-accent-blue" />
+            <ReadMetric label="Reports" value={synthesis.stats.reportCount} />
+            <ReadMetric label="Catalysts" value={synthesis.stats.catalystCount} accent="text-accent-yellow" />
+          </div>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-4">
+          <div className="rounded-xl border border-white/10 bg-black/10 p-4">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+              <Trophy size={13} className="text-accent-yellow" /> Top Theme
+            </div>
+            <p className="text-sm font-semibold text-white">{topTheme?.name || 'No theme read yet'}</p>
+            <p className="mt-1 text-xs text-gray-500">{topTheme?.healthLabel || 'Upload dossiers and map Market Leaders.'}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/10 p-4">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+              <Activity size={13} className="text-accent-green" /> Best Setup
+            </div>
+            <p className="text-sm font-semibold text-white">{strongestSetup?.name || 'No setup data'}</p>
+            <p className="mt-1 text-xs text-gray-500">{strongestSetup ? `${Math.round(strongestSetup.setupReadinessScore)} setup · ${strongestSetup.volatilityState}` : 'Refresh RS and squeeze data in Stocks/Ecosystems.'}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/10 p-4">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+              <AlertTriangle size={13} className="text-red-300" /> Bottleneck
+            </div>
+            <p className="text-sm font-semibold text-white">{biggestBottleneck?.theme || 'No bottlenecks flagged'}</p>
+            <p className="mt-1 line-clamp-2 text-xs text-gray-500">{biggestBottleneck?.detail || 'Supply-chain and thesis-killer fields will appear here.'}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/10 p-4">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+              <Target size={13} className="text-accent-blue" /> Leader Check
+            </div>
+            <p className="text-sm font-semibold text-white">{synthesis.currentRead.marketLeadersHealth}</p>
+            <p className="mt-1 text-xs text-gray-500">Market Leaders are the default confirmation layer.</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.8fr)]">
+        <div className="rounded-xl border border-white/10 bg-surface-50 p-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-white">Theme Heatmap</p>
+              <p className="mt-1 text-xs text-gray-500">Tailwinds, bottlenecks, Market Leaders, breadth, and setup in one read.</p>
+            </div>
+            <button onClick={() => onOpenTab('themes')} className="text-xs font-semibold text-accent-blue hover:underline">Open Themes</button>
+          </div>
+          {topThemes.length ? (
+            <div className="overflow-x-auto rounded-lg border border-white/10">
+              <table className="w-full min-w-[820px] text-sm">
+                <thead className="bg-white/[0.03] text-[10px] uppercase tracking-wider text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Theme</th>
+                    <th className="px-3 py-2 text-left">Leader Read</th>
+                    <th className="px-3 py-2 text-left">Tailwinds</th>
+                    <th className="px-3 py-2 text-left">Bottlenecks</th>
+                    <th className="px-3 py-2 text-left">Setup</th>
+                    <th className="px-3 py-2 text-left">Breadth</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/[0.05]">
+                  {topThemes.map(row => (
+                    <tr key={row.name} className="align-top">
+                      <td className="px-3 py-3">
+                        <p className="font-semibold text-white">{row.name}</p>
+                        <p className="mt-1 text-xs text-gray-600">{row.lifecycleStage}{row.runwayYears ? ` · ${row.runwayYears}yr runway` : ''}</p>
+                      </td>
+                      <td className="px-3 py-3">
+                        <ConfirmationBadge confirmation={row.marketLeaderConfirmation} />
+                        <p className="mt-1 text-xs text-gray-600">{row.marketLeaderSymbols.join(', ') || 'No mapped leaders'}</p>
+                      </td>
+                      <td className="px-3 py-3 text-gray-400">{row.tailwinds.slice(0, 2).map(item => item.label).join(' · ') || '—'}</td>
+                      <td className="px-3 py-3 text-gray-400">{row.bottlenecks.slice(0, 2).map(item => item.label).join(' · ') || '—'}</td>
+                      <td className="px-3 py-3 text-gray-300">{row.setupReadinessScore ? `${Math.round(row.setupReadinessScore)}` : '—'}<p className="text-xs text-gray-600">{row.volatilityState}</p></td>
+                      <td className="px-3 py-3">
+                        <span className={`rounded border px-2 py-1 text-[10px] ${row.narrowLeadership ? 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow' : 'border-white/10 bg-white/[0.03] text-gray-400'}`}>
+                          {row.healthLabel}
+                        </span>
+                        {row.leaderSpread != null && <p className="mt-1 text-xs text-gray-600">spread {row.leaderSpread.toFixed(2)}z</p>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-8 text-center">
+              <Layers size={20} className="mx-auto mb-2 text-gray-600" />
+              <p className="text-sm text-gray-400">Upload theme research and map Market Leaders to build the heatmap.</p>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-5">
+          <div className="rounded-xl border border-white/10 bg-surface-50 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-sm font-semibold text-white">Market Leaders Alignment</p>
+              <button onClick={() => onOpenTab('stocks')} className="text-xs font-semibold text-accent-blue hover:underline">Open Stocks</button>
+            </div>
+            <div className="space-y-2">
+              {leaders.length ? leaders.map(row => (
+                <div key={row.symbol} className="flex items-start justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-accent-blue">{row.symbol} <span className="font-normal text-gray-500">{row.companyName}</span></p>
+                    <p className="mt-0.5 truncate text-xs text-gray-600">{row.theme} · {row.relatedDriver}</p>
+                  </div>
+                  <span className={`shrink-0 rounded border px-2 py-1 text-[10px] font-semibold ${
+                    row.alignmentLabel === 'Confirming'
+                      ? 'border-accent-green/25 bg-accent-green/10 text-accent-green'
+                      : row.alignmentLabel === 'Contradicting'
+                        ? 'border-red-400/25 bg-red-500/10 text-red-300'
+                        : 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow'
+                  }`}>
+                    {row.alignmentLabel}
+                  </span>
+                </div>
+              )) : <p className="text-sm text-gray-500">Import Market Leaders to see stock-level confirmation.</p>}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-surface-50 p-4">
+            <p className="text-sm font-semibold text-white">Tailwinds + Bottlenecks</p>
+            <div className="mt-3 grid grid-cols-1 gap-3">
+              <div className="rounded-lg border border-accent-green/15 bg-accent-green/5 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-accent-green">Tailwinds</p>
+                {synthesis.tailwindRadar.slice(0, 4).map(item => (
+                  <p key={`${item.theme}-${item.label}-${item.detail}`} className="mb-2 text-xs leading-relaxed text-gray-400">
+                    <span className="font-semibold text-gray-200">{item.theme}</span> · {item.label}: {item.detail}
+                  </p>
+                ))}
+                {!synthesis.tailwindRadar.length && <p className="text-xs text-gray-600">No tailwinds extracted yet.</p>}
+              </div>
+              <div className="rounded-lg border border-red-400/15 bg-red-500/5 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-red-300">Bottlenecks</p>
+                {synthesis.bottleneckRadar.slice(0, 4).map(item => (
+                  <p key={`${item.theme}-${item.label}-${item.detail}`} className="mb-2 text-xs leading-relaxed text-gray-400">
+                    <span className="font-semibold text-gray-200">{item.theme}</span> · {item.label}: {item.detail}
+                  </p>
+                ))}
+                {!synthesis.bottleneckRadar.length && <p className="text-xs text-gray-600">No bottlenecks extracted yet.</p>}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Dossier Card ──────────────────────────────────────────────────────────────
 const CARD_TABS = [
   ['overview',    'Overview'],
@@ -1443,6 +1635,7 @@ export default function ThematicResearch() {
   const { apiKey, openRouterApiKey, researchAiProvider, setResearchAiProvider, researchOpenRouterModel, setResearchOpenRouterModel, useLocalLLM, setUseLocalLLM } = useSettingsStore()
   const { themes, removeTheme, convictions, setConviction, patchThemeDossier } = useThematicStore()
   const { sources: librarySources, loadSources } = useResearchLibraryStore()
+  const listsById = useResearchWatchlistStore(state => state.listsById)
   const resetWorkspaceState = useResearchWatchlistStore(state => state.resetWorkspaceState)
   const watchlistCount = useResearchWatchlistStore(state =>
     Object.values(state.listsById || {}).reduce((sum, list) => sum + (list?.symbols?.length || 0), 0)
@@ -1465,7 +1658,7 @@ export default function ThematicResearch() {
     loadSources()
   }, [loadSources])
 
-  const [growthTab,  setGrowthTab]  = useState('watchlist') // 'watchlist' | 'ecosystems' | 'themes' | 'earnings'
+  const [growthTab,  setGrowthTab]  = useState('overview') // 'overview' | 'themes' | 'stocks' | 'ecosystems' | 'reports' | 'earnings'
   const [expanded,   setExpanded]   = useState(null)
   const [tabs,       setTabs]       = useState({})
   const [showChat,   setShowChat]   = useState(false)
@@ -1505,6 +1698,10 @@ export default function ThematicResearch() {
 
   const earningsCount = librarySources.filter(s => s.source_type === 'earnings_call').length
   const deepDiveCount = librarySources.filter(s => s.source_type !== 'earnings_call').length
+  const synthesis = useMemo(
+    () => buildGrowthResearchSynthesis({ themes, sources: librarySources, listsById }),
+    [themes, librarySources, listsById]
+  )
 
   return (
     <div className="research-elevated p-5 space-y-5">
@@ -1565,12 +1762,14 @@ export default function ThematicResearch() {
         )}
       </div>
 
-      {/* ── Top-level tab switcher: Watchlist | Ecosystems | Themes | Earnings ── */}
+      {/* ── Top-level tab switcher: Command Center | Themes | Stocks | Ecosystems | Reports | Earnings ── */}
       <div className="flex items-center gap-1 border-b border-white/[0.08] -mb-1">
         {[
-          { id: 'watchlist', label: 'Watchlist', count: watchlistCount, desc: 'Relationship map for imported watchlists' },
+          { id: 'overview', label: 'Command Center', count: null, desc: 'Synthesized theme, tailwind, bottleneck, and Market Leaders read' },
+          { id: 'themes', label: 'Themes', count: themeCount, desc: 'Theme intelligence, catalysts, and dossiers' },
+          { id: 'stocks', label: 'Stocks', count: watchlistCount, desc: 'Market Leaders and watchlist relationship maps' },
           { id: 'ecosystems', label: 'Ecosystems', count: ecosystemCount, desc: 'Breadth, strength, and rotation across broader stock ecosystems' },
-          { id: 'themes',   label: 'Themes',   count: themeCount,    desc: 'Thematic dossiers & deep dives' },
+          { id: 'reports', label: 'Reports', count: deepDiveCount, desc: 'Uploaded research library and evidence' },
           { id: 'earnings', label: 'Earnings', count: earningsCount, desc: 'Earnings calls & company timelines' },
         ].map(({ id, label, count, desc }) => (
           <button
@@ -1609,7 +1808,14 @@ export default function ThematicResearch() {
         </div>
       )}
 
-      {growthTab === 'watchlist' && (
+      {growthTab === 'overview' && (
+        <GrowthResearchCommandCenter
+          synthesis={synthesis}
+          onOpenTab={setGrowthTab}
+        />
+      )}
+
+      {growthTab === 'stocks' && (
         <WorkspaceErrorBoundary
           boundaryKey={workspaceBoundaryKey}
           onRetry={handleWorkspaceRetry}
@@ -1645,9 +1851,6 @@ export default function ThematicResearch() {
       ════════════════════════════════════ */}
       {growthTab === 'themes' && (
         <>
-          {/* Research Library (deep dives + other — not earnings) */}
-          <ResearchLibrary />
-
           {/* Active Signals */}
           <ActiveSignals />
 
@@ -1705,6 +1908,10 @@ export default function ThematicResearch() {
             </>
           )}
         </>
+      )}
+
+      {growthTab === 'reports' && (
+        <ResearchLibrary />
       )}
 
       {/* ════════════════════════════════════
