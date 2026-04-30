@@ -118,7 +118,8 @@ const WATCHLIST_CONTEXT_PANEL_ID = 'watchlist-context'
 const COLUMN_LAYOUT_PANEL_ID = 'column-layout'
 const WATCHLIST_CHART_PANEL_ID = 'watchlist-chart'
 const ECOSYSTEM_CHART_PANEL_ID = 'ecosystem-chart'
-const GROWTH_RESEARCH_DAILY_RANGE_OPTIONS = [2, 5]
+const GROWTH_RESEARCH_DAILY_RANGE_OPTIONS = [3, 6, 9, 12]
+const GROWTH_RESEARCH_WEEKLY_RANGE_OPTIONS = [2, 5]
 
 async function mapWithConcurrency(items, limit, mapper) {
   const results = new Array(items.length)
@@ -1140,10 +1141,12 @@ export default function ThemeWatchlist({
     () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
     [tradeReviewChartSettings?.anchorDates]
   )
-  const growthResearchChartRangeYears = GROWTH_RESEARCH_DAILY_RANGE_OPTIONS.includes(tradeReviewChartSettings?.growthResearchChartRangeYears)
-    ? tradeReviewChartSettings.growthResearchChartRangeYears
-    : 5
-  const showSqueeze = tradeReviewChartSettings?.researchChartsShowSqueeze !== false
+  const growthResearchDailyRangeMonths = GROWTH_RESEARCH_DAILY_RANGE_OPTIONS.includes(tradeReviewChartSettings?.growthResearchDailyRangeMonths)
+    ? tradeReviewChartSettings.growthResearchDailyRangeMonths
+    : 6
+  const growthResearchWeeklyRangeYears = GROWTH_RESEARCH_WEEKLY_RANGE_OPTIONS.includes(tradeReviewChartSettings?.growthResearchWeeklyRangeYears)
+    ? tradeReviewChartSettings.growthResearchWeeklyRangeYears
+    : 2
   const ecosystemYtdEnabled = Boolean(tradeReviewChartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
   const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
 
@@ -2438,10 +2441,12 @@ export default function ThemeWatchlist({
                       chartType={normalizeTradeReviewChartType(tradeReviewChartSettings?.chartType)}
                       title={selectedThemeGroup.isMarketLeaders ? 'MARKET LEADERS' : `ECO:${String(selectedThemeGroup.label || '').toUpperCase()}`}
                       memberCount={selectedEcosystemComposite.memberCount}
-                      dailyRangeMonths={growthResearchChartRangeYears * 12}
-                      onChangeDailyRangeMonths={(years) => setTradeReviewChartSettings({ growthResearchChartRangeYears: years })}
+                      dailyRangeMonths={growthResearchDailyRangeMonths}
+                      weeklyRangeMonths={growthResearchWeeklyRangeYears * 12}
+                      onChangeDailyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchDailyRangeMonths: months })}
+                      onChangeWeeklyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchWeeklyRangeYears: Math.round(months / 12) })}
                       dailyRangeOptions={GROWTH_RESEARCH_DAILY_RANGE_OPTIONS}
-                      showSqueeze={showSqueeze}
+                      weeklyRangeOptions={GROWTH_RESEARCH_WEEKLY_RANGE_OPTIONS}
                       ytdEnabled={ecosystemYtdEnabled}
                       onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
                       collapsible
@@ -2700,10 +2705,12 @@ export default function ThemeWatchlist({
               chartType={normalizeTradeReviewChartType(tradeReviewChartSettings?.chartType)}
               title={selectedRow.symbol}
               memberCount={1}
-              dailyRangeMonths={growthResearchChartRangeYears * 12}
-              onChangeDailyRangeMonths={(years) => setTradeReviewChartSettings({ growthResearchChartRangeYears: years })}
+              dailyRangeMonths={growthResearchDailyRangeMonths}
+              weeklyRangeMonths={growthResearchWeeklyRangeYears * 12}
+              onChangeDailyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchDailyRangeMonths: months })}
+              onChangeWeeklyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchWeeklyRangeYears: Math.round(months / 12) })}
               dailyRangeOptions={GROWTH_RESEARCH_DAILY_RANGE_OPTIONS}
-              showSqueeze={showSqueeze}
+              weeklyRangeOptions={GROWTH_RESEARCH_WEEKLY_RANGE_OPTIONS}
               ytdEnabled={ecosystemYtdEnabled}
               onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
               chartLabel="Ticker Chart"

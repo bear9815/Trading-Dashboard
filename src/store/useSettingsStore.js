@@ -15,11 +15,10 @@ const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
   chartType: 'ohlc',
   growthResearchDailyRangeMonths: 6,
-  growthResearchChartRangeYears: 5,
+  growthResearchWeeklyRangeYears: 2,
   showTradeEntryAvwap: false,
   researchChartsShowDailyAnchoredRs: true,
   researchChartsShowWeeklyRollingRs: true,
-  researchChartsShowSqueeze: true,
   researchChartsWeeklyRightOffset: 3,
   researchChartsDailyRightOffset: 3,
   tradeReviewWeeklyRightOffset: 1,
@@ -132,20 +131,22 @@ function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol) {
 
 function normalizeTradeReviewChartSettings(settings) {
   const current = settings || {}
-  const legacyMonths = Number(current.growthResearchDailyRangeMonths)
-  const normalizedRangeYears = [2, 5].includes(Number(current.growthResearchChartRangeYears))
-    ? Number(current.growthResearchChartRangeYears)
-    : legacyMonths >= 24
-      ? 2
-      : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.growthResearchChartRangeYears
+  const normalizedDailyRangeMonths = [3, 6, 9, 12].includes(Number(current.growthResearchDailyRangeMonths))
+    ? Number(current.growthResearchDailyRangeMonths)
+    : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.growthResearchDailyRangeMonths
+  const normalizedWeeklyRangeYears = [2, 5].includes(Number(current.growthResearchWeeklyRangeYears))
+    ? Number(current.growthResearchWeeklyRangeYears)
+    : [2, 5].includes(Number(current.growthResearchChartRangeYears))
+      ? Number(current.growthResearchChartRangeYears)
+      : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.growthResearchWeeklyRangeYears
   return {
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
     ...current,
     chartType: normalizeTradeReviewChartType(current.chartType),
-    growthResearchChartRangeYears: normalizedRangeYears,
+    growthResearchDailyRangeMonths: normalizedDailyRangeMonths,
+    growthResearchWeeklyRangeYears: normalizedWeeklyRangeYears,
     researchChartsShowDailyAnchoredRs: current.researchChartsShowDailyAnchoredRs ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowDailyAnchoredRs,
     researchChartsShowWeeklyRollingRs: current.researchChartsShowWeeklyRollingRs ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowWeeklyRollingRs,
-    researchChartsShowSqueeze: current.researchChartsShowSqueeze ?? DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsShowSqueeze,
     researchChartsWeeklyRightOffset: Number.isFinite(Number(current.researchChartsWeeklyRightOffset)) ? Number(current.researchChartsWeeklyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsWeeklyRightOffset,
     researchChartsDailyRightOffset: Number.isFinite(Number(current.researchChartsDailyRightOffset)) ? Number(current.researchChartsDailyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsDailyRightOffset,
     tradeReviewWeeklyRightOffset: Number.isFinite(Number(current.tradeReviewWeeklyRightOffset)) ? Number(current.tradeReviewWeeklyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.tradeReviewWeeklyRightOffset,

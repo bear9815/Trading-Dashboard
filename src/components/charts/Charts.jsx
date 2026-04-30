@@ -29,7 +29,8 @@ const WATCHLIST_ORDER = DEFAULT_LIST_ORDER.reduce((next, id, index) => {
   next[id] = index
   return next
 }, {})
-const DAILY_RANGE_OPTIONS = [2, 5]
+const DAILY_RANGE_OPTIONS = [3, 6, 9, 12]
+const WEEKLY_RANGE_OPTIONS = [2, 5]
 const SIDEBAR_VIEW_OPTIONS = [
   ['symbols', 'Symbols'],
   ['ecosystems', 'Ecosystems'],
@@ -340,13 +341,15 @@ export default function Charts() {
     () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
     [tradeReviewChartSettings?.anchorDates]
   )
-  const growthResearchChartRangeYears = DAILY_RANGE_OPTIONS.includes(tradeReviewChartSettings?.growthResearchChartRangeYears)
-    ? tradeReviewChartSettings.growthResearchChartRangeYears
-    : 5
+  const growthResearchDailyRangeMonths = DAILY_RANGE_OPTIONS.includes(tradeReviewChartSettings?.growthResearchDailyRangeMonths)
+    ? tradeReviewChartSettings.growthResearchDailyRangeMonths
+    : 6
+  const growthResearchWeeklyRangeYears = WEEKLY_RANGE_OPTIONS.includes(tradeReviewChartSettings?.growthResearchWeeklyRangeYears)
+    ? tradeReviewChartSettings.growthResearchWeeklyRangeYears
+    : 2
   const ecosystemYtdEnabled = Boolean(tradeReviewChartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
   const dailyAnchoredRsEnabled = tradeReviewChartSettings?.researchChartsShowDailyAnchoredRs !== false
   const weeklyRollingRsEnabled = tradeReviewChartSettings?.researchChartsShowWeeklyRollingRs !== false
-  const showSqueeze = tradeReviewChartSettings?.researchChartsShowSqueeze !== false
   const chartsWeeklyRightOffset = Number.isFinite(tradeReviewChartSettings?.researchChartsWeeklyRightOffset) ? tradeReviewChartSettings.researchChartsWeeklyRightOffset : 3
   const chartsDailyRightOffset = Number.isFinite(tradeReviewChartSettings?.researchChartsDailyRightOffset) ? tradeReviewChartSettings.researchChartsDailyRightOffset : 3
   const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
@@ -759,16 +762,18 @@ export default function Charts() {
               chartType={normalizeTradeReviewChartType(tradeReviewChartSettings?.chartType)}
               title={activeChartTitle}
               memberCount={activeChartMemberCount}
-              dailyRangeMonths={growthResearchChartRangeYears * 12}
+              dailyRangeMonths={growthResearchDailyRangeMonths}
+              weeklyRangeMonths={growthResearchWeeklyRangeYears * 12}
               dailyRangeOptions={DAILY_RANGE_OPTIONS}
-              onChangeDailyRangeMonths={(years) => setTradeReviewChartSettings({ growthResearchChartRangeYears: years })}
+              weeklyRangeOptions={WEEKLY_RANGE_OPTIONS}
+              onChangeDailyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchDailyRangeMonths: months })}
+              onChangeWeeklyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchWeeklyRangeYears: Math.round(months / 12) })}
               ytdEnabled={ecosystemYtdEnabled}
               onToggleYtd={toggleYtd}
               weeklyRsEnabled={weeklyRollingRsEnabled}
               onToggleWeeklyRs={() => setTradeReviewChartSettings({ researchChartsShowWeeklyRollingRs: !weeklyRollingRsEnabled })}
               dailyAnchoredRsEnabled={dailyAnchoredRsEnabled}
               onToggleDailyAnchoredRs={() => setTradeReviewChartSettings({ researchChartsShowDailyAnchoredRs: !dailyAnchoredRsEnabled })}
-              showSqueeze={showSqueeze}
               onAddAvwap={isEcosystemMode ? null : (() => setAddAvwapMode(current => !current))}
               addAvwapMode={addAvwapMode}
               manualAnchors={isEcosystemMode ? [] : selectedManualAnchors}
