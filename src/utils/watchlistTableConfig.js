@@ -54,6 +54,36 @@ export const WATCHLIST_COLUMN_PRESETS = [
     columns: ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyCompression', 'dailyExpansion', 'weeklyCompression', 'weeklyExpansion', 'squeezeState', 'actions'],
   },
   {
+    key: 'squeeze_scout',
+    label: 'Squeeze Scout',
+    description: 'Best default volatility layout for daily and weekly compression and expansion scouting.',
+    columns: ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyCompression', 'dailyExpansion', 'weeklyCompression', 'weeklyExpansion', 'squeezeState', 'actions'],
+  },
+  {
+    key: 'trend_coil',
+    label: 'Trend + Coil',
+    description: 'Blend trend quality with compression context so leadership and coiling stay on one screen.',
+    columns: ['symbol', 'companyName', 'ecosystem', 'anchoredRs', 'rollingRs', 'ytdAvwap', 'dailyCompression', 'weeklyCompression', 'squeezeState', 'actions'],
+  },
+  {
+    key: 'expansion_hunter',
+    label: 'Expansion Hunter',
+    description: 'Surface names that are already beginning to wake up from their compressed bases.',
+    columns: ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyExpansion', 'weeklyExpansion', 'rollingRs', 'anchoredRs', 'squeezeState', 'actions'],
+  },
+  {
+    key: 'theme_leadership',
+    label: 'Theme Leadership',
+    description: 'Blend leadership and volatility so you can see what strong themes are quietly coiling.',
+    columns: ['symbol', 'companyName', 'theme', 'ecosystem', 'relatedDriver', 'anchoredRs', 'rollingRs', 'dailyCompression', 'dailyExpansion', 'actions'],
+  },
+  {
+    key: 'crowded_vs_coiled',
+    label: 'Crowded vs Coiled',
+    description: 'Compare volatility compression with short-interest pressure for crowding context.',
+    columns: ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyCompression', 'weeklyCompression', 'finraShortInterest', 'finraEstimatedShortInterest', 'squeezeState', 'actions'],
+  },
+  {
     key: 'short_interest',
     label: 'Short Interest',
     description: 'FINRA-heavy view for squeeze and crowding context.',
@@ -88,6 +118,7 @@ export function applyColumnPreset(presetKey) {
   const preset = WATCHLIST_COLUMN_PRESETS.find(item => item.key === presetKey) || WATCHLIST_COLUMN_PRESETS[0]
   return {
     presetKey: preset.key,
+    activeColumnPreset: preset.key,
     columnOrder: normalizeColumnOrder(preset.columns),
     hiddenColumns: DEFAULT_WATCHLIST_COLUMN_ORDER.filter(columnId => !preset.columns.includes(columnId)),
   }

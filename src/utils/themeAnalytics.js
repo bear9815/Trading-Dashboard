@@ -102,6 +102,51 @@ function delta(currentValue, previousValue, decimals = 3) {
   return round(currentValue - previousValue, decimals)
 }
 
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function buildPercentRank(currentValue, values) {
+  if (!Number.isFinite(currentValue)) return null
+  const finite = values.filter(Number.isFinite)
+  if (!finite.length) return null
+  const lessThan = finite.filter(value => value < currentValue).length
+  return round((lessThan / finite.length) * 100, 1)
+}
+
+function averageOrNull(values, decimals = 3) {
+  return average(values, decimals)
+}
+
+function buildAverageBlend(primary, secondary, primaryWeight = 0.5) {
+  const values = []
+  if (Number.isFinite(primary)) values.push({ value: primary, weight: primaryWeight })
+  if (Number.isFinite(secondary)) values.push({ value: secondary, weight: 1 - primaryWeight })
+  if (!values.length) return null
+  const totalWeight = values.reduce((sum, item) => sum + item.weight, 0)
+  if (!totalWeight) return null
+  return round(values.reduce((sum, item) => sum + (item.value * item.weight), 0) / totalWeight, 3)
+}
+
+function volatilityStateForMetrics({
+  compressionBlend,
+  expansionBlend,
+  compressionBreadthBlend,
+  expansionBreadthBlend,
+} = {}) {
+  if (!Number.isFinite(compressionBlend) || !Number.isFinite(expansionBlend)) return 'Loose'
+  if (expansionBlend >= 75 && compressionBlend < 55) return 'Crowded / Extended'
+  if (
+    (expansionBlend >= 62 || expansionBreadthBlend >= 35) &&
+    (compressionBlend >= 58 || compressionBreadthBlend >= 30)
+  ) {
+    return 'Expansion Starting'
+  }
+  if (compressionBlend >= 58 && expansionBlend >= 45) return 'Coiled and Turning'
+  if (compressionBlend >= 58) return 'Coiled'
+  return 'Loose'
+}
+
 function compareMemberFlips(currentMembers = [], previousMembers = []) {
   const previousBySymbol = Object.fromEntries(previousMembers.map(member => [member.symbol, member]))
   const improvingSymbols = []
@@ -199,6 +244,19 @@ function normalizeSnapshotGroup(group) {
     weakeningPct: Number.isFinite(group.weakeningPct) ? group.weakeningPct : 0,
     leaderSpread: Number.isFinite(group.leaderSpread) ? group.leaderSpread : null,
     healthLabel: typeof group.healthLabel === 'string' ? group.healthLabel : 'improving participation',
+    dailyCompressionAvg: Number.isFinite(group.dailyCompressionAvg) ? group.dailyCompressionAvg : null,
+    dailyExpansionAvg: Number.isFinite(group.dailyExpansionAvg) ? group.dailyExpansionAvg : null,
+    weeklyCompressionAvg: Number.isFinite(group.weeklyCompressionAvg) ? group.weeklyCompressionAvg : null,
+    weeklyExpansionAvg: Number.isFinite(group.weeklyExpansionAvg) ? group.weeklyExpansionAvg : null,
+    dailyCompressionBreadthPct: Number.isFinite(group.dailyCompressionBreadthPct) ? group.dailyCompressionBreadthPct : 0,
+    dailyExpansionBreadthPct: Number.isFinite(group.dailyExpansionBreadthPct) ? group.dailyExpansionBreadthPct : 0,
+    weeklyCompressionBreadthPct: Number.isFinite(group.weeklyCompressionBreadthPct) ? group.weeklyCompressionBreadthPct : 0,
+    weeklyExpansionBreadthPct: Number.isFinite(group.weeklyExpansionBreadthPct) ? group.weeklyExpansionBreadthPct : 0,
+    historicalCompressionPercentile: Number.isFinite(group.historicalCompressionPercentile) ? group.historicalCompressionPercentile : null,
+    historicalExpansionPercentile: Number.isFinite(group.historicalExpansionPercentile) ? group.historicalExpansionPercentile : null,
+    volatilitySetupScore: Number.isFinite(group.volatilitySetupScore) ? group.volatilitySetupScore : null,
+    volatilityState: typeof group.volatilityState === 'string' ? group.volatilityState : 'Loose',
+    volatilityCoveragePct: Number.isFinite(group.volatilityCoveragePct) ? group.volatilityCoveragePct : 0,
     members: normalizeMembers(group.members),
   }
 }
@@ -327,6 +385,117 @@ export function buildThemeGroupMetrics({
   }).sort((a, b) => (b.sizeAdjustedStrengthScore ?? -Infinity) - (a.sizeAdjustedStrengthScore ?? -Infinity) || b.count - a.count || a.label.localeCompare(b.label))
 }
 
+export function withGroupVolatilityMetrics({
+  groups = [],
+  squeezeBySymbol = {},
+  history = [],
+} = {}) {
+  const historyByKey = new Map()
+
+  for (const entry of normalizeThemeAnalyticsHistory({ theme: [], ecosystem: history }).ecosystem) {
+    for (const group of entry.groups || []) {
+      const current = historyByKey.get(group.key) || []
+      current.push(group)
+      historyByKey.set(group.key, current)
+    }
+  }
+
+  return groups.map(group => {
+    const snapshots = (group.symbols || [])
+      .map(symbol => squeezeBySymbol?.[symbol] || null)
+      .filter(Boolean)
+
+    const dailyCompressionValues = snapshots.map(item => item.daily?.compressionScore).filter(Number.isFinite)
+    const dailyExpansionValues = snapshots.map(item => item.daily?.expansionScore).filter(Number.isFinite)
+    const weeklyCompressionValues = snapshots.map(item => item.weekly?.compressionScore).filter(Number.isFinite)
+    const weeklyExpansionValues = snapshots.map(item => item.weekly?.expansionScore).filter(Number.isFinite)
+
+    const dailyCompressionAvg = averageOrNull(dailyCompressionValues)
+    const dailyExpansionAvg = averageOrNull(dailyExpansionValues)
+    const weeklyCompressionAvg = averageOrNull(weeklyCompressionValues)
+    const weeklyExpansionAvg = averageOrNull(weeklyExpansionValues)
+
+    const dailyCompressionBreadthPct = countPct(dailyCompressionValues.filter(value => value >= 58).length, dailyCompressionValues.length)
+    const dailyExpansionBreadthPct = countPct(dailyExpansionValues.filter(value => value >= 65).length, dailyExpansionValues.length)
+    const weeklyCompressionBreadthPct = countPct(weeklyCompressionValues.filter(value => value >= 58).length, weeklyCompressionValues.length)
+    const weeklyExpansionBreadthPct = countPct(weeklyExpansionValues.filter(value => value >= 65).length, weeklyExpansionValues.length)
+
+    const compressionBlend = buildAverageBlend(weeklyCompressionAvg, dailyCompressionAvg, 0.55)
+    const expansionBlend = buildAverageBlend(weeklyExpansionAvg, dailyExpansionAvg, 0.55)
+    const compressionBreadthBlend = buildAverageBlend(weeklyCompressionBreadthPct, dailyCompressionBreadthPct, 0.55)
+    const expansionBreadthBlend = buildAverageBlend(weeklyExpansionBreadthPct, dailyExpansionBreadthPct, 0.55)
+    const coveragePct = countPct(
+      snapshots.filter(item => (
+        Number.isFinite(item.daily?.compressionScore) ||
+        Number.isFinite(item.weekly?.compressionScore) ||
+        Number.isFinite(item.daily?.expansionScore) ||
+        Number.isFinite(item.weekly?.expansionScore)
+      )).length,
+      (group.symbols || []).length
+    )
+
+    const previousGroups = historyByKey.get(group.key) || []
+    const historicalCompressionPercentile = buildPercentRank(
+      compressionBlend,
+      previousGroups.map(item => buildAverageBlend(item.weeklyCompressionAvg, item.dailyCompressionAvg, 0.55))
+    )
+    const historicalExpansionPercentile = buildPercentRank(
+      expansionBlend,
+      previousGroups.map(item => buildAverageBlend(item.weeklyExpansionAvg, item.dailyExpansionAvg, 0.55))
+    )
+
+    const crowdPenalty = (
+      (Number.isFinite(expansionBlend) && expansionBlend >= 80 ? 12 : 0) +
+      (Number.isFinite(expansionBlend) && expansionBlend >= 75 && Number.isFinite(compressionBlend) && compressionBlend < 55 ? 16 : 0) +
+      (coveragePct > 0 && coveragePct < 50 ? 10 : 0)
+    )
+    const participationPenalty = Math.max(0, 10 - ((Number(group.count) || 0) * 4))
+    const mixedPenalty = Number.isFinite(compressionBreadthBlend) && compressionBreadthBlend < 60
+      ? (60 - compressionBreadthBlend) * 0.35
+      : 0
+    const turnBonus = Number.isFinite(expansionBlend)
+      ? clamp((expansionBlend - 35) * 0.45, 0, 18)
+      : 0
+    const volatilitySetupScore = Number.isFinite(compressionBlend)
+      ? round(clamp(
+          (compressionBlend * 0.27) +
+          ((historicalCompressionPercentile ?? compressionBlend) * 0.23) +
+          ((compressionBreadthBlend ?? 0) * 0.18) +
+          ((expansionBreadthBlend ?? 0) * 0.08) +
+          ((expansionBlend ?? 0) * 0.12) +
+          turnBonus -
+          crowdPenalty -
+          participationPenalty -
+          mixedPenalty,
+          0,
+          100
+        ), 3)
+      : null
+
+    return {
+      ...group,
+      dailyCompressionAvg,
+      dailyExpansionAvg,
+      weeklyCompressionAvg,
+      weeklyExpansionAvg,
+      dailyCompressionBreadthPct,
+      dailyExpansionBreadthPct,
+      weeklyCompressionBreadthPct,
+      weeklyExpansionBreadthPct,
+      historicalCompressionPercentile,
+      historicalExpansionPercentile,
+      volatilitySetupScore,
+      volatilityCoveragePct: coveragePct,
+      volatilityState: volatilityStateForMetrics({
+        compressionBlend,
+        expansionBlend,
+        compressionBreadthBlend,
+        expansionBreadthBlend,
+      }),
+    }
+  })
+}
+
 export function buildMarketLeadersEcosystemGroup({
   rows = [],
   fitBySymbol = {},
@@ -382,6 +551,19 @@ function snapshotGroup(group) {
     weakeningPct: group.weakeningPct,
     leaderSpread: group.leaderSpread,
     healthLabel: group.healthLabel,
+    dailyCompressionAvg: group.dailyCompressionAvg,
+    dailyExpansionAvg: group.dailyExpansionAvg,
+    weeklyCompressionAvg: group.weeklyCompressionAvg,
+    weeklyExpansionAvg: group.weeklyExpansionAvg,
+    dailyCompressionBreadthPct: group.dailyCompressionBreadthPct,
+    dailyExpansionBreadthPct: group.dailyExpansionBreadthPct,
+    weeklyCompressionBreadthPct: group.weeklyCompressionBreadthPct,
+    weeklyExpansionBreadthPct: group.weeklyExpansionBreadthPct,
+    historicalCompressionPercentile: group.historicalCompressionPercentile,
+    historicalExpansionPercentile: group.historicalExpansionPercentile,
+    volatilitySetupScore: group.volatilitySetupScore,
+    volatilityState: group.volatilityState,
+    volatilityCoveragePct: group.volatilityCoveragePct,
     members: Array.isArray(group.members) ? group.members : [],
   }
 }

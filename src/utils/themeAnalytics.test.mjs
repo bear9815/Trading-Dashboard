@@ -5,6 +5,7 @@ import {
   buildThemeRotationMetrics,
   normalizeThemeAnalyticsHistory,
   upsertThemeAnalyticsSnapshot,
+  withGroupVolatilityMetrics,
   withMarketLeadersEcosystemGroup,
 } from './themeAnalytics.js'
 
@@ -290,3 +291,87 @@ assert.equal(normalizedHistory.theme.length, 1)
 assert.equal(normalizedHistory.theme[0].groups.length, 1)
 assert.equal(normalizedHistory.theme[0].groups[0].members.length, 1)
 assert.equal(normalizedHistory.ecosystem.length, 0)
+
+const squeezeBySymbol = {
+  AAA: {
+    daily: { compressionScore: 82, expansionScore: 24, stateLabel: 'Compressed' },
+    weekly: { compressionScore: 78, expansionScore: 28, stateLabel: 'Compressed' },
+  },
+  BBB: {
+    daily: { compressionScore: 79, expansionScore: 30, stateLabel: 'Compressed and Turning' },
+    weekly: { compressionScore: 76, expansionScore: 34, stateLabel: 'Compressed and Turning' },
+  },
+  CCC: {
+    daily: { compressionScore: 66, expansionScore: 74, stateLabel: 'Expansion Starting' },
+    weekly: { compressionScore: 58, expansionScore: 69, stateLabel: 'Expansion Starting' },
+  },
+  DDD: {
+    daily: { compressionScore: 86, expansionScore: 18, stateLabel: 'Compressed' },
+    weekly: { compressionScore: 82, expansionScore: 22, stateLabel: 'Compressed' },
+  },
+  EEE: {
+    daily: { compressionScore: 36, expansionScore: 88, stateLabel: 'Expansion Starting' },
+    weekly: { compressionScore: 34, expansionScore: 84, stateLabel: 'Expansion Starting' },
+  },
+}
+
+const volatilityGroups = [
+  { key: 'broad compressed', label: 'Broad Compressed', symbols: ['AAA', 'BBB'], count: 2, currentStrengthScore: 24 },
+  { key: 'single compressed', label: 'Single Compressed', symbols: ['DDD'], count: 1, currentStrengthScore: 26 },
+  { key: 'fresh mover', label: 'Fresh Mover', symbols: ['CCC'], count: 1, currentStrengthScore: 22 },
+  { key: 'crowded leader', label: 'Crowded Leader', symbols: ['EEE'], count: 1, currentStrengthScore: 28 },
+  { key: 'mixed basket', label: 'Mixed Basket', symbols: ['AAA', 'EEE'], count: 2, currentStrengthScore: 20 },
+]
+
+const volatilityHistory = [
+  {
+    date: '2026-04-22',
+    groups: [
+      { key: 'broad compressed', label: 'Broad Compressed', dailyCompressionAvg: 58, weeklyCompressionAvg: 60, dailyExpansionAvg: 20, weeklyExpansionAvg: 24 },
+      { key: 'single compressed', label: 'Single Compressed', dailyCompressionAvg: 61, weeklyCompressionAvg: 64, dailyExpansionAvg: 18, weeklyExpansionAvg: 20 },
+      { key: 'fresh mover', label: 'Fresh Mover', dailyCompressionAvg: 52, weeklyCompressionAvg: 50, dailyExpansionAvg: 34, weeklyExpansionAvg: 36 },
+      { key: 'crowded leader', label: 'Crowded Leader', dailyCompressionAvg: 48, weeklyCompressionAvg: 46, dailyExpansionAvg: 64, weeklyExpansionAvg: 62 },
+      { key: 'mixed basket', label: 'Mixed Basket', dailyCompressionAvg: 54, weeklyCompressionAvg: 52, dailyExpansionAvg: 28, weeklyExpansionAvg: 30 },
+    ],
+  },
+  {
+    date: '2026-04-23',
+    groups: [
+      { key: 'broad compressed', label: 'Broad Compressed', dailyCompressionAvg: 62, weeklyCompressionAvg: 63, dailyExpansionAvg: 22, weeklyExpansionAvg: 26 },
+      { key: 'single compressed', label: 'Single Compressed', dailyCompressionAvg: 65, weeklyCompressionAvg: 66, dailyExpansionAvg: 19, weeklyExpansionAvg: 21 },
+      { key: 'fresh mover', label: 'Fresh Mover', dailyCompressionAvg: 50, weeklyCompressionAvg: 49, dailyExpansionAvg: 40, weeklyExpansionAvg: 42 },
+      { key: 'crowded leader', label: 'Crowded Leader', dailyCompressionAvg: 44, weeklyCompressionAvg: 43, dailyExpansionAvg: 70, weeklyExpansionAvg: 68 },
+      { key: 'mixed basket', label: 'Mixed Basket', dailyCompressionAvg: 50, weeklyCompressionAvg: 49, dailyExpansionAvg: 35, weeklyExpansionAvg: 34 },
+    ],
+  },
+]
+
+const enrichedVolatilityGroups = withGroupVolatilityMetrics({
+  groups: volatilityGroups,
+  squeezeBySymbol,
+  history: volatilityHistory,
+})
+
+const broadCompressed = enrichedVolatilityGroups.find(group => group.key === 'broad compressed')
+const singleCompressed = enrichedVolatilityGroups.find(group => group.key === 'single compressed')
+const freshMover = enrichedVolatilityGroups.find(group => group.key === 'fresh mover')
+const crowdedLeader = enrichedVolatilityGroups.find(group => group.key === 'crowded leader')
+const mixedBasket = enrichedVolatilityGroups.find(group => group.key === 'mixed basket')
+
+assert.ok(broadCompressed.volatilitySetupScore > singleCompressed.volatilitySetupScore)
+assert.equal(crowdedLeader.volatilityState, 'Crowded / Extended')
+assert.notEqual(freshMover.volatilityState, 'Crowded / Extended')
+assert.ok(mixedBasket.dailyCompressionBreadthPct < broadCompressed.dailyCompressionBreadthPct)
+assert.ok(mixedBasket.volatilitySetupScore < broadCompressed.volatilitySetupScore)
+assert.ok(Number.isFinite(broadCompressed.historicalCompressionPercentile))
+assert.ok(Number.isFinite(crowdedLeader.historicalExpansionPercentile))
+
+const sparseVolatilityGroup = withGroupVolatilityMetrics({
+  groups: [{ key: 'sparse', label: 'Sparse', symbols: ['ZZZ'], count: 1, currentStrengthScore: 8 }],
+  squeezeBySymbol: {},
+  history: [],
+})[0]
+
+assert.equal(sparseVolatilityGroup.dailyCompressionAvg, null)
+assert.equal(sparseVolatilityGroup.volatilitySetupScore, null)
+assert.equal(sparseVolatilityGroup.volatilityState, 'Loose')
