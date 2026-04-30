@@ -1,5 +1,5 @@
-export const WEEKLY_CHART_MONTHS = 24
-export const WEEKLY_CHART_BARS = 104
+export const WEEKLY_CHART_MONTHS = 60
+export const WEEKLY_CHART_BARS = 260
 
 export function getWeeklyChartStartDate(endDate = new Date()) {
   const end = endDate instanceof Date ? endDate : new Date(endDate)
