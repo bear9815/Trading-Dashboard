@@ -139,6 +139,15 @@ function stateAbbreviation(label) {
   return 'n/a'
 }
 
+function buildTriggerState(compressionScore, expansionScore, trueRangePercentile) {
+  if (!Number.isFinite(compressionScore) || !Number.isFinite(expansionScore)) return 'Loose'
+  if (expansionScore >= 70 && trueRangePercentile >= 55) return 'Firing'
+  if (compressionScore >= 58 && expansionScore >= 45) return 'Turning'
+  if (compressionScore >= 58) return 'Compressed'
+  if (expansionScore >= 72) return 'Crowded'
+  return 'Loose'
+}
+
 export function formatSqueezeStateBadge({ daily = null, weekly = null } = {}) {
   return `D ${stateAbbreviation(daily?.stateLabel)} / W ${stateAbbreviation(weekly?.stateLabel)}`
 }
@@ -164,6 +173,8 @@ export function buildSqueezeSeries(bars = [], options = {}) {
         trueRangeSlope: null,
         compressionScore: null,
         expansionScore: null,
+        setupReadinessScore: null,
+        triggerState: 'No Data',
         stateLabel: 'No Data',
         isCompressed: false,
         isExpansionStarting: false,
@@ -187,6 +198,8 @@ export function buildSqueezeSeries(bars = [], options = {}) {
   const trPercentile = sma(trPercentileRaw, 3)
   const compressionValues = []
   const expansionValues = []
+  const setupReadinessValues = []
+  const triggerMarkers = []
 
   for (let index = 0; index < cleaned.length; index += 1) {
     const bbwValue = bbw[index]
@@ -248,15 +261,44 @@ export function buildSqueezeSeries(bars = [], options = {}) {
       0,
       100
     )
+    const setupReadinessScore = clamp(
+      (compressionScore * 0.62) +
+      (expansionScore * 0.38),
+      0,
+      100
+    )
 
     compressionValues.push(compressionScore)
     expansionValues.push(expansionScore)
+    setupReadinessValues.push(setupReadinessScore)
+
+    if (index > 0) {
+      const priorExpansion = expansionValues[index - 1]
+      const priorCompression = compressionValues[index - 1]
+      if (Number.isFinite(priorExpansion) && priorExpansion < 45 && expansionScore >= 45) {
+        triggerMarkers.push({
+          time: cleaned[index].time,
+          value: Math.round(setupReadinessScore * 1000) / 1000,
+          type: 'momentum-turn',
+        })
+      }
+      if (Number.isFinite(priorCompression) && priorCompression >= 58 && expansionScore >= 65 && trPct >= 55) {
+        triggerMarkers.push({
+          time: cleaned[index].time,
+          value: Math.round(setupReadinessScore * 1000) / 1000,
+          type: 'expansion-start',
+        })
+      }
+    }
   }
 
   const compression = compressionValues
     .map((value, index) => Number.isFinite(value) ? { time: cleaned[index].time, value: Math.round(value * 1000) / 1000 } : null)
     .filter(Boolean)
   const expansion = expansionValues
+    .map((value, index) => Number.isFinite(value) ? { time: cleaned[index].time, value: Math.round(value * 1000) / 1000 } : null)
+    .filter(Boolean)
+  const setupReadiness = setupReadinessValues
     .map((value, index) => Number.isFinite(value) ? { time: cleaned[index].time, value: Math.round(value * 1000) / 1000 } : null)
     .filter(Boolean)
   const bbwLine = bbw
@@ -294,6 +336,8 @@ export function buildSqueezeSeries(bars = [], options = {}) {
       : null,
     compressionScore: compressionValues[lastIndex] ?? null,
     expansionScore: expansionValues[lastIndex] ?? null,
+    setupReadinessScore: setupReadinessValues[lastIndex] ?? null,
+    triggerState: buildTriggerState(compressionValues[lastIndex], expansionValues[lastIndex], trPercentile[lastIndex]),
     stateLabel: stateLabelForScores(compressionValues[lastIndex], expansionValues[lastIndex]),
     isCompressed: Number.isFinite(compressionValues[lastIndex]) && compressionValues[lastIndex] >= 58,
     isExpansionStarting: stateLabelForScores(compressionValues[lastIndex], expansionValues[lastIndex]) === 'Expansion Starting',
@@ -308,6 +352,8 @@ export function buildSqueezeSeries(bars = [], options = {}) {
     trueRangeSignal: trSignalLine,
     compression,
     expansion,
+    setupReadiness,
+    triggerMarkers,
     snapshot,
   }
 }

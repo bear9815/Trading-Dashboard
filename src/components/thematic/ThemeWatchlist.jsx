@@ -48,11 +48,13 @@ import {
   buildMarketLeadersEcosystemGroup,
   buildThemeGroupMetrics,
   buildThemeRotationMetrics,
+  withGroupVolatilityMetrics,
   withMarketLeadersEcosystemGroup,
 } from '../../utils/themeAnalytics.js'
 import { enrichWatchlistChunk } from '../../utils/watchlistResearch.js'
 import { collectReusableWatchlistRows, getSymbolsNeedingMapping, mergeTrustedCompanyIdentity } from '../../utils/watchlistReuse.js'
 import ResearchMultiTimeframeChart from '../charts/ResearchMultiTimeframeChart.jsx'
+import EcosystemVolatilityMap from './EcosystemVolatilityMap.jsx'
 import { buildTickerChartData, useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
 import { buildSqueezeSnapshot } from '../../utils/squeezeAnalytics.js'
 import { formatSqueezeMetric, formatSqueezeStateBadge, getSqueezeMetricTone, getSqueezeStateTone } from '../../utils/squeezeUi.js'
@@ -116,7 +118,7 @@ const WATCHLIST_CONTEXT_PANEL_ID = 'watchlist-context'
 const COLUMN_LAYOUT_PANEL_ID = 'column-layout'
 const WATCHLIST_CHART_PANEL_ID = 'watchlist-chart'
 const ECOSYSTEM_CHART_PANEL_ID = 'ecosystem-chart'
-const GROWTH_RESEARCH_DAILY_RANGE_OPTIONS = [3, 6, 9]
+const GROWTH_RESEARCH_DAILY_RANGE_OPTIONS = [2, 5]
 
 async function mapWithConcurrency(items, limit, mapper) {
   const results = new Array(items.length)
@@ -689,6 +691,91 @@ function RotationQuadrantLabel(quadrant) {
   }
 }
 
+function formatPlainMetric(value, decimals = 1, suffix = '') {
+  if (!Number.isFinite(value)) return '—'
+  return `${value.toFixed(decimals)}${suffix}`
+}
+
+function VolatilityStateBadge({ label }) {
+  return (
+    <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold ${getSqueezeStateTone(label || 'Loose')}`}>
+      {label || 'Loose'}
+    </span>
+  )
+}
+
+function EcosystemVolatilityDetailCard({ group, rotation }) {
+  if (!group) {
+    return (
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <p className="text-sm font-semibold text-white">Selected Ecosystem Volatility</p>
+        <p className="mt-2 text-sm text-gray-500">Select an ecosystem to inspect its daily and weekly volatility setup.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-white">{group.label}</p>
+          <p className="mt-1 text-xs text-gray-500">{group.count} members · quadrant {group.quadrantLabel || 'Lagging / Loose'}</p>
+        </div>
+        <VolatilityStateBadge label={group.volatilityState} />
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className={`rounded-lg border px-3 py-2 ${getSqueezeMetricTone(group.dailyCompressionAvg, { high: 70, medium: 50 })}`}>
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">Daily Compression</p>
+          <p className="mt-1 text-sm font-semibold">{formatSqueezeMetric(group.dailyCompressionAvg)}</p>
+        </div>
+        <div className={`rounded-lg border px-3 py-2 ${getSqueezeMetricTone(group.weeklyCompressionAvg, { high: 70, medium: 50 })}`}>
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">Weekly Compression</p>
+          <p className="mt-1 text-sm font-semibold">{formatSqueezeMetric(group.weeklyCompressionAvg)}</p>
+        </div>
+        <div className={`rounded-lg border px-3 py-2 ${getSqueezeMetricTone(group.dailyExpansionAvg, { high: 70, medium: 50 })}`}>
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">Daily Expansion</p>
+          <p className="mt-1 text-sm font-semibold">{formatSqueezeMetric(group.dailyExpansionAvg)}</p>
+        </div>
+        <div className={`rounded-lg border px-3 py-2 ${getSqueezeMetricTone(group.weeklyExpansionAvg, { high: 70, medium: 50 })}`}>
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">Weekly Expansion</p>
+          <p className="mt-1 text-sm font-semibold">{formatSqueezeMetric(group.weeklyExpansionAvg)}</p>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
+        <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+          <p className="uppercase tracking-wider text-gray-600">Setup Readiness</p>
+          <p className="mt-1 text-sm font-semibold text-white">{formatSqueezeMetric(group.setupReadinessScore ?? group.volatilitySetupScore)}</p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+          <p className="uppercase tracking-wider text-gray-600">Trend Leadership</p>
+          <p className="mt-1 text-sm font-semibold text-white">{formatPlainMetric(group.trendLeadershipScore, 0)}</p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+          <p className="uppercase tracking-wider text-gray-600">Alignment Breadth</p>
+          <p className="mt-1 text-sm font-semibold text-white">{formatPlainMetric(group.alignmentBreadthPct, 0, '%')}</p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+          <p className="uppercase tracking-wider text-gray-600">Momentum Turn</p>
+          <p className="mt-1 text-sm font-semibold text-white">{formatPlainMetric(group.momentumTurnScore, 0)}</p>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-3 text-xs text-gray-400">
+        <p>Compression breadth {formatPlainMetric(group.weeklyCompressionBreadthPct, 0, '%')} weekly · {formatPlainMetric(group.dailyCompressionBreadthPct, 0, '%')} daily</p>
+        <p className="mt-1">Expansion breadth {formatPlainMetric(group.weeklyExpansionBreadthPct, 0, '%')} weekly · {formatPlainMetric(group.dailyExpansionBreadthPct, 0, '%')} daily</p>
+        <p className="mt-1">Historical compression {formatPlainMetric(group.historicalCompressionPercentile, 0, '%ile')} · historical expansion {formatPlainMetric(group.historicalExpansionPercentile, 0, '%ile')}</p>
+        {rotation ? (
+          <p className="mt-2">
+            Rotation {rotation.rotationStatus} · 5d delta {formatMetric(rotation.deltaStrength5d, '', 1)}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 function toggleYtdAvwap(setTradeReviewChartSettings, chartSettings) {
   const nextPresets = (chartSettings?.avwapPresets || []).map(preset =>
     preset.id === 'ytd' ? { ...preset, enabled: !preset.enabled } : preset
@@ -1049,24 +1136,14 @@ export default function ThemeWatchlist({
     }),
     [symbols, anchoredRsBySymbol, rollingRsBySymbol]
   )
-  const squeezeBySymbol = useMemo(
-    () => Object.fromEntries(symbols.map(symbol => {
-      const dailyBars = historyBarsBySymbol[symbol] || []
-      return [symbol, {
-        daily: buildSqueezeSnapshot(dailyBars),
-        weekly: buildSqueezeSnapshot(aggregateWeeklyBars(dailyBars)),
-      }]
-    })),
-    [historyBarsBySymbol, symbols]
-  )
-
   const latestAnchorDate = useMemo(
     () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
     [tradeReviewChartSettings?.anchorDates]
   )
-  const growthResearchDailyRangeMonths = GROWTH_RESEARCH_DAILY_RANGE_OPTIONS.includes(tradeReviewChartSettings?.growthResearchDailyRangeMonths)
-    ? tradeReviewChartSettings.growthResearchDailyRangeMonths
-    : 6
+  const growthResearchChartRangeYears = GROWTH_RESEARCH_DAILY_RANGE_OPTIONS.includes(tradeReviewChartSettings?.growthResearchChartRangeYears)
+    ? tradeReviewChartSettings.growthResearchChartRangeYears
+    : 5
+  const showSqueeze = tradeReviewChartSettings?.researchChartsShowSqueeze !== false
   const ecosystemYtdEnabled = Boolean(tradeReviewChartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
   const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
 
@@ -1077,10 +1154,21 @@ export default function ThemeWatchlist({
   } = useResearchChartUniverse({
     symbols,
     latestAnchorDate,
+    minimumHistoryDays: 366 * 5,
     rollingRsWindow,
     rollingLookback: tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50,
     tradeReviewChartSettings,
   })
+  const squeezeBySymbol = useMemo(
+    () => Object.fromEntries(symbols.map(symbol => {
+      const dailyBars = historyBarsBySymbol[symbol] || []
+      return [symbol, {
+        daily: buildSqueezeSnapshot(dailyBars),
+        weekly: buildSqueezeSnapshot(aggregateWeeklyBars(dailyBars)),
+      }]
+    })),
+    [historyBarsBySymbol, symbols]
+  )
 
   const visibleColumnOrder = useMemo(
     () => buildVisibleColumnOrder({ columnOrder, hiddenColumns }),
@@ -1144,11 +1232,15 @@ export default function ThemeWatchlist({
   )
 
   const ecosystemGroupsAnalytics = useMemo(
-    () => withMarketLeadersEcosystemGroup({
-      groups: ecosystemGroupsBaseAnalytics,
-      marketLeadersGroup: marketLeadersEcosystemGroup,
+    () => withGroupVolatilityMetrics({
+      groups: withMarketLeadersEcosystemGroup({
+        groups: ecosystemGroupsBaseAnalytics,
+        marketLeadersGroup: marketLeadersEcosystemGroup,
+      }),
+      squeezeBySymbol,
+      history: themeAnalyticsHistory.ecosystem || [],
     }),
-    [ecosystemGroupsBaseAnalytics, marketLeadersEcosystemGroup]
+    [ecosystemGroupsBaseAnalytics, marketLeadersEcosystemGroup, squeezeBySymbol, themeAnalyticsHistory.ecosystem]
   )
 
   const activeGrouping = analyticsMode ? 'ecosystem' : themeGrouping
@@ -1166,6 +1258,12 @@ export default function ThemeWatchlist({
       if (ecosystemSortKey === 'greenPct') return group.greenPct
       if (ecosystemSortKey === 'aboveSignal') return group.rollingAboveSignalPct
       if (ecosystemSortKey === 'leaderSpread') return group.leaderSpread
+      if (ecosystemSortKey === 'dailyCompression') return group.dailyCompressionAvg
+      if (ecosystemSortKey === 'weeklyCompression') return group.weeklyCompressionAvg
+      if (ecosystemSortKey === 'dailyExpansion') return group.dailyExpansionAvg
+      if (ecosystemSortKey === 'weeklyExpansion') return group.weeklyExpansionAvg
+      if (ecosystemSortKey === 'volSetup') return group.setupReadinessScore ?? group.volatilitySetupScore
+      if (ecosystemSortKey === 'volState') return group.volatilityState || ''
       if (ecosystemSortKey === 'status') return group.healthLabel || ''
       return group.sizeAdjustedStrengthScore
     }
@@ -1235,6 +1333,19 @@ export default function ThemeWatchlist({
     if (!groupedEcosystemsEnabled) return activeThemeGroups.filter(group => !group.isMarketLeaders).length
     return new Set(ecosystemAnalyticsRows.map(row => row.sourceEcosystemKey).filter(Boolean)).size
   }, [activeThemeGroups, ecosystemAnalyticsRows, groupedEcosystemsEnabled])
+  const ecosystemVolatilityLeaders = useMemo(() => {
+    const candidates = sortedThemeGroups.filter(group => !group.isMarketLeaders)
+    const bestBy = selector => candidates
+      .filter(group => Number.isFinite(selector(group)))
+      .sort((a, b) => selector(b) - selector(a))[0] || null
+
+    return {
+      strongestSetup: bestBy(group => group.setupReadinessScore ?? group.volatilitySetupScore),
+      mostCompressed: bestBy(group => group.weeklyCompressionAvg ?? group.dailyCompressionAvg),
+      strongestExpansion: bestBy(group => group.weeklyExpansionAvg ?? group.dailyExpansionAvg),
+      widestCompressionBreadth: bestBy(group => group.alignmentBreadthPct ?? group.weeklyCompressionBreadthPct ?? group.dailyCompressionBreadthPct),
+    }
+  }, [sortedThemeGroups])
 
   const selectedThemeMembers = useMemo(() => {
     if (!selectedThemeGroup) return []
@@ -2310,31 +2421,56 @@ export default function ThemeWatchlist({
 
               <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
                 <StatPill label="Tracked Ecosystems" value={activeThemeGroups.length} />
-                <StatPill label="Source Ecosystems" value={uniqueSourceEcosystemCount} />
                 <StatPill label="Grouping" value={ECOSYSTEM_GROUPING_OPTIONS.find(([value]) => value === ecosystemGroupingMode)?.[1] || 'Normal'} />
-                <StatPill label="Best Breadth" value={sortedThemeGroups[0]?.label || '—'} />
-                <StatPill label="Top Strength" value={sortedThemeGroups[0]?.currentStrengthScore != null ? formatMetric(sortedThemeGroups[0].currentStrengthScore, '', 0) : '—'} />
-                <StatPill label="Rotation History" value={`${themeAnalyticsHistory[activeGrouping]?.length || 0} pts`} />
+                <StatPill label="Strongest Setup" value={ecosystemVolatilityLeaders.strongestSetup?.label || '—'} />
+                <StatPill label="Most Compressed" value={ecosystemVolatilityLeaders.mostCompressed?.label || '—'} />
+                <StatPill label="Strongest Expansion" value={ecosystemVolatilityLeaders.strongestExpansion?.label || '—'} />
+                <StatPill label="Best Alignment" value={ecosystemVolatilityLeaders.widestCompressionBreadth?.label || '—'} />
               </div>
               <div className="mb-4 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-[11px] text-gray-500">
                 Keyboard: press <span className="font-semibold text-gray-300">Space</span> for the next ecosystem, or <span className="font-semibold text-gray-300">Shift + Space</span> to go back.
               </div>
               <div className="space-y-4">
                 {selectedThemeGroup ? (
-                  <ResearchMultiTimeframeChart
-                    data={selectedEcosystemChartData}
-                    chartType={normalizeTradeReviewChartType(tradeReviewChartSettings?.chartType)}
-                    title={selectedThemeGroup.isMarketLeaders ? 'MARKET LEADERS' : `ECO:${String(selectedThemeGroup.label || '').toUpperCase()}`}
-                    memberCount={selectedEcosystemComposite.memberCount}
-                    dailyRangeMonths={growthResearchDailyRangeMonths}
-                    onChangeDailyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchDailyRangeMonths: months })}
-                    ytdEnabled={ecosystemYtdEnabled}
-                    onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
-                    collapsible
-                    collapsed={!!collapsedPanels[ECOSYSTEM_CHART_PANEL_ID]}
-                    onToggleCollapse={() => setPanelCollapsed(ECOSYSTEM_CHART_PANEL_ID, !collapsedPanels[ECOSYSTEM_CHART_PANEL_ID])}
-                  />
+                  <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.7fr)_360px] gap-4 items-start">
+                    <ResearchMultiTimeframeChart
+                      data={selectedEcosystemChartData}
+                      chartType={normalizeTradeReviewChartType(tradeReviewChartSettings?.chartType)}
+                      title={selectedThemeGroup.isMarketLeaders ? 'MARKET LEADERS' : `ECO:${String(selectedThemeGroup.label || '').toUpperCase()}`}
+                      memberCount={selectedEcosystemComposite.memberCount}
+                      dailyRangeMonths={growthResearchChartRangeYears * 12}
+                      onChangeDailyRangeMonths={(years) => setTradeReviewChartSettings({ growthResearchChartRangeYears: years })}
+                      dailyRangeOptions={GROWTH_RESEARCH_DAILY_RANGE_OPTIONS}
+                      showSqueeze={showSqueeze}
+                      ytdEnabled={ecosystemYtdEnabled}
+                      onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
+                      collapsible
+                      collapsed={!!collapsedPanels[ECOSYSTEM_CHART_PANEL_ID]}
+                      onToggleCollapse={() => setPanelCollapsed(ECOSYSTEM_CHART_PANEL_ID, !collapsedPanels[ECOSYSTEM_CHART_PANEL_ID])}
+                    />
+                    <EcosystemVolatilityDetailCard
+                      group={selectedThemeGroup}
+                      rotation={selectedThemeRotation}
+                    />
+                  </div>
                 ) : null}
+
+                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-300">Ecosystem Regime Board</p>
+                      <p className="mt-1 text-[11px] text-gray-500">Trend leadership on the X-axis, setup readiness on the Y-axis, with alignment breadth sizing the highest-quality outliers across Power Coil, Early Coil, Extended Leadership, and Lagging / Loose.</p>
+                    </div>
+                    <div className="text-[11px] text-gray-500">
+                      {uniqueSourceEcosystemCount} source ecosystems · {themeAnalyticsHistory[activeGrouping]?.length || 0} history pts
+                    </div>
+                  </div>
+                  <EcosystemVolatilityMap
+                    groups={sortedThemeGroups}
+                    selectedKey={selectedThemeGroup?.key || ''}
+                    onSelect={setSelectedThemeGroupKey}
+                  />
+                </div>
 
                 <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
                   <div className="flex items-center justify-between gap-3 mb-3">
@@ -2361,7 +2497,13 @@ export default function ThemeWatchlist({
                             ['anchored', 'Anchored'],
                             ['greenPct', '% Green'],
                             ['aboveSignal', '% Above Signal'],
+                            ['dailyCompression', 'Daily Compression'],
+                            ['weeklyCompression', 'Weekly Compression'],
+                            ['dailyExpansion', 'Daily Expansion'],
+                            ['weeklyExpansion', 'Weekly Expansion'],
+                            ['volSetup', 'Vol Setup'],
                             ['leaderSpread', 'Leader Spread'],
+                            ['volState', 'Vol State'],
                             ['status', 'Status'],
                           ].map(([key, label]) => (
                             <th key={key} className="px-3 py-2 text-left">
@@ -2433,7 +2575,15 @@ export default function ThemeWatchlist({
                             <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.avgAnchoredZ, 'z', 2)}</td>
                             <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.greenPct, '%', 0)}</td>
                             <td className="px-3 py-2.5 text-gray-300">{formatMetric(group.rollingAboveSignalPct, '%', 0)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatSqueezeMetric(group.dailyCompressionAvg)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatSqueezeMetric(group.weeklyCompressionAvg)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatSqueezeMetric(group.dailyExpansionAvg)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatSqueezeMetric(group.weeklyExpansionAvg)}</td>
+                            <td className="px-3 py-2.5 text-gray-300">{formatSqueezeMetric(group.setupReadinessScore ?? group.volatilitySetupScore)}</td>
                             <td className="px-3 py-2.5 text-gray-300">{group.leaderSpread != null ? `${group.leaderSpread.toFixed(2)}z` : '—'}</td>
+                            <td className="px-3 py-2.5">
+                              <VolatilityStateBadge label={group.volatilityState} />
+                            </td>
                             <td className="px-3 py-2.5">
                               <span className={`text-[10px] px-2 py-1 rounded border ${ThemeHealthTone(group.healthLabel)}`}>
                                 {group.healthLabel}
@@ -2550,8 +2700,10 @@ export default function ThemeWatchlist({
               chartType={normalizeTradeReviewChartType(tradeReviewChartSettings?.chartType)}
               title={selectedRow.symbol}
               memberCount={1}
-              dailyRangeMonths={growthResearchDailyRangeMonths}
-              onChangeDailyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchDailyRangeMonths: months })}
+              dailyRangeMonths={growthResearchChartRangeYears * 12}
+              onChangeDailyRangeMonths={(years) => setTradeReviewChartSettings({ growthResearchChartRangeYears: years })}
+              dailyRangeOptions={GROWTH_RESEARCH_DAILY_RANGE_OPTIONS}
+              showSqueeze={showSqueeze}
               ytdEnabled={ecosystemYtdEnabled}
               onToggleYtd={() => toggleYtdAvwap(setTradeReviewChartSettings, tradeReviewChartSettings)}
               chartLabel="Ticker Chart"

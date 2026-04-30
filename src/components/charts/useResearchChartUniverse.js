@@ -135,8 +135,8 @@ export function buildChartDataFromBars(
       weeklyKeltnerShades: [],
       dailyAnchoredRsGradient: [],
       weeklyRollingRsGradient: [],
-      dailySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], snapshot: { stateLabel: 'No Data' } },
-      weeklySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], snapshot: { stateLabel: 'No Data' } },
+      dailySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], setupReadiness: [], triggerMarkers: [], snapshot: { stateLabel: 'No Data', triggerState: 'No Data', setupReadinessScore: null } },
+      weeklySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], setupReadiness: [], triggerMarkers: [], snapshot: { stateLabel: 'No Data', triggerState: 'No Data', setupReadinessScore: null } },
       dailySqueezeSnapshot: { stateLabel: 'No Data' },
       weeklySqueezeSnapshot: { stateLabel: 'No Data' },
     }
@@ -151,8 +151,8 @@ export function buildChartDataFromBars(
       weeklyKeltnerShades: [],
       dailyAnchoredRsGradient: [],
       weeklyRollingRsGradient: [],
-      dailySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], snapshot: { stateLabel: 'No Data' } },
-      weeklySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], snapshot: { stateLabel: 'No Data' } },
+      dailySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], setupReadiness: [], triggerMarkers: [], snapshot: { stateLabel: 'No Data', triggerState: 'No Data', setupReadinessScore: null } },
+      weeklySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], setupReadiness: [], triggerMarkers: [], snapshot: { stateLabel: 'No Data', triggerState: 'No Data', setupReadinessScore: null } },
       dailySqueezeSnapshot: { stateLabel: 'No Data' },
       weeklySqueezeSnapshot: { stateLabel: 'No Data' },
     }

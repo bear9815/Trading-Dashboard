@@ -10,7 +10,11 @@ function numericTone(value, { high = 70, medium = 50 } = {}) {
 function stateTone(label) {
   if (label === 'Expansion Starting') return 'border-cyan-400/30 bg-cyan-400/12 text-cyan-100'
   if (label === 'Compressed and Turning') return 'border-sky-400/30 bg-sky-400/12 text-sky-100'
+  if (label === 'Coiled and Turning') return 'border-sky-400/30 bg-sky-400/12 text-sky-100'
   if (label === 'Compressed') return 'border-violet-400/30 bg-violet-400/12 text-violet-100'
+  if (label === 'Coiled') return 'border-violet-400/30 bg-violet-400/12 text-violet-100'
+  if (label === 'Crowded / Extended') return 'border-rose-400/30 bg-rose-400/12 text-rose-100'
+  if (label === 'Loose') return 'border-white/10 bg-white/[0.04] text-gray-400'
   if (label === 'Loose / No Setup') return 'border-white/10 bg-white/[0.04] text-gray-400'
   return 'border-white/10 bg-white/[0.04] text-gray-400'
 }

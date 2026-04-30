@@ -15,10 +15,40 @@ assert.ok(WATCHLIST_COLUMN_PRESETS.length >= 4)
 
 const compactPreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'compact')
 const squeezePreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'squeeze')
+const squeezeScoutPreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'squeeze_scout')
+const trendCoilPreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'trend_coil')
+const expansionHunterPreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'expansion_hunter')
+const themeLeadershipPreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'theme_leadership')
+const crowdedCoiledPreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'crowded_vs_coiled')
 assert.ok(compactPreset)
 assert.ok(squeezePreset)
+assert.ok(squeezeScoutPreset)
+assert.ok(trendCoilPreset)
+assert.ok(expansionHunterPreset)
+assert.ok(themeLeadershipPreset)
+assert.ok(crowdedCoiledPreset)
 assert.ok(squeezePreset.columns.includes('dailyCompression'))
 assert.ok(squeezePreset.columns.includes('squeezeState'))
+assert.deepEqual(
+  squeezeScoutPreset.columns,
+  ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyCompression', 'dailyExpansion', 'weeklyCompression', 'weeklyExpansion', 'squeezeState', 'actions']
+)
+assert.deepEqual(
+  trendCoilPreset.columns,
+  ['symbol', 'companyName', 'ecosystem', 'anchoredRs', 'rollingRs', 'ytdAvwap', 'dailyCompression', 'weeklyCompression', 'squeezeState', 'actions']
+)
+assert.deepEqual(
+  expansionHunterPreset.columns,
+  ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyExpansion', 'weeklyExpansion', 'rollingRs', 'anchoredRs', 'squeezeState', 'actions']
+)
+assert.deepEqual(
+  themeLeadershipPreset.columns,
+  ['symbol', 'companyName', 'theme', 'ecosystem', 'relatedDriver', 'anchoredRs', 'rollingRs', 'dailyCompression', 'dailyExpansion', 'actions']
+)
+assert.deepEqual(
+  crowdedCoiledPreset.columns,
+  ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyCompression', 'weeklyCompression', 'finraShortInterest', 'finraEstimatedShortInterest', 'squeezeState', 'actions']
+)
 assert.deepEqual(
   applyColumnPreset(compactPreset.key).hiddenColumns,
   DEFAULT_WATCHLIST_COLUMN_ORDER.filter(columnId => !compactPreset.columns.includes(columnId))
