@@ -2,7 +2,9 @@ import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
 import { inferAccountBalance } from '../utils/equityCurve.js'
 import { enrichTrade } from '../utils/enrichTrade.js'
+import { REVIEW_CONTEXTS, getReviewQuestionById, normalizeReviewAnswer } from '../utils/modelBookReviewSchema.js'
 import { buildActivityDedupKey, buildTradeDedupKey } from '../utils/tradeDedup.js'
+import { normalizeTradeAlignmentReview } from '../utils/tradeReviewAlignment.js'
 import { supabase } from '../lib/supabase.js'
 import { LOCAL_ONLY_MODE } from '../lib/appMode.js'
 import { idbStorage } from '../utils/idbStorage.js'
@@ -137,6 +139,17 @@ function chunk(arr, size) {
   return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) => arr.slice(i * size, i * size + size))
 }
 
+export function normalizeTradeForStore(trade) {
+  if (!trade) return trade
+
+  const enrichedTrade = enrichTrade(trade)
+
+  return {
+    ...enrichedTrade,
+    alignmentReview: normalizeTradeAlignmentReview(enrichedTrade.alignmentReview),
+  }
+}
+
 async function upsertRows(table, userId, rows, size = 200) {
   if (!supabase || !userId || rows.length === 0) return
   for (const batch of chunk(rows, size)) {
@@ -176,7 +189,7 @@ export const useTradeStore = create((set, get) => ({
         deletedBatchIds = [],
       } = snapshot
       set({
-        trades:            trades.map(t => enrichTrade(t)),
+        trades:            trades.map(normalizeTradeForStore),
         accountActivities,
         importBatches,
         deletedTradeIds,
@@ -212,7 +225,7 @@ export const useTradeStore = create((set, get) => ({
 
       if (localSnapshot) {
         set({
-          trades:            localSnapshot.trades.map(t => enrichTrade(t)),
+          trades:            localSnapshot.trades.map(normalizeTradeForStore),
           accountActivities: localSnapshot.accountActivities,
           importBatches:     localSnapshot.importBatches,
           deletedTradeIds:    localSnapshot.deletedTradeIds || [],
@@ -243,7 +256,7 @@ export const useTradeStore = create((set, get) => ({
 
     const mergedSnapshot = await get().mergeLocalSnapshot(userId, cloudSnapshot, localSnapshot)
     const nextState = {
-      trades:            mergedSnapshot.trades.map(t => enrichTrade(t)),
+      trades:            mergedSnapshot.trades.map(normalizeTradeForStore),
       accountActivities: mergedSnapshot.accountActivities,
       importBatches:     mergedSnapshot.importBatches,
       deletedTradeIds:    [...deletedTradeIds],
@@ -360,7 +373,7 @@ export const useTradeStore = create((set, get) => ({
   // ── Trades ────────────────────────────────────────────────────────────────
 
   addTrade: (trade) => {
-    const t = enrichTrade({ ...trade, id: trade.id || uuidv4() })
+    const t = normalizeTradeForStore({ ...trade, id: trade.id || uuidv4() })
     set(s => ({ trades: [...s.trades, t], deletedTradeIds: s.deletedTradeIds.filter(id => id !== t.id) }))
     saveSnapshot(get())
     syncTrade(t)
@@ -373,7 +386,7 @@ export const useTradeStore = create((set, get) => ({
       const existingKeys = new Set(s.trades.map(buildTradeDedupKey))
       added = []
       for (const trade of newTrades) {
-        const candidate = enrichTrade({ ...trade, id: trade.id || uuidv4() })
+        const candidate = normalizeTradeForStore({ ...trade, id: trade.id || uuidv4() })
         const dedupKey = buildTradeDedupKey(candidate)
         if (existing.has(candidate.id) || existingKeys.has(dedupKey)) continue
         existing.add(candidate.id)
@@ -401,7 +414,7 @@ export const useTradeStore = create((set, get) => ({
 
       toAdd = []
       for (const trade of newTrades) {
-        const candidate = enrichTrade({ ...trade, id: trade.id || uuidv4(), _batchId: batchId })
+        const candidate = normalizeTradeForStore({ ...trade, id: trade.id || uuidv4(), _batchId: batchId })
         const dedupKey = buildTradeDedupKey(candidate)
         if (existing.has(candidate.id) || existingTradeKeys.has(dedupKey)) continue
         existing.add(candidate.id)
@@ -473,20 +486,65 @@ export const useTradeStore = create((set, get) => ({
     set(s => {
       const trades = s.trades.map(t => {
         if (t.id !== id) return t
+        const normalizedTrade = normalizeTradeForStore(t)
         // If a stop-loss update is incoming and _originalStopLoss has never been
         // frozen, capture the CURRENT stopLoss as the original BEFORE merging.
         // enrichTrade sees stopLoss = new value, so we must do this here —
         // otherwise enrichTrade would stamp the new stop as the original.
         const safeUpdates = { ...updates }
-        if ('stopLoss' in safeUpdates && t._originalStopLoss == null && t.stopLoss != null) {
-          safeUpdates._originalStopLoss = t.stopLoss
+        if ('stopLoss' in safeUpdates && normalizedTrade._originalStopLoss == null && normalizedTrade.stopLoss != null) {
+          safeUpdates._originalStopLoss = normalizedTrade.stopLoss
         }
-        updated = enrichTrade({ ...t, ...safeUpdates })
+        updated = normalizeTradeForStore({ ...normalizedTrade, ...safeUpdates })
         return updated
       })
       return { trades }
     })
     if (updated) { syncTrade(updated); saveSnapshot(get()) }
+  },
+
+  updateTradeAlignmentAnswer: (tradeId, questionId, patch = {}) => {
+    const question = getReviewQuestionById(questionId)
+    if (!question || !question.contexts?.includes(REVIEW_CONTEXTS.TRADE_REVIEW)) return false
+
+    const timestamp = new Date().toISOString()
+    let updated = null
+
+    set(s => {
+      const trades = s.trades.map(trade => {
+        if (trade.id !== tradeId) return trade
+
+        const normalizedTrade = normalizeTradeForStore(trade)
+        const review = normalizeTradeAlignmentReview(normalizedTrade.alignmentReview)
+        const nextAnswer = normalizeReviewAnswer({
+          ...review.answers[questionId],
+          ...patch,
+          updatedAt: timestamp,
+        }, questionId)
+
+        updated = normalizeTradeForStore({
+          ...normalizedTrade,
+          alignmentReview: {
+            ...review,
+            lastReviewedAt: timestamp,
+            answers: {
+              ...review.answers,
+              [questionId]: nextAnswer,
+            },
+          },
+        })
+
+        return updated
+      })
+
+      return { trades }
+    })
+
+    if (!updated) return false
+
+    saveSnapshot(get())
+    syncTrade(updated)
+    return true
   },
 
   deleteTrade: (id) => {
@@ -518,7 +576,7 @@ export const useTradeStore = create((set, get) => ({
   recalcAllTrades: () => {
     let recalced = []
     set(s => {
-      recalced = s.trades.map(t => enrichTrade({ ...t, rMultiple: null, rMultipleATR: null, riskReward: null }))
+      recalced = s.trades.map(t => normalizeTradeForStore({ ...t, rMultiple: null, rMultipleATR: null, riskReward: null }))
       return { trades: recalced }
     })
     recalced.forEach(syncTrade)
