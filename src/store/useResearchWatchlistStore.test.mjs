@@ -5,8 +5,10 @@ import {
   LIQUID_LIST_ID,
   LIQUID_TREND_LIST_ID,
   MARKET_LEADERS_LIST_ID,
+  QQQ_LIST_ID,
   rebuildTrustedSymbolMemory,
   syncListsWithTrustedCompanyMemory,
+  TOP_100_LIST_ID,
   useResearchWatchlistStore,
 } from './useResearchWatchlistStore.js'
 
@@ -35,12 +37,80 @@ test('research watchlist exposes the expected default list order and labels', ()
     MARKET_LEADERS_LIST_ID,
     LIQUID_TREND_LIST_ID,
     LIQUID_LIST_ID,
+    TOP_100_LIST_ID,
+    QQQ_LIST_ID,
   ])
   assert.deepEqual(lists.map(list => list.name), [
     'Market Leaders',
     'Liquid Trend',
     'Liquid',
+    'Top 100',
+    'QQQ',
   ])
+})
+
+test('persist merge backfills Top 100 and QQQ without disturbing existing three-list workspaces', () => {
+  const merge = useResearchWatchlistStore.persist.getOptions().merge
+  const currentState = useResearchWatchlistStore.getState()
+  const persistedState = {
+    activeListId: LIQUID_LIST_ID,
+    symbolMemoryBySymbol: {
+      APP: {
+        symbol: 'APP',
+        companyName: 'AppLovin Corporation',
+        companyVerification: {
+          status: 'verified',
+          officialName: 'AppLovin Corporation',
+        },
+      },
+    },
+    listsById: {
+      [MARKET_LEADERS_LIST_ID]: {
+        id: MARKET_LEADERS_LIST_ID,
+        name: 'Market Leaders',
+        symbols: ['NVDA'],
+        rowsBySymbol: {
+          NVDA: { symbol: 'NVDA', companyName: 'NVIDIA Corporation' },
+        },
+      },
+      [LIQUID_TREND_LIST_ID]: {
+        id: LIQUID_TREND_LIST_ID,
+        name: 'Liquid Trend',
+        symbols: ['APP'],
+        rowsBySymbol: {
+          APP: {
+            symbol: 'APP',
+            companyName: 'AppLovin Corporation',
+            companyVerification: {
+              status: 'verified',
+              officialName: 'AppLovin Corporation',
+            },
+          },
+        },
+      },
+      [LIQUID_LIST_ID]: {
+        id: LIQUID_LIST_ID,
+        name: 'Liquid',
+        symbols: ['PLTR'],
+        rowsBySymbol: {
+          PLTR: { symbol: 'PLTR', companyName: 'Palantir Technologies' },
+        },
+        savedViews: [{ id: 'view-1', name: 'Momentum' }],
+      },
+    },
+  }
+
+  const merged = merge(persistedState, currentState)
+
+  assert.equal(merged.activeListId, LIQUID_LIST_ID)
+  assert.deepEqual(merged.listsById[MARKET_LEADERS_LIST_ID].symbols, ['NVDA'])
+  assert.deepEqual(merged.listsById[LIQUID_TREND_LIST_ID].symbols, ['APP'])
+  assert.deepEqual(merged.listsById[LIQUID_LIST_ID].symbols, ['PLTR'])
+  assert.deepEqual(merged.listsById[LIQUID_LIST_ID].savedViews, [{ id: 'view-1', name: 'Momentum' }])
+  assert.equal(merged.listsById[TOP_100_LIST_ID].name, 'Top 100')
+  assert.deepEqual(merged.listsById[TOP_100_LIST_ID].symbols, [])
+  assert.equal(merged.listsById[QQQ_LIST_ID].name, 'QQQ')
+  assert.deepEqual(merged.listsById[QQQ_LIST_ID].symbols, [])
 })
 
 test('syncListsWithTrustedCompanyMemory propagates trusted company names across all lists containing the symbol', () => {

@@ -1036,24 +1036,59 @@ function cstToUtcMs(dateTimeStr) {
 /**
  * Compute Max Adverse Excursion using Schwab data exclusively.
  *
- * - Entry day:       15-min standard-session bars, starting from the bar
- *                    containing the entry timestamp (interpreted as CST/CDT),
+ * - Entry day:       15-min standard-session bars, starting at or after
+ *                    the entry timestamp (interpreted as CST/CDT),
  *                    through the 4 PM ET close.
  * - Subsequent days: Daily standard-session OHLC, entry+1 day through
  *                    today (open trade) or exit date (closed trade).
- * - Tracking stops:  when trade closed OR intraday best R >= tpMultiplier.
+ * - Tracking stops:  when trade closed. For open trades, scans through today.
  *
  * Returns { worstPrice, maxAdverseR } or null if Schwab unavailable / missing data.
  * maxAdverseR is ≤ 0 (adverse move expressed in R units).
  */
-export async function computeSchwabMAE(trade, tpMultiplier = 2) {
+export function computeSchwabAdversePath({ entryPrice, stopPrice, position = 'Long', entryUtcMs, entryDateStr, endDateStr, entryBars = [], dailyBars = [] }) {
+  const isLong = (position || 'Long').toLowerCase() !== 'short'
+  const riskPerSh = Math.abs(entryPrice - stopPrice)
+  if (!entryPrice || !stopPrice || riskPerSh <= 0) return null
+
+  let worstPrice = entryPrice
+
+  for (const bar of entryBars) {
+    if (bar.unixMs < entryUtcMs) continue
+    if (isLong) {
+      if (bar.low < worstPrice) worstPrice = bar.low
+    } else if (bar.high > worstPrice) {
+      worstPrice = bar.high
+    }
+  }
+
+  for (const bar of dailyBars) {
+    const barDate = new Date(bar.unixMs).toISOString().slice(0, 10)
+    if (barDate <= entryDateStr || barDate > endDateStr) continue
+    if (isLong) {
+      if (bar.low < worstPrice) worstPrice = bar.low
+    } else if (bar.high > worstPrice) {
+      worstPrice = bar.high
+    }
+  }
+
+  const maxAdverseR = isLong
+    ? (worstPrice - entryPrice) / riskPerSh
+    : (entryPrice - worstPrice) / riskPerSh
+
+  return {
+    worstPrice:  Math.round(worstPrice * 100) / 100,
+    maxAdverseR: Math.round(maxAdverseR * 1000) / 1000,
+  }
+}
+
+export async function computeSchwabMAE(trade) {
   const { entryDate, entryPrice, symbol, position } = trade
   if (!entryDate || !entryPrice || !symbol) return null
 
   const origStop  = trade._originalStopLoss ?? trade.stopLoss
   if (!origStop) return null
 
-  const isLong    = (position || 'Long').toLowerCase() !== 'short'
   const riskPerSh = Math.abs(entryPrice - origStop)
   if (riskPerSh <= 0) return null
 
@@ -1083,74 +1118,48 @@ export async function computeSchwabMAE(trade, tpMultiplier = 2) {
     ? new Date(lastExitDate).toISOString().slice(0, 10)
     : new Date().toISOString().slice(0, 10)
 
-  let worstPrice = entryPrice  // start neutral — only move on adverse data
-  let targetHit  = false
+  let entryBars = []
+  let dailyBars = []
 
   // ── Entry day: 15-min bars from entry bar through 4 PM ET ────────────────
   try {
-    const bars = await fetchSchwabCandles(symbol, {
+    entryBars = await fetchSchwabCandles(symbol, {
       frequencyType: 'minute',
       frequency:     15,
       startDate:     entryUtcMs,
       endDate:       entryDayEndMs,
     })
-    for (const bar of bars) {
-      // Include bar if it starts at or after entry (the bar containing entry qualifies)
-      if (bar.unixMs < entryUtcMs) continue
-      if (isLong) {
-        if (bar.low  < worstPrice) worstPrice = bar.low
-      } else {
-        if (bar.high > worstPrice) worstPrice = bar.high
-      }
-      // Check if tpMultiplier R was reached on this bar
-      const bestR = isLong
-        ? (bar.high - entryPrice) / riskPerSh
-        : (entryPrice - bar.low)  / riskPerSh
-      if (bestR >= tpMultiplier) { targetHit = true; break }
-    }
   } catch (err) {
     console.warn(`[SchwabMAE] entry-day fetch failed for ${symbol}:`, err.message)
     return null
   }
 
   // ── Subsequent days: daily bars ───────────────────────────────────────────
-  if (!targetHit && endDateStr > entryDateStr) {
+  if (endDateStr > entryDateStr) {
     const nextDayMs = new Date(entryDateStr + 'T00:00:00Z').getTime() + 86_400_000
     const endMs     = new Date(endDateStr   + 'T23:59:59Z').getTime()
     try {
-      const bars = await fetchSchwabCandles(symbol, {
+      dailyBars = await fetchSchwabCandles(symbol, {
         frequencyType: 'daily',
         frequency:     1,
         startDate:     nextDayMs,
         endDate:       endMs,
       })
-      for (const bar of bars) {
-        const barDate = new Date(bar.unixMs).toISOString().slice(0, 10)
-        if (barDate <= entryDateStr || barDate > endDateStr) continue
-        if (isLong) {
-          if (bar.low  < worstPrice) worstPrice = bar.low
-        } else {
-          if (bar.high > worstPrice) worstPrice = bar.high
-        }
-        // Stop after this day if target was reached intraday
-        const bestR = isLong
-          ? (bar.high - entryPrice) / riskPerSh
-          : (entryPrice - bar.low)  / riskPerSh
-        if (bestR >= tpMultiplier) break
-      }
     } catch (err) {
       console.warn(`[SchwabMAE] daily fetch failed for ${symbol}:`, err.message)
     }
   }
 
-  const maxAdverseR = isLong
-    ? (worstPrice - entryPrice) / riskPerSh
-    : (entryPrice - worstPrice) / riskPerSh
-
-  return {
-    worstPrice:  Math.round(worstPrice  * 100)  / 100,
-    maxAdverseR: Math.round(maxAdverseR * 1000) / 1000,
-  }
+  return computeSchwabAdversePath({
+    entryPrice,
+    stopPrice: origStop,
+    position,
+    entryUtcMs,
+    entryDateStr,
+    endDateStr,
+    entryBars,
+    dailyBars,
+  })
 }
 
 // ── Earnings Calendar ─────────────────────────────────────────────────────────

@@ -141,35 +141,64 @@ function primaryReadFor(row) {
 }
 
 export function buildBreadthStateRows({
+  historiesById = {},
   marketHistory = [],
   liquidTrendHistory = [],
   liquidHistory = [],
+  leaderListId = 'market',
+  comparisonListIds = [],
   limit = 504,
 } = {}) {
-  const marketByDate = new Map(marketHistory.map(entry => [entry.date, entry]))
-  const liquidTrendByDate = new Map(liquidTrendHistory.map(entry => [entry.date, entry]))
-  const liquidByDate = new Map(liquidHistory.map(entry => [entry.date, entry]))
-  const dates = [...new Set([...marketByDate.keys(), ...liquidTrendByDate.keys(), ...liquidByDate.keys()])]
+  const hasDynamicHistories = Object.keys(historiesById || {}).length > 0
+  const normalizedHistoriesById = hasDynamicHistories
+    ? historiesById
+    : {
+        market: marketHistory,
+        liquidTrend: liquidTrendHistory,
+        liquid: liquidHistory,
+      }
+  const historyIds = Object.keys(normalizedHistoriesById)
+  const resolvedComparisonListIds = comparisonListIds.length
+    ? comparisonListIds
+    : hasDynamicHistories
+      ? historyIds.filter(listId => listId !== leaderListId)
+      : (historyIds.includes('liquid') ? ['liquid'] : historyIds.filter(listId => listId !== leaderListId))
+  const entriesByListId = Object.fromEntries(
+    historyIds.map(listId => [
+      listId,
+      new Map((normalizedHistoriesById[listId] || []).map(entry => [entry.date, entry])),
+    ])
+  )
+  const dates = [...new Set(
+    Object.values(entriesByListId).flatMap(historyByDate => [...historyByDate.keys()])
+  )]
     .sort((a, b) => a.localeCompare(b))
 
   const baseRows = dates.map(date => {
-    const market = metricSnapshot(marketByDate.get(date))
-    const liquidTrend = metricSnapshot(liquidTrendByDate.get(date))
-    const liquid = metricSnapshot(liquidByDate.get(date))
-    const level = round(average([market.score, liquidTrend.score, liquid.score]), 0)
+    const metricsById = Object.fromEntries(
+      historyIds.map(listId => [listId, metricSnapshot(entriesByListId[listId].get(date))])
+    )
+    const leader = metricsById[leaderListId] || metricSnapshot(null)
+    const rankedComparisons = [...new Set(resolvedComparisonListIds.filter(id => id !== leaderListId))]
+      .map(listId => ({ listId, metrics: metricsById[listId] || metricSnapshot(null) }))
+      .filter(entry => Number.isFinite(entry.metrics.score))
+      .sort((a, b) => (b.metrics.score ?? 0) - (a.metrics.score ?? 0))
+    const strongestComparison = rankedComparisons[0] || null
+    const allMetrics = Object.values(metricsById)
+    const level = round(average(allMetrics.map(metrics => metrics.score)), 0)
+
     return {
       date,
-      market,
-      liquidTrend,
-      liquid,
+      ...metricsById,
       level,
-      participation: round(average([market.sma20, liquidTrend.sma20, liquid.sma20]), 1),
-      structure: round(average([market.avwapStack, liquidTrend.avwapStack, liquid.avwapStack]), 1),
-      thrustNet: round(average([market.thrustNet, liquidTrend.thrustNet, liquid.thrustNet]), 1),
-      avgDistance: round(average([market.avgDistance, liquidTrend.avgDistance, liquid.avgDistance]), 2),
-      damagePressure: round(average([market.damagePressure, liquidTrend.damagePressure, liquid.damagePressure]), 1),
-      leaderSpread: round((market.score ?? 0) - (liquid.score ?? 0), 0),
-      liquidBroadening: round((liquid.score ?? 0) - (market.score ?? 0), 0),
+      participation: round(average(allMetrics.map(metrics => metrics.sma20)), 1),
+      structure: round(average(allMetrics.map(metrics => metrics.avwapStack)), 1),
+      thrustNet: round(average(allMetrics.map(metrics => metrics.thrustNet)), 1),
+      avgDistance: round(average(allMetrics.map(metrics => metrics.avgDistance)), 2),
+      damagePressure: round(average(allMetrics.map(metrics => metrics.damagePressure)), 1),
+      leaderSpread: strongestComparison ? round((leader.score ?? 0) - (strongestComparison.metrics.score ?? 0), 0) : null,
+      liquidBroadening: strongestComparison ? round((strongestComparison.metrics.score ?? 0) - (leader.score ?? 0), 0) : null,
+      strongestComparisonId: strongestComparison?.listId || null,
     }
   })
 

@@ -743,22 +743,38 @@ function metricTableSnapshot(entry) {
 }
 
 export function buildHistoricalBreadthMetricRows({
+  historiesById = {},
   marketHistory = [],
   liquidTrendHistory = [],
   liquidHistory = [],
   limit = BREADTH_TABLE_SESSION_COUNT,
 } = {}) {
-  const marketByDate = new Map(marketHistory.map(entry => [entry.date, entry]))
-  const liquidTrendByDate = new Map(liquidTrendHistory.map(entry => [entry.date, entry]))
-  const liquidByDate = new Map(liquidHistory.map(entry => [entry.date, entry]))
-  const dates = [...new Set([...marketByDate.keys(), ...liquidTrendByDate.keys(), ...liquidByDate.keys()])]
+  const normalizedHistoriesById = Object.keys(historiesById || {}).length
+    ? historiesById
+    : {
+        market: marketHistory,
+        liquidTrend: liquidTrendHistory,
+        liquid: liquidHistory,
+      }
+  const entriesByListId = Object.fromEntries(
+    Object.entries(normalizedHistoriesById).map(([listId, history]) => [
+      listId,
+      new Map((history || []).map(entry => [entry.date, entry])),
+    ])
+  )
+  const dates = [...new Set(
+    Object.values(entriesByListId).flatMap(historyByDate => [...historyByDate.keys()])
+  )]
     .sort((a, b) => b.localeCompare(a))
     .slice(0, limit)
 
   return dates.map(date => ({
     date,
-    market: metricTableSnapshot(marketByDate.get(date)),
-    liquidTrend: metricTableSnapshot(liquidTrendByDate.get(date)),
-    liquid: metricTableSnapshot(liquidByDate.get(date)),
+    ...Object.fromEntries(
+      Object.entries(entriesByListId).map(([listId, historyByDate]) => [
+        listId,
+        metricTableSnapshot(historyByDate.get(date)),
+      ])
+    ),
   }))
 }

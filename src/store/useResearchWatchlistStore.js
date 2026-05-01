@@ -14,8 +14,16 @@ export const MARKET_LEADERS_LIST_ID = 'market-leaders'
 export const WATCHLIST_LIST_ID = 'watchlist'
 export const LIQUID_TREND_LIST_ID = WATCHLIST_LIST_ID
 export const LIQUID_LIST_ID = 'liquid'
+export const TOP_100_LIST_ID = 'top-100'
+export const QQQ_LIST_ID = 'qqq'
 
-export const DEFAULT_LIST_ORDER = [MARKET_LEADERS_LIST_ID, LIQUID_TREND_LIST_ID, LIQUID_LIST_ID]
+export const DEFAULT_LIST_ORDER = [
+  MARKET_LEADERS_LIST_ID,
+  LIQUID_TREND_LIST_ID,
+  LIQUID_LIST_ID,
+  TOP_100_LIST_ID,
+  QQQ_LIST_ID,
+]
 const DEFAULT_COLUMN_PRESET = applyColumnPreset('compact')
 const DEFAULT_LISTS = {
   [MARKET_LEADERS_LIST_ID]: {
@@ -53,6 +61,38 @@ const DEFAULT_LISTS = {
   [LIQUID_LIST_ID]: {
     id: LIQUID_LIST_ID,
     name: 'Liquid',
+    symbols: [],
+    rowsBySymbol: {},
+    savedViews: [],
+    columnOrder: [...DEFAULT_COLUMN_PRESET.columnOrder],
+    hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
+    activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
+    controlsCollapsed: true,
+    collapsedPanels: {},
+    ecosystemGroupingMode: 'normal',
+    condensedEcosystemOverrides: {},
+    themeAnalyticsHistory: { theme: [], ecosystem: [] },
+    lastUpdated: null,
+  },
+  [TOP_100_LIST_ID]: {
+    id: TOP_100_LIST_ID,
+    name: 'Top 100',
+    symbols: [],
+    rowsBySymbol: {},
+    savedViews: [],
+    columnOrder: [...DEFAULT_COLUMN_PRESET.columnOrder],
+    hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
+    activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
+    controlsCollapsed: true,
+    collapsedPanels: {},
+    ecosystemGroupingMode: 'normal',
+    condensedEcosystemOverrides: {},
+    themeAnalyticsHistory: { theme: [], ecosystem: [] },
+    lastUpdated: null,
+  },
+  [QQQ_LIST_ID]: {
+    id: QQQ_LIST_ID,
+    name: 'QQQ',
     symbols: [],
     rowsBySymbol: {},
     savedViews: [],
@@ -262,6 +302,8 @@ function ensureWorkspaceShape(state) {
       }),
       [WATCHLIST_LIST_ID]: { ...DEFAULT_LISTS[WATCHLIST_LIST_ID] },
       [LIQUID_LIST_ID]: { ...DEFAULT_LISTS[LIQUID_LIST_ID] },
+      [TOP_100_LIST_ID]: { ...DEFAULT_LISTS[TOP_100_LIST_ID] },
+      [QQQ_LIST_ID]: { ...DEFAULT_LISTS[QQQ_LIST_ID] },
     }, persistedSymbolMemory)).listsById,
     symbolMemoryBySymbol: rebuildTrustedSymbolMemory({
       [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {
@@ -272,6 +314,8 @@ function ensureWorkspaceShape(state) {
       }),
       [WATCHLIST_LIST_ID]: { ...DEFAULT_LISTS[WATCHLIST_LIST_ID] },
       [LIQUID_LIST_ID]: { ...DEFAULT_LISTS[LIQUID_LIST_ID] },
+      [TOP_100_LIST_ID]: { ...DEFAULT_LISTS[TOP_100_LIST_ID] },
+      [QQQ_LIST_ID]: { ...DEFAULT_LISTS[QQQ_LIST_ID] },
     }, persistedSymbolMemory),
   }
 }

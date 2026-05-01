@@ -720,6 +720,18 @@ function sideLabel(trade) {
   return (trade.position || 'Long').toLowerCase() === 'short' ? 'Short' : 'Long'
 }
 
+function dateKey(value) {
+  const ms = value ? new Date(value).getTime() : NaN
+  return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : null
+}
+
+function openTradeNeedsMAERefresh(trade) {
+  if (trade.maxAdverseR == null || trade.maxAdversePrice == null) return true
+  const updatedKey = dateKey(trade.maxAdverseUpdatedAt)
+  if (!updatedKey) return true
+  return updatedKey < new Date().toISOString().slice(0, 10)
+}
+
 function computeWinnerMAEStats(trades) {
   const cutoff = new Date('2025-11-14T00:00:00Z')
   const winners = trades.filter(t =>
@@ -836,13 +848,14 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
     updateTrade(row.id, {
       maxAdverseR:     Math.round(rawR * 1000) / 1000,
       maxAdversePrice: Math.round(price * 100) / 100,
+      maxAdverseUpdatedAt: new Date().toISOString(),
     })
   }
 
   async function computeOpenMAE(forceRecompute = false) {
     const toProcess = openTrades.filter(t => {
       if (!t.entryPrice || !(t._originalStopLoss ?? t.stopLoss)) return false
-      return forceRecompute || t.maxAdverseR == null
+      return forceRecompute || openTradeNeedsMAERefresh(t)
     })
     if (!toProcess.length) return
     setComputing(true); setDone(0); setErrCount(0); setTotal(toProcess.length)
@@ -851,7 +864,11 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
       try {
         const result = await computeSchwabMAE(trade, tpMultiplier)
         if (result) {
-          updateTrade(trade.id, { maxAdverseR: result.maxAdverseR, maxAdversePrice: result.worstPrice })
+          updateTrade(trade.id, {
+            maxAdverseR: result.maxAdverseR,
+            maxAdversePrice: result.worstPrice,
+            maxAdverseUpdatedAt: new Date().toISOString(),
+          })
         }
       } catch (err) {
         console.warn(`[MAE] ${trade.symbol}:`, err.message)
@@ -878,7 +895,11 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
       try {
         const result = await computeSchwabMAE(trade, tpMultiplier)
         if (result) {
-          updateTrade(trade.id, { maxAdverseR: result.maxAdverseR, maxAdversePrice: result.worstPrice })
+          updateTrade(trade.id, {
+            maxAdverseR: result.maxAdverseR,
+            maxAdversePrice: result.worstPrice,
+            maxAdverseUpdatedAt: new Date().toISOString(),
+          })
         }
       } catch (err) {
         console.warn(`[MAE hist] ${trade.symbol}:`, err.message)
@@ -927,9 +948,13 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
         ? (isLong ? cp - entry : entry - cp) / riskPerSh
         : null
       const stored    = t.maxAdverseR ?? null
-      const worstR    = stored != null && liveR != null && liveR < stored ? liveR
-        : (stored ?? (liveR != null && liveR < 0 ? liveR : null))
+      const liveWorstR = liveR != null && liveR < 0 ? liveR : null
+      const worstR    = stored != null && liveWorstR != null && liveWorstR < stored ? liveWorstR
+        : (stored ?? liveWorstR)
       const absWorstR = worstR != null ? Math.abs(worstR) : null
+      const worstPrice = liveWorstR != null && (stored == null || liveWorstR < stored)
+        ? cp
+        : (t.maxAdversePrice ?? null)
 
       let zone = 'none'
       if (absWorstR != null) {
@@ -1026,7 +1051,8 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
       return {
         id: t.id, symbol: t.symbol, isLong,
         entry, origStop, riskPerSh, liveR, worstR, absWorstR,
-        worstPrice:    t.maxAdversePrice ?? null,
+        worstPrice,
+        maeUpdatedAt:  t.maxAdverseUpdatedAt ?? null,
         proximityPct:  thresholdUsagePct != null ? Math.min(160, thresholdUsagePct) : null,
         thresholdUsagePct, stopUsagePct, overshootR, stopBufferR,
         holdDays, adverseVelocity, velocityUsagePct, lossCompressionScore,
@@ -1066,7 +1092,7 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
   }, [openTrades, quotes, winnerCohorts, maeThreshold, trimTriggerR, trimFrac, tpMultiplier, atrData, sortCol, sortDir])
 
   const pendingOpen = openTrades.filter(t =>
-    t.entryPrice && (t._originalStopLoss ?? t.stopLoss) && t.maxAdverseR == null
+    t.entryPrice && (t._originalStopLoss ?? t.stopLoss) && openTradeNeedsMAERefresh(t)
   ).length
   const cutoff = new Date('2025-11-14T00:00:00Z')
   const pendingHist = allTrades.filter(t =>
@@ -1146,7 +1172,7 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
           </h3>
           <p className="text-xs text-gray-500 mt-1 max-w-2xl">
             Tracks how far each open position has moved against you versus your historical winner MAE distribution.
-            The goal is loss compression: if a trade burns through your winner-risk budget while still negative, cut it faster.
+            Worst Price is the lowest regular-session price after entry for longs, or highest after entry for shorts; entry-day bars before your timestamp are excluded.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -1161,7 +1187,7 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
             onClick={() => computeOpenMAE(false)}
             disabled={computing || histComp || pendingOpen === 0}
             className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-40"
-            title="Fetch intraday MAE for open trades missing data"
+            title="Fetch Schwab intraday/daily MAE for open trades missing or stale data"
           >
             <RefreshCw size={12} className={computing ? 'animate-spin' : ''} />
             {computing ? 'Computing…' : `Open MAE${pendingOpen > 0 ? ` (${pendingOpen})` : ''}`}
@@ -1191,12 +1217,18 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
         <div className="flex items-center gap-4 bg-surface-200 rounded-lg px-4 py-2.5 text-xs flex-wrap">
           {winnerStats ? (
             <>
-              <span className="text-gray-500">Winner MAE <span className="text-gray-400">n={winnerStats.n}</span></span>
+              <span className="text-gray-500 inline-flex items-center gap-1">
+                Winner MAE <span className="text-gray-400">n={winnerStats.n}</span>
+                <InlineMetricHelp tooltipContent={<><p className="font-bold text-white text-sm mb-2">Winner MAE Sample</p><p className="text-gray-400 leading-relaxed mb-3">Closed winning trades since Nov 14, 2025 with a computed Max Adverse Excursion. MAE is how far a trade went against entry before still finishing as a win, measured in R.</p><p className="text-gray-600">A p90 of 1.20R means 90% of those winners stayed within 1.20R of adverse movement.</p></>} />
+              </span>
               <span><span className="text-gray-500">Avg </span><span className="mono font-semibold text-gray-200">{winnerStats.avg.toFixed(2)}R</span></span>
               <span><span className="text-gray-500">p75 </span><span className="mono font-semibold text-gray-200">{winnerStats.p75.toFixed(2)}R</span></span>
               <span><span className="text-gray-500">p90 </span><span className="mono font-semibold text-accent-yellow">{winnerStats.p90.toFixed(2)}R</span></span>
               <span><span className="text-gray-500">p95 </span><span className="mono font-semibold text-accent-red">{winnerStats.p95.toFixed(2)}R</span></span>
-              <span className="text-gray-600">Rows use setup/side/hold cohorts when sample size is sufficient.</span>
+              <span className="text-gray-600 inline-flex items-center gap-1">
+                Rows use setup/side/hold cohorts when sample size is sufficient.
+                <InlineMetricHelp tooltipContent={<><p className="font-bold text-white text-sm mb-2">Cohort Fallbacks</p><p className="text-gray-400 leading-relaxed mb-3">Each row first looks for winners with the same setup, side, and hold bucket. If fewer than 5 examples exist, it falls back to side + hold, then setup only, then all winners.</p><p className="text-gray-600">This keeps the alert threshold relevant without pretending tiny samples are precise.</p></>} />
+              </span>
             </>
           ) : (
             <span className="text-gray-500 italic">
@@ -1241,6 +1273,21 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
         </div>
       </div>
 
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4 text-xs">
+        <div className="rounded-lg border border-white/5 bg-surface-200/70 px-3 py-2">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Worst Price Source</p>
+          <p className="text-gray-400 leading-relaxed">Schwab 15-minute bars from entry timestamp through entry-day close, then Schwab daily OHLC through today or exit.</p>
+        </div>
+        <div className="rounded-lg border border-white/5 bg-surface-200/70 px-3 py-2">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Threshold Meaning</p>
+          <p className="text-gray-400 leading-relaxed">Avg, p75, and p90 are the adverse R levels prior winners survived. Lower settings are stricter; p90 gives more room.</p>
+        </div>
+        <div className="rounded-lg border border-white/5 bg-surface-200/70 px-3 py-2">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">How To Use</p>
+          <p className="text-gray-400 leading-relaxed">When Budget Used crosses 100% while Live R is negative, the trade is acting worse than your selected winner baseline.</p>
+        </div>
+      </div>
+
       {rows.length === 0 ? (
         <div className="rounded-lg bg-surface-200 px-4 py-5 text-xs text-gray-500 text-center">
           No open trades with entry + stop data.
@@ -1259,7 +1306,7 @@ function PositionHealthPanel({ allTrades, openTrades, quotes, liveBalance, tpMul
                 <SortTh col="symbol" label="Symbol"     align="left" rk="symbol" />
                 <PlainTh             label="Entry"                   rk="entry" />
                 <PlainTh             label="Orig Stop"               rk="origStop" />
-                <PlainTh             label="Worst Price"             rk="worstPrice" />
+                <PlainTh             label={<span className="inline-flex items-center gap-1 justify-end">Worst Price<InlineMetricHelp tooltipContent={<><p className="font-bold text-white text-sm mb-2">Worst Price</p><p className="text-gray-400 leading-relaxed mb-3">For longs, the lowest price reached after the entry timestamp. For shorts, the highest price reached after entry. Entry-day candles before the timestamp are excluded; later days use full regular-session daily highs/lows.</p><p className="text-gray-600">Use Open MAE to refresh stale open positions; live price is used as a temporary worse value if it has already exceeded the stored MAE.</p></>} /></span>} rk="worstPrice" />
                 <SortTh col="worstR" label="Max Adv R"               rk="worstR" />
                 <SortTh col="liveR"  label="Live R"                  rk="liveR" />
                 <SortTh col="proximity" label={<span className="inline-flex items-center gap-1 justify-end">Budget Used<InlineMetricHelp tooltipContent={<><p className="font-bold text-white text-sm mb-2">Budget Used</p><p className="text-gray-400 leading-relaxed mb-3">Adverse excursion divided by the selected winner-MAE threshold for that cohort. 100% means the trade has already moved against you as far as your chosen winner budget allows.</p><div className="space-y-1 mb-2">{[['< 70%','text-accent-green','Comfortable'],['70–100%','text-accent-yellow','Tightening zone'],['> 100%','text-accent-red','Budget breach']].map(([r,c,d]) => <div key={r} className="flex gap-2"><span className={`font-semibold w-16 shrink-0 ${c}`}>{r}</span><span className="text-gray-600">{d}</span></div>)}</div><p className="text-gray-600">The smaller this stays on losers, the better your loss compression.</p></>} /></span>} rk="proximity" />
