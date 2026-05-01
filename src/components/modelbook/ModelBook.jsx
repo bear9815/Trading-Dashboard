@@ -3,6 +3,7 @@ import {
   Plus, Trash2, X, Image, Upload, ChevronLeft, ChevronRight,
   Sparkles, Loader2, Tag, Calendar, Search, List, Check,
   TrendingUp, BarChart2, MessageSquare, StickyNote, GripVertical,
+  BookOpenCheck, Maximize2, Save,
 } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -10,12 +11,19 @@ import {
 } from 'recharts'
 import { useModelBookStore, MAX_CHARTS_PER_MODEL } from '../../store/useModelBookStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
+import { useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
 import { compressImage, toDataUrl, imageFromClipboard } from '../../utils/imageUtils.js'
 import { fetchHistory } from '../../utils/marketData.js'
 import {
   analyzeModelsGemini, analyzeModelsOpenRouter, analyzeModelsOllama,
-  analyzeChartVisionGemini,
+  analyzeChartVisionGemini, buildHistoricalContextGemini, buildHistoricalContextOpenRouter,
+  buildHistoricalContextOllama, synthesizeModelStudyGemini, synthesizeModelStudyOpenRouter,
+  synthesizeModelStudyOllama,
 } from '../../utils/modelBookAi.js'
+import { getModelBookStudyProgress } from '../../utils/modelBookReviewState.js'
+import StudyReviewPanel from './StudyReviewPanel.jsx'
+import ContextAssistPanel from './ContextAssistPanel.jsx'
+import { buildModelBookContextEvidence } from '../../utils/modelBookContextEvidence.js'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -33,7 +41,7 @@ const SUGGESTED_TAGS = [
 
 // ── Lightbox ─────────────────────────────────────────────────────────────────
 
-function Lightbox({ charts, index, onClose, onPrev, onNext }) {
+function Lightbox({ charts, index, onClose, onPrev, onNext, sidebar = null }) {
   const chart = charts[index]
   const hasPrev = index > 0
   const hasNext = index < charts.length - 1
@@ -49,7 +57,7 @@ function Lightbox({ charts, index, onClose, onPrev, onNext }) {
   }, [hasPrev, hasNext, onPrev, onNext, onClose])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/95 backdrop-blur-sm" onClick={onClose}>
       <button onClick={onClose} className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"><X size={18} /></button>
       {charts.length > 1 && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/10 text-white text-xs font-medium z-10">
@@ -65,13 +73,21 @@ function Lightbox({ charts, index, onClose, onPrev, onNext }) {
       {hasNext && (
         <button onClick={e => { e.stopPropagation(); onNext() }} className="absolute right-4 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"><ChevronRight size={22} /></button>
       )}
-      <img
-        src={toDataUrl(chart.base64, chart.mimeType)}
-        alt={chart.label || 'Chart'}
-        className="rounded-lg shadow-2xl"
-        style={{ maxWidth: '92vw', maxHeight: '92vh', width: 'auto', height: 'auto', display: 'block' }}
-        onClick={e => e.stopPropagation()}
-      />
+      <div className={`w-full h-full flex ${sidebar ? 'items-stretch' : 'items-center justify-center'} gap-4 p-4`} onClick={e => e.stopPropagation()}>
+        <div className="flex-1 min-w-0 flex items-center justify-center">
+          <img
+            src={toDataUrl(chart.base64, chart.mimeType)}
+            alt={chart.label || 'Chart'}
+            className="rounded-lg shadow-2xl"
+            style={{ maxWidth: sidebar ? '100%' : '92vw', maxHeight: '92vh', width: 'auto', height: 'auto', display: 'block' }}
+          />
+        </div>
+        {sidebar ? (
+          <div className="w-[360px] max-w-[38vw] min-w-[300px] rounded-xl border border-white/10 bg-surface-100/95 overflow-y-auto p-4">
+            {sidebar}
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -170,6 +186,7 @@ function ModelFormModal({ model, onSave, onClose }) {
 // ── Sidebar list item ────────────────────────────────────────────────────────
 
 function ModelListItem({ model, selected, onClick }) {
+  const progress = getModelBookStudyProgress(model.studyReview)
   return (
     <button
       onClick={onClick}
@@ -181,7 +198,10 @@ function ModelListItem({ model, selected, onClick }) {
     >
       <div className="flex items-center justify-between">
         <span className={`text-sm font-bold mono ${selected ? 'text-white' : 'text-gray-300'}`}>{model.symbol}</span>
-        <span className="text-[10px] text-gray-600">{model.charts.length} <Image size={9} className="inline" /></span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-gray-600">{progress.answeredCount}/{progress.totalCount}</span>
+          <span className="text-[10px] text-gray-600">{model.charts.length} <Image size={9} className="inline" /></span>
+        </div>
       </div>
       {model.name && <p className="text-[10px] text-gray-500 mt-0.5 truncate">{model.name}</p>}
       {model.tags.length > 0 && (
@@ -654,15 +674,123 @@ function ChartGallery({ model, onOpenLightbox }) {
   )
 }
 
+function ChartStudySidebar({ model, chart, updateChart, onSaveAndClose }) {
+  const [label, setLabel] = useState(chart?.label || '')
+  const [chartRole, setChartRole] = useState(chart?.chartRole || '')
+  const [chartNote, setChartNote] = useState(chart?.chartNote || '')
+
+  useEffect(() => {
+    setLabel(chart?.label || '')
+    setChartRole(chart?.chartRole || '')
+    setChartNote(chart?.chartNote || '')
+  }, [chart?.id, chart?.label, chart?.chartRole, chart?.chartNote])
+
+  function save() {
+    updateChart(model.id, chart.id, { label, chartRole, chartNote })
+    onSaveAndClose?.()
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-sm font-semibold text-white">Chart Study</p>
+        <p className="text-xs text-gray-500 mt-1">Keep the chart large while you label its role and note what this specific screenshot shows.</p>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <label className="block text-[10px] uppercase tracking-wider text-gray-500 mb-1">Label</label>
+          <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Daily setup" className="input w-full text-xs" />
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wider text-gray-500 mb-1">Chart role</label>
+          <input value={chartRole} onChange={e => setChartRole(e.target.value)} placeholder="daily setup / weekly context / entry trigger" className="input w-full text-xs" />
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wider text-gray-500 mb-1">Chart note</label>
+          <textarea
+            value={chartNote}
+            onChange={e => setChartNote(e.target.value)}
+            rows={8}
+            placeholder="What did this timeframe show that mattered?"
+            className="input w-full text-xs resize-none leading-relaxed"
+          />
+        </div>
+      </div>
+
+      <button onClick={save} className="w-full text-xs px-3 py-2 rounded-lg border border-accent-blue/20 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/15 flex items-center justify-center gap-1.5">
+        <Save size={12} />
+        Save chart study
+      </button>
+    </div>
+  )
+}
+
 // ── Model Detail panel (right side) ──────────────────────────────────────────
 
 function ModelDetail({ model, onPrev, onNext, hasPrev, hasNext, onEdit, onDelete }) {
+  const { updateChart, updateModel, previewContextAssist, saveContextAssist, discardContextAssist, updateStudyAnswer } = useModelBookStore()
+  const {
+    apiKey,
+    openRouterApiKey,
+    researchAiProvider,
+    researchOpenRouterModel,
+  } = useSettingsStore()
+  const listsById = useResearchWatchlistStore(state => state.listsById)
   const [lightboxIndex, setLightboxIndex] = useState(null)
+  const [contextLoading, setContextLoading] = useState(false)
+  const [contextError, setContextError] = useState('')
+  const [synthesisLoading, setSynthesisLoading] = useState(false)
+  const [synthesisError, setSynthesisError] = useState('')
+  const provider = researchAiProvider || 'gemini'
+  const progress = useMemo(() => getModelBookStudyProgress(model.studyReview), [model.studyReview])
 
   useEffect(() => { setLightboxIndex(null) }, [model.id])
 
   const prevLightbox = useCallback(() => setLightboxIndex(i => (i > 0 ? i - 1 : i)), [])
   const nextLightbox = useCallback(() => setLightboxIndex(i => (i < model.charts.length - 1 ? i + 1 : i)), [model.charts.length])
+
+  async function handleGenerateSynthesis() {
+    setSynthesisLoading(true)
+    setSynthesisError('')
+    try {
+      const result = provider === 'gemini'
+        ? await synthesizeModelStudyGemini(model, apiKey)
+        : provider === 'openrouter'
+          ? await synthesizeModelStudyOpenRouter(model, openRouterApiKey, researchOpenRouterModel)
+          : await synthesizeModelStudyOllama(model)
+
+      updateModel(model.id, {
+        studyReview: {
+          ...model.studyReview,
+          aiSynthesis: result,
+        },
+      })
+    } catch (err) {
+      setSynthesisError(err.message || 'Failed to generate stock takeaways.')
+    } finally {
+      setSynthesisLoading(false)
+    }
+  }
+
+  async function handleBuildContext() {
+    setContextLoading(true)
+    setContextError('')
+    try {
+      const evidence = buildModelBookContextEvidence(model, { listsById })
+      const result = provider === 'gemini'
+        ? await buildHistoricalContextGemini(model, evidence, apiKey)
+        : provider === 'openrouter'
+          ? await buildHistoricalContextOpenRouter(model, evidence, openRouterApiKey, researchOpenRouterModel)
+          : await buildHistoricalContextOllama(model, evidence)
+
+      previewContextAssist(model.id, result, result?.evidenceSources || evidence.watchlistMatches.map(match => match.listName), result?.probableCatalyst?.confidence || null)
+    } catch (err) {
+      setContextError(err.message || 'Failed to build historical context.')
+    } finally {
+      setContextLoading(false)
+    }
+  }
 
   return (
     <div className="flex-1 overflow-y-auto p-5 space-y-5">
@@ -672,6 +800,9 @@ function ModelDetail({ model, onPrev, onNext, hasPrev, hasNext, onEdit, onDelete
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-xl font-bold mono text-white">{model.symbol}</h2>
             {model.name && <span className="text-sm text-gray-500">{model.name}</span>}
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent-blue/10 border border-accent-blue/20 text-accent-blue">
+              {progress.answeredCount}/{progress.totalCount} study answers
+            </span>
           </div>
           <div className="flex items-center gap-3 mt-1">
             {model.startDate && model.endDate && (
@@ -704,9 +835,32 @@ function ModelDetail({ model, onPrev, onNext, hasPrev, hasNext, onEdit, onDelete
       {/* Charts */}
       <ChartGallery model={model} onOpenLightbox={setLightboxIndex} />
 
+      {/* Structured study review */}
+      <div className="pt-2 border-t border-white/5">
+        <StudyReviewPanel
+          model={model}
+          updateStudyAnswer={updateStudyAnswer}
+          onGenerateSynthesis={handleGenerateSynthesis}
+          generatingSynthesis={synthesisLoading}
+        />
+        {synthesisError && <p className="text-xs text-accent-red mt-2">{synthesisError}</p>}
+      </div>
+
       {/* Market context */}
       <div className="pt-2 border-t border-white/5">
         <MarketContextChart startDate={model.startDate} endDate={model.endDate} symbol={model.symbol} />
+      </div>
+
+      {/* Historical context assistant */}
+      <div className="pt-2 border-t border-white/5">
+        <ContextAssistPanel
+          model={model}
+          loading={contextLoading}
+          error={contextError}
+          onBuildContext={handleBuildContext}
+          onSaveContext={() => saveContextAssist(model.id)}
+          onDiscardContext={() => discardContextAssist(model.id)}
+        />
       </div>
 
       {/* Notes */}
@@ -716,7 +870,20 @@ function ModelDetail({ model, onPrev, onNext, hasPrev, hasNext, onEdit, onDelete
 
       {/* Lightbox */}
       {lightboxIndex != null && model.charts[lightboxIndex] && (
-        <Lightbox charts={model.charts} index={lightboxIndex} onClose={() => setLightboxIndex(null)} onPrev={prevLightbox} onNext={nextLightbox} />
+        <Lightbox
+          charts={model.charts}
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onPrev={prevLightbox}
+          onNext={nextLightbox}
+          sidebar={(
+            <ChartStudySidebar
+              model={model}
+              chart={model.charts[lightboxIndex]}
+              updateChart={updateChart}
+            />
+          )}
+        />
       )}
     </div>
   )
@@ -844,7 +1011,17 @@ export default function ModelBook() {
         m.symbol.toLowerCase().includes(q) ||
         m.name.toLowerCase().includes(q) ||
         m.notes.toLowerCase().includes(q) ||
-        m.tags.some(t => t.toLowerCase().includes(q))
+        m.tags.some(t => t.toLowerCase().includes(q)) ||
+        Object.values(m.studyReview?.answers || {}).some(answer =>
+          answer?.text?.toLowerCase?.().includes(q) ||
+          answer?.voiceTranscript?.toLowerCase?.().includes(q) ||
+          answer?.tags?.some?.(tag => tag.toLowerCase().includes(q))
+        ) ||
+        m.charts.some(chart =>
+          chart.label?.toLowerCase?.().includes(q) ||
+          chart.chartRole?.toLowerCase?.().includes(q) ||
+          chart.chartNote?.toLowerCase?.().includes(q)
+        )
       )
     }
     if (filterTag) list = list.filter(m => m.tags.includes(filterTag))

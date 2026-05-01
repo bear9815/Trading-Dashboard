@@ -6,27 +6,49 @@
  */
 
 import { parseJsonText as parseJson } from './aiHelpers.js'
+import { serializeModelBookStudyAnswers } from './modelBookReviewState.js'
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const SYS_ANALYST = 'Expert stock market pattern analyst. Respond with valid JSON only.'
 
+function buildModelReviewSummary(model) {
+  const sections = [`### ${model.symbol}`]
+  if (model.name) sections.push(`Name: ${model.name}`)
+  if (model.startDate && model.endDate) sections.push(`Study window: ${model.startDate} to ${model.endDate}`)
+  if (model.tags?.length) sections.push(`Model tags: ${model.tags.join(', ')}`)
+  if (model.notes?.trim()) sections.push(`General notes:\n${model.notes.trim()}`)
+
+  const studyAnswers = serializeModelBookStudyAnswers(model.studyReview)
+  if (studyAnswers) sections.push(`Structured review:\n${studyAnswers}`)
+
+  const chartNotes = (model.charts || [])
+    .map(chart => {
+      const details = []
+      if (chart.label) details.push(chart.label)
+      if (chart.chartRole) details.push(`role=${chart.chartRole}`)
+      if (chart.chartNote?.trim()) details.push(`note=${chart.chartNote.trim()}`)
+      return details.length ? `- ${details.join(' | ')}` : null
+    })
+    .filter(Boolean)
+  if (chartNotes.length) sections.push(`Chart study notes:\n${chartNotes.join('\n')}`)
+
+  if (model.contextAssist?.result) {
+    sections.push(`Historical context:\n${JSON.stringify(model.contextAssist.result, null, 2)}`)
+  }
+
+  sections.push(`Charts uploaded: ${model.charts?.length || 0}`)
+  return sections.join('\n')
+}
+
 // ── Prompt builders ─────────────────────────────────────────────────────────
 
 function buildAnalysisPrompt(models) {
-  const summaries = models.map((m, i) => {
-    const lines = [`### Model ${i + 1}: ${m.symbol}`]
-    if (m.name) lines.push(`Name: ${m.name}`)
-    if (m.startDate && m.endDate) lines.push(`Trade Period: ${m.startDate} to ${m.endDate}`)
-    if (m.tags?.length) lines.push(`Tags: ${m.tags.join(', ')}`)
-    if (m.notes) lines.push(`Notes:\n${m.notes}`)
-    lines.push(`Charts uploaded: ${m.charts?.length || 0}`)
-    return lines.join('\n')
-  }).join('\n\n')
+  const summaries = models.map(buildModelReviewSummary).join('\n\n')
 
   return `You are an expert stock market pattern analyst and trading coach. You are reviewing a trader's "Model Book" — a curated collection of their best-performing trades that they want to use as blueprints for future opportunities.
 
-Below are the model stocks with their notes, date ranges, and tags. Analyze ALL entries together and identify:
+Below are the model stocks with their notes, date ranges, structured review answers, optional chart-role notes, and saved historical context. Analyze ALL entries together and identify:
 
 1. **Chart Pattern Commonalities** — What chart patterns appear repeatedly? (e.g., VCP, breakout from consolidation, cup-and-handle, tight base, earnings gap-up)
 2. **Setup Characteristics** — Common entry characteristics: volume patterns, moving average relationships, relative strength behavior, consolidation length
@@ -49,6 +71,60 @@ Respond with valid JSON in this exact structure:
   "checklist": ["item1", "item2"],
   "redFlags": ["flag1", "flag2"],
   "summary": "2-3 paragraph synthesis of the trader's winning formula"
+}`
+}
+
+function buildSingleModelSynthesisPrompt(model) {
+  return `You are an expert growth-stock study coach. Review this single model-book stock and summarize why it was a strong blueprint.
+
+MODEL ENTRY:
+${buildModelReviewSummary(model)}
+
+Return ONLY valid JSON:
+{
+  "leaderSummary": "2-3 sentences on why this stock qualified as a true leader",
+  "setupSummary": "2-3 sentences on the setup and low-risk entry logic",
+  "acceptableFlaw": "1-2 sentences on the main flaw that was still acceptable",
+  "holdPressSummary": "2-3 sentences on what justified holding or pressing the name",
+  "keyTakeaways": ["takeaway 1", "takeaway 2", "takeaway 3"],
+  "screeningChecklist": ["item 1", "item 2", "item 3"]
+}`
+}
+
+function buildHistoricalContextPrompt(model, evidence = {}) {
+  return `You are a historical context assistant for a trader's model-book study. Use only the supplied evidence. If evidence is weak or missing, say so explicitly instead of guessing.
+
+MODEL ENTRY:
+${buildModelReviewSummary(model)}
+
+EVIDENCE PACKET:
+${JSON.stringify(evidence, null, 2)}
+
+Return ONLY valid JSON:
+{
+  "probableCatalyst": {
+    "summary": "1-3 sentences",
+    "confidence": "high|medium|low",
+    "provenance": "confirmed|inferred|missing"
+  },
+  "earningsSalesBackdrop": {
+    "summary": "1-3 sentences",
+    "confidence": "high|medium|low",
+    "provenance": "confirmed|inferred|missing"
+  },
+  "themeGroupContext": {
+    "summary": "1-3 sentences",
+    "confidence": "high|medium|low",
+    "provenance": "confirmed|inferred|missing"
+  },
+  "leaderConfirmation": {
+    "summary": "1-3 sentences",
+    "confidence": "high|medium|low",
+    "provenance": "confirmed|inferred|missing"
+  },
+  "whatLikelyMatteredMost": "1-3 sentences synthesizing the strongest driver of the move",
+  "risksContradictions": ["risk or contradiction 1", "risk or contradiction 2"],
+  "evidenceSources": ["source 1", "source 2"]
 }`
 }
 
@@ -148,6 +224,50 @@ export async function analyzeChartVisionGemini(base64, mimeType, symbol, apiKey)
   return parseJson(text)
 }
 
+export async function synthesizeModelStudyGemini(model, apiKey) {
+  if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
+
+  const res = await fetch(`${GEMINI_BASE}/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: buildSingleModelSynthesisPrompt(model) }] }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.error?.message || `Gemini API error ${res.status}`)
+  }
+
+  const data = await res.json()
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+  return parseJson(text)
+}
+
+export async function buildHistoricalContextGemini(model, evidence, apiKey) {
+  if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
+
+  const res = await fetch(`${GEMINI_BASE}/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: buildHistoricalContextPrompt(model, evidence) }] }],
+      generationConfig: { temperature: 0.15, maxOutputTokens: 4096 },
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.error?.message || `Gemini API error ${res.status}`)
+  }
+
+  const data = await res.json()
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+  return parseJson(text)
+}
+
 // ── OpenRouter (text-only, no vision for charts) ────────────────────────────
 
 export async function analyzeModelsOpenRouter(models, apiKey, model = 'openai/gpt-4o-mini') {
@@ -182,6 +302,70 @@ export async function analyzeModelsOpenRouter(models, apiKey, model = 'openai/gp
   return parseJson(text)
 }
 
+export async function synthesizeModelStudyOpenRouter(model, apiKey, modelName = 'openai/gpt-4o-mini') {
+  if (!apiKey) throw new Error('No OpenRouter API key. Add it in Settings.')
+
+  const res = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'https://localhost',
+      'X-Title': 'Trading Dashboard',
+    },
+    body: JSON.stringify({
+      model: modelName,
+      messages: [
+        { role: 'system', content: SYS_ANALYST },
+        { role: 'user', content: buildSingleModelSynthesisPrompt(model) },
+      ],
+      temperature: 0.2,
+      max_tokens: 4096,
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.error?.message || `OpenRouter API error ${res.status}`)
+  }
+
+  const data = await res.json()
+  const text = data.choices?.[0]?.message?.content?.trim() || ''
+  return parseJson(text)
+}
+
+export async function buildHistoricalContextOpenRouter(model, evidence, apiKey, modelName = 'openai/gpt-4o-mini') {
+  if (!apiKey) throw new Error('No OpenRouter API key. Add it in Settings.')
+
+  const res = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'https://localhost',
+      'X-Title': 'Trading Dashboard',
+    },
+    body: JSON.stringify({
+      model: modelName,
+      messages: [
+        { role: 'system', content: SYS_ANALYST },
+        { role: 'user', content: buildHistoricalContextPrompt(model, evidence) },
+      ],
+      temperature: 0.15,
+      max_tokens: 4096,
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.error?.message || `OpenRouter API error ${res.status}`)
+  }
+
+  const data = await res.json()
+  const text = data.choices?.[0]?.message?.content?.trim() || ''
+  return parseJson(text)
+}
+
 // ── Local Ollama ────────────────────────────────────────────────────────────
 
 export async function analyzeModelsOllama(models) {
@@ -195,6 +379,46 @@ export async function analyzeModelsOllama(models) {
         { role: 'user', content: buildAnalysisPrompt(models) },
       ],
       temperature: 0.3,
+    }),
+  })
+
+  if (!res.ok) throw new Error(`Ollama error ${res.status}`)
+  const data = await res.json()
+  const text = data.choices?.[0]?.message?.content?.trim() || ''
+  return parseJson(text)
+}
+
+export async function synthesizeModelStudyOllama(model) {
+  const res = await fetch('http://localhost:11434/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemma4:31b',
+      messages: [
+        { role: 'system', content: SYS_ANALYST },
+        { role: 'user', content: buildSingleModelSynthesisPrompt(model) },
+      ],
+      temperature: 0.2,
+    }),
+  })
+
+  if (!res.ok) throw new Error(`Ollama error ${res.status}`)
+  const data = await res.json()
+  const text = data.choices?.[0]?.message?.content?.trim() || ''
+  return parseJson(text)
+}
+
+export async function buildHistoricalContextOllama(model, evidence) {
+  const res = await fetch('http://localhost:11434/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemma4:31b',
+      messages: [
+        { role: 'system', content: SYS_ANALYST },
+        { role: 'user', content: buildHistoricalContextPrompt(model, evidence) },
+      ],
+      temperature: 0.15,
     }),
   })
 
