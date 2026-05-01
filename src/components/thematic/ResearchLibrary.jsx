@@ -186,6 +186,18 @@ function SentimentBadge({ sentiment }) {
   )
 }
 
+function SourceKindBadge({ source }) {
+  const kind = source?.source_kind || (source?.source_url ? 'external_web' : 'library')
+  const map = {
+    external_web: { label: 'External Web', cls: 'bg-accent-blue/10 text-accent-blue border-accent-blue/20' },
+    external_filing: { label: 'Filing', cls: 'bg-accent-green/10 text-accent-green border-accent-green/20' },
+    manual_note: { label: 'Manual Note', cls: 'bg-accent-yellow/10 text-accent-yellow border-accent-yellow/20' },
+    library: { label: 'Library', cls: 'bg-white/10 text-gray-400 border-white/15' },
+  }
+  const current = map[kind] || map.library
+  return <span className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wider border rounded-full px-2 py-0.5 ${current.cls}`}>{current.label}</span>
+}
+
 function catalystCls(status) {
   return {
     confirmed: 'text-accent-green border-accent-green/40',
@@ -257,6 +269,7 @@ function SourceCard({ source, onRemove, onView }) {
           <div className="flex items-center gap-2 flex-wrap mb-1.5">
             <TypeBadge type={source.source_type}/>
             <SentimentBadge sentiment={source.sentiment}/>
+            <SourceKindBadge source={source} />
           </div>
           <p className="text-base font-medium text-gray-200 leading-snug">{source.title}</p>
           {(source.tickers || []).length > 0 && (
@@ -752,6 +765,7 @@ export default function ResearchLibrary({ earningsMode = false }) {
   const [createDossier, setCreateDossier] = useState(false)
   const [tickerInput,  setTickerInput]  = useState('')
   const [themeInput,   setThemeInput]   = useState('')
+  const [sourceUrlInput, setSourceUrlInput] = useState('')
   const [transcriptUrl, setTranscriptUrl] = useState('')
   const [transcriptText, setTranscriptText] = useState('')
   const [dragging,     setDragging]     = useState(false)
@@ -812,6 +826,7 @@ export default function ResearchLibrary({ earningsMode = false }) {
       sentiment:        typeof extracted.sentiment === 'string'   ? extracted.sentiment        : 'neutral',
       file_name:        fileName,
       source_url:       sourceUrl,
+      source_kind:      sourceUrl ? 'external_web' : 'library',
     }
 
     const saved = addSource(payload)
@@ -919,6 +934,7 @@ export default function ResearchLibrary({ earningsMode = false }) {
         await persistExtractedSource({
           extracted,
           fileName: file.name,
+          sourceUrl: sourceUrlInput.trim(),
         })
 
       } catch (err) {
@@ -930,12 +946,13 @@ export default function ResearchLibrary({ earningsMode = false }) {
 
     setTickerInput('')
     setThemeInput('')
+    setSourceUrlInput('')
     setUploading(false)
     setUploadFile('')
     setUploadStatus('')
     setUploadIndex(0)
     setUploadTotal(0)
-  }, [apiKey, openRouterApiKey, researchOpenRouterModel, provider, sourceType, createDossier, getAgentsForTrigger, persistExtractedSource, selectedAgentId])
+  }, [apiKey, createDossier, getAgentsForTrigger, openRouterApiKey, persistExtractedSource, provider, researchOpenRouterModel, selectedAgentId, sourceType, sourceUrlInput])
 
   const handleDrop = useCallback(e => {
     e.preventDefault(); setDragging(false)
@@ -998,6 +1015,7 @@ export default function ResearchLibrary({ earningsMode = false }) {
       })
 
       setTranscriptUrl('')
+      setSourceUrlInput('')
     } catch (err) {
       console.error(err)
       setError(err?.message || 'Transcript import failed.')
@@ -1051,10 +1069,12 @@ export default function ResearchLibrary({ earningsMode = false }) {
       await persistExtractedSource({
         extracted,
         fileName: tickerInput.trim() ? `${tickerInput.trim()} Transcript Paste` : 'Transcript Paste',
+        sourceUrl: sourceUrlInput.trim(),
         fallbackTitle: tickerInput.trim() ? `${tickerInput.trim()} Transcript Paste` : 'Transcript Paste',
       })
 
       setTranscriptText('')
+      setSourceUrlInput('')
     } catch (err) {
       console.error(err)
       setError(err?.message || 'Transcript text import failed.')
@@ -1065,7 +1085,7 @@ export default function ResearchLibrary({ earningsMode = false }) {
       setUploadIndex(0)
       setUploadTotal(0)
     }
-  }, [apiKey, getAgentsForTrigger, openRouterApiKey, persistExtractedSource, selectedAgentId, themeInput, tickerInput, transcriptText])
+  }, [apiKey, getAgentsForTrigger, openRouterApiKey, persistExtractedSource, selectedAgentId, sourceUrlInput, themeInput, tickerInput, transcriptText])
 
   const handleGoogleDrive = useCallback(async () => {
     if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) {
@@ -1260,6 +1280,11 @@ export default function ResearchLibrary({ earningsMode = false }) {
                   placeholder="Tickers (AAPL, NVDA…)"
                   className="flex-1 min-w-[140px] bg-white/[0.04] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors"
                 />
+                <input
+                  type="url" value={sourceUrlInput} onChange={e => setSourceUrlInput(e.target.value)}
+                  placeholder="Source URL (optional)"
+                  className="flex-1 min-w-[220px] bg-white/[0.04] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors"
+                />
               </div>
               <AgentPicker sourceType="earnings_call" selectedAgentId={selectedAgentId} onSelect={setSelectedAgentId} />
 
@@ -1434,6 +1459,11 @@ export default function ResearchLibrary({ earningsMode = false }) {
                 type="text" value={themeInput} onChange={e => setThemeInput(e.target.value)}
                 placeholder="Theme (optional)"
                 className="flex-1 min-w-[120px] bg-white/[0.04] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors"
+              />
+              <input
+                type="url" value={sourceUrlInput} onChange={e => setSourceUrlInput(e.target.value)}
+                placeholder="Source URL (optional)"
+                className="flex-[1.2] min-w-[220px] bg-white/[0.04] border border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent-blue/50 transition-colors"
               />
             </div>
             <AgentPicker sourceType={sourceType} selectedAgentId={selectedAgentId} onSelect={setSelectedAgentId} />

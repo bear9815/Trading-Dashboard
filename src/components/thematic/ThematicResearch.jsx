@@ -6,6 +6,7 @@ import {
 } from '../../store/useResearchWatchlistStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import ResearchLibrary, { ActiveSignals } from './ResearchLibrary.jsx'
+import ResearchWorkflows from './ResearchWorkflows.jsx'
 import ThemeWatchlist from './ThemeWatchlist.jsx'
 import { refreshNewFields } from '../../utils/thematicGemini.js'
 import { refreshNewFieldsWithOpenRouter } from '../../utils/researchAi.js'
@@ -13,6 +14,7 @@ import { refreshNewFieldsWithOllama } from '../../utils/localResearch.js'
 import { chatWithOpenRouter } from '../../utils/researchAi.js'
 import { ollamaChatStream, checkOllama } from '../../utils/ollama.js'
 import { buildGrowthResearchSynthesis } from '../../utils/growthResearchSynthesis.js'
+import { buildResearchWorkflowState } from '../../utils/researchWorkflows.js'
 import {
   ChevronDown, AlertTriangle, Gem, Zap, FileText,
   Trash2, Send, Bot, TrendingUp,
@@ -1702,6 +1704,10 @@ export default function ThematicResearch() {
     () => buildGrowthResearchSynthesis({ themes, sources: librarySources, listsById }),
     [themes, librarySources, listsById]
   )
+  const workflowState = useMemo(
+    () => buildResearchWorkflowState({ themes, sources: librarySources }),
+    [themes, librarySources]
+  )
 
   return (
     <div className="research-elevated p-5 space-y-5">
@@ -1766,6 +1772,7 @@ export default function ThematicResearch() {
       <div className="flex items-center gap-1 border-b border-white/[0.08] -mb-1">
         {[
           { id: 'overview', label: 'Command Center', count: null, desc: 'Synthesized theme, tailwind, bottleneck, and Market Leaders read' },
+          { id: 'workflows', label: 'Workflows', count: Object.keys(workflowState.tickerWorkflows || {}).length + Object.keys(workflowState.themeWorkflows || {}).length, desc: 'Evidence-backed ticker and theme workflows with narratives and what-changed views' },
           { id: 'themes', label: 'Themes', count: themeCount, desc: 'Theme intelligence, catalysts, and dossiers' },
           { id: 'stocks', label: 'Stocks', count: watchlistCount, desc: 'Market Leaders and watchlist relationship maps' },
           { id: 'ecosystems', label: 'Ecosystems', count: ecosystemCount, desc: 'Breadth, strength, and rotation across broader stock ecosystems' },
@@ -1813,6 +1820,10 @@ export default function ThematicResearch() {
           synthesis={synthesis}
           onOpenTab={setGrowthTab}
         />
+      )}
+
+      {growthTab === 'workflows' && (
+        <ResearchWorkflows workflowState={workflowState} />
       )}
 
       {growthTab === 'stocks' && (
