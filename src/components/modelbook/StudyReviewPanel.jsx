@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { CheckCircle2, Loader2, Mic, MicOff, Sparkles } from 'lucide-react'
+import { CheckCircle2, Loader2, Mic, MicOff, Plus, Sparkles, X } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { MODEL_BOOK_REVIEW_QUESTION_DEFS } from '../../utils/modelBookReviewSchema.js'
 import { getModelBookStudyProgress } from '../../utils/modelBookReviewState.js'
@@ -10,23 +10,35 @@ function QuestionCard({
   answer,
   isRecording,
   onToggleTag,
+  onAddCustomTag,
+  onRemoveCustomTag,
   onChangeText,
   onStartVoice,
   onStopVoice,
 }) {
-  const answered = (answer?.tags?.length || 0) > 0 || answer?.text?.trim() || answer?.voiceTranscript?.trim()
+  const answered = (answer?.tags?.length || 0) > 0 || (answer?.customTags?.length || 0) > 0 || answer?.text?.trim() || answer?.voiceTranscript?.trim()
+  const [addingTag, setAddingTag] = useState(false)
+  const [draftTag, setDraftTag] = useState('')
+
+  function submitCustomTag() {
+    const nextTag = draftTag.trim()
+    if (!nextTag) return
+    onAddCustomTag(nextTag)
+    setDraftTag('')
+    setAddingTag(false)
+  }
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-3">
+    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-white">{question.label}</p>
-          <p className="text-xs text-gray-500 mt-1">{question.helperText}</p>
+          <p className="text-lg font-semibold text-white leading-tight">{question.label}</p>
+          <p className="text-sm text-gray-400 mt-2 leading-relaxed">{question.helperText}</p>
         </div>
-        {answered && <CheckCircle2 size={16} className="text-accent-green shrink-0 mt-0.5" />}
+        {answered && <CheckCircle2 size={20} className="text-accent-green shrink-0 mt-1" />}
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap gap-2">
         {question.tags.map(tag => {
           const active = answer?.tags?.includes(tag)
           return (
@@ -34,7 +46,7 @@ function QuestionCard({
               key={tag}
               type="button"
               onClick={() => onToggleTag(tag)}
-              className={`text-[10px] px-2 py-1 rounded-full border transition-all ${
+              className={`text-sm px-4 py-2 rounded-full border transition-all ${
                 active
                   ? 'bg-accent-blue/15 text-accent-blue border-accent-blue/30'
                   : 'bg-white/[0.02] text-gray-500 border-white/10 hover:text-gray-300 hover:border-white/20'
@@ -44,48 +56,109 @@ function QuestionCard({
             </button>
           )
         })}
+
+        {(answer?.customTags || []).map(tag => (
+          <span
+            key={tag}
+            className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-full border bg-accent-green/10 text-accent-green border-accent-green/20"
+          >
+            {tag}
+            <button
+              type="button"
+              onClick={() => onRemoveCustomTag(tag)}
+              className="text-accent-green/80 hover:text-white transition-colors"
+              aria-label={`Remove ${tag}`}
+            >
+              <X size={14} />
+            </button>
+          </span>
+        ))}
+
+        {addingTag ? (
+          <div className="flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.03] px-3 py-2">
+            <input
+              value={draftTag}
+              onChange={event => setDraftTag(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  submitCustomTag()
+                }
+                if (event.key === 'Escape') {
+                  setAddingTag(false)
+                  setDraftTag('')
+                }
+              }}
+              placeholder="New bubble"
+              className="bg-transparent text-sm text-white placeholder:text-gray-600 outline-none w-32"
+              autoFocus
+            />
+            <button
+              type="button"
+              onClick={submitCustomTag}
+              className="text-xs px-2.5 py-1 rounded-full border border-accent-blue/25 text-accent-blue hover:bg-accent-blue/10 transition-all"
+            >
+              Add
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAddingTag(true)}
+            className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-full border border-dashed border-white/15 text-gray-400 hover:text-white hover:border-accent-blue/30 hover:bg-accent-blue/[0.05] transition-all"
+          >
+            <Plus size={16} />
+            Add bubble
+          </button>
+        )}
       </div>
 
       <textarea
         value={answer?.text || ''}
         onChange={e => onChangeText(e.target.value)}
-        rows={3}
+        rows={5}
         placeholder="Add a short written takeaway..."
-        className="input w-full text-xs leading-relaxed resize-none"
+        className="input w-full text-base leading-relaxed resize-none"
       />
 
       <div className="flex items-center justify-between gap-3">
         <button
           type="button"
           onClick={isRecording ? onStopVoice : onStartVoice}
-          className={`text-xs px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 transition-all ${
+          className={`text-sm px-4 py-2.5 rounded-xl border flex items-center gap-2 transition-all ${
             isRecording
               ? 'border-accent-red/30 bg-accent-red/10 text-accent-red'
               : 'border-white/10 bg-white/[0.02] text-gray-400 hover:text-white hover:border-white/20'
           }`}
         >
-          {isRecording ? <MicOff size={12} /> : <Mic size={12} />}
+          {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
           {isRecording ? 'Stop voice note' : 'Add voice note'}
         </button>
 
         {answer?.updatedAt && (
-          <span className="text-[10px] text-gray-600">
+          <span className="text-xs text-gray-600">
             Updated {new Date(answer.updatedAt).toLocaleDateString()}
           </span>
         )}
       </div>
 
       {answer?.voiceTranscript?.trim() && (
-        <div className="rounded-lg border border-white/8 bg-black/10 px-3 py-2">
-          <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-1">Voice transcript</p>
-          <p className="text-xs text-gray-400 leading-relaxed">{answer.voiceTranscript}</p>
+        <div className="rounded-xl border border-white/8 bg-black/10 px-4 py-3">
+          <p className="text-xs uppercase tracking-wider text-gray-600 mb-2">Voice transcript</p>
+          <p className="text-sm text-gray-300 leading-relaxed">{answer.voiceTranscript}</p>
         </div>
       )}
     </div>
   )
 }
 
-export default function StudyReviewPanel({ model, updateStudyAnswer, onGenerateSynthesis, generatingSynthesis = false }) {
+export default function StudyReviewPanel({
+  model,
+  updateStudyAnswer,
+  onGenerateSynthesis,
+  generatingSynthesis = false,
+  hideSynthesisButton = false,
+}) {
   const { apiKey, openRouterApiKey, researchOpenRouterModel } = useSettingsStore()
   const progress = useMemo(() => getModelBookStudyProgress(model.studyReview), [model.studyReview])
   const recognitionRef = useRef(null)
@@ -104,6 +177,17 @@ export default function StudyReviewPanel({ model, updateStudyAnswer, onGenerateS
       ? currentTags.filter(value => value !== tag)
       : [...currentTags, tag]
     patchAnswer(questionId, { tags: nextTags })
+  }
+
+  function addCustomTag(questionId, tag) {
+    const currentCustomTags = model.studyReview?.answers?.[questionId]?.customTags || []
+    if (currentCustomTags.includes(tag)) return
+    patchAnswer(questionId, { customTags: [...currentCustomTags, tag] })
+  }
+
+  function removeCustomTag(questionId, tag) {
+    const currentCustomTags = model.studyReview?.answers?.[questionId]?.customTags || []
+    patchAnswer(questionId, { customTags: currentCustomTags.filter(value => value !== tag) })
   }
 
   async function startVoice(questionId) {
@@ -178,33 +262,35 @@ export default function StudyReviewPanel({ model, updateStudyAnswer, onGenerateS
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold text-white">Study Review</p>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent-blue/10 border border-accent-blue/20 text-accent-blue">
+            <p className="text-xl font-semibold text-white">Study Review</p>
+            <span className="text-sm px-3 py-1 rounded-full bg-accent-blue/10 border border-accent-blue/20 text-accent-blue">
               {progress.answeredCount}/{progress.totalCount}
             </span>
           </div>
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-sm text-gray-400 mt-2 leading-relaxed">
             Capture what made this stock a real model so the rest of your system can compare against it.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={onGenerateSynthesis}
-          disabled={generatingSynthesis || !progress.answeredCount}
-          className="text-xs px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/[0.02] text-gray-300 hover:text-white hover:border-white/20 disabled:opacity-40 flex items-center gap-1.5"
-        >
-          {generatingSynthesis ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-          Generate takeaways
-        </button>
+        {!hideSynthesisButton && (
+          <button
+            type="button"
+            onClick={onGenerateSynthesis}
+            disabled={generatingSynthesis || !progress.answeredCount}
+            className="text-sm px-4 py-2.5 rounded-xl border border-white/10 bg-white/[0.02] text-gray-300 hover:text-white hover:border-white/20 disabled:opacity-40 flex items-center gap-2"
+          >
+            {generatingSynthesis ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            Generate takeaways
+          </button>
+        )}
       </div>
 
       {voiceStatus !== 'idle' || voiceError ? (
-        <div className={`rounded-lg border px-3 py-2 text-xs ${
+        <div className={`rounded-xl border px-4 py-3 text-sm ${
           voiceError ? 'border-accent-red/20 bg-accent-red/10 text-accent-red' : 'border-accent-blue/20 bg-accent-blue/10 text-accent-blue'
         }`}>
           {voiceError || (
@@ -223,6 +309,8 @@ export default function StudyReviewPanel({ model, updateStudyAnswer, onGenerateS
             answer={model.studyReview?.answers?.[question.id]}
             isRecording={recordingQuestionId === question.id}
             onToggleTag={tag => toggleTag(question.id, tag)}
+            onAddCustomTag={tag => addCustomTag(question.id, tag)}
+            onRemoveCustomTag={tag => removeCustomTag(question.id, tag)}
             onChangeText={value => patchAnswer(question.id, { text: value })}
             onStartVoice={() => startVoice(question.id)}
             onStopVoice={stopVoice}

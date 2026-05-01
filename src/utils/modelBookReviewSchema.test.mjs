@@ -52,6 +52,7 @@ test('createEmptyReviewAnswers initializes tags, text, and transcript slots for 
   assert.deepEqual(Object.keys(answers), MODEL_BOOK_QUESTION_IDS)
   assert.deepEqual(answers.leader_reason, {
     tags: [],
+    customTags: [],
     text: '',
     voiceTranscript: '',
     updatedAt: null,

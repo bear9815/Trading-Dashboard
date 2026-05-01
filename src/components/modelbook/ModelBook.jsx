@@ -58,23 +58,34 @@ function Lightbox({ charts, index, onClose, onPrev, onNext, sidebar = null }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/95 backdrop-blur-sm" onClick={onClose}>
-      <button onClick={onClose} className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"><X size={18} /></button>
-      {charts.length > 1 && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/10 text-white text-xs font-medium z-10">
-          {index + 1} / {charts.length}
-        </div>
-      )}
-      {chart?.label && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/10 text-white text-xs font-medium z-10">{chart.label}</div>
-      )}
-      {hasPrev && (
-        <button onClick={e => { e.stopPropagation(); onPrev() }} className="absolute left-4 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"><ChevronLeft size={22} /></button>
-      )}
-      {hasNext && (
-        <button onClick={e => { e.stopPropagation(); onNext() }} className="absolute right-4 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"><ChevronRight size={22} /></button>
-      )}
       <div className={`w-full h-full flex ${sidebar ? 'items-stretch' : 'items-center justify-center'} gap-4 p-4`} onClick={e => e.stopPropagation()}>
-        <div className="flex-1 min-w-0 flex items-center justify-center">
+        <div className="relative flex-1 min-w-0 flex items-center justify-center rounded-2xl overflow-hidden">
+          {charts.length > 1 && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-black/55 text-white text-sm font-medium z-10 border border-white/10">
+              {index + 1} / {charts.length}
+            </div>
+          )}
+          {chart?.label && (
+            <div className="absolute bottom-5 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-black/55 text-white text-sm font-medium z-10 border border-white/10">
+              {chart.label}
+            </div>
+          )}
+          {hasPrev && (
+            <button
+              onClick={e => { e.stopPropagation(); onPrev() }}
+              className="absolute left-5 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/55 hover:bg-black/75 transition-colors text-white z-10 border border-white/10"
+            >
+              <ChevronLeft size={24} />
+            </button>
+          )}
+          {hasNext && (
+            <button
+              onClick={e => { e.stopPropagation(); onNext() }}
+              className="absolute right-5 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/55 hover:bg-black/75 transition-colors text-white z-10 border border-white/10"
+            >
+              <ChevronRight size={24} />
+            </button>
+          )}
           <img
             src={toDataUrl(chart.base64, chart.mimeType)}
             alt={chart.label || 'Chart'}
@@ -83,7 +94,7 @@ function Lightbox({ charts, index, onClose, onPrev, onNext, sidebar = null }) {
           />
         </div>
         {sidebar ? (
-          <div className="w-[360px] max-w-[38vw] min-w-[300px] rounded-xl border border-white/10 bg-surface-100/95 overflow-y-auto p-4">
+          <div className="w-[520px] max-w-[42vw] min-w-[380px] rounded-2xl border border-white/10 bg-surface-100/95 overflow-y-auto p-5">
             {sidebar}
           </div>
         ) : null}
@@ -674,7 +685,15 @@ function ChartGallery({ model, onOpenLightbox }) {
   )
 }
 
-function ChartStudySidebar({ model, chart, updateChart, onSaveAndClose }) {
+function ChartStudySidebar({
+  model,
+  chart,
+  updateChart,
+  updateStudyAnswer,
+  onGenerateSynthesis,
+  generatingSynthesis = false,
+  onClose,
+}) {
   const [label, setLabel] = useState(chart?.label || '')
   const [chartRole, setChartRole] = useState(chart?.chartRole || '')
   const [chartNote, setChartNote] = useState(chart?.chartNote || '')
@@ -687,41 +706,60 @@ function ChartStudySidebar({ model, chart, updateChart, onSaveAndClose }) {
 
   function save() {
     updateChart(model.id, chart.id, { label, chartRole, chartNote })
-    onSaveAndClose?.()
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <p className="text-sm font-semibold text-white">Chart Study</p>
-        <p className="text-xs text-gray-500 mt-1">Keep the chart large while you label its role and note what this specific screenshot shows.</p>
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xl font-semibold text-white">Chart Study</p>
+          <p className="text-sm text-gray-400 mt-2 leading-relaxed">Keep the chart large while you label its role, capture what this screenshot showed, and answer the study questions without leaving fullscreen.</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 p-2 rounded-full bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+          aria-label="Close chart study"
+        >
+          <X size={18} />
+        </button>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div>
-          <label className="block text-[10px] uppercase tracking-wider text-gray-500 mb-1">Label</label>
-          <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Daily setup" className="input w-full text-xs" />
+          <label className="block text-xs uppercase tracking-wider text-gray-500 mb-2">Label</label>
+          <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Daily setup" className="input w-full text-sm" />
         </div>
         <div>
-          <label className="block text-[10px] uppercase tracking-wider text-gray-500 mb-1">Chart role</label>
-          <input value={chartRole} onChange={e => setChartRole(e.target.value)} placeholder="daily setup / weekly context / entry trigger" className="input w-full text-xs" />
+          <label className="block text-xs uppercase tracking-wider text-gray-500 mb-2">Chart role</label>
+          <input value={chartRole} onChange={e => setChartRole(e.target.value)} placeholder="daily setup / weekly context / entry trigger" className="input w-full text-sm" />
         </div>
         <div>
-          <label className="block text-[10px] uppercase tracking-wider text-gray-500 mb-1">Chart note</label>
+          <label className="block text-xs uppercase tracking-wider text-gray-500 mb-2">Chart note</label>
           <textarea
             value={chartNote}
             onChange={e => setChartNote(e.target.value)}
-            rows={8}
+            rows={6}
             placeholder="What did this timeframe show that mattered?"
-            className="input w-full text-xs resize-none leading-relaxed"
+            className="input w-full text-sm resize-none leading-relaxed"
           />
         </div>
       </div>
 
-      <button onClick={save} className="w-full text-xs px-3 py-2 rounded-lg border border-accent-blue/20 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/15 flex items-center justify-center gap-1.5">
-        <Save size={12} />
-        Save chart study
+      <button onClick={save} className="w-full text-sm px-4 py-3 rounded-xl border border-accent-blue/20 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/15 flex items-center justify-center gap-2">
+        <Save size={16} />
+        Save chart details
       </button>
+
+      <div className="pt-5 border-t border-white/10">
+        <StudyReviewPanel
+          model={model}
+          updateStudyAnswer={updateStudyAnswer}
+          onGenerateSynthesis={onGenerateSynthesis}
+          generatingSynthesis={generatingSynthesis}
+          hideSynthesisButton
+        />
+      </div>
     </div>
   )
 }
@@ -881,6 +919,10 @@ function ModelDetail({ model, onPrev, onNext, hasPrev, hasNext, onEdit, onDelete
               model={model}
               chart={model.charts[lightboxIndex]}
               updateChart={updateChart}
+              updateStudyAnswer={updateStudyAnswer}
+              onGenerateSynthesis={handleGenerateSynthesis}
+              generatingSynthesis={synthesisLoading}
+              onClose={() => setLightboxIndex(null)}
             />
           )}
         />

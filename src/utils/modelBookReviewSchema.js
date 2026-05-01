@@ -1,5 +1,6 @@
 const BASE_ANSWER = Object.freeze({
   tags: [],
+  customTags: [],
   text: '',
   voiceTranscript: '',
   updatedAt: null,
@@ -221,6 +222,7 @@ export function getReviewQuestionsForContext(context = REVIEW_CONTEXTS.MODEL_BOO
 export function createEmptyReviewAnswer() {
   return {
     tags: [],
+    customTags: [],
     text: '',
     voiceTranscript: '',
     updatedAt: null,
@@ -248,6 +250,9 @@ export function normalizeReviewAnswer(answer = {}, questionId = null) {
 
   return {
     tags,
+    customTags: Array.isArray(answer.customTags)
+      ? answer.customTags.map(tag => String(tag || '').trim()).filter(Boolean)
+      : BASE_ANSWER.customTags,
     text: typeof answer.text === 'string' ? answer.text : BASE_ANSWER.text,
     voiceTranscript: typeof answer.voiceTranscript === 'string' ? answer.voiceTranscript : BASE_ANSWER.voiceTranscript,
     updatedAt: typeof answer.updatedAt === 'string' ? answer.updatedAt : BASE_ANSWER.updatedAt,

@@ -19,6 +19,11 @@ test('hasModelBookStudyInput recognizes tags, text, and transcript activity', ()
       core_setup: { tags: [], text: 'Tight action before breakout.', voiceTranscript: '' },
     },
   }), true)
+  assert.equal(hasModelBookStudyInput({
+    answers: {
+      market_group_context: { tags: [], customTags: ['fresh AI leader'], text: '', voiceTranscript: '' },
+    },
+  }), true)
 })
 
 test('getModelBookStudyProgress counts answered questions against the configured total', () => {
@@ -39,6 +44,7 @@ test('serializeModelBookStudyAnswers formats question labels with tags and trans
     answers: {
       leader_reason: {
         tags: ['relative strength leader', 'top group/theme'],
+        customTags: ['theme reset'],
         text: 'Clear institutional sponsorship.',
         voiceTranscript: 'It was the best stock in the best group.',
       },
@@ -46,6 +52,6 @@ test('serializeModelBookStudyAnswers formats question labels with tags and trans
   })
 
   assert.match(text, /Why was this stock a true leader\?/)
-  assert.match(text, /Tags: relative strength leader, top group\/theme/)
+  assert.match(text, /Tags: relative strength leader, top group\/theme, theme reset/)
   assert.match(text, /Transcript: It was the best stock in the best group\./)
 })

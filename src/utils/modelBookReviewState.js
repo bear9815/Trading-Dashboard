@@ -7,6 +7,7 @@ function hasText(value) {
 function isAnswerFilled(answer = {}) {
   return (
     (Array.isArray(answer.tags) && answer.tags.length > 0) ||
+    (Array.isArray(answer.customTags) && answer.customTags.length > 0) ||
     hasText(answer.text) ||
     hasText(answer.voiceTranscript)
   )
@@ -40,8 +41,12 @@ export function serializeModelBookStudyAnswers(studyReview = {}) {
       if (!isAnswerFilled(answer)) return null
 
       const parts = [question.label]
-      if (Array.isArray(answer.tags) && answer.tags.length > 0) {
-        parts.push(`Tags: ${answer.tags.join(', ')}`)
+      const allTags = [
+        ...(Array.isArray(answer.tags) ? answer.tags : []),
+        ...(Array.isArray(answer.customTags) ? answer.customTags : []),
+      ]
+      if (allTags.length > 0) {
+        parts.push(`Tags: ${allTags.join(', ')}`)
       }
       if (hasText(answer.text)) {
         parts.push(`Notes: ${answer.text.trim()}`)
