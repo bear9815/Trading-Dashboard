@@ -123,7 +123,7 @@ export const MODEL_BOOK_REVIEW_QUESTION_DEFS = Object.freeze([
     label: 'What made this worth holding or pressing?',
     helperText: 'What behavior justified staying with it or adding to it?',
     selectionMode: 'multi',
-    contexts: [REVIEW_CONTEXTS.MODEL_BOOK, REVIEW_CONTEXTS.TRADE_REVIEW],
+    contexts: [REVIEW_CONTEXTS.MODEL_BOOK],
     allowText: true,
     allowVoice: true,
     tags: [
@@ -206,6 +206,8 @@ const ALL_QUESTIONS = Object.freeze([
   ...TRADE_REVIEW_ONLY_QUESTION_DEFS,
 ])
 
+const REVIEW_QUESTION_MAP = new Map(ALL_QUESTIONS.map(question => [question.id, question]))
+
 export const TRADE_REVIEW_QUESTION_IDS = Object.freeze(
   ALL_QUESTIONS
     .filter(question => question.contexts.includes(REVIEW_CONTEXTS.TRADE_REVIEW))
@@ -231,9 +233,21 @@ export function createEmptyReviewAnswers(context = REVIEW_CONTEXTS.MODEL_BOOK) {
   )
 }
 
-export function normalizeReviewAnswer(answer = {}) {
+export function getReviewQuestionById(questionId) {
+  return REVIEW_QUESTION_MAP.get(questionId) ?? null
+}
+
+export function normalizeReviewAnswer(answer = {}, questionId = null) {
+  const question = questionId ? getReviewQuestionById(questionId) : null
+  const validTags = Array.isArray(answer.tags) ? answer.tags.filter(Boolean) : BASE_ANSWER.tags
+  const allowedTags = Array.isArray(question?.tags) ? new Set(question.tags) : null
+  const filteredTags = allowedTags
+    ? validTags.filter(tag => allowedTags.has(tag))
+    : validTags
+  const tags = question?.selectionMode === 'single' ? filteredTags.slice(0, 1) : filteredTags
+
   return {
-    tags: Array.isArray(answer.tags) ? answer.tags.filter(Boolean) : BASE_ANSWER.tags,
+    tags,
     text: typeof answer.text === 'string' ? answer.text : BASE_ANSWER.text,
     voiceTranscript: typeof answer.voiceTranscript === 'string' ? answer.voiceTranscript : BASE_ANSWER.voiceTranscript,
     updatedAt: typeof answer.updatedAt === 'string' ? answer.updatedAt : BASE_ANSWER.updatedAt,

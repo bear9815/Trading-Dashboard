@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   MODEL_BOOK_REVIEW_QUESTION_IDS,
   MODEL_BOOK_QUESTION_IDS,
+  TRADE_REVIEW_QUESTION_IDS,
   TRADE_REVIEW_ONLY_QUESTION_IDS,
   getReviewQuestionsForContext,
   createEmptyReviewAnswers,
@@ -41,7 +42,7 @@ test('context filtering returns shared model book questions and trade-review-onl
 
   assert.deepEqual(
     tradeReviewQuestions.map(question => question.id),
-    [...MODEL_BOOK_REVIEW_QUESTION_IDS, ...TRADE_REVIEW_ONLY_QUESTION_IDS]
+    TRADE_REVIEW_QUESTION_IDS
   )
 })
 

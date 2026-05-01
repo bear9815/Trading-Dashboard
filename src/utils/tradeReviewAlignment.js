@@ -22,7 +22,7 @@ export function normalizeTradeAlignmentReview(review = {}) {
   const normalizedReview = createEmptyTradeAlignmentReview()
 
   for (const questionId of TRADE_REVIEW_QUESTION_IDS) {
-    normalizedReview.answers[questionId] = normalizeReviewAnswer(review?.answers?.[questionId] || {})
+    normalizedReview.answers[questionId] = normalizeReviewAnswer(review?.answers?.[questionId] || {}, questionId)
   }
 
   return {
