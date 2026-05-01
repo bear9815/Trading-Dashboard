@@ -10,6 +10,7 @@ import { formatCurrency } from './formatters.js'
 import { resolveTickerToName } from './marketData.js'
 import { parseJsonText } from './aiHelpers.js'
 import { resolveDashboardVoiceCleanupModel } from './dashboardVoiceModels.js'
+import { TRADE_REVIEW_QUESTION_IDS, getReviewQuestionById } from './modelBookReviewSchema.js'
 
 // ── Anthropic fallback key (set at app startup from useSettingsStore) ──────────
 let _anthropicFallbackKey = ''
@@ -1211,6 +1212,17 @@ function buildTradeVoiceReviewPrompt(trade, transcript) {
     exitNotes: trade.exitNotes || null,
   }
 
+  const alignmentSchema = Object.fromEntries(
+    TRADE_REVIEW_QUESTION_IDS.map(questionId => {
+      const question = getReviewQuestionById(questionId)
+      return [questionId, {
+        label: question?.label || questionId,
+        selectionMode: question?.selectionMode || 'multi',
+        allowedTags: question?.tags || [],
+      }]
+    })
+  )
+
   return `You are a trading coach helping turn a trader's spoken post-trade debrief into structured review data.
 
 Trade context:
@@ -1236,7 +1248,18 @@ Return ONLY a valid JSON object in this exact shape:
   ],
   "summary": "1 sentence summary of the trade review",
   "keyLesson": "1 sentence describing the main repeat/avoid lesson",
-  "processGradeSuggestion": 1
+  "processGradeSuggestion": 1,
+  "alignmentSignals": {
+    "leader_reason": { "tags": [], "text": "" },
+    "core_setup": { "tags": [], "text": "" },
+    "entry_location": { "tags": [], "text": "" },
+    "entry_quality_reason": { "tags": [], "text": "" },
+    "market_group_context": { "tags": [], "text": "" },
+    "challenge_flaw": { "tags": [], "text": "" },
+    "execution_alignment": { "tags": [], "text": "" },
+    "main_execution_leak": { "tags": [], "text": "" },
+    "trade_review_verdict": { "tags": [], "text": "" }
+  }
 }
 
 Rules:
@@ -1244,6 +1267,9 @@ Rules:
 - processGradeSuggestion must be an integer 1-5 if implied, otherwise null
 - noteBullets should be plain strings without bullet characters
 - reviewTags should avoid duplicates
+- Only use tags from this schema: ${JSON.stringify(alignmentSchema)}
+- For alignmentSignals, leave tags empty and text blank when the transcript does not clearly support an inference
+- For multi-select fields, prefer 1-2 tags max. For single-select fields, use at most one tag
 - No markdown, no code fences, no commentary outside the JSON`
 }
 

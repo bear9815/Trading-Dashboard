@@ -5,6 +5,7 @@ import { useMorningStore } from '../../store/useMorningStore.js'
 import { useOpenRouterVoice } from '../../hooks/useOpenRouterVoice.js'
 import { formatCurrency } from '../../utils/formatters.js'
 import { analyzeTradeVoiceReview, generateTradeVoiceFollowUp } from '../../utils/ai.js'
+import { buildTradeAlignmentVoicePatches } from '../../utils/tradeReviewAlignment.js'
 import {
   BEST_FIT_LOOKBACK_MONTH_DEFAULT,
   BEST_FIT_LOOKBACK_MONTH_OPTIONS,
@@ -1046,6 +1047,7 @@ function QuickReviewSection({ trade, onUpdate }) {
 
 function VoiceReviewSection({ trade, onUpdate }) {
   const { apiKey, openRouterApiKey } = useSettingsStore()
+  const applyTradeAlignmentAnswerPatches = useTradeStore(state => state.applyTradeAlignmentAnswerPatches)
   const [mode, setMode] = useState('guided')
   const [status, setStatus] = useState('idle')
   const [answers, setAnswers] = useState([])
@@ -1100,6 +1102,7 @@ function VoiceReviewSection({ trade, onUpdate }) {
     try {
       const result = await analyzeTradeVoiceReview(trade, transcriptForAnalysis, apiKey)
       setAnalysis(result)
+      const alignmentPatches = buildTradeAlignmentVoicePatches(trade.alignmentReview, result.alignmentSignals)
 
       const voiceQuick = result.quickReview || {}
       const mergedQuickReview = {
@@ -1132,6 +1135,9 @@ function VoiceReviewSection({ trade, onUpdate }) {
       }
 
       onUpdate(updates)
+      if (Object.keys(alignmentPatches).length > 0) {
+        applyTradeAlignmentAnswerPatches(trade.id, alignmentPatches)
+      }
       setStatus('done')
     } catch (err) {
       setStatus('error')

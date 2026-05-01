@@ -7,6 +7,7 @@
 
 import { parseJsonText as parseJson } from './aiHelpers.js'
 import { serializeModelBookStudyAnswers } from './modelBookReviewState.js'
+import { TRADE_REVIEW_QUESTION_IDS, getReviewQuestionById } from './modelBookReviewSchema.js'
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
@@ -150,6 +151,70 @@ Respond with valid JSON:
   "relativeStrength": "description if visible",
   "baseQuality": "tight/loose/other with reasoning",
   "overallAssessment": "1-2 sentence summary of what made this a winning setup"
+}`
+}
+
+function buildTradeReviewSummary(trade) {
+  const sections = [`### ${trade.symbol || 'Unknown Symbol'}`]
+  if (trade.status) sections.push(`Status: ${trade.status}`)
+  if (trade.position) sections.push(`Position: ${trade.position}`)
+  if (trade.entryDate) sections.push(`Entry date: ${trade.entryDate}`)
+  if (trade.exitDate) sections.push(`Exit date: ${trade.exitDate}`)
+  if (trade.pl != null) sections.push(`P&L: ${trade.pl}`)
+  if (trade.rMultiple != null) sections.push(`R multiple: ${trade.rMultiple}`)
+  if (trade.processGrade != null) sections.push(`Process grade: ${trade.processGrade}`)
+  if (trade.quickReview) sections.push(`Quick review: ${JSON.stringify(trade.quickReview)}`)
+  if (trade.reviewTags?.length) sections.push(`Review tags: ${trade.reviewTags.join(', ')}`)
+  if (trade.reviewNotes?.trim()) sections.push(`Review notes:\n${trade.reviewNotes.trim()}`)
+
+  const alignmentAnswers = TRADE_REVIEW_QUESTION_IDS
+    .map(questionId => {
+      const question = getReviewQuestionById(questionId)
+      const answer = trade.alignmentReview?.answers?.[questionId]
+      const parts = []
+      if (answer?.tags?.length) parts.push(`Tags: ${answer.tags.join(', ')}`)
+      if (answer?.text?.trim()) parts.push(`Notes: ${answer.text.trim()}`)
+      if (!parts.length) return null
+      return `${question?.label || questionId}\n${parts.join('\n')}`
+    })
+    .filter(Boolean)
+    .join('\n\n')
+  if (alignmentAnswers) sections.push(`Structured alignment review:\n${alignmentAnswers}`)
+
+  if (trade.voiceReview?.summary) sections.push(`Voice review summary: ${trade.voiceReview.summary}`)
+  if (trade.voiceReview?.keyLesson) sections.push(`Voice key lesson: ${trade.voiceReview.keyLesson}`)
+
+  return sections.join('\n')
+}
+
+function buildTradeVsModelPrompt(trade, models, comparisonSummary) {
+  const modelSummaries = (models || []).map(buildModelReviewSummary).join('\n\n')
+
+  return `You are an expert swing-trading review coach. Compare this completed trade against selected Model Book examples and explain where the trade matched the blueprint versus where execution drifted.
+
+TRADE REVIEW:
+${buildTradeReviewSummary(trade)}
+
+DETERMINISTIC COMPARISON:
+${JSON.stringify(comparisonSummary, null, 2)}
+
+SELECTED MODEL BOOK EXAMPLES:
+${modelSummaries}
+
+Return ONLY valid JSON:
+{
+  "summary": "2-3 sentences explaining the overall trade-vs-model relationship",
+  "alignmentVerdict": "1 sentence verdict on how closely this trade matched the chosen blueprints",
+  "strongestMatches": ["match 1", "match 2", "match 3"],
+  "driftRisks": ["drift 1", "drift 2", "drift 3"],
+  "modelReferences": [
+    {
+      "modelId": "model id",
+      "symbol": "symbol",
+      "whyItFits": "1 sentence on the most useful comparison"
+    }
+  ],
+  "coachingFocus": ["focus 1", "focus 2", "focus 3"]
 }`
 }
 
@@ -423,6 +488,60 @@ export async function buildHistoricalContextOllama(model, evidence) {
   })
 
   if (!res.ok) throw new Error(`Ollama error ${res.status}`)
+  const data = await res.json()
+  const text = data.choices?.[0]?.message?.content?.trim() || ''
+  return parseJson(text)
+}
+
+export async function synthesizeTradeVsModelsGemini(trade, models, comparisonSummary, apiKey) {
+  if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
+
+  const res = await fetch(`${GEMINI_BASE}/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: buildTradeVsModelPrompt(trade, models, comparisonSummary) }] }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.error?.message || `Gemini API error ${res.status}`)
+  }
+
+  const data = await res.json()
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+  return parseJson(text)
+}
+
+export async function synthesizeTradeVsModelsOpenRouter(trade, models, comparisonSummary, apiKey, modelName = 'openai/gpt-4o-mini') {
+  if (!apiKey) throw new Error('No OpenRouter API key. Add it in Settings.')
+
+  const res = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'https://localhost',
+      'X-Title': 'Trading Dashboard',
+    },
+    body: JSON.stringify({
+      model: modelName,
+      messages: [
+        { role: 'system', content: SYS_ANALYST },
+        { role: 'user', content: buildTradeVsModelPrompt(trade, models, comparisonSummary) },
+      ],
+      temperature: 0.2,
+      max_tokens: 4096,
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err?.error?.message || `OpenRouter API error ${res.status}`)
+  }
+
   const data = await res.json()
   const text = data.choices?.[0]?.message?.content?.trim() || ''
   return parseJson(text)

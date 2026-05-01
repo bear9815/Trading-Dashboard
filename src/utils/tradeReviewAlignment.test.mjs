@@ -8,6 +8,7 @@ import {
   getReviewQuestionsForContext,
 } from './modelBookReviewSchema.js'
 import {
+  buildTradeAlignmentVoicePatches,
   createEmptyTradeAlignmentReview,
   normalizeTradeAlignmentReview,
 } from './tradeReviewAlignment.js'
@@ -60,4 +61,36 @@ test('normalizeTradeAlignmentReview upgrades legacy review payloads safely', () 
   assert.equal(review.answers.trade_review_verdict.text, '')
   assert.deepEqual(review.comparison.selectedModelIds, ['model-1', 'model-2'])
   assert.equal(review.comparison.scoredAt, null)
+})
+
+test('buildTradeAlignmentVoicePatches merges useful inferred answers without overwriting filled responses', () => {
+  const review = createEmptyTradeAlignmentReview()
+  review.answers.leader_reason.tags = ['relative strength leader']
+  review.answers.execution_alignment.tags = ['mostly aligned']
+  review.answers.challenge_flaw.text = 'Already reviewed manually.'
+
+  const patches = buildTradeAlignmentVoicePatches(review, {
+    leader_reason: {
+      tags: ['top group/theme'],
+      text: 'It was the clear leader in the strongest theme.',
+    },
+    execution_alignment: {
+      tags: ['poorly aligned'],
+      text: 'The entry did not match the model.',
+    },
+    challenge_flaw: {
+      tags: ['weak RS'],
+      text: 'RS weakened before the add.',
+    },
+    trade_review_verdict: {
+      tags: ['good idea, poor execution'],
+    },
+  })
+
+  assert.deepEqual(patches.leader_reason.tags, ['relative strength leader', 'top group/theme'])
+  assert.equal(patches.leader_reason.text, 'It was the clear leader in the strongest theme.')
+  assert.equal(patches.execution_alignment, undefined)
+  assert.deepEqual(patches.challenge_flaw.tags, ['weak RS'])
+  assert.equal(patches.challenge_flaw.text, undefined)
+  assert.deepEqual(patches.trade_review_verdict.tags, ['good idea, poor execution'])
 })

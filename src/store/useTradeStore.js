@@ -561,6 +561,140 @@ export const useTradeStore = create((set, get) => ({
     return true
   },
 
+  applyTradeAlignmentAnswerPatches: (tradeId, answerPatches = {}) => {
+    const timestamp = new Date().toISOString()
+    let updated = null
+    let didChange = false
+
+    set(s => {
+      const trades = s.trades.map(trade => {
+        if (trade.id !== tradeId) return trade
+
+        const normalizedTrade = normalizeTradeForStore(trade)
+        const review = normalizeTradeAlignmentReview(normalizedTrade.alignmentReview)
+        const nextAnswers = { ...review.answers }
+
+        for (const [questionId, patch] of Object.entries(answerPatches || {})) {
+          const question = getReviewQuestionById(questionId)
+          if (!question || !question.contexts?.includes(REVIEW_CONTEXTS.TRADE_REVIEW)) continue
+
+          const nextAnswer = normalizeReviewAnswer({
+            ...nextAnswers[questionId],
+            ...patch,
+            updatedAt: timestamp,
+          }, questionId)
+
+          if (JSON.stringify(nextAnswer) !== JSON.stringify(nextAnswers[questionId])) {
+            nextAnswers[questionId] = nextAnswer
+            didChange = true
+          }
+        }
+
+        if (!didChange) return trade
+
+        updated = normalizeTradeForStore({
+          ...normalizedTrade,
+          alignmentReview: {
+            ...review,
+            lastReviewedAt: timestamp,
+            answers: nextAnswers,
+          },
+        })
+
+        return updated
+      })
+
+      return { trades }
+    })
+
+    if (!updated) return false
+
+    saveSnapshot(get())
+    syncTrade(updated)
+    return true
+  },
+
+  updateTradeAlignmentComparison: (tradeId, patch = {}) => {
+    const timestamp = new Date().toISOString()
+    let updated = null
+
+    set(s => {
+      const trades = s.trades.map(trade => {
+        if (trade.id !== tradeId) return trade
+
+        const normalizedTrade = normalizeTradeForStore(trade)
+        const review = normalizeTradeAlignmentReview(normalizedTrade.alignmentReview)
+
+        updated = normalizeTradeForStore({
+          ...normalizedTrade,
+          alignmentReview: {
+            ...review,
+            lastReviewedAt: timestamp,
+            comparison: {
+              ...review.comparison,
+              ...(Object.prototype.hasOwnProperty.call(patch, 'selectedModelIds')
+                ? {
+                    selectedModelIds: Array.isArray(patch.selectedModelIds)
+                      ? patch.selectedModelIds.filter(Boolean)
+                      : review.comparison.selectedModelIds,
+                  }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(patch, 'summary')
+                ? { summary: patch.summary ?? null }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(patch, 'scoredAt')
+                ? { scoredAt: typeof patch.scoredAt === 'string' ? patch.scoredAt : null }
+                : {}),
+            },
+          },
+        })
+
+        return updated
+      })
+
+      return { trades }
+    })
+
+    if (!updated) return false
+
+    saveSnapshot(get())
+    syncTrade(updated)
+    return true
+  },
+
+  updateTradeAlignmentAiSynthesis: (tradeId, synthesis = null) => {
+    const timestamp = new Date().toISOString()
+    let updated = null
+
+    set(s => {
+      const trades = s.trades.map(trade => {
+        if (trade.id !== tradeId) return trade
+
+        const normalizedTrade = normalizeTradeForStore(trade)
+        const review = normalizeTradeAlignmentReview(normalizedTrade.alignmentReview)
+
+        updated = normalizeTradeForStore({
+          ...normalizedTrade,
+          alignmentReview: {
+            ...review,
+            lastReviewedAt: timestamp,
+            aiSynthesis: synthesis ?? null,
+          },
+        })
+
+        return updated
+      })
+
+      return { trades }
+    })
+
+    if (!updated) return false
+
+    saveSnapshot(get())
+    syncTrade(updated)
+    return true
+  },
+
   deleteTrade: (id) => {
     set(s => ({
       trades: s.trades.filter(t => t.id !== id),

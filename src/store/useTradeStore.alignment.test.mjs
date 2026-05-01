@@ -150,3 +150,79 @@ test('updateTradeAlignmentAnswer ignores unknown question ids without creating j
     }
   }
 })
+
+test('applyTradeAlignmentAnswerPatches stores non-destructive multi-question updates', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  globalThis.localStorage = createLocalStorageMock()
+
+  try {
+    resetTradeStore()
+    useTradeStore.getState().addTrade(createLegacyTrade())
+
+    const didUpdate = useTradeStore.getState().applyTradeAlignmentAnswerPatches('trade-1', {
+      leader_reason: {
+        tags: ['relative strength leader'],
+        text: 'This was the obvious leader.',
+      },
+      trade_review_verdict: {
+        tags: ['A setup, B/C execution'],
+      },
+    })
+
+    assert.equal(didUpdate, true)
+
+    const trade = useTradeStore.getState().trades.find(entry => entry.id === 'trade-1')
+    assert.deepEqual(trade.alignmentReview.answers.leader_reason.tags, ['relative strength leader'])
+    assert.equal(trade.alignmentReview.answers.leader_reason.text, 'This was the obvious leader.')
+    assert.deepEqual(trade.alignmentReview.answers.trade_review_verdict.tags, ['A setup, B/C execution'])
+    await new Promise(resolve => setTimeout(resolve, 0))
+  } finally {
+    resetTradeStore()
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+  }
+})
+
+test('trade alignment comparison and AI synthesis persist on the trade review object', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  globalThis.localStorage = createLocalStorageMock()
+
+  try {
+    resetTradeStore()
+    useTradeStore.getState().addTrade(createLegacyTrade())
+
+    const comparisonSaved = useTradeStore.getState().updateTradeAlignmentComparison('trade-1', {
+      selectedModelIds: ['model-1', 'model-2'],
+      summary: {
+        selectedModelCount: 2,
+        results: [{ modelId: 'model-1', symbol: 'NVDA', scorePct: 72 }],
+      },
+      scoredAt: '2026-05-01T12:00:00.000Z',
+    })
+    const synthesisSaved = useTradeStore.getState().updateTradeAlignmentAiSynthesis('trade-1', {
+      summary: 'The trade matched the setup but drifted on execution.',
+      strongestMatches: ['real leader', 'clean pullback'],
+      driftRisks: ['entered too early'],
+    })
+
+    assert.equal(comparisonSaved, true)
+    assert.equal(synthesisSaved, true)
+
+    const trade = useTradeStore.getState().trades.find(entry => entry.id === 'trade-1')
+    assert.deepEqual(trade.alignmentReview.comparison.selectedModelIds, ['model-1', 'model-2'])
+    assert.equal(trade.alignmentReview.comparison.summary.results[0].scorePct, 72)
+    assert.equal(trade.alignmentReview.aiSynthesis.summary, 'The trade matched the setup but drifted on execution.')
+    assert.ok(trade.alignmentReview.lastReviewedAt)
+    await new Promise(resolve => setTimeout(resolve, 0))
+  } finally {
+    resetTradeStore()
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+  }
+})
