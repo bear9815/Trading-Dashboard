@@ -13,6 +13,7 @@ import {
 } from '../../utils/tradeReviewChart.js'
 import { getTradeReviewState, hasTradeReviewInput, isTradeReviewComplete } from '../../utils/tradeReviewStatus.js'
 import TradeReviewChart from './TradeReviewChart.jsx'
+import TradeAlignmentPanel from './TradeAlignmentPanel.jsx'
 import SharedChartToolsSettingsModal from '../charts/ChartToolsSettingsModal.jsx'
 import { ChevronLeft, ChevronRight, X, ScanLine, Search, Image, ArrowDownUp, Tag, MessageSquare, Check, Plus, List, Sparkles, Brain, CircleDot, RotateCcw, Mic, MicOff, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Volume2, Square, SlidersHorizontal, Trash2, Maximize2 } from 'lucide-react'
 
@@ -2037,7 +2038,7 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, onComp
                   ? 'Completed and ready for the archive.'
                   : hasReviewInput
                     ? 'Review input captured. Complete when you are ready to move on.'
-                    : 'Answer one quick prompt, record voice, add a tag, or write a note to complete.'}
+                    : 'Answer one structured prompt, record voice, add a tag, or write a note to complete.'}
               </p>
             </div>
             <span className={`shrink-0 text-[10px] px-2 py-1 rounded-full border ${
@@ -2053,6 +2054,7 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, onComp
 
           <QuickReviewSection trade={trade} onUpdate={onUpdate} />
           <VoiceReviewSection trade={trade} onUpdate={onUpdate} />
+          <TradeAlignmentPanel trade={trade} />
           <ReviewTagsSection  trade={trade} onUpdate={onUpdate} />
           <ReviewNotesSection trade={trade} onUpdate={onUpdate} />
 

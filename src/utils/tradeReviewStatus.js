@@ -1,5 +1,15 @@
+import { TRADE_REVIEW_QUESTION_IDS } from './modelBookReviewSchema.js'
+
 function hasText(value) {
   return typeof value === 'string' && value.trim().length > 0
+}
+
+function hasStructuredAnswer(answer = {}) {
+  return (
+    (Array.isArray(answer.tags) && answer.tags.length > 0) ||
+    hasText(answer.text) ||
+    hasText(answer.voiceTranscript)
+  )
 }
 
 export function hasQuickReviewInput(quickReview) {
@@ -13,10 +23,17 @@ export function hasVoiceReviewInput(voiceReview) {
   return Array.isArray(voiceReview.answers) && voiceReview.answers.some(item => hasText(item?.answer))
 }
 
+export function hasTradeAlignmentReviewInput(alignmentReview) {
+  if (!alignmentReview || typeof alignmentReview !== 'object') return false
+  const answers = alignmentReview.answers || {}
+  return TRADE_REVIEW_QUESTION_IDS.some(questionId => hasStructuredAnswer(answers[questionId]))
+}
+
 export function hasTradeReviewInput(trade) {
   return Boolean(
     hasQuickReviewInput(trade?.quickReview) ||
     hasVoiceReviewInput(trade?.voiceReview) ||
+    hasTradeAlignmentReviewInput(trade?.alignmentReview) ||
     (trade?.reviewTags || []).length > 0 ||
     hasText(trade?.reviewNotes)
   )
