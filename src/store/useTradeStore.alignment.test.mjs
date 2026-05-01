@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { useTradeStore, normalizeTradeForStore } from './useTradeStore.js'
+import { useTradeStore, normalizeTradeForStore, createTradeCloudRow } from './useTradeStore.js'
 
 function createLocalStorageMock() {
   const store = new Map()
@@ -53,6 +53,25 @@ test('normalizeTradeForStore upgrades legacy trades with an alignment review she
 
   assert.ok(normalizedTrade.alignmentReview)
   assert.deepEqual(Object.keys(normalizedTrade.alignmentReview.answers), [
+    'leader_reason',
+    'core_setup',
+    'entry_location',
+    'entry_quality_reason',
+    'market_group_context',
+    'challenge_flaw',
+    'execution_alignment',
+    'main_execution_leak',
+    'trade_review_verdict',
+  ])
+})
+
+test('createTradeCloudRow normalizes the cloud-persisted trade payload', () => {
+  const row = createTradeCloudRow(createLegacyTrade(), 'user-1')
+
+  assert.equal(row.id, 'trade-1')
+  assert.equal(row.user_id, 'user-1')
+  assert.ok(row.data.alignmentReview)
+  assert.deepEqual(Object.keys(row.data.alignmentReview.answers), [
     'leader_reason',
     'core_setup',
     'entry_location',

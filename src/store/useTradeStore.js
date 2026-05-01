@@ -16,11 +16,22 @@ async function getUid() {
   return useAuthStore.getState().user?.id
 }
 
+export function createTradeCloudRow(trade, userId) {
+  const normalizedTrade = normalizeTradeForStore(trade)
+
+  return {
+    id: normalizedTrade.id,
+    user_id: userId,
+    data: normalizedTrade,
+  }
+}
+
 async function syncTrade(trade) {
   if (!supabase) return
   const uid = await getUid(); if (!uid) return
+  const row = createTradeCloudRow(trade, uid)
   const { error } = await supabase.from('trades')
-    .upsert({ id: trade.id, user_id: uid, data: trade }, { onConflict: 'id' })
+    .upsert(row, { onConflict: 'id' })
   if (error) console.error('[cloud] syncTrade:', error.message)
 }
 
@@ -307,14 +318,16 @@ export const useTradeStore = create((set, get) => ({
         `[cloud] Recovering local snapshot deltas: ${missingTrades.length} trade(s), ${missingActivities.length} activit${missingActivities.length === 1 ? 'y' : 'ies'}, ${missingBatches.length} batch(es)…`
       )
 
-      await upsertRows('trades', userId, missingTrades.map(t => ({ id: t.id, user_id: userId, data: t })))
+      const normalizedMissingTrades = missingTrades.map(normalizeTradeForStore)
+
+      await upsertRows('trades', userId, normalizedMissingTrades.map(trade => createTradeCloudRow(trade, userId)))
       await upsertRows('account_activities', userId, missingActivities.map(a => ({ id: a.id, user_id: userId, data: a })))
       await upsertRows('import_batches', userId, missingBatches.map(b => ({ id: b.id, user_id: userId, data: b })), 50)
 
       console.info('[cloud] Local snapshot recovery complete')
 
       return {
-        trades: [...cloudSnapshot.trades, ...missingTrades],
+        trades: [...cloudSnapshot.trades, ...normalizedMissingTrades],
         accountActivities: [...cloudSnapshot.accountActivities, ...missingActivities],
         importBatches: [...cloudSnapshot.importBatches, ...missingBatches]
           .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
@@ -353,9 +366,10 @@ export const useTradeStore = create((set, get) => ({
 
       const chunk = (arr, n) =>
         Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n))
+      const normalizedTrades = trades.map(normalizeTradeForStore)
 
-      for (const batch of chunk(trades, 200))
-        await supabase.from('trades').upsert(batch.map(t => ({ id: t.id, user_id: userId, data: t })))
+      for (const batch of chunk(normalizedTrades, 200))
+        await supabase.from('trades').upsert(batch.map(trade => createTradeCloudRow(trade, userId)))
       for (const batch of chunk(accountActivities, 200))
         await supabase.from('account_activities').upsert(batch.map(a => ({ id: a.id, user_id: userId, data: a })))
       for (const batch of chunk(importBatches, 50))
