@@ -7,6 +7,7 @@ function hasText(value) {
 function hasStructuredAnswer(answer = {}) {
   return (
     (Array.isArray(answer.tags) && answer.tags.length > 0) ||
+    (Array.isArray(answer.customTags) && answer.customTags.length > 0) ||
     hasText(answer.text) ||
     hasText(answer.voiceTranscript)
   )

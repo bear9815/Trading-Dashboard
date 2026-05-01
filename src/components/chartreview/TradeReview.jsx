@@ -35,7 +35,7 @@ function tradeDuration(trade) {
 }
 
 // ── Lightbox with prev/next navigation ───────────────────────────────────────
-function Lightbox({ shots, index, onClose, onPrev, onNext }) {
+function Lightbox({ shots, index, onClose, onPrev, onNext, sidebar = null }) {
   const shot = shots[index]
   const hasPrev = index > 0
   const hasNext = index < shots.length - 1
@@ -52,59 +52,58 @@ function Lightbox({ shots, index, onClose, onPrev, onNext }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/95 backdrop-blur-sm"
       onClick={onClose}
     >
-      {/* Close */}
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"
+      <div
+        className={`w-full h-full flex ${sidebar ? 'items-stretch' : 'items-center justify-center'} gap-4 p-4`}
+        onClick={event => event.stopPropagation()}
       >
-        <X size={18} />
-      </button>
+        <div className="relative flex-1 min-w-0 flex items-center justify-center rounded-2xl overflow-hidden">
+          {shots.length > 1 && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-black/55 text-white text-sm font-medium z-10 border border-white/10">
+              {index + 1} / {shots.length}
+            </div>
+          )}
 
-      {/* Counter */}
-      {shots.length > 1 && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/10 text-white text-xs font-medium z-10">
-          {index + 1} / {shots.length}
+          {shot?.label && (
+            <div className="absolute bottom-5 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-black/55 text-white text-sm font-medium z-10 border border-white/10">
+              {shot.label}
+            </div>
+          )}
+
+          {hasPrev && (
+            <button
+              onClick={e => { e.stopPropagation(); onPrev() }}
+              className="absolute left-5 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/55 hover:bg-black/75 transition-colors text-white z-10 border border-white/10"
+            >
+              <ChevronLeft size={24} />
+            </button>
+          )}
+
+          {hasNext && (
+            <button
+              onClick={e => { e.stopPropagation(); onNext() }}
+              className="absolute right-5 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/55 hover:bg-black/75 transition-colors text-white z-10 border border-white/10"
+            >
+              <ChevronRight size={24} />
+            </button>
+          )}
+
+          <img
+            src={shot?.src}
+            alt={shot?.label || 'Screenshot'}
+            className="rounded-lg shadow-2xl"
+            style={{ maxWidth: sidebar ? '100%' : '92vw', maxHeight: '92vh', width: 'auto', height: 'auto', display: 'block' }}
+          />
         </div>
-      )}
 
-      {/* Label */}
-      {shot?.label && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-white/10 text-white text-xs font-medium z-10">
-          {shot.label}
-        </div>
-      )}
-
-      {/* Prev arrow */}
-      {hasPrev && (
-        <button
-          onClick={e => { e.stopPropagation(); onPrev() }}
-          className="absolute left-4 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"
-        >
-          <ChevronLeft size={22} />
-        </button>
-      )}
-
-      {/* Next arrow */}
-      {hasNext && (
-        <button
-          onClick={e => { e.stopPropagation(); onNext() }}
-          className="absolute right-4 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white z-10"
-        >
-          <ChevronRight size={22} />
-        </button>
-      )}
-
-      {/* Image — max constraints prevent upscaling blur; natural size fills most of screen */}
-      <img
-        src={shot?.src}
-        alt={shot?.label || 'Screenshot'}
-        className="rounded-lg shadow-2xl"
-        style={{ maxWidth: '92vw', maxHeight: '92vh', width: 'auto', height: 'auto', display: 'block' }}
-        onClick={e => e.stopPropagation()}
-      />
+        {sidebar ? (
+          <div className="w-[520px] max-w-[42vw] min-w-[380px] rounded-2xl border border-white/10 bg-surface-100/95 overflow-y-auto p-5">
+            {sidebar}
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -1856,6 +1855,35 @@ function ReviewNotesSection({ trade, onUpdate }) {
   )
 }
 
+function TradeStudySidebar({ trade, onUpdate, onClose }) {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xl font-semibold text-white">Trade Study</p>
+          <p className="text-sm text-gray-400 mt-2 leading-relaxed">
+            Keep the chart or screenshot large while you answer the alignment questions and run voice review in the same workspace.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 p-2 rounded-full bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+          aria-label="Close trade study"
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      <VoiceReviewSection trade={trade} onUpdate={onUpdate} />
+
+      <div className="pt-5 border-t border-white/10">
+        <TradeAlignmentPanel trade={trade} />
+      </div>
+    </div>
+  )
+}
+
 // ── Trade detail panel ────────────────────────────────────────────────────────
 function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, onCompleteReview, chartSettings, onOpenChartSettings }) {
   const [lightboxIndex, setLightboxIndex] = useState(null)
@@ -2097,35 +2125,29 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, onComp
       </div>
 
       {chartFocusOpen && (
-        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm p-4 md:p-6 flex flex-col">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <div className="min-w-0">
-              <p className="text-xs uppercase tracking-[0.16em] text-gray-500">Chart Focus</p>
-              <p className="text-lg font-bold mono text-white truncate">{trade.symbol}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onOpenChartSettings}
-                className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-white/10 text-gray-300 hover:text-white hover:border-accent-blue/30 hover:bg-accent-blue/10 transition-all"
-              >
-                <SlidersHorizontal size={13} />
-                Settings
-              </button>
-              <button
-                type="button"
-                onClick={() => setChartFocusOpen(false)}
-                className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-white/10 text-gray-300 hover:text-white hover:border-white/25 transition-all"
-              >
-                <X size={13} />
-                Close
-              </button>
-            </div>
-          </div>
-          <div className="flex-1 min-h-0 rounded-xl border border-white/10 bg-surface-50 p-3 overflow-hidden">
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm p-4 flex items-stretch gap-4">
+          <div className="flex-1 min-w-0 rounded-2xl border border-white/10 bg-surface-50 p-3 overflow-hidden">
             <TradeReviewChart trade={trade} chartSettings={chartSettings} onOpenSettings={onOpenChartSettings} expanded />
           </div>
-          <p className="text-[11px] text-gray-600 mt-2">Press Escape to return the chart to the review workspace.</p>
+          <div className="w-[520px] max-w-[42vw] min-w-[380px] rounded-2xl border border-white/10 bg-surface-100/95 overflow-y-auto p-5">
+            <div className="mb-5">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div className="min-w-0">
+                  <p className="text-xs uppercase tracking-[0.16em] text-gray-500">Chart Focus</p>
+                  <p className="text-xl font-bold mono text-white truncate">{trade.symbol}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onOpenChartSettings}
+                  className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-white/10 text-gray-300 hover:text-white hover:border-accent-blue/30 hover:bg-accent-blue/10 transition-all"
+                >
+                  <SlidersHorizontal size={13} />
+                  Settings
+                </button>
+              </div>
+              <TradeStudySidebar trade={trade} onUpdate={onUpdate} onClose={() => setChartFocusOpen(false)} />
+            </div>
+          </div>
         </div>
       )}
 
@@ -2137,6 +2159,7 @@ function TradeDetail({ trade, onPrev, onNext, hasPrev, hasNext, onUpdate, onComp
           onClose={() => setLightboxIndex(null)}
           onPrev={prevLightbox}
           onNext={nextLightbox}
+          sidebar={<TradeStudySidebar trade={trade} onUpdate={onUpdate} onClose={() => setLightboxIndex(null)} />}
         />
       )}
     </div>

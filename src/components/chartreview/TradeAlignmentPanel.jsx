@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CheckCircle2, Compass, Link2, Loader2, Sparkles, GitCompare, Save } from 'lucide-react'
+import { CheckCircle2, Compass, Link2, Loader2, Sparkles, GitCompare, Plus, Save, X } from 'lucide-react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useModelBookStore } from '../../store/useModelBookStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
@@ -13,25 +13,36 @@ const TRADE_REVIEW_QUESTIONS = getReviewQuestionsForContext(REVIEW_CONTEXTS.TRAD
 function isAnswered(answer = {}) {
   return (
     (Array.isArray(answer.tags) && answer.tags.length > 0) ||
+    (Array.isArray(answer.customTags) && answer.customTags.length > 0) ||
     typeof answer.text === 'string' && answer.text.trim().length > 0 ||
     typeof answer.voiceTranscript === 'string' && answer.voiceTranscript.trim().length > 0
   )
 }
 
-function QuestionCard({ question, answer, onToggleTag, onChangeText }) {
+function QuestionCard({ question, answer, onToggleTag, onAddCustomTag, onRemoveCustomTag, onChangeText }) {
   const answered = isAnswered(answer)
+  const [addingTag, setAddingTag] = useState(false)
+  const [draftTag, setDraftTag] = useState('')
+
+  function submitCustomTag() {
+    const nextTag = draftTag.trim()
+    if (!nextTag) return
+    onAddCustomTag(nextTag)
+    setDraftTag('')
+    setAddingTag(false)
+  }
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-3">
+    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-white">{question.label}</p>
-          <p className="text-xs text-gray-500 mt-1">{question.helperText}</p>
+          <p className="text-lg font-semibold text-white leading-tight">{question.label}</p>
+          <p className="text-sm text-gray-400 mt-2 leading-relaxed">{question.helperText}</p>
         </div>
-        {answered && <CheckCircle2 size={16} className="shrink-0 text-accent-green mt-0.5" />}
+        {answered && <CheckCircle2 size={20} className="shrink-0 text-accent-green mt-1" />}
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap gap-2">
         {question.tags.map(tag => {
           const active = answer?.tags?.includes(tag)
           return (
@@ -39,7 +50,7 @@ function QuestionCard({ question, answer, onToggleTag, onChangeText }) {
               key={tag}
               type="button"
               onClick={() => onToggleTag(tag)}
-              className={`text-[10px] px-2 py-1 rounded-full border transition-all ${
+              className={`text-sm px-4 py-2 rounded-full border transition-all ${
                 active
                   ? 'bg-accent-blue/15 text-accent-blue border-accent-blue/30'
                   : 'bg-white/[0.02] text-gray-500 border-white/10 hover:text-gray-300 hover:border-white/20'
@@ -49,31 +60,86 @@ function QuestionCard({ question, answer, onToggleTag, onChangeText }) {
             </button>
           )
         })}
+
+        {(answer?.customTags || []).map(tag => (
+          <span
+            key={tag}
+            className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-full border bg-accent-green/10 text-accent-green border-accent-green/20"
+          >
+            {tag}
+            <button
+              type="button"
+              onClick={() => onRemoveCustomTag(tag)}
+              className="text-accent-green/80 hover:text-white transition-colors"
+              aria-label={`Remove ${tag}`}
+            >
+              <X size={14} />
+            </button>
+          </span>
+        ))}
+
+        {addingTag ? (
+          <div className="flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.03] px-3 py-2">
+            <input
+              value={draftTag}
+              onChange={event => setDraftTag(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  submitCustomTag()
+                }
+                if (event.key === 'Escape') {
+                  setAddingTag(false)
+                  setDraftTag('')
+                }
+              }}
+              placeholder="New bubble"
+              className="bg-transparent text-sm text-white placeholder:text-gray-600 outline-none w-32"
+              autoFocus
+            />
+            <button
+              type="button"
+              onClick={submitCustomTag}
+              className="text-xs px-2.5 py-1 rounded-full border border-accent-blue/25 text-accent-blue hover:bg-accent-blue/10 transition-all"
+            >
+              Add
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAddingTag(true)}
+            className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-full border border-dashed border-white/15 text-gray-400 hover:text-white hover:border-accent-blue/30 hover:bg-accent-blue/[0.05] transition-all"
+          >
+            <Plus size={16} />
+            Add bubble
+          </button>
+        )}
       </div>
 
       <textarea
         value={answer?.text || ''}
         onChange={event => onChangeText(event.target.value)}
-        rows={2}
+        rows={4}
         placeholder="Add a short note..."
-        className="input w-full text-xs leading-relaxed resize-none"
+        className="input w-full text-base leading-relaxed resize-none"
       />
 
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[10px] text-gray-600">
+        <p className="text-xs text-gray-600">
           {question.selectionMode === 'single' ? 'Choose one best-fit tag.' : 'Choose all tags that fit.'}
         </p>
         {answer?.updatedAt && (
-          <span className="text-[10px] text-gray-600">
+          <span className="text-xs text-gray-600">
             Updated {new Date(answer.updatedAt).toLocaleDateString()}
           </span>
         )}
       </div>
 
       {answer?.voiceTranscript?.trim() && (
-        <div className="rounded-lg border border-white/8 bg-black/10 px-3 py-2">
-          <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-1">Voice transcript</p>
-          <p className="text-xs text-gray-400 leading-relaxed">{answer.voiceTranscript}</p>
+        <div className="rounded-xl border border-white/8 bg-black/10 px-4 py-3">
+          <p className="text-xs uppercase tracking-wider text-gray-600 mb-2">Voice transcript</p>
+          <p className="text-sm text-gray-300 leading-relaxed">{answer.voiceTranscript}</p>
         </div>
       )}
     </div>
@@ -119,6 +185,17 @@ export default function TradeAlignmentPanel({ trade }) {
 
   function patchAnswer(questionId, patch) {
     updateTradeAlignmentAnswer(trade.id, questionId, patch)
+  }
+
+  function addCustomTag(questionId, tag) {
+    const currentCustomTags = trade?.alignmentReview?.answers?.[questionId]?.customTags || []
+    if (currentCustomTags.includes(tag)) return
+    patchAnswer(questionId, { customTags: [...currentCustomTags, tag] })
+  }
+
+  function removeCustomTag(questionId, tag) {
+    const currentCustomTags = trade?.alignmentReview?.answers?.[questionId]?.customTags || []
+    patchAnswer(questionId, { customTags: currentCustomTags.filter(value => value !== tag) })
   }
 
   function toggleTag(questionId, question, tag) {
@@ -190,20 +267,20 @@ export default function TradeAlignmentPanel({ trade }) {
   }
 
   return (
-    <div className="rounded-xl border border-accent-blue/15 bg-accent-blue/[0.04] p-4 space-y-4">
+    <div className="rounded-2xl border border-accent-blue/15 bg-accent-blue/[0.04] p-5 space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Link2 size={14} className="text-accent-blue" />
-            <p className="label text-white">Model Alignment Review</p>
-            <span className="text-[10px] uppercase tracking-[0.16em] text-accent-blue/70">Phase 2</span>
+            <p className="text-xl font-semibold text-white">Model Alignment Review</p>
+            <span className="text-xs uppercase tracking-[0.16em] text-accent-blue/70">Phase 2</span>
           </div>
-          <p className="text-xs text-gray-400 leading-relaxed">
+          <p className="text-sm text-gray-400 leading-relaxed mt-2">
             Review this trade with the same language as Model Book so your best setups and your real executions can be compared cleanly.
           </p>
         </div>
         <div className="text-right">
-          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-accent-blue/10 border border-accent-blue/20 text-accent-blue">
+          <span className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full bg-accent-blue/10 border border-accent-blue/20 text-accent-blue">
             <Compass size={11} />
             {progress.answeredCount}/{progress.totalCount}
           </span>
@@ -224,6 +301,8 @@ export default function TradeAlignmentPanel({ trade }) {
             question={question}
             answer={trade?.alignmentReview?.answers?.[question.id]}
             onToggleTag={tag => toggleTag(question.id, question, tag)}
+            onAddCustomTag={tag => addCustomTag(question.id, tag)}
+            onRemoveCustomTag={tag => removeCustomTag(question.id, tag)}
             onChangeText={value => patchAnswer(question.id, { text: value })}
           />
         ))}

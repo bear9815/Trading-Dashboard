@@ -24,6 +24,9 @@ test('hasTradeReviewInput accepts meaningful structured alignment answers', () =
   const tagDriven = createEmptyTradeAlignmentReview()
   tagDriven.answers.leader_reason.tags = ['relative strength leader']
 
+  const customTagDriven = createEmptyTradeAlignmentReview()
+  customTagDriven.answers.market_group_context.customTags = ['fresh theme pivot']
+
   const textDriven = createEmptyTradeAlignmentReview()
   textDriven.answers.execution_alignment.text = 'This matched my model entry criteria.'
 
@@ -31,6 +34,7 @@ test('hasTradeReviewInput accepts meaningful structured alignment answers', () =
   transcriptDriven.answers.challenge_flaw.voiceTranscript = 'RS weakened before I entered.'
 
   assert.equal(hasTradeReviewInput({ alignmentReview: tagDriven }), true)
+  assert.equal(hasTradeReviewInput({ alignmentReview: customTagDriven }), true)
   assert.equal(hasTradeReviewInput({ alignmentReview: textDriven }), true)
   assert.equal(hasTradeReviewInput({ alignmentReview: transcriptDriven }), true)
 })
