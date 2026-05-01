@@ -206,6 +206,12 @@ const ALL_QUESTIONS = Object.freeze([
   ...TRADE_REVIEW_ONLY_QUESTION_DEFS,
 ])
 
+export const TRADE_REVIEW_QUESTION_IDS = Object.freeze(
+  ALL_QUESTIONS
+    .filter(question => question.contexts.includes(REVIEW_CONTEXTS.TRADE_REVIEW))
+    .map(question => question.id)
+)
+
 export function getReviewQuestionsForContext(context = REVIEW_CONTEXTS.MODEL_BOOK) {
   return ALL_QUESTIONS.filter(question => question.contexts.includes(context))
 }
