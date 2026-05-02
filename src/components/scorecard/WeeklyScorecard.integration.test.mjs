@@ -12,11 +12,12 @@ test('the app mounts Weekly Scorecard in place of Edge Lab navigation', async ()
     readFile(sidebarPath, 'utf8'),
   ])
 
-  assert.match(appSource, /WeeklyScorecard/)
-  assert.match(appSource, /page === 'scorecard'/)
+  assert.match(appSource, /WeeklyScorecardPopup/)
+  assert.match(appSource, /setPage\('journal'/)
+  assert.doesNotMatch(appSource, /page === 'scorecard'/)
   assert.doesNotMatch(appSource, /page === 'edgelab'/)
 
-  assert.match(sidebarSource, /id: 'scorecard'/)
-  assert.match(sidebarSource, /Weekly Scorecard/)
+  assert.doesNotMatch(sidebarSource, /id: 'scorecard'/)
+  assert.doesNotMatch(sidebarSource, /Weekly Scorecard/)
   assert.doesNotMatch(sidebarSource, /id: 'edgelab'/)
 })

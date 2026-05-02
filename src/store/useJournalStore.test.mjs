@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { useJournalStore } from './useJournalStore.js'
+import { isDashboardJournalEntry } from '../utils/dashboardThoughts.js'
 
 function createLocalStorageMock() {
   const store = new Map()
@@ -78,6 +79,63 @@ test('weekly scorecards survive a refresh when cloud sync is unavailable', () =>
       tradingThoughts: [],
       weeklyScorecards: [],
       cloudReady: false,
+    })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+  }
+})
+
+test('dashboard journal thoughts persist into journal entries across local reload', () => {
+  const previousLocalStorage = globalThis.localStorage
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
+
+  try {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+
+    useJournalStore.getState().addJournalThought('Remember: wait for confirmation.')
+    const savedEntry = useJournalStore.getState().entries[0]
+
+    assert.equal(isDashboardJournalEntry(savedEntry), true)
+    assert.equal(savedEntry.noteText, 'Remember: wait for confirmation.')
+
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+    useJournalStore.getState().loadFromLocal()
+
+    const restoredEntry = useJournalStore.getState().entries[0]
+    assert.equal(isDashboardJournalEntry(restoredEntry), true)
+    assert.equal(restoredEntry.noteText, 'Remember: wait for confirmation.')
+  } finally {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
     })
     if (previousLocalStorage === undefined) {
       delete globalThis.localStorage

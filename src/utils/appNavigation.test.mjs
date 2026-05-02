@@ -13,7 +13,8 @@ import {
 test('isAppPage only accepts known dashboard pages', () => {
   assert.equal(isAppPage('dashboard'), true)
   assert.equal(isAppPage('thematic'), true)
-  assert.equal(isAppPage('scorecard'), true)
+  assert.equal(isAppPage('journal'), true)
+  assert.equal(isAppPage('scorecard'), false)
   assert.equal(isAppPage('missing'), false)
   assert.equal(isAppPage('edgelab'), false)
   assert.equal(isAppPage(''), false)
@@ -27,12 +28,14 @@ test('buildPageHash creates stable hash routes', () => {
 test('getPageFromLocationLike prefers valid hash routes', () => {
   assert.equal(getPageFromLocationLike({ hash: '#settings' }), 'settings')
   assert.equal(getPageFromLocationLike({ hash: '#thematic?foo=bar' }), 'thematic')
-  assert.equal(getPageFromLocationLike({ hash: '#edgelab' }), 'scorecard')
+  assert.equal(getPageFromLocationLike({ hash: '#edgelab' }), 'journal')
+  assert.equal(getPageFromLocationLike({ hash: '#scorecard' }), 'journal')
 })
 
 test('getPageFromLocationLike falls back to state when hash is absent', () => {
   assert.equal(getPageFromLocationLike({ hash: '', state: { page: 'charts' } }), 'charts')
-  assert.equal(getPageFromLocationLike({ hash: '', state: { page: 'edgelab' } }), 'scorecard')
+  assert.equal(getPageFromLocationLike({ hash: '', state: { page: 'edgelab' } }), 'journal')
+  assert.equal(getPageFromLocationLike({ hash: '', state: { page: 'scorecard' } }), 'journal')
 })
 
 test('getPageFromLocationLike falls back to dashboard for unknown values', () => {

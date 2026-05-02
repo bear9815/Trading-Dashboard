@@ -8,7 +8,6 @@ export const APP_PAGES = [
   'morning',
   'journal',
   'ai',
-  'scorecard',
   'regime',
   'settings',
   'rrg',
@@ -18,8 +17,19 @@ export const APP_PAGES = [
 ]
 
 const LEGACY_PAGE_ALIASES = {
-  edgelab: 'scorecard',
+  edgelab: 'journal',
+  scorecard: 'journal',
 }
+
+export const JOURNAL_SECTIONS = [
+  'entries',
+  'goals',
+  'habits',
+  'weekly-review',
+]
+
+export const DEFAULT_JOURNAL_SECTION = 'entries'
+export const LEGACY_WEEKLY_REVIEW_SECTION = 'weekly-review'
 
 export const APP_PAGE_STORAGE_KEY = 'trading-dashboard:page'
 
@@ -60,4 +70,22 @@ export function getRestoredPage({ locationLike, storedPage } = {}) {
   const resolvedStoredPage = resolvePageAlias(storedPage)
   if (isAppPage(resolvedStoredPage)) return resolvedStoredPage
   return locationPage
+}
+
+export function isJournalSection(value) {
+  return JOURNAL_SECTIONS.includes(value)
+}
+
+export function getJournalSectionFromLocationLike(locationLike, storedSection = DEFAULT_JOURNAL_SECTION) {
+  const rawHashPage = String(locationLike?.hash || '').replace(/^#/, '').split('?')[0].trim()
+  const rawStatePage = String(locationLike?.state?.page || '').trim()
+  const stateSection = String(locationLike?.state?.journalSection || '').trim()
+
+  if (rawHashPage === 'scorecard' || rawHashPage === 'edgelab' || rawStatePage === 'scorecard' || rawStatePage === 'edgelab') {
+    return LEGACY_WEEKLY_REVIEW_SECTION
+  }
+
+  if (isJournalSection(stateSection)) return stateSection
+  if (isJournalSection(storedSection)) return storedSection
+  return DEFAULT_JOURNAL_SECTION
 }

@@ -1,9 +1,11 @@
-import { useState } from 'react'
-import { Plus, ChevronDown, Trash2, BookOpen, Target, Repeat } from 'lucide-react'
+import { useMemo, useState, useEffect } from 'react'
+import { Plus, ChevronDown, Trash2, BookOpen, Target, Repeat, CalendarCheck, Flag, CheckCircle2 } from 'lucide-react'
 import { useJournalStore } from '../../store/useJournalStore.js'
 import { formatDate } from '../../utils/formatters.js'
+import { isDashboardJournalEntry } from '../../utils/dashboardThoughts.js'
 import GoalsTab from './GoalsTab.jsx'
 import HabitsTab from './HabitsTab.jsx'
+import WeeklyScorecard from '../scorecard/WeeklyScorecard.jsx'
 
 // ── Journal Entries tab ────────────────────────────────────────────────────
 
@@ -60,12 +62,20 @@ function buildJournalPrefill(entries, tradingThoughts) {
 
 function JournalEntryCard({ entry, onDelete }) {
   const [open, setOpen] = useState(false)
+  const isDashboardEntry = isDashboardJournalEntry(entry)
   return (
     <div className="card">
       <button className="w-full flex items-start justify-between gap-3" onClick={() => setOpen(v => !v)}>
         <div className="text-left">
           <p className="text-xs text-gray-500 mb-0.5">{formatDate(entry.timestamp, 'time')}</p>
-          <p className="text-sm text-gray-200 line-clamp-1">{entry.objective || entry.marketState || '(no content)'}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm text-gray-200 line-clamp-1">{entry.objective || entry.marketState || '(no content)'}</p>
+            {isDashboardEntry && (
+              <span className="rounded-full border border-accent-blue/30 bg-accent-blue/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-accent-blue">
+                Dashboard
+              </span>
+            )}
+          </div>
         </div>
         <ChevronDown size={16} className={`text-gray-500 shrink-0 mt-0.5 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -90,6 +100,87 @@ function JournalEntryCard({ entry, onDelete }) {
         </div>
       )}
     </div>
+  )
+}
+
+function WeeklyReviewHeader() {
+  const { priorities = [], goals = [], checkins = [] } = useJournalStore()
+
+  const activeGoals = useMemo(
+    () => goals.filter(goal => goal.status === 'active'),
+    [goals]
+  )
+  const orderedPriorities = useMemo(
+    () => [...priorities].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).slice(0, 4),
+    [priorities]
+  )
+  const recentCheckins = useMemo(
+    () => [...checkins].sort((a, b) => new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0)).slice(0, 3),
+    [checkins]
+  )
+
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+      <div className="card">
+        <div className="flex items-center gap-2">
+          <Flag size={14} className="text-accent-blue" />
+          <p className="text-sm font-semibold text-white">Active Priorities</p>
+        </div>
+        <div className="mt-3 space-y-2">
+          {orderedPriorities.length === 0 ? (
+            <p className="text-sm text-gray-500">No priorities set yet.</p>
+          ) : orderedPriorities.map(priority => (
+            <div key={priority.id} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+              <p className="text-sm font-medium text-white">{priority.label || 'Untitled priority'}</p>
+              {priority.description ? <p className="mt-1 text-xs text-gray-500">{priority.description}</p> : null}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="flex items-center gap-2">
+          <Target size={14} className="text-accent-green" />
+          <p className="text-sm font-semibold text-white">Active Goals</p>
+        </div>
+        <div className="mt-3 space-y-2">
+          {activeGoals.length === 0 ? (
+            <p className="text-sm text-gray-500">No active goals yet.</p>
+          ) : activeGoals.slice(0, 4).map(goal => (
+            <div key={goal.id} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+              <p className="text-sm font-medium text-white">{goal.title || 'Untitled goal'}</p>
+              <p className="mt-1 text-xs text-gray-500">{goal.area || 'General'} · {goal.priority || 'medium'} priority</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="flex items-center gap-2">
+          <CheckCircle2 size={14} className="text-accent-yellow" />
+          <p className="text-sm font-semibold text-white">Recent Check-Ins</p>
+        </div>
+        <div className="mt-3 space-y-2">
+          {recentCheckins.length === 0 ? (
+            <p className="text-sm text-gray-500">No check-ins recorded yet.</p>
+          ) : recentCheckins.map(checkin => (
+            <div key={checkin.id} className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+              <p className="text-xs uppercase tracking-[0.16em] text-gray-500">{checkin.date || formatDate(checkin.createdAt, 'time')}</p>
+              <p className="mt-1 text-sm text-white">{checkin.wins || checkin.onTrack || checkin.needsAttention || 'Weekly check-in saved.'}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function WeeklyReviewTab() {
+  return (
+    <WeeklyScorecard
+      embedded
+      headerContent={<WeeklyReviewHeader />}
+    />
   )
 }
 
@@ -181,34 +272,52 @@ const TABS = [
   { id: 'entries', label: 'Journal Entries',    icon: BookOpen },
   { id: 'goals',   label: 'Goals & Priorities', icon: Target   },
   { id: 'habits',  label: 'Habits',             icon: Repeat   },
+  { id: 'weekly-review', label: 'Weekly Review', icon: CalendarCheck },
 ]
 
-export default function Journal() {
-  const [tab, setTab] = useState('entries')
+export default function Journal({ initialSection = 'entries', selectedSection = null, onSectionChange = null }) {
+  const resolvedInitial = TABS.some(tab => tab.id === initialSection) ? initialSection : 'entries'
+  const [tab, setTab] = useState(resolvedInitial)
+
+  useEffect(() => {
+    if (selectedSection && TABS.some(option => option.id === selectedSection)) {
+      setTab(selectedSection)
+    }
+  }, [selectedSection])
+
+  const activeTab = selectedSection && TABS.some(option => option.id === selectedSection)
+    ? selectedSection
+    : tab
+
+  function handleTabChange(nextTab) {
+    setTab(nextTab)
+    onSectionChange?.(nextTab)
+  }
 
   return (
-    <div className="p-4 flex flex-col gap-4 max-w-3xl">
+    <div className={`p-4 flex flex-col gap-4 ${activeTab === 'weekly-review' ? 'max-w-7xl' : 'max-w-3xl'}`}>
       {/* Tab bar */}
       <div className="flex gap-1 border-b border-white/10 -mb-1">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => setTab(id)}
+            onClick={() => handleTabChange(id)}
             className={`flex items-center gap-2 px-3 py-2.5 text-sm font-medium border-b-2 transition-all whitespace-nowrap ${
-              tab === id
+              activeTab === id
                 ? 'border-accent-blue text-white'
                 : 'border-transparent text-gray-500 hover:text-gray-300'
             }`}
           >
-            <Icon size={14} className={tab === id ? 'text-accent-blue' : ''} />
+            <Icon size={14} className={activeTab === id ? 'text-accent-blue' : ''} />
             {label}
           </button>
         ))}
       </div>
 
-      {tab === 'entries' && <EntriesTab />}
-      {tab === 'goals'   && <GoalsTab />}
-      {tab === 'habits'  && <HabitsTab />}
+      {activeTab === 'entries' && <EntriesTab />}
+      {activeTab === 'goals'   && <GoalsTab />}
+      {activeTab === 'habits'  && <HabitsTab />}
+      {activeTab === 'weekly-review' && <WeeklyReviewTab />}
     </div>
   )
 }

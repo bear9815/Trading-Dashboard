@@ -18,7 +18,7 @@ import { useHabitsStore } from './store/useHabitsStore.js'
 import { useAuthStore } from './store/useAuthStore.js'
 import { supabase } from './lib/supabase.js'
 import { Loader } from 'lucide-react'
-import { APP_PAGE_STORAGE_KEY, buildPageHash, getPageFromLocationLike, getRestoredPage, isAppPage } from './utils/appNavigation.js'
+import { APP_PAGE_STORAGE_KEY, buildPageHash, DEFAULT_JOURNAL_SECTION, getJournalSectionFromLocationLike, getRestoredPage, isAppPage } from './utils/appNavigation.js'
 import { hydrateCloudStoresForUser } from './utils/cloudHydration.js'
 
 // ── Lazy-loaded pages (each splits into its own chunk) ────────────────────────
@@ -34,11 +34,11 @@ const TradeReview        = lazy(() => import('./components/chartreview/TradeRevi
 const Charts             = lazy(() => import('./components/charts/Charts.jsx'))
 const Morning            = lazy(() => import('./components/morning/Morning.jsx'))
 const RRGPage            = lazy(() => import('./components/rrg/RRGPage.jsx'))
-const WeeklyScorecard    = lazy(() => import('./components/scorecard/WeeklyScorecard.jsx'))
 const FactorRegime       = lazy(() => import('./components/regime/FactorRegime.jsx'))
 const ThematicResearch    = lazy(() => import('./components/thematic/ThematicResearch.jsx'))
 const ModelBook           = lazy(() => import('./components/modelbook/ModelBook.jsx'))
 const Agents              = lazy(() => import('./components/agents/Agents.jsx'))
+const JOURNAL_SECTION_STORAGE_KEY = 'trading-dashboard:journal-section'
 
 // ── Page-transition loading fallback ─────────────────────────────────────────
 function PageLoader() {
@@ -64,8 +64,17 @@ export default function App() {
   const [showImport, setShowImport] = useState(false)
   const [reminderOpenSignal, setReminderOpenSignal] = useState(0)
   const [selectedAccount, setSelectedAccount] = useState('All')
+  const [journalSection, setJournalSection] = useState(() => (
+    typeof window === 'undefined'
+      ? DEFAULT_JOURNAL_SECTION
+      : getJournalSectionFromLocationLike(
+        { hash: window.location.hash, state: window.history.state },
+        window.sessionStorage.getItem(JOURNAL_SECTION_STORAGE_KEY)
+      )
+  ))
   const didInitHistoryRef = useRef(false)
   const lastPageRef = useRef(page)
+  const lastJournalSectionRef = useRef(journalSection)
   const { theme, anthropicApiKey, sidebarCollapsed, setSidebarCollapsed } = useSettingsStore()
   const { loadTokens: loadSchwabTokens, _accessToken: schwabAccessToken } = useSchwabStore()
   const { loadFromLocal } = useTradeStore()
@@ -75,8 +84,12 @@ export default function App() {
   // Note: migrateDeprecatedModels runs inside useAgentsStore's onRehydrateStorage —
   // calling it here raced with IDB hydration and silently wiped custom agents.
 
-  const setPage = useCallback((nextPage) => {
-    setPageState(prev => (isAppPage(nextPage) ? nextPage : prev))
+  const setPage = useCallback((nextPage, options = {}) => {
+    if (!isAppPage(nextPage)) return
+    setPageState(nextPage)
+    if (nextPage === 'journal') {
+      setJournalSection(options.journalSection || DEFAULT_JOURNAL_SECTION)
+    }
   }, [])
 
   // Apply theme
@@ -92,9 +105,15 @@ export default function App() {
         locationLike: { hash: window.location.hash, state },
         storedPage: window.sessionStorage.getItem(APP_PAGE_STORAGE_KEY),
       })
+      const nextJournalSection = getJournalSectionFromLocationLike(
+        { hash: window.location.hash, state },
+        window.sessionStorage.getItem(JOURNAL_SECTION_STORAGE_KEY)
+      )
       lastPageRef.current = nextPage
       window.sessionStorage.setItem(APP_PAGE_STORAGE_KEY, nextPage)
+      window.sessionStorage.setItem(JOURNAL_SECTION_STORAGE_KEY, nextJournalSection)
       setPageState(nextPage)
+      setJournalSection(nextJournalSection)
     }
 
     const handlePopState = (event) => syncFromLocation(event.state || window.history.state)
@@ -112,22 +131,33 @@ export default function App() {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
+    const state = page === 'journal'
+      ? { ...(window.history.state || {}), page, journalSection }
+      : { ...(window.history.state || {}), page }
     const url = `${window.location.pathname}${window.location.search}${buildPageHash(page)}`
 
     if (!didInitHistoryRef.current) {
-      window.history.replaceState({ ...(window.history.state || {}), page }, '', url)
+      window.history.replaceState(state, '', url)
       didInitHistoryRef.current = true
       lastPageRef.current = page
+      lastJournalSectionRef.current = journalSection
       window.sessionStorage.setItem(APP_PAGE_STORAGE_KEY, page)
+      window.sessionStorage.setItem(JOURNAL_SECTION_STORAGE_KEY, journalSection)
       return
     }
 
-    if (lastPageRef.current === page) return
+    if (lastPageRef.current === page && lastJournalSectionRef.current === journalSection) return
 
-    window.history.pushState({ ...(window.history.state || {}), page }, '', url)
+    if (lastPageRef.current === page) {
+      window.history.replaceState(state, '', url)
+    } else {
+      window.history.pushState(state, '', url)
+    }
     lastPageRef.current = page
+    lastJournalSectionRef.current = journalSection
     window.sessionStorage.setItem(APP_PAGE_STORAGE_KEY, page)
-  }, [page])
+    window.sessionStorage.setItem(JOURNAL_SECTION_STORAGE_KEY, journalSection)
+  }, [page, journalSection])
 
   // Handle OAuth callback redirect from Schwab (?schwab=connected)
   useEffect(() => {
@@ -240,9 +270,8 @@ export default function App() {
               {page === 'chartreview' && <TradeReview   {...pageProps} />}
               {page === 'charts'      && <Charts />}
               {page === 'morning'     && <Morning />}
-              {page === 'journal'     && <Journal       {...pageProps} />}
+              {page === 'journal'     && <Journal {...pageProps} selectedSection={journalSection} onSectionChange={setJournalSection} />}
               {page === 'ai'          && <AIFeedback    {...pageProps} />}
-              {page === 'scorecard'   && <WeeklyScorecard />}
               {page === 'regime'      && <FactorRegime />}
               {page === 'settings'    && <Settings />}
               {page === 'rrg'         && <div className="h-full"><RRGPage /></div>}
@@ -258,7 +287,7 @@ export default function App() {
       <QuickAddTrade />
       <MorningCheckin />
       <TradingReminderPopup openSignal={reminderOpenSignal} />
-      <WeeklyScorecardPopup onOpenScorecard={() => setPage('scorecard')} />
+      <WeeklyScorecardPopup onOpenWeeklyReview={() => setPage('journal', { journalSection: 'weekly-review' })} />
     </div>
   )
 }

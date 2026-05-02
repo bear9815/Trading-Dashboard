@@ -271,7 +271,7 @@ function MonthlyView({ rollup, previousRollup, onSelectWeek }) {
   )
 }
 
-export default function WeeklyScorecard() {
+export default function WeeklyScorecard({ embedded = false, headerContent = null }) {
   const {
     habits,
     normalizedSettings,
@@ -299,7 +299,7 @@ export default function WeeklyScorecard() {
   )
 
   return (
-    <div className="p-4 xl:p-6 max-w-7xl mx-auto space-y-4">
+    <div className={`${embedded ? 'space-y-4' : 'p-4 xl:p-6 max-w-7xl mx-auto space-y-4'}`}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.22em] text-accent-green font-semibold">Process</p>
@@ -326,6 +326,8 @@ export default function WeeklyScorecard() {
           )}
         </div>
       </div>
+
+      {headerContent}
 
       {tab === 'weekly' ? (
         <WeeklyView

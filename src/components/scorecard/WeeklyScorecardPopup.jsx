@@ -20,7 +20,7 @@ function writeShownDate(dateKey) {
   } catch {}
 }
 
-export default function WeeklyScorecardPopup({ onOpenScorecard }) {
+export default function WeeklyScorecardPopup({ onOpenWeeklyReview }) {
   const { normalizedSettings, selectedScorecard, aiLoadingWeekKey } = useWeeklyScorecardWorkspace()
   const [visible, setVisible] = useState(false)
   const popupState = useMemo(
@@ -96,7 +96,7 @@ export default function WeeklyScorecardPopup({ onOpenScorecard }) {
             <button
               onClick={() => {
                 dismiss()
-                onOpenScorecard?.()
+                onOpenWeeklyReview?.()
               }}
               className="btn-primary text-xs"
             >
