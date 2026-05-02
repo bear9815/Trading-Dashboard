@@ -28,24 +28,26 @@ async function saveToCloud(entries) {
 export const useMorningStore = create((set, get) => ({
   entries: [],
   cloudReady: false,
+  cloudUserId: null,
 
   // ── Cloud ──────────────────────────────────────────────────────────────────
 
   loadFromLocal: () => {
     try {
       const raw = localStorage.getItem('risk-tool-morning')
-      if (!raw) { set({ cloudReady: true }); return }
+      if (!raw) { set({ cloudReady: true, cloudUserId: null }); return }
       const parsed = JSON.parse(raw)
       const { entries = [] } = parsed?.state || {}
-      set({ entries, cloudReady: true })
+      set({ entries, cloudReady: true, cloudUserId: null })
     } catch {
-      set({ cloudReady: true })
+      set({ cloudReady: true, cloudUserId: null })
     }
   },
 
   loadFromCloud: async (userId) => {
-    if (!supabase) return
-    if (get().cloudReady) return
+    if (!supabase) { set({ cloudReady: true, cloudUserId: null }); return }
+    if (!userId) return
+    if (get().cloudUserId === userId) return
     const { data, error } = await supabase
       .from('user_morning')
       .select('data')
@@ -54,13 +56,13 @@ export const useMorningStore = create((set, get) => ({
 
     if (error && error.code !== 'PGRST116') {
       console.error('[cloud] loadMorning:', error.message)
-      set({ cloudReady: true })
+      set({ cloudReady: true, cloudUserId: null })
       return
     }
 
     if (data?.data) {
       const { entries = [] } = data.data
-      set({ entries, cloudReady: true })
+      set({ entries, cloudReady: true, cloudUserId: userId })
       // Back up locally so data survives if Supabase is removed
       persistLocal(entries)
     } else {
@@ -69,22 +71,23 @@ export const useMorningStore = create((set, get) => ({
         if (raw) {
           const parsed = JSON.parse(raw)
           const { entries = [] } = parsed?.state || {}
-          set({ entries, cloudReady: true })
+          set({ entries, cloudReady: true, cloudUserId: null })
           const ok = await saveToCloud(entries)
           if (ok) {
             localStorage.removeItem('risk-tool-morning')
             console.info('[cloud] Morning entries migrated from localStorage ✓')
+            set({ cloudUserId: userId })
           }
         } else {
-          set({ cloudReady: true })
+          set({ cloudReady: true, cloudUserId: userId })
         }
       } catch {
-        set({ cloudReady: true })
+        set({ cloudReady: true, cloudUserId: null })
       }
     }
   },
 
-  clearLocalState: () => set({ entries: [], cloudReady: false }),
+  clearLocalState: () => set({ entries: [], cloudReady: false, cloudUserId: null }),
 
   _sync: () => {
     const { entries } = get()

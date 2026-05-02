@@ -22,24 +22,11 @@ import { useJournalStore }  from '../../store/useJournalStore.js'
 import { calcCashDeployed, calcEffectiveExposure } from '../../utils/riskCalcs.js'
 import { fetchHistory, fetchATR14 }     from '../../utils/marketData.js'
 import { formatCurrency }   from '../../utils/formatters.js'
+import { buildPriorTradingThoughtsText } from '../../utils/priorTradingThoughts.js'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 const TODAY = new Date().toISOString().slice(0, 10)
-function localDateString(date = new Date()) {
-  const year  = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day   = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function priorTradingDayString(dateStr) {
-  const [year, month, day] = dateStr.split('-').map(Number)
-  const d = new Date(year, month - 1, day)
-  do { d.setDate(d.getDate() - 1) }
-  while (d.getDay() === 0 || d.getDay() === 6)
-  return localDateString(d)
-}
 
 function normDate(d) {
   if (!d) return ''
@@ -1212,13 +1199,7 @@ function LogTab() {
     const lastEntry    = sorted.find(e => e.date < targetDate) ?? sorted[0] ?? null
     const lastRiskMode = lastEntry?.riskMode ?? null
     // Pre-fill Prior Day Notes from the last trading day's thoughts (skip weekends)
-    const priorDay = priorTradingDayString(targetDate)
-    const priorThoughts = tradingThoughts.filter(t =>
-      t.timestamp && localDateString(new Date(t.timestamp)) === priorDay
-    )
-    const priorThoughtsText = priorThoughts.length > 0
-      ? priorThoughts.map(t => `• ${t.text}`).join('\n')
-      : ''
+    const priorThoughtsText = buildPriorTradingThoughtsText(tradingThoughts, targetDate)
     // New entry: pre-fill cash deployed + effective exposure (if ATR already resolved)
     return blankForm(targetDate, autoCash, autoEffective, lastRiskMode, lastEntry, priorThoughtsText)
   }, [mode, editingEntry, editDate, autoCash, autoEffective, sorted, tradingThoughts])

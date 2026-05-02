@@ -36,13 +36,14 @@ export const useJournalStore = create((set, get) => ({
   tradingThoughts: [],
   weeklyScorecards: [],
   cloudReady:      false,
+  cloudUserId:     null,
 
   // ── Cloud ──────────────────────────────────────────────────────────────────
 
   loadFromLocal: () => {
     try {
       const raw = localStorage.getItem('risk-tool-journal')
-      if (!raw) { set({ cloudReady: true }); return }
+      if (!raw) { set({ cloudReady: true, cloudUserId: null }); return }
       const parsed = JSON.parse(raw)
       const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [], weeklyScorecards = [] } = parsed?.state || {}
       set({
@@ -53,15 +54,17 @@ export const useJournalStore = create((set, get) => ({
         tradingThoughts,
         weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
         cloudReady: true,
+        cloudUserId: null,
       })
     } catch {
-      set({ cloudReady: true })
+      set({ cloudReady: true, cloudUserId: null })
     }
   },
 
   loadFromCloud: async (userId) => {
-    if (!supabase) return
-    if (get().cloudReady) return
+    if (!supabase) { set({ cloudReady: true, cloudUserId: null }); return }
+    if (!userId) return
+    if (get().cloudUserId === userId) return
     const { data, error } = await supabase
       .from('user_journal')
       .select('data')
@@ -70,7 +73,7 @@ export const useJournalStore = create((set, get) => ({
 
     if (error && error.code !== 'PGRST116') {
       console.error('[cloud] loadJournal:', error.message)
-      set({ cloudReady: true })
+      set({ cloudReady: true, cloudUserId: null })
       return
     }
 
@@ -84,6 +87,7 @@ export const useJournalStore = create((set, get) => ({
         tradingThoughts,
         weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
         cloudReady: true,
+        cloudUserId: userId,
       })
       // Back up locally so data survives if Supabase is removed
       persistLocal({
@@ -108,6 +112,7 @@ export const useJournalStore = create((set, get) => ({
             tradingThoughts,
             weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
             cloudReady: true,
+            cloudUserId: null,
           })
           const ok = await saveToCloud({
             entries,
@@ -120,18 +125,19 @@ export const useJournalStore = create((set, get) => ({
           if (ok) {
             localStorage.removeItem('risk-tool-journal')
             console.info('[cloud] Journal migrated from localStorage ✓')
+            set({ cloudUserId: userId })
           }
         } else {
-          set({ cloudReady: true })
+          set({ cloudReady: true, cloudUserId: userId })
         }
       } catch {
-        set({ cloudReady: true })
+        set({ cloudReady: true, cloudUserId: null })
       }
     }
   },
 
   clearLocalState: () => set({
-    entries: [], priorities: [], goals: [], checkins: [], tradingThoughts: [], weeklyScorecards: [], cloudReady: false,
+    entries: [], priorities: [], goals: [], checkins: [], tradingThoughts: [], weeklyScorecards: [], cloudReady: false, cloudUserId: null,
   }),
 
   // ── Internal sync helper ───────────────────────────────────────────────────

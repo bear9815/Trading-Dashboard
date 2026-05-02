@@ -15,8 +15,11 @@ import { useTradeStore } from './store/useTradeStore.js'
 import { useJournalStore } from './store/useJournalStore.js'
 import { useMorningStore } from './store/useMorningStore.js'
 import { useHabitsStore } from './store/useHabitsStore.js'
+import { useAuthStore } from './store/useAuthStore.js'
+import { supabase } from './lib/supabase.js'
 import { Loader } from 'lucide-react'
 import { APP_PAGE_STORAGE_KEY, buildPageHash, getPageFromLocationLike, getRestoredPage, isAppPage } from './utils/appNavigation.js'
+import { hydrateCloudStoresForUser } from './utils/cloudHydration.js'
 
 // ── Lazy-loaded pages (each splits into its own chunk) ────────────────────────
 // Only the page you're on gets downloaded — everything else costs nothing until navigated to.
@@ -178,6 +181,33 @@ export default function App() {
     loadHabitsLocal()
     loadSchwabTokens()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!supabase?.auth) return
+
+    const hydrateForSession = async (session) => {
+      useAuthStore.getState().setSession(session)
+      const userId = session?.user?.id
+      if (!userId) return
+      await hydrateCloudStoresForUser(userId, {
+        settings: useSettingsStore.getState(),
+        trades: useTradeStore.getState(),
+        journal: useJournalStore.getState(),
+        morning: useMorningStore.getState(),
+        habits: useHabitsStore.getState(),
+      })
+    }
+
+    supabase.auth.getSession().then(({ data }) => {
+      hydrateForSession(data?.session ?? null)
+    }).catch(() => {})
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      hydrateForSession(session)
+    })
+
+    return () => authListener?.subscription?.unsubscribe()
+  }, [])
 
   // ── Main app ──────────────────────────────────────────────────────────────
   const pageProps = { selectedAccount }

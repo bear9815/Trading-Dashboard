@@ -33,24 +33,26 @@ export const useHabitsStore = create((set, get) => ({
   completions: [],   // { id, habitId, date: 'YYYY-MM-DD', note }
   reminders:   [],   // { id, label, time, days, active, habitIds }
   cloudReady:  false,
+  cloudUserId: null,
 
   // ── Cloud ────────────────────────────────────────────────────────────────
 
   loadFromLocal: () => {
     try {
       const raw = localStorage.getItem('risk-tool-habits')
-      if (!raw) { set({ cloudReady: true }); return }
+      if (!raw) { set({ cloudReady: true, cloudUserId: null }); return }
       const parsed = JSON.parse(raw)
       const { habits = [], completions = [], reminders = [] } = parsed?.state || {}
-      set({ habits, completions, reminders, cloudReady: true })
+      set({ habits, completions, reminders, cloudReady: true, cloudUserId: null })
     } catch {
-      set({ cloudReady: true })
+      set({ cloudReady: true, cloudUserId: null })
     }
   },
 
   loadFromCloud: async (userId) => {
-    if (!supabase) { set({ cloudReady: true }); return }
-    if (get().cloudReady) return
+    if (!supabase) { set({ cloudReady: true, cloudUserId: null }); return }
+    if (!userId) return
+    if (get().cloudUserId === userId) return
     const { data, error } = await supabase
       .from('user_habits')
       .select('data')
@@ -59,21 +61,21 @@ export const useHabitsStore = create((set, get) => ({
 
     if (error && error.code !== 'PGRST116') {
       console.error('[cloud] loadHabits:', error.message)
-      set({ cloudReady: true })
+      set({ cloudReady: true, cloudUserId: null })
       return
     }
 
     if (data?.data) {
       const { habits = [], completions = [], reminders = [] } = data.data
-      set({ habits, completions, reminders, cloudReady: true })
+      set({ habits, completions, reminders, cloudReady: true, cloudUserId: userId })
       // Back up locally so data survives if Supabase is removed
       persistLocal({ habits, completions, reminders })
     } else {
-      set({ cloudReady: true })
+      set({ cloudReady: true, cloudUserId: userId })
     }
   },
 
-  clearLocalState: () => set({ habits: [], completions: [], reminders: [], cloudReady: false }),
+  clearLocalState: () => set({ habits: [], completions: [], reminders: [], cloudReady: false, cloudUserId: null }),
 
   _sync: () => {
     const { habits, completions, reminders } = get()
