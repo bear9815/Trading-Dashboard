@@ -7,6 +7,7 @@ import {
   BEST_FIT_LOOKBACK_MONTH_OPTIONS,
   normalizeTradeReviewChartType,
 } from '../utils/tradeReviewChart.js'
+import { normalizeWeeklyScorecardSettings } from '../utils/weeklyScorecard.js'
 
 // Module-level flag — prevents re-fetching settings more than once per page load
 let settingsSessionLoaded = false
@@ -177,6 +178,7 @@ const CLOUD_FIELDS = [
   'dashboardNote', 'openPositionsColumns',
   'riskVisibleColumns',
   'tradeReviewChartSettings',
+  'weeklyScorecardSettings',
   'breadthTableSettings',
   'tradeReviewManualAnchorsBySymbol',
   'excludedSymbols', 'strategies', 'edges',
@@ -212,6 +214,7 @@ export const useSettingsStore = create(
       benchmarkSymbol: 'SPY',
       tpMultiplier: 2,
       tradeReviewChartSettings: normalizeTradeReviewChartSettings(),
+      weeklyScorecardSettings: normalizeWeeklyScorecardSettings(),
       breadthTableSettings: normalizeBreadthTableSettings(),
       tradeReviewManualAnchorsBySymbol: {},
 
@@ -276,6 +279,7 @@ export const useSettingsStore = create(
             ...s,
             ...data.data,
             tradeReviewChartSettings: normalizeTradeReviewChartSettings(data.data.tradeReviewChartSettings ?? s.tradeReviewChartSettings),
+            weeklyScorecardSettings: normalizeWeeklyScorecardSettings(data.data.weeklyScorecardSettings ?? s.weeklyScorecardSettings),
             breadthTableSettings: normalizeBreadthTableSettings(data.data.breadthTableSettings ?? s.breadthTableSettings),
             tradeReviewManualAnchorsBySymbol: normalizeTradeReviewManualAnchorsBySymbol(
               data.data.tradeReviewManualAnchorsBySymbol ?? s.tradeReviewManualAnchorsBySymbol
@@ -329,6 +333,15 @@ export const useSettingsStore = create(
         })
         set({ tradeReviewChartSettings: next })
         saveToCloud({ ...get(), tradeReviewChartSettings: next })
+      },
+      setWeeklyScorecardSettings: (settings) => {
+        const current = get().weeklyScorecardSettings || {}
+        const next = normalizeWeeklyScorecardSettings({
+          ...current,
+          ...(settings || {}),
+        })
+        set({ weeklyScorecardSettings: next })
+        saveToCloud({ ...get(), weeklyScorecardSettings: next })
       },
       setBreadthTableSettings: (settings) => {
         const current = get().breadthTableSettings || {}
@@ -465,6 +478,9 @@ export const useSettingsStore = create(
         merged.useLocalLLM = merged.researchAiProvider === 'local'
         merged.tradeReviewChartSettings = normalizeTradeReviewChartSettings(
           persistedState?.tradeReviewChartSettings ?? currentState?.tradeReviewChartSettings
+        )
+        merged.weeklyScorecardSettings = normalizeWeeklyScorecardSettings(
+          persistedState?.weeklyScorecardSettings ?? currentState?.weeklyScorecardSettings
         )
         merged.breadthTableSettings = normalizeBreadthTableSettings(
           persistedState?.breadthTableSettings ?? currentState?.breadthTableSettings

@@ -9,6 +9,7 @@ import { setSchwabToken, setSchwabTokenGetter } from './utils/marketData.js'
 import PageErrorBoundary from './components/PageErrorBoundary.jsx'
 import MorningCheckin from './components/shared/MorningCheckin.jsx'
 import TradingReminderPopup from './components/shared/TradingReminderPopup.jsx'
+import WeeklyScorecardPopup from './components/scorecard/WeeklyScorecardPopup.jsx'
 import { useSchwabStore } from './store/useSchwabStore.js'
 import { useTradeStore } from './store/useTradeStore.js'
 import { useJournalStore } from './store/useJournalStore.js'
@@ -30,7 +31,7 @@ const TradeReview        = lazy(() => import('./components/chartreview/TradeRevi
 const Charts             = lazy(() => import('./components/charts/Charts.jsx'))
 const Morning            = lazy(() => import('./components/morning/Morning.jsx'))
 const RRGPage            = lazy(() => import('./components/rrg/RRGPage.jsx'))
-const EdgeLab            = lazy(() => import('./components/edgelab/EdgeLab.jsx'))
+const WeeklyScorecard    = lazy(() => import('./components/scorecard/WeeklyScorecard.jsx'))
 const FactorRegime       = lazy(() => import('./components/regime/FactorRegime.jsx'))
 const ThematicResearch    = lazy(() => import('./components/thematic/ThematicResearch.jsx'))
 const ModelBook           = lazy(() => import('./components/modelbook/ModelBook.jsx'))
@@ -211,7 +212,7 @@ export default function App() {
               {page === 'morning'     && <Morning />}
               {page === 'journal'     && <Journal       {...pageProps} />}
               {page === 'ai'          && <AIFeedback    {...pageProps} />}
-              {page === 'edgelab'     && <EdgeLab       {...pageProps} />}
+              {page === 'scorecard'   && <WeeklyScorecard />}
               {page === 'regime'      && <FactorRegime />}
               {page === 'settings'    && <Settings />}
               {page === 'rrg'         && <div className="h-full"><RRGPage /></div>}
@@ -227,6 +228,7 @@ export default function App() {
       <QuickAddTrade />
       <MorningCheckin />
       <TradingReminderPopup openSignal={reminderOpenSignal} />
+      <WeeklyScorecardPopup onOpenScorecard={() => setPage('scorecard')} />
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
 import { supabase } from '../lib/supabase.js'
 import { buildDashboardJournalEntry, extractJournalEntryText } from '../utils/dashboardThoughts.js'
+import { normalizeWeeklyScorecardSnapshot } from '../utils/weeklyScorecard.js'
 
 function persistLocal(state) {
   try {
@@ -33,6 +34,7 @@ export const useJournalStore = create((set, get) => ({
   goals:           [],
   checkins:        [],
   tradingThoughts: [],
+  weeklyScorecards: [],
   cloudReady:      false,
 
   // ── Cloud ──────────────────────────────────────────────────────────────────
@@ -42,8 +44,16 @@ export const useJournalStore = create((set, get) => ({
       const raw = localStorage.getItem('risk-tool-journal')
       if (!raw) { set({ cloudReady: true }); return }
       const parsed = JSON.parse(raw)
-      const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [] } = parsed?.state || {}
-      set({ entries, priorities, goals, checkins, tradingThoughts, cloudReady: true })
+      const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [], weeklyScorecards = [] } = parsed?.state || {}
+      set({
+        entries,
+        priorities,
+        goals,
+        checkins,
+        tradingThoughts,
+        weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
+        cloudReady: true,
+      })
     } catch {
       set({ cloudReady: true })
     }
@@ -65,18 +75,48 @@ export const useJournalStore = create((set, get) => ({
     }
 
     if (data?.data) {
-      const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [] } = data.data
-      set({ entries, priorities, goals, checkins, tradingThoughts, cloudReady: true })
+      const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [], weeklyScorecards = [] } = data.data
+      set({
+        entries,
+        priorities,
+        goals,
+        checkins,
+        tradingThoughts,
+        weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
+        cloudReady: true,
+      })
       // Back up locally so data survives if Supabase is removed
-      persistLocal({ entries, priorities, goals, checkins, tradingThoughts })
+      persistLocal({
+        entries,
+        priorities,
+        goals,
+        checkins,
+        tradingThoughts,
+        weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
+      })
     } else {
       try {
         const raw = localStorage.getItem('risk-tool-journal')
         if (raw) {
           const parsed = JSON.parse(raw)
-          const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [] } = parsed?.state || {}
-          set({ entries, priorities, goals, checkins, tradingThoughts, cloudReady: true })
-          const ok = await saveToCloud({ entries, priorities, goals, checkins, tradingThoughts })
+          const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [], weeklyScorecards = [] } = parsed?.state || {}
+          set({
+            entries,
+            priorities,
+            goals,
+            checkins,
+            tradingThoughts,
+            weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
+            cloudReady: true,
+          })
+          const ok = await saveToCloud({
+            entries,
+            priorities,
+            goals,
+            checkins,
+            tradingThoughts,
+            weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
+          })
           if (ok) {
             localStorage.removeItem('risk-tool-journal')
             console.info('[cloud] Journal migrated from localStorage ✓')
@@ -91,14 +131,14 @@ export const useJournalStore = create((set, get) => ({
   },
 
   clearLocalState: () => set({
-    entries: [], priorities: [], goals: [], checkins: [], tradingThoughts: [], cloudReady: false,
+    entries: [], priorities: [], goals: [], checkins: [], tradingThoughts: [], weeklyScorecards: [], cloudReady: false,
   }),
 
   // ── Internal sync helper ───────────────────────────────────────────────────
   _sync: () => {
-    const { entries, priorities, goals, checkins, tradingThoughts } = get()
-    persistLocal({ entries, priorities, goals, checkins, tradingThoughts })
-    saveToCloud({ entries, priorities, goals, checkins, tradingThoughts })
+    const { entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards } = get()
+    persistLocal({ entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards })
+    saveToCloud({ entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards })
   },
 
   // ── Journal entries ────────────────────────────────────────────────────────
@@ -260,6 +300,75 @@ export const useJournalStore = create((set, get) => ({
 
   deleteThought: (id) => {
     set(s => ({ tradingThoughts: s.tradingThoughts.filter(t => t.id !== id) }))
+    get()._sync()
+  },
+
+  upsertWeeklyScorecard: (snapshot) => {
+    const normalized = normalizeWeeklyScorecardSnapshot(snapshot)
+    set(s => {
+      const exists = s.weeklyScorecards.some(item => item.weekKey === normalized.weekKey)
+      const next = exists
+        ? s.weeklyScorecards.map(item => item.weekKey === normalized.weekKey ? normalized : item)
+        : [normalized, ...s.weeklyScorecards]
+      return { weeklyScorecards: next.sort((a, b) => b.weekStart.localeCompare(a.weekStart)) }
+    })
+    get()._sync()
+    return normalized
+  },
+
+  getWeeklyScorecard: (weekKey) => {
+    if (!weekKey) return null
+    return get().weeklyScorecards.find(item => item.weekKey === weekKey) || null
+  },
+
+  updateWeeklyScorecardReflection: (weekKey, updates = {}) => {
+    if (!weekKey) return
+    set(s => ({
+      weeklyScorecards: s.weeklyScorecards.map(item => (
+        item.weekKey === weekKey
+          ? normalizeWeeklyScorecardSnapshot({
+              ...item,
+              notes: typeof updates.notes === 'string' ? updates.notes : item.notes,
+              selfGrade: typeof updates.selfGrade === 'string' ? updates.selfGrade : item.selfGrade,
+              updatedAt: new Date().toISOString(),
+            })
+          : item
+      )),
+    }))
+    get()._sync()
+  },
+
+  finalizeWeeklyScorecard: (weekKey) => {
+    if (!weekKey) return
+    set(s => ({
+      weeklyScorecards: s.weeklyScorecards.map(item => (
+        item.weekKey === weekKey
+          ? normalizeWeeklyScorecardSnapshot({
+              ...item,
+              status: 'finalized',
+              finalizedAt: item.finalizedAt || new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            })
+          : item
+      )),
+    }))
+    get()._sync()
+  },
+
+  unfinalizeWeeklyScorecard: (weekKey) => {
+    if (!weekKey) return
+    set(s => ({
+      weeklyScorecards: s.weeklyScorecards.map(item => (
+        item.weekKey === weekKey
+          ? normalizeWeeklyScorecardSnapshot({
+              ...item,
+              status: 'draft',
+              finalizedAt: null,
+              updatedAt: new Date().toISOString(),
+            })
+          : item
+      )),
+    }))
     get()._sync()
   },
 }))

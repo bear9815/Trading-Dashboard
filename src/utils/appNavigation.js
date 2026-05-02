@@ -8,7 +8,7 @@ export const APP_PAGES = [
   'morning',
   'journal',
   'ai',
-  'edgelab',
+  'scorecard',
   'regime',
   'settings',
   'rrg',
@@ -17,10 +17,19 @@ export const APP_PAGES = [
   'agents',
 ]
 
+const LEGACY_PAGE_ALIASES = {
+  edgelab: 'scorecard',
+}
+
 export const APP_PAGE_STORAGE_KEY = 'trading-dashboard:page'
 
 export function isAppPage(value) {
   return APP_PAGES.includes(value)
+}
+
+function resolvePageAlias(value) {
+  const normalized = String(value || '').trim()
+  return LEGACY_PAGE_ALIASES[normalized] || normalized
 }
 
 export function buildPageHash(page) {
@@ -28,14 +37,14 @@ export function buildPageHash(page) {
 }
 
 export function getPageFromLocationLike(locationLike) {
-  const hashPage = String(locationLike?.hash || '')
+  const hashPage = resolvePageAlias(String(locationLike?.hash || '')
     .replace(/^#/, '')
     .split('?')[0]
-    .trim()
+    .trim())
 
   if (isAppPage(hashPage)) return hashPage
 
-  const statePage = locationLike?.state?.page
+  const statePage = resolvePageAlias(locationLike?.state?.page)
   if (isAppPage(statePage)) return statePage
 
   return APP_PAGES[0]
@@ -43,10 +52,12 @@ export function getPageFromLocationLike(locationLike) {
 
 export function getRestoredPage({ locationLike, storedPage } = {}) {
   const locationPage = getPageFromLocationLike(locationLike)
-  const hasExplicitLocationPage = isAppPage(String(locationLike?.hash || '').replace(/^#/, '').split('?')[0].trim())
-    || isAppPage(locationLike?.state?.page)
+  const resolvedHashPage = resolvePageAlias(String(locationLike?.hash || '').replace(/^#/, '').split('?')[0].trim())
+  const resolvedStatePage = resolvePageAlias(locationLike?.state?.page)
+  const hasExplicitLocationPage = isAppPage(resolvedHashPage) || isAppPage(resolvedStatePage)
 
   if (hasExplicitLocationPage) return locationPage
-  if (isAppPage(storedPage)) return storedPage
+  const resolvedStoredPage = resolvePageAlias(storedPage)
+  if (isAppPage(resolvedStoredPage)) return resolvedStoredPage
   return locationPage
 }

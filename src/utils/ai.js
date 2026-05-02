@@ -637,6 +637,28 @@ If fewer than 3 trades this week, focus on process quality and mental game from 
   return JSON.parse(jsonMatch[0])
 }
 
+export async function generateWeeklyScorecardSummary(input, apiKey) {
+  if (!apiKey) throw new Error('No Gemini API key. Add it in Settings.')
+
+  const prompt = `You are a trading performance coach writing a short weekly scorecard summary.
+
+Weekly data:
+${JSON.stringify(input)}
+
+Return ONLY valid JSON:
+{
+  "headline": "1 sentence capturing the week's main process story",
+  "summary": "2-3 sentences explaining what the metrics say",
+  "wins": ["up to 3 concrete wins grounded in the metrics or logs"],
+  "focus": ["up to 3 practical focus points for next week"]
+}
+
+Keep it short, specific, and process-oriented. Do not invent trades or habits that are not in the input.`
+
+  const text = await callAI(apiKey, prompt)
+  return parseJsonText(text)
+}
+
 /**
  * Pre-Trade Score — AI scores a new trade setup against historical winning DNA.
  */
