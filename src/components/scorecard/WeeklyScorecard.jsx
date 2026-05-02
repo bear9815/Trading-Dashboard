@@ -58,7 +58,7 @@ function WeeklyView({
 
   const routineHabits = habits.filter(habit => settings.routineHabitIds.includes(habit.id))
   const meditationHabits = habits.filter(habit => settings.meditationHabitIds.includes(habit.id))
-  const rltHabits = habits.filter(habit => settings.rltHabitIds.includes(habit.id))
+  const movementHabits = habits.filter(habit => settings.movementHabitIds.includes(habit.id))
 
   if (!scorecard) {
     return (
@@ -116,7 +116,7 @@ function WeeklyView({
         <MetricCard label="Model Book Adds" value={metrics.newModelBookStocks} meta={`${scorecard.comparisonToPriorWeek.newModelBookStocks > 0 ? '+' : ''}${scorecard.comparisonToPriorWeek.newModelBookStocks} vs prior`} />
         <MetricCard label="Morning Entries" value={metrics.morningEntriesLogged} />
         <MetricCard label="Meditation" value={metrics.meditationSessions} meta={`Best streak ${metrics.bestMeditationStreak}`} />
-        <MetricCard label="RLT" value={metrics.rltSessions} meta={`Best streak ${metrics.bestRltStreak}`} />
+        <MetricCard label="Movement" value={metrics.movementSessions} meta={`Best streak ${metrics.bestMovementStreak}`} />
         <MetricCard label="Wellness Total" value={metrics.wellnessSessions} meta={`Routine streak ${metrics.bestRoutineStreak}`} />
       </div>
 
@@ -215,10 +215,10 @@ function WeeklyView({
                 onToggle={(id) => toggleIds('meditationHabitIds', id)}
               />
               <HabitChecklist
-                title={`RLT (${rltHabits.length} selected)`}
+                title={`Movement (${movementHabits.length} selected)`}
                 habits={habits}
-                selectedIds={settings.rltHabitIds}
-                onToggle={(id) => toggleIds('rltHabitIds', id)}
+                selectedIds={settings.movementHabitIds}
+                onToggle={(id) => toggleIds('movementHabitIds', id)}
               />
             </div>
           </div>

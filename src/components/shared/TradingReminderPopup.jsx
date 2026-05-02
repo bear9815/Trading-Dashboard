@@ -4,6 +4,7 @@ import { useHabitsStore }   from '../../store/useHabitsStore.js'
 import { useJournalStore }  from '../../store/useJournalStore.js'
 import { useMorningStore }  from '../../store/useMorningStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
+import { resolveCheckinHabitIds } from '../../utils/checkinHabits.js'
 
 const THOUGHT_TAGS = ['note', 'insight', 'discipline', 'warning', 'fomo']
 
@@ -94,6 +95,7 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
   const todayEntry  = getEntryByDate(localDateString())
   const activeGoals = goals.filter(g => g.status === 'active').slice(0, 4)
   const dailyHabits = habits.filter(h => h.active !== false && (h.frequency === 'daily' || !h.frequency))
+  const { cyclingHabitId, walkHabitId } = useMemo(() => resolveCheckinHabitIds(habits), [habits])
 
   const streaks = useMemo(() => {
     const map = {}
@@ -226,6 +228,18 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
   const completedToday = dailyHabits.filter(h => isCompleted(h.id, localDateString())).length
   const quickStates = QUICK_STATES[mode] || QUICK_STATES.morning
   const promptText = pickDailyPrompt(mode)
+  const today = localDateString()
+
+  const movementOptions = [
+    { id: 'cycling', label: 'Cycling', habitId: cyclingHabitId },
+    { id: 'walk', label: 'Walk', habitId: walkHabitId },
+  ]
+
+  const toggleMovementHabit = (habitId) => {
+    if (!habitId) return
+    if (isCompleted(habitId, today)) removeCompletion(habitId, today)
+    else logCompletion(habitId, today)
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -371,12 +385,47 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
           </div>
 
           {/* Daily habits */}
+          {!isMorning && (
+            <div className="px-5 py-4">
+              <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-3">Afternoon Movement</p>
+              <div className="space-y-1.5">
+                {movementOptions.map(item => {
+                  const done = item.habitId ? isCompleted(item.habitId, today) : false
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => toggleMovementHabit(item.habitId)}
+                      disabled={!item.habitId}
+                      className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left transition-all group ${
+                        item.habitId ? '' : 'opacity-60 cursor-not-allowed'
+                      }`}
+                      style={{ background: done ? 'rgba(255,255,255,0.025)' : 'transparent' }}
+                    >
+                      {done
+                        ? <CheckCircle2 size={13} style={{ color: '#00d084', flexShrink: 0 }} />
+                        : <Circle size={13} className="text-gray-700 group-hover:text-gray-500 transition-colors" style={{ flexShrink: 0 }} />
+                      }
+                      <span className={`text-[13px] flex-1 transition-colors ${
+                        done ? 'text-gray-600 line-through decoration-gray-700' : 'text-gray-300'
+                      }`}>
+                        {item.label}
+                      </span>
+                      {!item.habitId && (
+                        <span className="text-[10px] text-gray-600">Add habit</span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {dailyHabits.length > 0 && (
             <div className="px-5 py-4">
               <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-3">Today's Habits</p>
               <div className="space-y-1.5">
                 {dailyHabits.slice(0, 6).map(h => {
-                  const done   = isCompleted(h.id, localDateString())
+                  const done   = isCompleted(h.id, today)
                   const streak = streaks[h.id] || 0
                   return (
                     <button

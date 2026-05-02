@@ -73,14 +73,14 @@ test('buildWeeklyScorecardMetrics aggregates trades, reviews, model-book entries
       { habitId: 'routine-2', date: '2026-04-30' },
       { habitId: 'med-1', date: '2026-04-27' },
       { habitId: 'med-1', date: '2026-04-28' },
-      { habitId: 'rlt-1', date: '2026-04-29' },
-      { habitId: 'rlt-1', date: '2026-05-01' },
+      { habitId: 'cycle-1', date: '2026-04-29' },
+      { habitId: 'walk-1', date: '2026-05-01' },
     ],
     settings: {
       routineRequiresMorningEntry: true,
       routineHabitIds: ['routine-1', 'routine-2'],
       meditationHabitIds: ['med-1'],
-      rltHabitIds: ['rlt-1'],
+      movementHabitIds: ['cycle-1', 'walk-1'],
     },
   })
 
@@ -92,11 +92,11 @@ test('buildWeeklyScorecardMetrics aggregates trades, reviews, model-book entries
   assert.equal(metrics.routineCompleteTradingDays, 3)
   assert.equal(metrics.tradingDaysOnPlan, 60)
   assert.equal(metrics.meditationSessions, 2)
-  assert.equal(metrics.rltSessions, 2)
+  assert.equal(metrics.movementSessions, 2)
   assert.equal(metrics.wellnessSessions, 4)
   assert.equal(metrics.bestRoutineStreak, 2)
   assert.equal(metrics.bestMeditationStreak, 2)
-  assert.equal(metrics.bestRltStreak, 1)
+  assert.equal(metrics.bestMovementStreak, 1)
 })
 
 test('buildWeeklyScorecardSnapshot includes prior-week deltas and editable reflection fields', () => {
@@ -114,13 +114,13 @@ test('buildWeeklyScorecardSnapshot includes prior-week deltas and editable refle
       newModelBookStocks: 1,
       routineCompleteTradingDays: 4,
       meditationSessions: 3,
-      rltSessions: 2,
+      movementSessions: 2,
       wellnessSessions: 5,
       morningEntriesLogged: 5,
       tradingDaysOnPlan: 80,
       bestRoutineStreak: 3,
       bestMeditationStreak: 2,
-      bestRltStreak: 1,
+      bestMovementStreak: 1,
     },
     previousMetrics: {
       tradesPlaced: 2,
@@ -129,13 +129,13 @@ test('buildWeeklyScorecardSnapshot includes prior-week deltas and editable refle
       newModelBookStocks: 0,
       routineCompleteTradingDays: 2,
       meditationSessions: 1,
-      rltSessions: 1,
+      movementSessions: 1,
       wellnessSessions: 2,
       morningEntriesLogged: 2,
       tradingDaysOnPlan: 40,
       bestRoutineStreak: 1,
       bestMeditationStreak: 1,
-      bestRltStreak: 1,
+      bestMovementStreak: 1,
     },
     aiSummary: null,
     existing: null,
@@ -144,7 +144,7 @@ test('buildWeeklyScorecardSnapshot includes prior-week deltas and editable refle
       routineRequiresMorningEntry: true,
       routineHabitIds: ['routine-1'],
       meditationHabitIds: ['med-1'],
-      rltHabitIds: ['rlt-1'],
+      movementHabitIds: ['cycle-1'],
     },
   })
 
@@ -171,7 +171,7 @@ test('buildMonthlyScorecardRollup groups saved weekly snapshots by the week end 
           newModelBookStocks: 1,
           routineCompleteTradingDays: 4,
           meditationSessions: 3,
-          rltSessions: 2,
+          movementSessions: 2,
           wellnessSessions: 5,
           morningEntriesLogged: 5,
           tradingDaysOnPlan: 80,
@@ -187,7 +187,7 @@ test('buildMonthlyScorecardRollup groups saved weekly snapshots by the week end 
           newModelBookStocks: 0,
           routineCompleteTradingDays: 3,
           meditationSessions: 1,
-          rltSessions: 1,
+          movementSessions: 1,
           wellnessSessions: 2,
           morningEntriesLogged: 4,
           tradingDaysOnPlan: 60,
@@ -203,7 +203,7 @@ test('buildMonthlyScorecardRollup groups saved weekly snapshots by the week end 
           newModelBookStocks: 9,
           routineCompleteTradingDays: 5,
           meditationSessions: 9,
-          rltSessions: 9,
+          movementSessions: 9,
           wellnessSessions: 18,
           morningEntriesLogged: 5,
           tradingDaysOnPlan: 100,
@@ -218,7 +218,7 @@ test('buildMonthlyScorecardRollup groups saved weekly snapshots by the week end 
   assert.equal(rollup.totals.tradeReviewsCompleted, 5)
   assert.equal(rollup.totals.newModelBookStocks, 1)
   assert.equal(rollup.totals.meditationSessions, 4)
-  assert.equal(rollup.totals.rltSessions, 3)
+  assert.equal(rollup.totals.movementSessions, 3)
   assert.equal(rollup.averages.reviewCompletionRate, 87.5)
   assert.equal(rollup.averages.tradingDaysOnPlan, 70)
 })

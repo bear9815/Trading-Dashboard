@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Wind, Brain, Shield, ChevronRight, Sword } from 'lucide-react'
+import { useHabitsStore } from '../../store/useHabitsStore.js'
+import { resolveCheckinHabitIds } from '../../utils/checkinHabits.js'
 
 const STORAGE_KEY = () => `checkin_${new Date().toISOString().slice(0, 10)}`
 
@@ -59,6 +61,7 @@ export default function MorningCheckin() {
   const [douglasChecks, setDouglas] = useState({})
   const [declared, setDeclared]     = useState(false)
   const [breathing, setBreathing]   = useState(true) // show breathing cue first
+  const { habits, logCompletion, removeCompletion, isCompleted } = useHabitsStore()
 
   useEffect(() => {
     if (!localStorage.getItem(STORAGE_KEY())) {
@@ -79,6 +82,9 @@ export default function MorningCheckin() {
   const howellDone  = HOWELL_CHECKS.every(c => howellChecks[c.id])
   const douglasDone = DOUGLAS_TRUTHS.every(t => douglasChecks[t.num])
   const currentStep = STEPS[step]
+  const today = new Date().toISOString().slice(0, 10)
+  const { meditationHabitId } = resolveCheckinHabitIds(habits)
+  const meditationCompleted = meditationHabitId ? isCompleted(meditationHabitId, today) : false
 
   function toggleHowell(id) {
     setHowell(prev => ({ ...prev, [id]: !prev[id] }))
@@ -86,6 +92,12 @@ export default function MorningCheckin() {
 
   function toggleDouglas(num) {
     setDouglas(prev => ({ ...prev, [num]: !prev[num] }))
+  }
+
+  function toggleMorningMeditation() {
+    if (!meditationHabitId) return
+    if (meditationCompleted) removeCompletion(meditationHabitId, today)
+    else logCompletion(meditationHabitId, today)
   }
 
   return (
@@ -304,6 +316,37 @@ export default function MorningCheckin() {
                 <span className="text-xs text-gray-300 leading-relaxed">
                   I accept the risk. I am prepared for whatever comes. I trade my edge, not my emotions.
                 </span>
+              </label>
+
+              <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all mb-4 ${
+                meditationCompleted
+                  ? 'border-accent-blue/30 bg-accent-blue/5'
+                  : 'border-white/8 bg-white/2 hover:border-white/15'
+              } ${meditationHabitId ? '' : 'opacity-70'}`}>
+                <div className={`mt-0.5 w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-all ${
+                  meditationCompleted ? 'bg-accent-blue border-accent-blue' : 'border-gray-600'
+                }`}>
+                  {meditationCompleted && (
+                    <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                      <path d="M1 4l3 3 5-6" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  )}
+                </div>
+                <input
+                  type="checkbox"
+                  className="hidden"
+                  checked={meditationCompleted}
+                  disabled={!meditationHabitId}
+                  onChange={toggleMorningMeditation}
+                />
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-300 leading-relaxed">Morning Meditation</p>
+                  <p className="mt-1 text-[11px] text-gray-500 leading-relaxed">
+                    {meditationHabitId
+                      ? 'Track whether you completed your meditation before the open.'
+                      : 'Add a Meditation habit in Journal → Habits to track this automatically.'}
+                  </p>
+                </div>
               </label>
 
               {/* Enter the Arena */}

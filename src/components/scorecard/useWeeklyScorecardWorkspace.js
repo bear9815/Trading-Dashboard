@@ -179,9 +179,9 @@ export function useWeeklyScorecardWorkspace() {
       const ids = suggestHabitIdsByTitle(habits, [/medit/i])
       if (ids.length) patch.meditationHabitIds = ids
     }
-    if (!normalizedSettings.rltHabitIds.length) {
-      const ids = suggestHabitIdsByTitle(habits, [/rlt/i, /red light/i])
-      if (ids.length) patch.rltHabitIds = ids
+    if (!normalizedSettings.movementHabitIds.length) {
+      const ids = suggestHabitIdsByTitle(habits, [/cycl/i, /\bbik(e|ing)?\b/i, /\bwalk/i, /\bwalking\b/i])
+      if (ids.length) patch.movementHabitIds = ids
     }
     if (Object.keys(patch).length) {
       setWeeklyScorecardSettings({ ...normalizedSettings, ...patch })

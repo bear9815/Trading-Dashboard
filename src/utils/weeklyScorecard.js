@@ -71,11 +71,11 @@ function normalizeSnapshotMetrics(metrics = {}) {
     routineCompleteTradingDays: Number(metrics.routineCompleteTradingDays) || 0,
     tradingDaysOnPlan: Number(metrics.tradingDaysOnPlan) || 0,
     meditationSessions: Number(metrics.meditationSessions) || 0,
-    rltSessions: Number(metrics.rltSessions) || 0,
+    movementSessions: Number(metrics.movementSessions ?? metrics.rltSessions) || 0,
     wellnessSessions: Number(metrics.wellnessSessions) || 0,
     bestRoutineStreak: Number(metrics.bestRoutineStreak) || 0,
     bestMeditationStreak: Number(metrics.bestMeditationStreak) || 0,
-    bestRltStreak: Number(metrics.bestRltStreak) || 0,
+    bestMovementStreak: Number(metrics.bestMovementStreak ?? metrics.bestRltStreak) || 0,
   }
 }
 
@@ -108,7 +108,7 @@ export function normalizeWeeklyScorecardSettings(settings = {}) {
     routineRequiresMorningEntry: settings.routineRequiresMorningEntry !== false,
     routineHabitIds: normalizeIdArray(settings.routineHabitIds),
     meditationHabitIds: normalizeIdArray(settings.meditationHabitIds),
-    rltHabitIds: normalizeIdArray(settings.rltHabitIds),
+    movementHabitIds: normalizeIdArray(settings.movementHabitIds?.length ? settings.movementHabitIds : settings.rltHabitIds),
     autoPopupEnabled: settings.autoPopupEnabled !== false,
   }
 }
@@ -177,9 +177,9 @@ export function buildWeeklyScorecardMetrics({
     week.weekStart,
     week.weekEnd
   )
-  const rltSessions = countCompletionsByHabitIds(
+  const movementSessions = countCompletionsByHabitIds(
     completions,
-    normalizedSettings.rltHabitIds,
+    normalizedSettings.movementHabitIds,
     week.weekStart,
     week.weekEnd
   )
@@ -193,8 +193,8 @@ export function buildWeeklyScorecardMetrics({
     routineCompleteTradingDays,
     tradingDaysOnPlan,
     meditationSessions,
-    rltSessions,
-    wellnessSessions: meditationSessions + rltSessions,
+    movementSessions,
+    wellnessSessions: meditationSessions + movementSessions,
     bestRoutineStreak: longestTruthyStreak(routineDailyResults),
     bestMeditationStreak: longestCompletionStreak(
       completions,
@@ -202,9 +202,9 @@ export function buildWeeklyScorecardMetrics({
       week.weekStart,
       week.weekEnd
     ),
-    bestRltStreak: longestCompletionStreak(
+    bestMovementStreak: longestCompletionStreak(
       completions,
-      normalizedSettings.rltHabitIds,
+      normalizedSettings.movementHabitIds,
       week.weekStart,
       week.weekEnd
     ),
@@ -221,7 +221,7 @@ export function buildWeeklyScorecardComparison(metrics = {}, previousMetrics = {
     'routineCompleteTradingDays',
     'tradingDaysOnPlan',
     'meditationSessions',
-    'rltSessions',
+    'movementSessions',
     'wellnessSessions',
   ]
 
