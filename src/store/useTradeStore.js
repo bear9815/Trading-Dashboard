@@ -4,6 +4,7 @@ import { inferAccountBalance } from '../utils/equityCurve.js'
 import { enrichTrade } from '../utils/enrichTrade.js'
 import { REVIEW_CONTEXTS, getReviewQuestionById, normalizeReviewAnswer } from '../utils/modelBookReviewSchema.js'
 import { buildActivityDedupKey, buildTradeDedupKey } from '../utils/tradeDedup.js'
+import { resolveTradeIdeaId } from '../utils/tradeIdeas.js'
 import { normalizeTradeAlignmentReview } from '../utils/tradeReviewAlignment.js'
 import { supabase } from '../lib/supabase.js'
 import { LOCAL_ONLY_MODE } from '../lib/appMode.js'
@@ -157,7 +158,26 @@ export function normalizeTradeForStore(trade) {
 
   return {
     ...enrichedTrade,
+    tradeIdeaId: enrichedTrade.tradeIdeaId || enrichedTrade.id || null,
+    tradeIdeaSource: enrichedTrade.tradeIdeaSource || 'manual',
     alignmentReview: normalizeTradeAlignmentReview(enrichedTrade.alignmentReview),
+  }
+}
+
+function assignTradeIdeaMetadata(trade, existingTrades = []) {
+  if (!trade?.id) return trade
+  if (trade.tradeIdeaId) {
+    return {
+      ...trade,
+      tradeIdeaSource: trade.tradeIdeaSource || 'manual',
+    }
+  }
+
+  const linkedIdeaId = resolveTradeIdeaId(trade, existingTrades)
+  return {
+    ...trade,
+    tradeIdeaId: linkedIdeaId || trade.id,
+    tradeIdeaSource: 'auto',
   }
 }
 
@@ -387,7 +407,8 @@ export const useTradeStore = create((set, get) => ({
   // ── Trades ────────────────────────────────────────────────────────────────
 
   addTrade: (trade) => {
-    const t = normalizeTradeForStore({ ...trade, id: trade.id || uuidv4() })
+    const seededTrade = assignTradeIdeaMetadata({ ...trade, id: trade.id || uuidv4() }, get().trades)
+    const t = normalizeTradeForStore(seededTrade)
     set(s => ({ trades: [...s.trades, t], deletedTradeIds: s.deletedTradeIds.filter(id => id !== t.id) }))
     saveSnapshot(get())
     syncTrade(t)
@@ -400,7 +421,8 @@ export const useTradeStore = create((set, get) => ({
       const existingKeys = new Set(s.trades.map(buildTradeDedupKey))
       added = []
       for (const trade of newTrades) {
-        const candidate = normalizeTradeForStore({ ...trade, id: trade.id || uuidv4() })
+        const seededTrade = assignTradeIdeaMetadata({ ...trade, id: trade.id || uuidv4() }, [...s.trades, ...added])
+        const candidate = normalizeTradeForStore(seededTrade)
         const dedupKey = buildTradeDedupKey(candidate)
         if (existing.has(candidate.id) || existingKeys.has(dedupKey)) continue
         existing.add(candidate.id)
@@ -428,7 +450,8 @@ export const useTradeStore = create((set, get) => ({
 
       toAdd = []
       for (const trade of newTrades) {
-        const candidate = normalizeTradeForStore({ ...trade, id: trade.id || uuidv4(), _batchId: batchId })
+        const seededTrade = assignTradeIdeaMetadata({ ...trade, id: trade.id || uuidv4(), _batchId: batchId }, [...s.trades, ...toAdd])
+        const candidate = normalizeTradeForStore(seededTrade)
         const dedupKey = buildTradeDedupKey(candidate)
         if (existing.has(candidate.id) || existingTradeKeys.has(dedupKey)) continue
         existing.add(candidate.id)
@@ -515,6 +538,48 @@ export const useTradeStore = create((set, get) => ({
       return { trades }
     })
     if (updated) { syncTrade(updated); saveSnapshot(get()) }
+  },
+
+  reassignTradeIdea: (tradeId, targetTradeIdeaId) => {
+    if (!tradeId || !targetTradeIdeaId) return false
+    let updated = null
+    set(s => {
+      const trades = s.trades.map(trade => {
+        if (trade.id !== tradeId) return trade
+        updated = normalizeTradeForStore({
+          ...trade,
+          tradeIdeaId: targetTradeIdeaId,
+          tradeIdeaSource: 'manual',
+        })
+        return updated
+      })
+      return { trades }
+    })
+    if (!updated) return false
+    syncTrade(updated)
+    saveSnapshot(get())
+    return true
+  },
+
+  detachTradeIdea: (tradeId) => {
+    if (!tradeId) return false
+    let updated = null
+    set(s => {
+      const trades = s.trades.map(trade => {
+        if (trade.id !== tradeId) return trade
+        updated = normalizeTradeForStore({
+          ...trade,
+          tradeIdeaId: trade.id,
+          tradeIdeaSource: 'manual',
+        })
+        return updated
+      })
+      return { trades }
+    })
+    if (!updated) return false
+    syncTrade(updated)
+    saveSnapshot(get())
+    return true
   },
 
   updateTradeAlignmentAnswer: (tradeId, questionId, patch = {}) => {

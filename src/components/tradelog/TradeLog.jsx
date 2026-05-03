@@ -59,6 +59,12 @@ function formatAtrFlags(flags = []) {
   return flags.map(flag => flag.replaceAll('_', ' ')).join(', ')
 }
 
+function shortIdeaLabel(tradeIdeaId) {
+  const value = String(tradeIdeaId || '').trim()
+  if (!value) return 'Unlinked'
+  return `Idea ${value.slice(-6).toUpperCase()}`
+}
+
 function buildReconciliationRows(trades) {
   const rows = []
 
@@ -566,6 +572,26 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
   const [ssUploading, setSsUploading]     = useState(false)
   const { apiKey, accounts: settingsAccounts } = useSettingsStore()
   const { trades: allTrades }             = useTradeStore()
+  const sameBucketIdeas = useMemo(() => {
+    const bucketTrades = allTrades
+      .filter(candidate => candidate.id !== trade.id)
+      .filter(candidate => (candidate.account || '') === (trade.account || ''))
+      .filter(candidate => (candidate.symbol || '') === (trade.symbol || ''))
+      .filter(candidate => (candidate.position || 'Long') === (trade.position || 'Long'))
+      .sort((left, right) => new Date(left.entryDate || 0) - new Date(right.entryDate || 0))
+
+    const unique = new Map()
+    for (const candidate of bucketTrades) {
+      const tradeIdeaId = candidate.tradeIdeaId || candidate.id
+      if (!tradeIdeaId || unique.has(tradeIdeaId)) continue
+      unique.set(tradeIdeaId, candidate)
+    }
+    return [...unique.entries()]
+  }, [allTrades, trade])
+  const linkedLotCount = useMemo(() => {
+    const tradeIdeaId = trade.tradeIdeaId || trade.id
+    return allTrades.filter(candidate => (candidate.tradeIdeaId || candidate.id) === tradeIdeaId).length
+  }, [allTrades, trade])
 
   async function getAIFeedback() {
     if (!apiKey) { setAiNote('Add your Google Gemini API key in Settings to enable AI feedback.'); return }
@@ -647,6 +673,7 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
       exitNotes:    trade.exitNotes    ?? '',
       tags:         trade.tags         ?? [],
       processGrade: trade.processGrade ?? null,
+      tradeIdeaId: trade.tradeIdeaId || trade.id,
     })
     setEditing(true)
   }
@@ -730,6 +757,10 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
       exitNotes:    draft.exitNotes ?? trade.exitNotes ?? '',
       tags:         draft.tags ?? trade.tags ?? [],
       processGrade: draft.processGrade !== undefined ? draft.processGrade : (trade.processGrade ?? null),
+      tradeIdeaId: draft.tradeIdeaId || trade.tradeIdeaId || trade.id,
+      tradeIdeaSource: draft.tradeIdeaId && draft.tradeIdeaId !== (trade.tradeIdeaId || trade.id)
+        ? 'manual'
+        : (trade.tradeIdeaSource || 'manual'),
       // Preserve original stop once set — never overwrite with a trailed stop.
       // This is the denominator for all R calculations on this trade forever.
       _originalStopLoss: trade._originalStopLoss ?? num(draft.stopLoss),
@@ -795,6 +826,7 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
               ['Market',       trade.market   || '—'],
               ['Risk:Reward',  trade.riskReward != null ? `1:${trade.riskReward.toFixed(2)}` : '—'],
               ['Source',       trade.source   || '—'],
+              ['Trade Idea',   `${shortIdeaLabel(trade.tradeIdeaId || trade.id)}${linkedLotCount > 1 ? ` · ${linkedLotCount} lots` : ''}`],
             ].map(([label, val]) => (
               <div key={label}>
                 <p className="text-gray-500 mb-0.5">{label}</p>
@@ -1156,6 +1188,44 @@ function TradeDetail({ trade, onDelete, onUpdate }) {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3 text-xs">
+            <div className="rounded-xl border border-white/10 bg-surface-300/60 p-3 sm:col-span-3">
+              <p className="label mb-2">Trade Idea Link</p>
+              <div className="flex flex-wrap gap-2 mb-2">
+                <span className="text-[11px] px-2 py-1 rounded-full border border-accent-blue/20 bg-accent-blue/10 text-accent-blue">
+                  Current: {shortIdeaLabel(draft.tradeIdeaId || trade.tradeIdeaId || trade.id)}
+                </span>
+                <span className="text-[11px] px-2 py-1 rounded-full border border-white/10 bg-black/10 text-gray-400">
+                  {linkedLotCount} linked lot{linkedLotCount === 1 ? '' : 's'}
+                </span>
+              </div>
+              {sameBucketIdeas.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={draft.tradeIdeaId || trade.tradeIdeaId || trade.id}
+                    onChange={e => setDraft(d => ({ ...d, tradeIdeaId: e.target.value }))}
+                    className="bg-surface border border-white/10 rounded px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-accent-blue/50"
+                  >
+                    <option value={trade.id}>Start a new idea from this lot</option>
+                    {sameBucketIdeas.map(([tradeIdeaId, sourceTrade]) => (
+                      <option key={tradeIdeaId} value={tradeIdeaId}>
+                        {shortIdeaLabel(tradeIdeaId)} · {formatDate(sourceTrade.entryDate)} · {sourceTrade.status}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setDraft(d => ({ ...d, tradeIdeaId: trade.id }))}
+                    className="btn-ghost text-xs"
+                  >
+                    Own idea
+                  </button>
+                </div>
+              ) : (
+                <p className="text-[11px] text-gray-500">
+                  No other matching {trade.account || 'account'} {trade.symbol} {trade.position} ideas found. You can keep this lot on its own idea.
+                </p>
+              )}
+            </div>
             <EdgePicker
               edges={draft.edges ?? getEdges(trade)}
               onChange={edges => setDraft(d => ({ ...d, edges }))}
@@ -1537,15 +1607,27 @@ export default function TradeLog({ selectedAccount }) {
                         {expanded === trade.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                       </td>
                       <td className="px-4 py-3">
-                        <TickerTooltip symbol={trade.symbol}>
-                          <button
-                            onClick={e => { e.stopPropagation(); setSymbolModal(trade.symbol) }}
-                            className="font-bold mono text-white hover:text-accent-blue transition-colors"
-                            title={`View ${trade.symbol} stats`}
-                          >
-                            {trade.symbol}
-                          </button>
-                        </TickerTooltip>
+                        <div className="flex flex-col gap-1">
+                          <TickerTooltip symbol={trade.symbol}>
+                            <button
+                              onClick={e => { e.stopPropagation(); setSymbolModal(trade.symbol) }}
+                              className="font-bold mono text-white hover:text-accent-blue transition-colors text-left"
+                              title={`View ${trade.symbol} stats`}
+                            >
+                              {trade.symbol}
+                            </button>
+                          </TickerTooltip>
+                          <div className="flex flex-wrap gap-1.5">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-accent-blue/20 bg-accent-blue/10 text-accent-blue">
+                              {shortIdeaLabel(trade.tradeIdeaId || trade.id)}
+                            </span>
+                            {trade.tradeIdeaSource === 'manual' && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-white/10 bg-black/10 text-gray-500">
+                                manual
+                              </span>
+                            )}
+                          </div>
+                        </div>
                         {trade.atrValidationFlags?.length ? (
                           <div className="text-[10px] text-accent-yellow mt-0.5">
                             ATR: {trade.atrValidationFlags.slice(0, 2).map(f => f.replaceAll('_', ' ')).join(', ')}

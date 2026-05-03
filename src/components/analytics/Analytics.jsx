@@ -22,6 +22,7 @@ import {
 } from '../../utils/metrics.js'
 import { formatCurrency, formatR, formatDate } from '../../utils/formatters.js'
 import { fetchHistory, fetchATR14, fetchQuotes } from '../../utils/marketData.js'
+import { buildComboTrades } from '../../utils/tradeIdeas.js'
 import { resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
 
 const COLORS = { Win: '#00d084', Loss: '#ff4757', Scratch: '#6b7280' }
@@ -469,6 +470,8 @@ function AnalyticsHeader({
   setTimeframe,
   tradeMode,
   setTradeMode,
+  tradeLens,
+  setTradeLens,
   hasATRData,
   rBasis,
   setRBasis,
@@ -537,6 +540,23 @@ function AnalyticsHeader({
 
         <div className="flex items-center bg-surface-100/85 border border-white/10 rounded-xl p-1">
           {[
+            ['lots', 'Lots'],
+            ['ideas', 'Ideas'],
+          ].map(([mode, label]) => (
+            <button
+              key={mode}
+              onClick={() => setTradeLens(mode)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+                tradeLens === mode ? 'bg-accent-blue/20 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center bg-surface-100/85 border border-white/10 rounded-xl p-1">
+          {[
             ['closed', 'Closed'],
             ['realtime', 'Real Time'],
           ].map(([mode, label]) => (
@@ -569,9 +589,11 @@ function AnalyticsHeader({
         )}
 
         <span className="text-[10px] text-gray-600">
-          {tradeMode === 'realtime'
-            ? `${closedTradeCount} closed + ${realtimeTradeCount} live open${liveQuoteLoading ? ' · refreshing quotes' : ''}`
-            : 'Closed trades only'}
+          {tradeLens === 'ideas'
+            ? 'Combo mode shows only fully closed linked ideas.'
+            : tradeMode === 'realtime'
+              ? `${closedTradeCount} closed + ${realtimeTradeCount} live open${liveQuoteLoading ? ' · refreshing quotes' : ''}`
+              : 'Closed trades only'}
         </span>
       </div>
     </div>
@@ -1016,8 +1038,11 @@ export default function Analytics({ selectedAccount }) {
   const setTimeframe = setAnalyticsTimeframe
   const tradeMode    = analyticsTradeMode ?? 'closed'
   const setTradeMode = setAnalyticsTradeMode
+  const [tradeLens, setTradeLens] = useState('lots')
   const activeTab    = ANALYTICS_TABS.some(tab => tab.key === analyticsActiveTab) ? analyticsActiveTab : 'snapshot'
-  const sampleLabel  = tradeMode === 'realtime' ? 'Trades + Live Opens' : 'Closed Trades'
+  const sampleLabel  = tradeLens === 'ideas'
+    ? 'Linked Trade Combos'
+    : tradeMode === 'realtime' ? 'Trades + Live Opens' : 'Closed Trades'
 
   // R-basis toggle: 'stop' = stop-based R (default), 'atr' = ATR-budget R
   const [rBasis, setRBasis] = useState('stop')
@@ -1083,12 +1108,20 @@ export default function Analytics({ selectedAccount }) {
     return accountFiltered.filter(t => !excludedSet.has((t.symbol || '').toUpperCase()))
   }, [trades, selectedAccount, excludedSet])
 
+  const comboTrades = useMemo(() => buildComboTrades(filtered), [filtered])
+
   const timeframeCutoff = useMemo(() => getTimeframeCutoff(timeframe), [timeframe])
 
   const tfFiltered = useMemo(() => {
     if (!timeframeCutoff) return filtered
     return filtered.filter(t => t.entryDate && new Date(t.entryDate) >= timeframeCutoff)
   }, [filtered, timeframeCutoff])
+
+  const lensTrades = tradeLens === 'ideas' ? comboTrades : filtered
+  const lensTfFiltered = useMemo(() => {
+    if (!timeframeCutoff) return lensTrades
+    return lensTrades.filter(t => t.entryDate && new Date(t.entryDate) >= timeframeCutoff)
+  }, [lensTrades, timeframeCutoff])
 
   const openForRealtime = useMemo(
     () => tfFiltered.filter(t => t.status === 'Open' && t.symbol && t.entryPrice),
@@ -1126,6 +1159,11 @@ export default function Analytics({ selectedAccount }) {
     [tfFiltered]
   )
 
+  const lensClosedOnly = useMemo(
+    () => lensTfFiltered.filter(t => t.status === 'Win' || t.status === 'Loss'),
+    [lensTfFiltered]
+  )
+
   const anchoredRsTradeSample = useMemo(
     () => [...closedOnly].sort((a, b) => (new Date(a.entryDate).getTime() || 0) - (new Date(b.entryDate).getTime() || 0)),
     [closedOnly]
@@ -1137,6 +1175,11 @@ export default function Analytics({ selectedAccount }) {
     [tradeMode, closedOnly, realtimeOpenTrades]
   )
 
+  const lensClosed = useMemo(
+    () => lensClosedOnly.filter(t => t.status === 'Win' || t.status === 'Loss'),
+    [lensClosedOnly]
+  )
+
   const closedTradeCount = closedOnly.length
   const realtimeTradeCount = realtimeOpenTrades.length
 
@@ -1144,6 +1187,11 @@ export default function Analytics({ selectedAccount }) {
   const closedSorted = useMemo(
     () => [...closed].sort((a, b) => (getTradeResolutionDate(a)?.getTime() ?? 0) - (getTradeResolutionDate(b)?.getTime() ?? 0)),
     [closed]
+  )
+
+  const lensClosedSorted = useMemo(
+    () => [...lensClosed].sort((a, b) => (getTradeResolutionDate(a)?.getTime() ?? 0) - (getTradeResolutionDate(b)?.getTime() ?? 0)),
+    [lensClosed]
   )
 
   useEffect(() => {
@@ -1545,6 +1593,39 @@ export default function Analytics({ selectedAccount }) {
     })
   }, [monthlyStats, monthSort])
 
+  const lensMonthlyStats = useMemo(() => {
+    const byMonth = {}
+    for (const t of lensClosedSorted) {
+      let monthKey = ''
+      try { monthKey = getTradeResolutionDate(t)?.toISOString().slice(0, 7) || '' } catch { continue }
+      if (!monthKey) continue
+      if (!byMonth[monthKey]) byMonth[monthKey] = []
+      byMonth[monthKey].push(t)
+    }
+    return Object.entries(byMonth).map(([month, ts]) => {
+      const pf = calcProfitFactor(ts)
+      return {
+        month,
+        label: (() => { const d = new Date(`${month}-02`); return d.toLocaleString('default', { month: 'short', year: '2-digit' }) })(),
+        trades: ts.length,
+        winRate: calcWinRate(ts),
+        avgR: calcAvgR(ts, rField),
+        expectancy: calcExpectancy(ts),
+        profitFactor: isFinite(pf) ? pf : 999,
+        totalR: calcTotalR(ts, rField),
+        totalPL: ts.reduce((sum, trade) => sum + (trade.pl || 0), 0),
+      }
+    })
+  }, [lensClosedSorted, rField])
+
+  const sortedLensMonthly = useMemo(() => {
+    return [...lensMonthlyStats].sort((a, b) => {
+      const av = a[monthSort.field], bv = b[monthSort.field]
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0
+      return monthSort.dir === 'asc' ? cmp : -cmp
+    })
+  }, [lensMonthlyStats, monthSort])
+
   // ── Cumulative R ──────────────────────────────────────────────────────────
   const cumRData = useMemo(() => {
     let cumR = 0
@@ -1554,7 +1635,16 @@ export default function Analytics({ selectedAccount }) {
     })
   }, [closedSorted, rField])
 
+  const lensCumRData = useMemo(() => {
+    let cumulativeR = 0
+    return lensClosedSorted.map((trade, index) => {
+      cumulativeR += trade[rField] || 0
+      return { trade: index + 1, cumR: Math.round(cumulativeR * 100) / 100 }
+    })
+  }, [lensClosedSorted, rField])
+
   const totalR = calcTotalR(closedSorted, rField)
+  const lensTotalR = calcTotalR(lensClosedSorted, rField)
 
   const equityTrades = useMemo(
     () => tradeMode === 'realtime' ? [...filtered, ...realtimeOpenTrades] : filtered,
@@ -1753,7 +1843,15 @@ export default function Analytics({ selectedAccount }) {
     { name: 'Loss', value: losses },
   ]
 
+  const lensWins = lensClosed.filter(t => t.status === 'Win').length
+  const lensLosses = lensClosed.filter(t => t.status === 'Loss').length
+  const lensPieData = [
+    { name: 'Win', value: lensWins },
+    { name: 'Loss', value: lensLosses },
+  ]
+
   const rDist = calcRMultipleDistribution(closed, rField)
+  const lensRDist = calcRMultipleDistribution(lensClosed, rField)
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const byDow = Object.fromEntries(dayNames.map(d => [d, { total: 0, count: 0 }]))
@@ -1767,6 +1865,22 @@ export default function Analytics({ selectedAccount }) {
     day: d, total: byDow[d].total, count: byDow[d].count,
     avg: byDow[d].count ? byDow[d].total / byDow[d].count : 0
   }))
+
+  const lensDowData = useMemo(() => {
+    const byDowLocal = Object.fromEntries(dayNames.map(d => [d, { total: 0, count: 0 }]))
+    lensClosed.forEach(t => {
+      if (!t.entryDate) return
+      const dow = dayNames[new Date(t.entryDate).getDay()]
+      byDowLocal[dow].total += t.pl || 0
+      byDowLocal[dow].count++
+    })
+    return dayNames.slice(1, 6).map(d => ({
+      day: d,
+      total: byDowLocal[d].total,
+      count: byDowLocal[d].count,
+      avg: byDowLocal[d].count ? byDowLocal[d].total / byDowLocal[d].count : 0,
+    }))
+  }, [dayNames, lensClosed])
 
   // ── Hour × Day Heatmap ─────────────────────────────────────────────────────
   const heatmapData = useMemo(() => {
@@ -1817,6 +1931,14 @@ export default function Analytics({ selectedAccount }) {
     .sort((a, b) => Math.abs(b.pl) - Math.abs(a.pl))
     .slice(0, 10)
 
+  const lensSymbolData = useMemo(() => {
+    const bySymbolLocal = groupByField(lensClosed, 'symbol')
+    return Object.entries(bySymbolLocal)
+      .map(([sym, ts]) => ({ symbol: sym, pl: ts.reduce((sum, trade) => sum + (trade.pl || 0), 0), count: ts.length }))
+      .sort((left, right) => Math.abs(right.pl) - Math.abs(left.pl))
+      .slice(0, 10)
+  }, [lensClosed])
+
   // Edge-aware grouping: each trade can contribute to multiple edges.
   // "Bought on Strength" / "Bought on Weakness" are auto-computed from
   // entry price vs prior day's close — no manual tagging required.
@@ -1846,21 +1968,52 @@ export default function Analytics({ selectedAccount }) {
     }))
     .sort((a, b) => b.winRate - a.winRate)
 
+  const lensStratData = useMemo(() => {
+    const edgeMapLocal = {}
+    for (const t of lensClosed) {
+      const tEdges = t.edges?.length > 0 ? t.edges : (t.strategy ? [t.strategy] : [])
+      for (const edge of tEdges) {
+        if (!edge) continue
+        if (!edgeMapLocal[edge]) edgeMapLocal[edge] = []
+        edgeMapLocal[edge].push(t)
+      }
+    }
+    return Object.entries(edgeMapLocal)
+      .filter(([edge]) => edge && edge !== 'Unknown')
+      .map(([edge, ts]) => ({
+        strategy: edge.length > 20 ? `${edge.slice(0, 20)}…` : edge,
+        avgPL: ts.reduce((sum, trade) => sum + (trade.pl || 0), 0) / ts.length,
+        pl: ts.reduce((sum, trade) => sum + (trade.pl || 0), 0),
+        avgR: ts.reduce((sum, trade) => sum + (trade[rField] || 0), 0) / ts.length,
+        winRate: (ts.filter(trade => trade.status === 'Win').length / ts.length) * 100,
+        count: ts.length,
+      }))
+      .sort((left, right) => right.winRate - left.winRate)
+  }, [lensClosed, rField])
+
   const { avgWin, avgLoss } = calcAvgWinLoss(closed)
   const payoffRatio = Math.abs(avgLoss) > 0 ? avgWin / Math.abs(avgLoss) : null
+  const { avgWin: lensAvgWin, avgLoss: lensAvgLoss } = calcAvgWinLoss(lensClosed)
+  const lensPayoffRatio = Math.abs(lensAvgLoss) > 0 ? lensAvgWin / Math.abs(lensAvgLoss) : null
   const avgWinR  = useMemo(() => { const w = closed.filter(t => t.status === 'Win'  && t[rField] != null); return w.length ? w.reduce((s, t) => s + t[rField], 0) / w.length : null }, [closed, rField])
   const avgLossR = useMemo(() => { const l = closed.filter(t => t.status === 'Loss' && t[rField] != null); return l.length ? l.reduce((s, t) => s + t[rField], 0) / l.length : null }, [closed, rField])
+  const lensAvgWinR = useMemo(() => { const w = lensClosed.filter(t => t.status === 'Win'  && t[rField] != null); return w.length ? w.reduce((s, t) => s + t[rField], 0) / w.length : null }, [lensClosed, rField])
+  const lensAvgLossR = useMemo(() => { const l = lensClosed.filter(t => t.status === 'Loss' && t[rField] != null); return l.length ? l.reduce((s, t) => s + t[rField], 0) / l.length : null }, [lensClosed, rField])
   const profitFactor = calcProfitFactor(closed)
   const expectancy = calcExpectancy(closed)
   const avgR = calcAvgR(closed, rField)
   const winRate = calcWinRate(closed)
+  const lensProfitFactor = calcProfitFactor(lensClosed)
+  const lensExpectancy = calcExpectancy(lensClosed)
+  const lensAvgR = calcAvgR(lensClosed, rField)
+  const lensWinRate = calcWinRate(lensClosed)
   const avgStopEff = useMemo(() => calcAvgStopEfficiency(closed), [closed])
   const atrSummary = useMemo(() => calcAtrAnalyticsSummary(closed), [closed])
   const hasATRData = useMemo(() => tfFiltered.some(t => t.atrValue != null), [tfFiltered])
-  const rSampleCount = closed.filter(t => t[rField] != null).length
-  const winSampleCount = closed.filter(t => t.status === 'Win').length
-  const lossSampleCount = closed.filter(t => t.status === 'Loss').length
-  const enoughHeadlineSample = closed.length >= 10
+  const rSampleCount = lensClosed.filter(t => t[rField] != null).length
+  const winSampleCount = lensClosed.filter(t => t.status === 'Win').length
+  const lossSampleCount = lensClosed.filter(t => t.status === 'Loss').length
+  const enoughHeadlineSample = lensClosed.length >= 10
   const enoughRSample = rSampleCount >= 10
   const enoughDistributionSample = closed.length >= 12
   const enoughSQNSample = rSampleCount >= 20
@@ -1912,6 +2065,22 @@ export default function Analytics({ selectedAccount }) {
     }
     return { current, curType, maxWin, maxLoss }
   }, [closedSorted])
+
+  const lensStreaks = useMemo(() => {
+    if (lensClosedSorted.length === 0) return null
+    let maxWin = 0, maxLoss = 0, curWin = 0, curLoss = 0
+    for (const t of lensClosedSorted) {
+      if (t.status === 'Win') { curWin++; curLoss = 0; maxWin = Math.max(maxWin, curWin) }
+      else                   { curLoss++; curWin = 0; maxLoss = Math.max(maxLoss, curLoss) }
+    }
+    const curType = lensClosedSorted[lensClosedSorted.length - 1]?.status
+    let current = 0
+    for (let i = lensClosedSorted.length - 1; i >= 0; i--) {
+      if (lensClosedSorted[i].status === curType) current++
+      else break
+    }
+    return { current, curType, maxWin, maxLoss }
+  }, [lensClosedSorted])
 
   // ── Hold Duration ─────────────────────────────────────────────────────────
   const holdDurationData = useMemo(() => {
@@ -2229,6 +2398,8 @@ export default function Analytics({ selectedAccount }) {
           setTimeframe={setTimeframe}
           tradeMode={tradeMode}
           setTradeMode={setTradeMode}
+          tradeLens={tradeLens}
+          setTradeLens={setTradeLens}
           hasATRData={hasATRData}
           rBasis={rBasis}
           setRBasis={setRBasis}
@@ -2276,6 +2447,8 @@ export default function Analytics({ selectedAccount }) {
         setTimeframe={setTimeframe}
         tradeMode={tradeMode}
         setTradeMode={setTradeMode}
+        tradeLens={tradeLens}
+        setTradeLens={setTradeLens}
         hasATRData={hasATRData}
         rBasis={rBasis}
         setRBasis={setRBasis}
@@ -2293,7 +2466,7 @@ export default function Analytics({ selectedAccount }) {
 
       <div className={tabContentClass('snapshot')}>
 
-      {hasATRData && (
+      {hasATRData && tradeLens === 'lots' && (
         <div className="card border border-accent-blue/15 bg-gradient-to-br from-accent-blue/5 via-transparent to-accent-yellow/5">
           <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
             <div>
@@ -2380,9 +2553,9 @@ export default function Analytics({ selectedAccount }) {
       <div className="grid grid-cols-3 sm:grid-cols-7 gap-3">
 
         <StatCardWithTooltip
-          label="Win Rate" value={enoughHeadlineSample ? `${winRate.toFixed(1)}%` : '—'}
-          valueClass={!enoughHeadlineSample ? 'text-gray-500' : winRate >= 50 ? 'text-accent-green' : 'text-accent-red'}
-          sub={{ label: `n=${closed.length}${enoughHeadlineSample ? '' : ' · low sample'}`, cls: enoughHeadlineSample ? 'text-gray-600' : 'text-accent-yellow' }}
+          label="Win Rate" value={enoughHeadlineSample ? `${lensWinRate.toFixed(1)}%` : '—'}
+          valueClass={!enoughHeadlineSample ? 'text-gray-500' : lensWinRate >= 50 ? 'text-accent-green' : 'text-accent-red'}
+          sub={{ label: `n=${lensClosed.length}${enoughHeadlineSample ? '' : ' · low sample'}`, cls: enoughHeadlineSample ? 'text-gray-600' : 'text-accent-yellow' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Win Rate</p>
             <p className="text-gray-400 leading-relaxed mb-3">The percentage of trades in the selected sample that result in a profit. Higher isn't always better — a 40% win rate with large winners beats a 70% win rate with tiny gains.</p>
@@ -2396,13 +2569,15 @@ export default function Analytics({ selectedAccount }) {
         />
 
         <StatCardWithTooltip
-          label={rBasis === 'atr' ? 'Avg R (ATR)' : 'Avg R-Multiple'} value={enoughRSample ? formatR(avgR) : '—'}
-          valueClass={!enoughRSample ? 'text-gray-500' : avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}
+          label={rBasis === 'atr' ? 'Avg R (ATR)' : 'Avg R-Multiple'} value={enoughRSample ? formatR(lensAvgR) : '—'}
+          valueClass={!enoughRSample ? 'text-gray-500' : lensAvgR >= 0 ? 'text-accent-green' : 'text-accent-red'}
           sub={{ label: `n=${rSampleCount}${enoughRSample ? '' : ' · low sample'}`, cls: enoughRSample ? 'text-gray-600' : 'text-accent-yellow' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Average R-Multiple</p>
             <p className="text-gray-400 leading-relaxed mb-3">
-              {rBasis === 'atr'
+              {tradeLens === 'ideas'
+                ? 'In combo mode this averages fully closed linked trade ideas instead of standalone lots.'
+                : rBasis === 'atr'
                 ? 'P&L ÷ (ATR × position size). Your true system expectancy — accounts for tight stops vs ATR sizing. A stopped-out trade with a tight stop costs less than -1R here.'
                 : 'The average profit or loss per trade in the selected sample expressed as a multiple of your actual stop risk (1R = stop distance × shares).'}
             </p>
@@ -2416,8 +2591,8 @@ export default function Analytics({ selectedAccount }) {
         />
 
         <StatCardWithTooltip
-          label="Total R" value={rSampleCount > 0 ? formatR(totalR) : '—'}
-          valueClass={rSampleCount === 0 ? 'text-gray-500' : totalR >= 0 ? 'text-accent-green' : 'text-accent-red'}
+          label="Total R" value={rSampleCount > 0 ? formatR(lensTotalR) : '—'}
+          valueClass={rSampleCount === 0 ? 'text-gray-500' : lensTotalR >= 0 ? 'text-accent-green' : 'text-accent-red'}
           sub={{ label: `n=${rSampleCount}`, cls: 'text-gray-600' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Total R</p>
@@ -2462,9 +2637,9 @@ export default function Analytics({ selectedAccount }) {
         />
 
         <StatCardWithTooltip
-          label="Profit Factor" value={enoughHeadlineSample ? (isFinite(profitFactor) ? profitFactor.toFixed(2) : '∞') : '—'}
-          valueClass={!enoughHeadlineSample ? 'text-gray-500' : profitFactor >= 1.5 ? 'text-accent-green' : profitFactor >= 1 ? 'text-accent-yellow' : 'text-accent-red'}
-          sub={{ label: `${winSampleCount}W · ${lossSampleCount}L${enoughHeadlineSample ? '' : ' · low sample'}`, cls: enoughHeadlineSample ? 'text-gray-600' : 'text-accent-yellow' }}
+          label="Profit Factor" value={enoughHeadlineSample ? (isFinite(lensProfitFactor) ? lensProfitFactor.toFixed(2) : '∞') : '—'}
+          valueClass={!enoughHeadlineSample ? 'text-gray-500' : lensProfitFactor >= 1.5 ? 'text-accent-green' : lensProfitFactor >= 1 ? 'text-accent-yellow' : 'text-accent-red'}
+          sub={{ label: `${lensWins}W · ${lensLosses}L${enoughHeadlineSample ? '' : ' · low sample'}`, cls: enoughHeadlineSample ? 'text-gray-600' : 'text-accent-yellow' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Profit Factor</p>
             <p className="text-gray-400 leading-relaxed mb-2">Gross winning P&L ÷ Gross losing P&L. For every $1 lost, how many $ did you make? The most size-agnostic measure of system quality — works regardless of account size or position sizing.</p>
@@ -2478,9 +2653,9 @@ export default function Analytics({ selectedAccount }) {
         />
 
         <StatCardWithTooltip
-          label="Expectancy / Trade" value={enoughHeadlineSample ? formatCurrency(expectancy, true) : '—'}
-          valueClass={!enoughHeadlineSample ? 'text-gray-500' : expectancy >= 0 ? 'text-accent-green' : 'text-accent-red'}
-          sub={{ label: `n=${closed.length}${enoughHeadlineSample ? '' : ' · low sample'}`, cls: enoughHeadlineSample ? 'text-gray-600' : 'text-accent-yellow' }}
+          label="Expectancy / Trade" value={enoughHeadlineSample ? formatCurrency(lensExpectancy, true) : '—'}
+          valueClass={!enoughHeadlineSample ? 'text-gray-500' : lensExpectancy >= 0 ? 'text-accent-green' : 'text-accent-red'}
+          sub={{ label: `n=${lensClosed.length}${enoughHeadlineSample ? '' : ' · low sample'}`, cls: enoughHeadlineSample ? 'text-gray-600' : 'text-accent-yellow' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Expectancy Per Trade</p>
             <p className="text-accent-blue font-medium text-[11px] mb-2">Van Tharp: "The most important statistic a trader can know"</p>
@@ -2491,9 +2666,9 @@ export default function Analytics({ selectedAccount }) {
         />
 
         <StatCardWithTooltip
-          label="Payoff Ratio" value={enoughHeadlineSample && payoffRatio != null ? `${payoffRatio.toFixed(2)}x` : '—'}
-          valueClass={!enoughHeadlineSample || payoffRatio == null ? 'text-gray-500' : payoffRatio >= 1.5 ? 'text-accent-green' : payoffRatio >= 1 ? 'text-accent-yellow' : 'text-accent-red'}
-          sub={{ label: `${winSampleCount}W / ${lossSampleCount}L`, cls: 'text-gray-600' }}
+          label="Payoff Ratio" value={enoughHeadlineSample && lensPayoffRatio != null ? `${lensPayoffRatio.toFixed(2)}x` : '—'}
+          valueClass={!enoughHeadlineSample || lensPayoffRatio == null ? 'text-gray-500' : lensPayoffRatio >= 1.5 ? 'text-accent-green' : lensPayoffRatio >= 1 ? 'text-accent-yellow' : 'text-accent-red'}
+          sub={{ label: `${lensWins}W / ${lensLosses}L`, cls: 'text-gray-600' }}
           tooltipContent={<>
             <p className="font-bold text-white text-sm mb-2">Payoff Ratio</p>
             <p className="text-gray-400 leading-relaxed mb-3">Average winning trade $ ÷ Average losing trade $. Shows how large your winners are relative to your losers. A 2.0x payoff means winners are twice the size of losers on average.</p>
@@ -2743,52 +2918,52 @@ export default function Analytics({ selectedAccount }) {
             ))}
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3">
           <div className="card-sm text-center">
             <p className="text-xs text-gray-500 mb-1">Avg Win</p>
             {winLossMode === '$'
-              ? <p className="text-xl font-bold mono text-accent-green">+{formatCurrency(avgWin, true)}</p>
-              : <p className="text-xl font-bold mono text-accent-green">{avgWinR != null ? `+${avgWinR.toFixed(2)}R` : '—'}</p>
+              ? <p className="text-xl font-bold mono text-accent-green">+{formatCurrency(lensAvgWin, true)}</p>
+              : <p className="text-xl font-bold mono text-accent-green">{lensAvgWinR != null ? `+${lensAvgWinR.toFixed(2)}R` : '—'}</p>
             }
           </div>
           <div className="card-sm text-center">
             <p className="text-xs text-gray-500 mb-1">Avg Loss</p>
             {winLossMode === '$'
-              ? <p className="text-xl font-bold mono text-accent-red">{formatCurrency(avgLoss, true)}</p>
-              : <p className="text-xl font-bold mono text-accent-red">{avgLossR != null ? `${avgLossR.toFixed(2)}R` : '—'}</p>
+              ? <p className="text-xl font-bold mono text-accent-red">{formatCurrency(lensAvgLoss, true)}</p>
+              : <p className="text-xl font-bold mono text-accent-red">{lensAvgLossR != null ? `${lensAvgLossR.toFixed(2)}R` : '—'}</p>
             }
           </div>
         </div>
       </div>
 
       {/* Streak Analysis */}
-      {streaks && (
+      {lensStreaks && (
         <div className="card">
           <SectionTitle>Streak Analysis</SectionTitle>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="card-sm text-center">
               <p className="text-xs text-gray-500 mb-2">Current Streak</p>
-              <p className={`text-3xl font-black mono ${streaks.curType === 'Win' ? 'text-accent-green' : 'text-accent-red'}`}>
-                {streaks.curType === 'Win' ? '+' : '−'}{streaks.current}
+              <p className={`text-3xl font-black mono ${lensStreaks.curType === 'Win' ? 'text-accent-green' : 'text-accent-red'}`}>
+                {lensStreaks.curType === 'Win' ? '+' : '−'}{lensStreaks.current}
               </p>
-              <p className={`text-xs mt-1 font-medium ${streaks.curType === 'Win' ? 'text-accent-green' : 'text-accent-red'}`}>
-                {streaks.curType === 'Win' ? 'win' : 'loss'} streak
+              <p className={`text-xs mt-1 font-medium ${lensStreaks.curType === 'Win' ? 'text-accent-green' : 'text-accent-red'}`}>
+                {lensStreaks.curType === 'Win' ? 'win' : 'loss'} streak
               </p>
             </div>
             <div className="card-sm text-center">
               <p className="text-xs text-gray-500 mb-2">Best Win Streak</p>
-              <p className="text-3xl font-black mono text-accent-green">+{streaks.maxWin}</p>
+              <p className="text-3xl font-black mono text-accent-green">+{lensStreaks.maxWin}</p>
               <p className="text-xs text-gray-600 mt-1">consecutive wins</p>
             </div>
             <div className="card-sm text-center">
               <p className="text-xs text-gray-500 mb-2">Worst Loss Streak</p>
-              <p className="text-3xl font-black mono text-accent-red">−{streaks.maxLoss}</p>
+              <p className="text-3xl font-black mono text-accent-red">−{lensStreaks.maxLoss}</p>
               <p className="text-xs text-gray-600 mt-1">consecutive losses</p>
             </div>
             <div className="card-sm text-center">
               <p className="text-xs text-gray-500 mb-2">{sampleLabel}</p>
-              <p className="text-3xl font-black mono text-white">{closed.length}</p>
-              <p className="text-xs text-gray-600 mt-1">{closed.filter(t => t.status === 'Win').length}W · {closed.filter(t => t.status === 'Loss').length}L</p>
+              <p className="text-3xl font-black mono text-white">{lensClosed.length}</p>
+              <p className="text-xs text-gray-600 mt-1">{lensWins}W · {lensLosses}L</p>
             </div>
           </div>
         </div>
@@ -2862,16 +3037,16 @@ export default function Analytics({ selectedAccount }) {
       <div className={tabContentClass('edge')}>
 
       {/* Cumulative R */}
-      {cumRData.length >= 2 && (
+      {lensCumRData.length >= 2 && (
         <div className="card">
           <SectionTitle>Cumulative R Over Time</SectionTitle>
           <p className="text-xs text-gray-500 mb-3">Running sum of all R-multiples across the selected sample. Shows how your edge compounds over time.</p>
           <ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={cumRData} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
+            <AreaChart data={lensCumRData} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
               <defs>
                 <linearGradient id="cumRGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor={totalR >= 0 ? '#00d084' : '#ff4757'} stopOpacity={0.25} />
-                  <stop offset="95%" stopColor={totalR >= 0 ? '#00d084' : '#ff4757'} stopOpacity={0} />
+                  <stop offset="5%"  stopColor={lensTotalR >= 0 ? '#00d084' : '#ff4757'} stopOpacity={0.25} />
+                  <stop offset="95%" stopColor={lensTotalR >= 0 ? '#00d084' : '#ff4757'} stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
@@ -2881,7 +3056,7 @@ export default function Analytics({ selectedAccount }) {
                 tickFormatter={v => `${v}R`} />
               <Tooltip contentStyle={TT_STYLE} labelStyle={TT_LABEL_STYLE} itemStyle={TT_ITEM_STYLE} formatter={v => [`${v}R`, 'Cumulative R']} />
               <ReferenceLine y={0} stroke="#ffffff20" strokeDasharray="4 4" />
-              <Area type="monotone" dataKey="cumR" stroke={totalR >= 0 ? '#00d084' : '#ff4757'}
+              <Area type="monotone" dataKey="cumR" stroke={lensTotalR >= 0 ? '#00d084' : '#ff4757'}
                 strokeWidth={2} fill="url(#cumRGrad)" dot={false} />
             </AreaChart>
           </ResponsiveContainer>
@@ -2893,16 +3068,16 @@ export default function Analytics({ selectedAccount }) {
       <div className={tabContentClass('timing')}>
 
       {/* Monthly Performance Breakdown */}
-      {monthlyStats.length > 0 && (
+      {lensMonthlyStats.length > 0 && (
         <div className="card">
           <SectionTitle>Monthly Performance</SectionTitle>
           <p className="text-xs text-gray-500 mb-3">
-            Click column headers to sort. Stats are computed from {tradeMode === 'realtime' ? 'closed trades plus live open-trade marks.' : 'closed trades only.'}
+            Click column headers to sort. Stats are computed from {tradeLens === 'ideas' ? 'fully closed linked trade ideas.' : tradeMode === 'realtime' ? 'closed trades plus live open-trade marks.' : 'closed trades only.'}
           </p>
-          {monthlyStats.length >= 2 && (
+          {lensMonthlyStats.length >= 2 && (
             <ResponsiveContainer width="100%" height={110}>
               <BarChart
-                data={[...monthlyStats].sort((a, b) => a.month.localeCompare(b.month))}
+                data={[...lensMonthlyStats].sort((a, b) => a.month.localeCompare(b.month))}
                 margin={{ top: 4, right: 4, left: -8, bottom: 0 }}
               >
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
@@ -2911,7 +3086,7 @@ export default function Analytics({ selectedAccount }) {
                 <Tooltip contentStyle={TT_STYLE} labelStyle={TT_LABEL_STYLE} itemStyle={TT_ITEM_STYLE} formatter={v => [formatCurrency(v), 'Monthly P&L']} />
                 <ReferenceLine y={0} stroke="#ffffff20" />
                 <Bar dataKey="totalPL" radius={[3, 3, 0, 0]}>
-                  {[...monthlyStats].sort((a, b) => a.month.localeCompare(b.month)).map(m => (
+                  {[...lensMonthlyStats].sort((a, b) => a.month.localeCompare(b.month)).map(m => (
                     <Cell key={m.month} fill={m.totalPL >= 0 ? '#00d084' : '#ff4757'} />
                   ))}
                 </Bar>
@@ -2954,7 +3129,7 @@ export default function Analytics({ selectedAccount }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {sortedMonthly.map(m => (
+                {sortedLensMonthly.map(m => (
                   <tr key={m.month} className="hover:bg-white/3">
                     <td className="py-2 text-gray-300 font-medium">{m.label}</td>
                     <td className="py-2 text-right text-gray-400">{m.trades}</td>
@@ -2982,16 +3157,16 @@ export default function Analytics({ selectedAccount }) {
               <tfoot className="border-t border-white/10 text-gray-400">
                 <tr>
                   <td className="pt-2 text-gray-300 font-semibold">{timeframe === 'All' ? 'Since 11/24/25' : timeframe}</td>
-                  <td className="pt-2 text-right">{closed.length}</td>
-                  <td className={`pt-2 text-right mono font-semibold ${winRate >= 50 ? 'text-accent-green' : 'text-accent-red'}`}>{winRate.toFixed(0)}%</td>
-                  <td className={`pt-2 text-right mono ${avgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{formatR(avgR)}</td>
-                  <td className={`pt-2 text-right mono font-semibold ${totalR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{formatR(totalR)}</td>
-                  <td className={`pt-2 text-right mono ${expectancy >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{formatCurrency(expectancy, true)}</td>
-                  <td className={`pt-2 text-right mono ${profitFactor >= 1.5 ? 'text-accent-green' : profitFactor >= 1 ? 'text-accent-yellow' : 'text-accent-red'}`}>
-                    {isFinite(profitFactor) ? profitFactor.toFixed(2) : '∞'}
+                  <td className="pt-2 text-right">{lensClosed.length}</td>
+                  <td className={`pt-2 text-right mono font-semibold ${lensWinRate >= 50 ? 'text-accent-green' : 'text-accent-red'}`}>{lensWinRate.toFixed(0)}%</td>
+                  <td className={`pt-2 text-right mono ${lensAvgR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{formatR(lensAvgR)}</td>
+                  <td className={`pt-2 text-right mono font-semibold ${lensTotalR >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{formatR(lensTotalR)}</td>
+                  <td className={`pt-2 text-right mono ${lensExpectancy >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{formatCurrency(lensExpectancy, true)}</td>
+                  <td className={`pt-2 text-right mono ${lensProfitFactor >= 1.5 ? 'text-accent-green' : lensProfitFactor >= 1 ? 'text-accent-yellow' : 'text-accent-red'}`}>
+                    {isFinite(lensProfitFactor) ? lensProfitFactor.toFixed(2) : '∞'}
                   </td>
-                  <td className={`pt-2 text-right mono font-semibold ${closed.reduce((s, t) => s + (t.pl || 0), 0) >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
-                    {(() => { const p = closed.reduce((s, t) => s + (t.pl || 0), 0); return `${p >= 0 ? '+' : ''}${formatCurrency(p, true)}` })()}
+                  <td className={`pt-2 text-right mono font-semibold ${lensClosed.reduce((s, t) => s + (t.pl || 0), 0) >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>
+                    {(() => { const p = lensClosed.reduce((s, t) => s + (t.pl || 0), 0); return `${p >= 0 ? '+' : ''}${formatCurrency(p, true)}` })()}
                   </td>
                 </tr>
               </tfoot>
@@ -3012,8 +3187,8 @@ export default function Analytics({ selectedAccount }) {
           <div className="flex items-center gap-4">
             <ResponsiveContainer width={160} height={160}>
               <PieChart>
-                <Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={70} dataKey="value" paddingAngle={3}>
-                  {pieData.map((entry) => <Cell key={entry.name} fill={COLORS[entry.name]} />)}
+                <Pie data={lensPieData} cx="50%" cy="50%" innerRadius={45} outerRadius={70} dataKey="value" paddingAngle={3}>
+                  {lensPieData.map((entry) => <Cell key={entry.name} fill={COLORS[entry.name]} />)}
                 </Pie>
                 <Tooltip contentStyle={TT_STYLE} labelStyle={TT_LABEL_STYLE} itemStyle={TT_ITEM_STYLE} formatter={(v, n) => [v, n]} />
               </PieChart>
@@ -3021,14 +3196,14 @@ export default function Analytics({ selectedAccount }) {
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-accent-green" />
-                <span className="text-gray-300">Wins: <strong className="text-white">{wins}</strong></span>
+                <span className="text-gray-300">Wins: <strong className="text-white">{lensWins}</strong></span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-accent-red" />
-                <span className="text-gray-300">Losses: <strong className="text-white">{losses}</strong></span>
+                <span className="text-gray-300">Losses: <strong className="text-white">{lensLosses}</strong></span>
               </div>
               <div className="text-xs text-gray-500 pt-1">
-                Win rate: <span className={winRate >= 50 ? 'text-accent-green' : 'text-accent-red'}>{winRate.toFixed(1)}%</span>
+                Win rate: <span className={lensWinRate >= 50 ? 'text-accent-green' : 'text-accent-red'}>{lensWinRate.toFixed(1)}%</span>
               </div>
             </div>
           </div>
@@ -3037,15 +3212,15 @@ export default function Analytics({ selectedAccount }) {
         {/* R Distribution */}
         <div className="card">
           <SectionTitle>R-Multiple Distribution</SectionTitle>
-          {rDist.length > 0 ? (
+          {lensRDist.length > 0 ? (
             <ResponsiveContainer width="100%" height={160}>
-              <BarChart data={rDist} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+              <BarChart data={lensRDist} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                 <XAxis dataKey="r" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
                 <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
                 <Tooltip contentStyle={TT_STYLE} labelStyle={TT_LABEL_STYLE} itemStyle={TT_ITEM_STYLE} formatter={(v) => [v, 'Trades']} />
                 <ReferenceLine x="0R" stroke="#ffffff20" />
                 <Bar dataKey="count" radius={[3, 3, 0, 0]}>
-                  {rDist.map((entry) => (
+                  {lensRDist.map((entry) => (
                     <Cell key={entry.r} fill={entry.rNum >= 1 ? '#00d084' : entry.rNum >= 0 ? '#ffa502' : '#ff4757'} />
                   ))}
                 </Bar>
@@ -3063,13 +3238,13 @@ export default function Analytics({ selectedAccount }) {
       <div className="card">
         <SectionTitle>P&L by Day of Week (Avg)</SectionTitle>
         <ResponsiveContainer width="100%" height={160}>
-          <BarChart data={dowData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
+          <BarChart data={lensDowData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
             <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#6b7280' }} tickLine={false} axisLine={false} />
             <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => formatCurrency(v, true)} />
             <Tooltip contentStyle={TT_STYLE} labelStyle={TT_LABEL_STYLE} itemStyle={TT_ITEM_STYLE} formatter={(v, n) => [formatCurrency(v), n === 'avg' ? 'Avg P&L' : 'Total']} />
             <ReferenceLine y={0} stroke="#ffffff15" />
             <Bar dataKey="avg" radius={[3, 3, 0, 0]} name="avg">
-              {dowData.map((entry) => <Cell key={entry.day} fill={entry.avg >= 0 ? '#00d084' : '#ff4757'} />)}
+              {lensDowData.map((entry) => <Cell key={entry.day} fill={entry.avg >= 0 ? '#00d084' : '#ff4757'} />)}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
@@ -3147,18 +3322,18 @@ export default function Analytics({ selectedAccount }) {
       <div className="card">
         <SectionTitle>P&L by Symbol (Top 10)</SectionTitle>
         <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={symbolData} layout="vertical" margin={{ top: 4, right: 8, left: 40, bottom: 0 }}>
+          <BarChart data={lensSymbolData} layout="vertical" margin={{ top: 4, right: 8, left: 40, bottom: 0 }}>
             <XAxis type="number" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={v => formatCurrency(v, true)} />
             <YAxis type="category" dataKey="symbol" tick={{ fontSize: 11, fill: '#9ca3af', fontFamily: 'JetBrains Mono, monospace' }} tickLine={false} axisLine={false} />
             <Tooltip contentStyle={TT_STYLE} labelStyle={TT_LABEL_STYLE} itemStyle={TT_ITEM_STYLE} formatter={(v) => [formatCurrency(v), 'P&L']} />
             <ReferenceLine x={0} stroke="#ffffff15" />
             <Bar dataKey="pl" radius={[0, 3, 3, 0]}>
-              {symbolData.map(e => <Cell key={e.symbol} fill={e.pl >= 0 ? '#00d084' : '#ff4757'} />)}
+              {lensSymbolData.map(e => <Cell key={e.symbol} fill={e.pl >= 0 ? '#00d084' : '#ff4757'} />)}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
         <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-white/5">
-          {symbolData.map(e => (
+          {lensSymbolData.map(e => (
             <TickerTooltip key={e.symbol} symbol={e.symbol}>
               <span className={`inline-flex items-center gap-1.5 text-xs mono px-2.5 py-1 rounded-full border cursor-default
                 ${e.pl >= 0
@@ -3332,7 +3507,7 @@ export default function Analytics({ selectedAccount }) {
       <div className={tabContentClass('edge')}>
 
       {/* Edge Performance */}
-      {stratData.length > 0 && (
+      {lensStratData.length > 0 && (
         <div className="card">
           <div className="flex items-center gap-2 mb-3">
             <SectionTitle>Edge Performance</SectionTitle>
@@ -3357,7 +3532,7 @@ export default function Analytics({ selectedAccount }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {stratData.map(s => (
+                {lensStratData.map(s => (
                   <tr key={s.strategy} className="hover:bg-white/3">
                     <td className="py-2 text-gray-300 font-medium">{s.strategy}</td>
                     <td className="py-2 text-right text-gray-400">{s.count}</td>

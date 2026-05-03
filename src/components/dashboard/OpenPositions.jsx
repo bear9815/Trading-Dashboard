@@ -3,6 +3,8 @@ import { useColumnResize } from '../../hooks/useColumnResize.js'
 import { Settings2, Loader } from 'lucide-react'
 import { formatCurrency, formatDate } from '../../utils/formatters.js'
 import { calcRiskPerTrade } from '../../utils/riskCalcs.js'
+import { groupTradesByIdea } from '../../utils/tradeIdeas.js'
+import { useTradeStore } from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { classifySymbolTheme } from '../../utils/ai.js'
 import { fetchQuotes } from '../../utils/marketData.js'
@@ -42,6 +44,12 @@ function daysHeld(entryDate) {
   return Math.floor((Date.now() - new Date(entryDate)) / 86_400_000)
 }
 
+function shortIdeaLabel(tradeIdeaId) {
+  const value = String(tradeIdeaId || '').trim()
+  if (!value) return 'Unlinked'
+  return `Idea ${value.slice(-6).toUpperCase()}`
+}
+
 /** True if a trade has been tagged as a hedge in its edges */
 function isHedgeTrade(t) {
   const edges = t.edges?.length > 0 ? t.edges : (t.strategy ? [t.strategy] : [])
@@ -69,6 +77,7 @@ function consolidateLots(openTrades) {
       (min, t) => (new Date(t.entryDate) < new Date(min) ? t.entryDate : min),
       lots[0].entryDate
     )
+    const tradeIdeaIds = [...new Set(lots.map(t => t.tradeIdeaId || t.id).filter(Boolean))]
     // Use the most common account; show stop/target from first lot as representative
     return {
       ...lots[0],
@@ -77,6 +86,8 @@ function consolidateLots(openTrades) {
       entryDate: earliest,
       _lots: lots.length,
       _totalRisk: totalRisk,
+      _sourceLots: lots,
+      _tradeIdeaIds: tradeIdeaIds,
     }
   }).sort((a, b) => new Date(b.entryDate) - new Date(a.entryDate))
 }
@@ -89,6 +100,7 @@ function resolveCache(cached) {
 }
 
 export default function OpenPositions({ openTrades, accountBalance }) {
+  const { reassignTradeIdea, detachTradeIdea } = useTradeStore()
   const {
     apiKey,
     openPositionsColumns, setOpenPositionsColumns,
@@ -98,6 +110,7 @@ export default function OpenPositions({ openTrades, accountBalance }) {
   } = useSettingsStore()
 
   const [showMenu, setShowMenu] = useState(false)
+  const [ideaManager, setIdeaManager] = useState(null)
   const [dragCol, setDragCol] = useState(null)
   const [dragOverCol, setDragOverCol] = useState(null)
   const [loadingThemes, setLoadingThemes] = useState({})
@@ -176,6 +189,59 @@ export default function OpenPositions({ openTrades, accountBalance }) {
 
   return (
     <div className="card">
+      {ideaManager && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4" onClick={() => setIdeaManager(null)}>
+          <div className="w-full max-w-2xl rounded-2xl border border-white/10 bg-surface-100 p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.24em] text-accent-blue mb-1">Trade Ideas</p>
+                <h3 className="text-lg font-semibold text-white">{ideaManager.symbol} open-lot linking</h3>
+                <p className="text-xs text-gray-500 mt-1">This only updates trade-idea metadata. It does not change entries, exits, reconciliation rows, or audit history.</p>
+              </div>
+              <button onClick={() => setIdeaManager(null)} className="btn-ghost text-xs">Close</button>
+            </div>
+            <div className="space-y-2">
+              {groupTradesByIdea(ideaManager.lots).map(group => {
+                const anchor = group.trades[0]
+                return (
+                  <div key={group.tradeIdeaId} className="rounded-xl border border-white/10 bg-surface-200/60 p-3">
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <div>
+                        <p className="text-sm font-semibold text-white">{shortIdeaLabel(group.tradeIdeaId)}</p>
+                        <p className="text-[11px] text-gray-500">{group.trades.length} lot{group.trades.length === 1 ? '' : 's'} · first entry {formatDate(anchor.entryDate)}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          ideaManager.lots.forEach(lot => reassignTradeIdea(lot.id, group.tradeIdeaId))
+                          setIdeaManager(null)
+                        }}
+                        className="btn-ghost text-xs"
+                      >
+                        Link all here
+                      </button>
+                    </div>
+                    <div className="space-y-1">
+                      {group.trades.map(lot => (
+                        <div key={lot.id} className="flex items-center justify-between gap-3 text-xs text-gray-400">
+                          <span>{formatDate(lot.entryDate)} · {lot.positionSize} sh · {lot.status}</span>
+                          <button
+                            type="button"
+                            onClick={() => detachTradeIdea(lot.id)}
+                            className="text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+                          >
+                            Own idea
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <h3 className="text-xl font-medium text-gray-300">Open Positions</h3>
@@ -309,6 +375,18 @@ export default function OpenPositions({ openTrades, accountBalance }) {
                           <span className="shrink-0 px-1.5 py-0.5 rounded bg-white/8 text-gray-400">
                             {t._lots}×
                           </span>
+                        )}
+                        <span className="shrink-0 px-1.5 py-0.5 rounded bg-accent-blue/10 text-accent-blue text-[10px] border border-accent-blue/20">
+                          {t._tradeIdeaIds?.length > 1 ? `${t._tradeIdeaIds.length} ideas` : shortIdeaLabel((t._tradeIdeaIds || [t.tradeIdeaId || t.id])[0])}
+                        </span>
+                        {t._lots > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setIdeaManager({ symbol: t.symbol, lots: t._sourceLots || [t] })}
+                            className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20 transition-colors"
+                          >
+                            Ideas
+                          </button>
                         )}
                       </div>
                     </td>
