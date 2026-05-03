@@ -753,7 +753,7 @@ export default function Charts() {
               <div className="max-w-md space-y-3">
                 <BarChart3 size={22} className="mx-auto text-accent-blue" />
                 <p className="text-base font-semibold text-white">Charts workspace is ready.</p>
-                <p className="text-sm text-gray-500">Import and map symbols in Growth Research first, then this page will turn that watchlist into a dedicated chart deck.</p>
+                <p className="text-sm text-gray-500">Import and map symbols in Watchlist first, then this page will turn that watchlist into a dedicated chart deck.</p>
               </div>
             </div>
           ) : (

@@ -5,6 +5,7 @@ export const APP_PAGES = [
   'analytics',
   'chartreview',
   'charts',
+  'watchlist',
   'morning',
   'journal',
   'ai',

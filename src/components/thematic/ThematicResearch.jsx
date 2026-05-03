@@ -1,4 +1,4 @@
-import { Component, useState, useRef, useMemo, useEffect } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 import { useSettingsStore }        from '../../store/useSettingsStore.js'
 import { useThematicStore }        from '../../store/useThematicStore.js'
 import {
@@ -7,7 +7,6 @@ import {
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import ResearchLibrary, { ActiveSignals } from './ResearchLibrary.jsx'
 import ResearchWorkflows from './ResearchWorkflows.jsx'
-import ThemeWatchlist from './ThemeWatchlist.jsx'
 import { refreshNewFields } from '../../utils/thematicGemini.js'
 import { refreshNewFieldsWithOpenRouter } from '../../utils/researchAi.js'
 import { refreshNewFieldsWithOllama } from '../../utils/localResearch.js'
@@ -106,55 +105,6 @@ const PROVIDER_PILL_STYLES = {
     active: 'bg-accent-green/15 border-accent-green/30 text-accent-green',
     dot: 'bg-accent-green',
   },
-}
-
-class WorkspaceErrorBoundary extends Component {
-  constructor(props) {
-    super(props)
-    this.state = { error: null }
-  }
-
-  static getDerivedStateFromError(error) {
-    return { error }
-  }
-
-  componentDidUpdate(prevProps) {
-    if (prevProps.boundaryKey !== this.props.boundaryKey && this.state.error) {
-      this.setState({ error: null })
-    }
-  }
-
-  render() {
-    if (!this.state.error) return this.props.children
-
-    return (
-      <div className="rounded-xl border border-red-500/20 bg-red-500/8 px-5 py-6">
-        <div className="flex items-start gap-3">
-          <AlertTriangle size={18} className="text-red-400 mt-0.5 shrink-0" />
-          <div className="space-y-3">
-            <div>
-              <p className="text-sm font-semibold text-red-300">Growth Research workspace hit a rendering error.</p>
-              <p className="text-xs text-gray-400 mt-1">{this.state.error?.message || 'Unknown workspace error.'}</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={this.props.onRetry}
-                className="px-3 py-2 rounded-lg border border-white/10 text-xs font-semibold text-gray-200 hover:border-white/20 transition-all"
-              >
-                Try Again
-              </button>
-              <button
-                onClick={this.props.onReset}
-                className="px-3 py-2 rounded-lg bg-accent-blue/15 border border-accent-blue/25 text-xs font-semibold text-accent-blue hover:bg-accent-blue/20 transition-all"
-              >
-                Reset Growth Research Workspace
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
 }
 
 // ── Sub-components: existing data renderers ───────────────────────────────────
@@ -1367,7 +1317,7 @@ function ConfirmationBadge({ confirmation }) {
   )
 }
 
-function GrowthResearchCommandCenter({ synthesis, onOpenTab }) {
+function GrowthResearchCommandCenter({ synthesis, watchlistSummary, onOpenTab, onNavigate }) {
   const topTheme = synthesis.currentRead.topTheme
   const strongestSetup = synthesis.currentRead.strongestSetup
   const biggestBottleneck = synthesis.currentRead.biggestBottleneck
@@ -1404,7 +1354,7 @@ function GrowthResearchCommandCenter({ synthesis, onOpenTab }) {
               <Activity size={13} className="text-accent-green" /> Best Setup
             </div>
             <p className="text-sm font-semibold text-white">{strongestSetup?.name || 'No setup data'}</p>
-            <p className="mt-1 text-xs text-gray-500">{strongestSetup ? `${Math.round(strongestSetup.setupReadinessScore)} setup · ${strongestSetup.volatilityState}` : 'Refresh RS and squeeze data in Stocks/Ecosystems.'}</p>
+            <p className="mt-1 text-xs text-gray-500">{strongestSetup ? `${Math.round(strongestSetup.setupReadinessScore)} setup · ${strongestSetup.volatilityState}` : 'Refresh RS and squeeze data in Watchlist or Charts.'}</p>
           </div>
           <div className="rounded-xl border border-white/10 bg-black/10 p-4">
             <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
@@ -1482,7 +1432,7 @@ function GrowthResearchCommandCenter({ synthesis, onOpenTab }) {
           <div className="rounded-xl border border-white/10 bg-surface-50 p-4">
             <div className="mb-3 flex items-center justify-between">
               <p className="text-sm font-semibold text-white">Market Leaders Alignment</p>
-              <button onClick={() => onOpenTab('stocks')} className="text-xs font-semibold text-accent-blue hover:underline">Open Stocks</button>
+              <button onClick={() => onNavigate('watchlist')} className="text-xs font-semibold text-accent-blue hover:underline">Open Watchlist</button>
             </div>
             <div className="space-y-2">
               {leaders.length ? leaders.map(row => (
@@ -1526,6 +1476,35 @@ function GrowthResearchCommandCenter({ synthesis, onOpenTab }) {
                 ))}
                 {!synthesis.bottleneckRadar.length && <p className="text-xs text-gray-600">No bottlenecks extracted yet.</p>}
               </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-surface-50 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-white">Watchlist Snapshot</p>
+                <p className="mt-1 text-xs text-gray-500">Growth Research now reads from the dedicated Watchlist workspace instead of maintaining the lists here.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => onNavigate('watchlist')} className="rounded-lg border border-accent-blue/25 bg-accent-blue/10 px-3 py-2 text-xs font-semibold text-accent-blue transition-colors hover:bg-accent-blue/15">Open Watchlist</button>
+                <button onClick={() => onNavigate('charts')} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-gray-300 transition-colors hover:border-white/20 hover:text-white">Open Charts</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <ReadMetric label="Watchlists" value={watchlistSummary.listCount} />
+              <ReadMetric label="Symbols" value={watchlistSummary.symbolCount} accent="text-accent-blue" />
+              <ReadMetric label="Mapped Rows" value={watchlistSummary.mappedRowCount} accent="text-accent-green" />
+              <ReadMetric label="Ecosystems" value={watchlistSummary.ecosystemCount} />
+            </div>
+            <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Best Setup</p>
+              <p className="mt-1 text-sm font-semibold text-white">{watchlistSummary.bestSetupLabel}</p>
+              <p className="mt-1 text-xs text-gray-500">{watchlistSummary.bestSetupDetail}</p>
+            </div>
+            <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Most Active List</p>
+              <p className="mt-1 text-sm font-semibold text-white">{watchlistSummary.strongestListLabel}</p>
+              <p className="mt-1 text-xs text-gray-500">{watchlistSummary.strongestListDetail}</p>
             </div>
           </div>
         </div>
@@ -1633,14 +1612,16 @@ function DossierCard({ name, data, expanded, onToggle, activeTab, onTabChange, c
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function ThematicResearch() {
+export default function ThematicResearch({ onNavigate = () => {} }) {
   const { apiKey, openRouterApiKey, researchAiProvider, setResearchAiProvider, researchOpenRouterModel, setResearchOpenRouterModel, useLocalLLM, setUseLocalLLM } = useSettingsStore()
   const { themes, removeTheme, convictions, setConviction, patchThemeDossier } = useThematicStore()
   const { sources: librarySources, loadSources } = useResearchLibraryStore()
   const listsById = useResearchWatchlistStore(state => state.listsById)
-  const resetWorkspaceState = useResearchWatchlistStore(state => state.resetWorkspaceState)
   const watchlistCount = useResearchWatchlistStore(state =>
     Object.values(state.listsById || {}).reduce((sum, list) => sum + (list?.symbols?.length || 0), 0)
+  )
+  const mappedRowCount = useResearchWatchlistStore(state =>
+    Object.values(state.listsById || {}).reduce((sum, list) => sum + Object.keys(list?.rowsBySymbol || {}).length, 0)
   )
   const ecosystemCount = useResearchWatchlistStore(state => {
     const ecosystems = new Set()
@@ -1654,27 +1635,15 @@ export default function ThematicResearch() {
   })
   const provider = researchAiProvider || (useLocalLLM ? 'local' : 'gemini')
   const [modelInput, setModelInput] = useState(researchOpenRouterModel || 'openai/gpt-4o-mini')
-  const [workspaceBoundaryKey, setWorkspaceBoundaryKey] = useState(0)
-
   useEffect(() => {
     loadSources()
   }, [loadSources])
 
-  const [growthTab,  setGrowthTab]  = useState('overview') // 'overview' | 'themes' | 'stocks' | 'ecosystems' | 'reports' | 'earnings'
+  const [growthTab,  setGrowthTab]  = useState('overview') // 'overview' | 'workflows' | 'themes' | 'reports' | 'earnings'
   const [expanded,   setExpanded]   = useState(null)
   const [tabs,       setTabs]       = useState({})
   const [showChat,   setShowChat]   = useState(false)
   const [refreshing, setRefreshing] = useState({}) // { [themeName]: true }
-
-  const handleWorkspaceRetry = () => {
-    setWorkspaceBoundaryKey(prev => prev + 1)
-  }
-
-  const handleWorkspaceReset = () => {
-    resetWorkspaceState()
-    useResearchWatchlistStore.persist?.clearStorage?.()
-    setWorkspaceBoundaryKey(prev => prev + 1)
-  }
 
   const handleRefresh = async (name) => {
     if (provider === 'gemini' && !apiKey) return alert('Add your Gemini API key in Settings first.')
@@ -1708,6 +1677,25 @@ export default function ThematicResearch() {
     () => buildResearchWorkflowState({ themes, sources: librarySources }),
     [themes, librarySources]
   )
+  const watchlistSummary = useMemo(() => {
+    const lists = Object.values(listsById || {})
+    const strongestList = [...lists].sort((a, b) => (b?.symbols?.length || 0) - (a?.symbols?.length || 0))[0] || null
+
+    return {
+      listCount: lists.length,
+      symbolCount: watchlistCount,
+      mappedRowCount,
+      ecosystemCount,
+      bestSetupLabel: synthesis.currentRead.strongestSetup?.name || 'No setup data yet',
+      bestSetupDetail: synthesis.currentRead.strongestSetup
+        ? `${Math.round(synthesis.currentRead.strongestSetup.setupReadinessScore || 0)} setup score · ${synthesis.currentRead.strongestSetup.volatilityState || 'No regime'}`
+        : 'Refresh watchlist RS and squeeze data from Watchlist or Charts to surface the best setup.',
+      strongestListLabel: strongestList?.name || 'No watchlists loaded',
+      strongestListDetail: strongestList
+        ? `${strongestList.symbols?.length || 0} symbol${(strongestList.symbols?.length || 0) === 1 ? '' : 's'} currently tracked`
+        : 'Import a watchlist in the Watchlist page to start building shared research context.',
+    }
+  }, [ecosystemCount, listsById, mappedRowCount, synthesis.currentRead.strongestSetup, watchlistCount])
 
   return (
     <div className="research-elevated p-5 space-y-5">
@@ -1768,14 +1756,12 @@ export default function ThematicResearch() {
         )}
       </div>
 
-      {/* ── Top-level tab switcher: Command Center | Themes | Stocks | Ecosystems | Reports | Earnings ── */}
+      {/* ── Top-level tab switcher: Command Center | Workflows | Themes | Reports | Earnings ── */}
       <div className="flex items-center gap-1 border-b border-white/[0.08] -mb-1">
         {[
           { id: 'overview', label: 'Command Center', count: null, desc: 'Synthesized theme, tailwind, bottleneck, and Market Leaders read' },
           { id: 'workflows', label: 'Workflows', count: Object.keys(workflowState.tickerWorkflows || {}).length + Object.keys(workflowState.themeWorkflows || {}).length, desc: 'Evidence-backed ticker and theme workflows with narratives and what-changed views' },
           { id: 'themes', label: 'Themes', count: themeCount, desc: 'Theme intelligence, catalysts, and dossiers' },
-          { id: 'stocks', label: 'Stocks', count: watchlistCount, desc: 'Market Leaders and watchlist relationship maps' },
-          { id: 'ecosystems', label: 'Ecosystems', count: ecosystemCount, desc: 'Breadth, strength, and rotation across broader stock ecosystems' },
           { id: 'reports', label: 'Reports', count: deepDiveCount, desc: 'Uploaded research library and evidence' },
           { id: 'earnings', label: 'Earnings', count: earningsCount, desc: 'Earnings calls & company timelines' },
         ].map(({ id, label, count, desc }) => (
@@ -1818,43 +1804,14 @@ export default function ThematicResearch() {
       {growthTab === 'overview' && (
         <GrowthResearchCommandCenter
           synthesis={synthesis}
+          watchlistSummary={watchlistSummary}
           onOpenTab={setGrowthTab}
+          onNavigate={onNavigate}
         />
       )}
 
       {growthTab === 'workflows' && (
         <ResearchWorkflows workflowState={workflowState} />
-      )}
-
-      {growthTab === 'stocks' && (
-        <WorkspaceErrorBoundary
-          boundaryKey={workspaceBoundaryKey}
-          onRetry={handleWorkspaceRetry}
-          onReset={handleWorkspaceReset}
-        >
-          <ThemeWatchlist
-            provider={provider}
-            apiKey={apiKey}
-            openRouterApiKey={openRouterApiKey}
-            researchOpenRouterModel={researchOpenRouterModel}
-          />
-        </WorkspaceErrorBoundary>
-      )}
-
-      {growthTab === 'ecosystems' && (
-        <WorkspaceErrorBoundary
-          boundaryKey={`ecosystems-${workspaceBoundaryKey}`}
-          onRetry={handleWorkspaceRetry}
-          onReset={handleWorkspaceReset}
-        >
-          <ThemeWatchlist
-            provider={provider}
-            apiKey={apiKey}
-            openRouterApiKey={openRouterApiKey}
-            researchOpenRouterModel={researchOpenRouterModel}
-            mode="analytics"
-          />
-        </WorkspaceErrorBoundary>
       )}
 
       {/* ════════════════════════════════════

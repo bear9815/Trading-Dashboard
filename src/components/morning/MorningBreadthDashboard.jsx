@@ -488,7 +488,7 @@ function buildMorningRead(latestById = {}) {
   const market = latestById.market
   const breadthConfigs = BREADTH_LISTS.filter(config => latestById[config.id])
 
-  if (!breadthConfigs.length) return `Import ${breadthListLabels()} lists in Growth Research to unlock breadth reads.`
+  if (!breadthConfigs.length) return `Import ${breadthListLabels()} lists in Watchlist to unlock breadth reads.`
   if (!market) return 'Market Leaders need data before breadth can be compared cleanly.'
 
   const rankedComparisons = BREADTH_LISTS
@@ -1614,7 +1614,7 @@ export default function MorningBreadthDashboard() {
       <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-8 text-center">
         <Activity size={22} className="mx-auto mb-3 text-gray-600" />
         <p className="text-sm font-semibold text-gray-300">No breadth universe yet.</p>
-        <p className="mt-1 text-xs text-gray-600">Add symbols to {breadthListLabels()} in Growth Research, then Morning can build the breadth dashboard.</p>
+        <p className="mt-1 text-xs text-gray-600">Add symbols to {breadthListLabels()} in Watchlist, then Morning can build the breadth dashboard.</p>
       </div>
     )
   }

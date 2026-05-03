@@ -1,4 +1,4 @@
-import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, Sparkles, ScanLine, Sun, GitCompare, Layers, Globe, Trophy, Bot, PanelLeftClose, PanelLeftOpen, CandlestickChart } from 'lucide-react'
+import { LayoutDashboard, List, ShieldAlert, BarChart2, BookOpen, Settings, Sparkles, ScanLine, Sun, GitCompare, Layers, Globe, Trophy, Bot, PanelLeftClose, PanelLeftOpen, CandlestickChart, Bookmark } from 'lucide-react'
 import { useState } from 'react'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import AppLogo from './AppLogo.jsx'
@@ -11,6 +11,7 @@ const NAV = [
   { id: 'analytics',   label: 'Analytics',      icon: BarChart2 },
   { id: 'chartreview', label: 'Trade Review',   icon: ScanLine },
   { id: 'charts',      label: 'Charts',         icon: CandlestickChart },
+  { id: 'watchlist',   label: 'Watchlist',      icon: Bookmark },
   { id: 'morning',     label: 'Morning',        icon: Sun      },
   { id: 'rrg',         label: 'Rotation',       icon: GitCompare },
   { id: 'journal',     label: 'Journal',        icon: BookOpen },

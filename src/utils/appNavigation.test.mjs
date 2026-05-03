@@ -13,6 +13,7 @@ import {
 test('isAppPage only accepts known dashboard pages', () => {
   assert.equal(isAppPage('dashboard'), true)
   assert.equal(isAppPage('thematic'), true)
+  assert.equal(isAppPage('watchlist'), true)
   assert.equal(isAppPage('journal'), true)
   assert.equal(isAppPage('scorecard'), false)
   assert.equal(isAppPage('missing'), false)
@@ -23,6 +24,7 @@ test('isAppPage only accepts known dashboard pages', () => {
 test('buildPageHash creates stable hash routes', () => {
   assert.equal(buildPageHash('dashboard'), '#dashboard')
   assert.equal(buildPageHash('agents'), '#agents')
+  assert.equal(buildPageHash('watchlist'), '#watchlist')
 })
 
 test('getPageFromLocationLike prefers valid hash routes', () => {

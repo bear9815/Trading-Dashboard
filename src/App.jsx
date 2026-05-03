@@ -33,6 +33,7 @@ const AIFeedback         = lazy(() => import('./components/ai/AIFeedback.jsx'))
 const Settings           = lazy(() => import('./components/settings/Settings.jsx'))
 const TradeReview        = lazy(() => import('./components/chartreview/TradeReview.jsx'))
 const Charts             = lazy(() => import('./components/charts/Charts.jsx'))
+const Watchlist          = lazy(() => import('./components/watchlist/Watchlist.jsx'))
 const Morning            = lazy(() => import('./components/morning/Morning.jsx'))
 const RRGPage            = lazy(() => import('./components/rrg/RRGPage.jsx'))
 const FactorRegime       = lazy(() => import('./components/regime/FactorRegime.jsx'))
@@ -299,13 +300,14 @@ export default function App() {
               {page === 'analytics'   && <Analytics     {...pageProps} />}
               {page === 'chartreview' && <TradeReview   {...pageProps} />}
               {page === 'charts'      && <Charts />}
+              {page === 'watchlist'   && <Watchlist />}
               {page === 'morning'     && <Morning />}
               {page === 'journal'     && <Journal {...pageProps} selectedSection={journalSection} onSectionChange={setJournalSection} />}
               {page === 'ai'          && <AIFeedback    {...pageProps} />}
               {page === 'regime'      && <FactorRegime />}
               {page === 'settings'    && <Settings />}
               {page === 'rrg'         && <div className="h-full"><RRGPage /></div>}
-              {page === 'thematic'    && <ThematicResearch />}
+              {page === 'thematic'    && <ThematicResearch onNavigate={setPage} />}
               {page === 'modelbook'   && <ModelBook />}
               {page === 'agents'      && <Agents />}
             </Suspense>
