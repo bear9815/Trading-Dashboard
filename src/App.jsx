@@ -20,6 +20,7 @@ import { supabase } from './lib/supabase.js'
 import { Loader } from 'lucide-react'
 import { APP_PAGE_STORAGE_KEY, buildPageHash, DEFAULT_JOURNAL_SECTION, getJournalSectionFromLocationLike, getRestoredPage, isAppPage } from './utils/appNavigation.js'
 import { hydrateCloudStoresForUser } from './utils/cloudHydration.js'
+import { buildMorningCheckinStorageKey, shouldOpenMorningCheckin } from './utils/morningCheckinState.js'
 
 // ── Lazy-loaded pages (each splits into its own chunk) ────────────────────────
 // Only the page you're on gets downloaded — everything else costs nothing until navigated to.
@@ -62,7 +63,8 @@ export default function App() {
       })
   ))
   const [showImport, setShowImport] = useState(false)
-  const [reminderOpenSignal, setReminderOpenSignal] = useState(0)
+  const [reminderOpenRequest, setReminderOpenRequest] = useState({ signal: 0, requestedMode: null })
+  const [morningCheckinRequest, setMorningCheckinRequest] = useState({ signal: 0, requestedMode: 'pre-market' })
   const [selectedAccount, setSelectedAccount] = useState('All')
   const [journalSection, setJournalSection] = useState(() => (
     typeof window === 'undefined'
@@ -75,6 +77,7 @@ export default function App() {
   const didInitHistoryRef = useRef(false)
   const lastPageRef = useRef(page)
   const lastJournalSectionRef = useRef(journalSection)
+  const lastMorningCheckinAutoKeyRef = useRef('')
   const { theme, anthropicApiKey, sidebarCollapsed, setSidebarCollapsed } = useSettingsStore()
   const { loadTokens: loadSchwabTokens, _accessToken: schwabAccessToken } = useSchwabStore()
   const { loadFromLocal } = useTradeStore()
@@ -90,6 +93,19 @@ export default function App() {
     if (nextPage === 'journal') {
       setJournalSection(options.journalSection || DEFAULT_JOURNAL_SECTION)
     }
+  }, [])
+
+  const requestMorningCheckinIfNeeded = useCallback(() => {
+    if (typeof window === 'undefined') return
+    const storageKey = buildMorningCheckinStorageKey(new Date())
+    if (lastMorningCheckinAutoKeyRef.current === storageKey) return
+    const storageValue = window.localStorage.getItem(storageKey)
+    if (!shouldOpenMorningCheckin({ storageValue })) return
+    lastMorningCheckinAutoKeyRef.current = storageKey
+    setMorningCheckinRequest(prev => ({
+      signal: prev.signal + 1,
+      requestedMode: 'pre-market',
+    }))
   }, [])
 
   // Apply theme
@@ -210,7 +226,8 @@ export default function App() {
     loadMorningLocal()
     loadHabitsLocal()
     loadSchwabTokens()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    requestMorningCheckinIfNeeded()
+  }, [loadFromLocal, loadJournalLocal, loadMorningLocal, loadHabitsLocal, loadSchwabTokens, requestMorningCheckinIfNeeded])
 
   useEffect(() => {
     if (!supabase?.auth) return
@@ -218,6 +235,7 @@ export default function App() {
     const hydrateForSession = async (session) => {
       useAuthStore.getState().setSession(session)
       const userId = session?.user?.id
+      if (session?.user?.id) requestMorningCheckinIfNeeded()
       if (!userId) return
       await hydrateCloudStoresForUser(userId, {
         settings: useSettingsStore.getState(),
@@ -237,7 +255,7 @@ export default function App() {
     })
 
     return () => authListener?.subscription?.unsubscribe()
-  }, [])
+  }, [requestMorningCheckinIfNeeded])
 
   // ── Main app ──────────────────────────────────────────────────────────────
   const pageProps = { selectedAccount }
@@ -257,7 +275,19 @@ export default function App() {
         <TopBar
           page={page}
           onImport={() => setShowImport(true)}
-          onOpenReminder={() => setReminderOpenSignal(v => v + 1)}
+          onOpenReminder={(requestedMode) => {
+            if (requestedMode === 'pre-market') {
+              setMorningCheckinRequest(prev => ({
+                signal: prev.signal + 1,
+                requestedMode: 'pre-market',
+              }))
+              return
+            }
+            setReminderOpenRequest(prev => ({
+              signal: prev.signal + 1,
+              requestedMode: requestedMode || null,
+            }))
+          }}
         />
 
         <main className={`flex-1 ${(page === 'rrg' || page === 'charts') ? 'overflow-hidden' : 'overflow-y-auto'}`}>
@@ -285,8 +315,8 @@ export default function App() {
 
       {showImport && <ImportModal onClose={() => setShowImport(false)} />}
       <QuickAddTrade />
-      <MorningCheckin />
-      <TradingReminderPopup openSignal={reminderOpenSignal} />
+      <MorningCheckin openRequest={morningCheckinRequest} />
+      <TradingReminderPopup openRequest={reminderOpenRequest} />
       <WeeklyScorecardPopup onOpenWeeklyReview={() => setPage('journal', { journalSection: 'weekly-review' })} />
     </div>
   )

@@ -278,6 +278,29 @@ function QuotesTicker() {
 /* ─── TopBar ──────────────────────────────────────────────────────── */
 export default function TopBar({ page, onImport, onOpenReminder }) {
   const { connected } = useSchwabStore()
+  const [reminderMenuOpen, setReminderMenuOpen] = useState(false)
+  const reminderMenuRef = useRef(null)
+
+  useEffect(() => {
+    if (!reminderMenuOpen) return
+
+    const handlePointerDown = (event) => {
+      if (!reminderMenuRef.current?.contains(event.target)) {
+        setReminderMenuOpen(false)
+      }
+    }
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') setReminderMenuOpen(false)
+    }
+
+    window.addEventListener('mousedown', handlePointerDown)
+    window.addEventListener('keydown', handleEscape)
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown)
+      window.removeEventListener('keydown', handleEscape)
+    }
+  }, [reminderMenuOpen])
 
   return (
     <header className="h-14 xl:h-16 bg-surface-50/72 backdrop-blur-xl border-b border-white/10 flex items-center px-3 md:px-4 xl:px-5 shrink-0 sticky top-0 z-10 gap-2 xl:gap-3">
@@ -294,14 +317,54 @@ export default function TopBar({ page, onImport, onOpenReminder }) {
             Schwab
           </div>
         )}
-        <button
-          onClick={onOpenReminder}
-          title="Open trading reminder popup"
-          className="btn-ghost flex items-center gap-1.5 text-[13px] xl:text-sm px-3 xl:px-4 py-2 xl:py-2.5"
-        >
-          <Bell size={14} />
-          <span className="hidden sm:inline">Reminder</span>
-        </button>
+        <div className="relative" ref={reminderMenuRef}>
+          <button
+            onClick={() => setReminderMenuOpen(open => !open)}
+            title="Open morning or afternoon reminder"
+            className="btn-ghost flex items-center gap-1.5 text-[13px] xl:text-sm px-3 xl:px-4 py-2 xl:py-2.5"
+          >
+            <Bell size={14} />
+            <span className="hidden sm:inline">Reminder</span>
+            {reminderMenuOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </button>
+          {reminderMenuOpen && (
+            <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-56 rounded-2xl border border-white/10 bg-surface-100/95 p-2 shadow-2xl backdrop-blur-xl">
+              <p className="px-3 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">
+                Open Reminder
+              </p>
+              <button
+                onClick={() => {
+                  onOpenReminder('pre-market')
+                  setReminderMenuOpen(false)
+                }}
+                className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-white/5"
+              >
+                <span className="text-sm font-medium text-white">Pre-Market Check-in</span>
+                <span className="text-[11px] text-gray-500">Open</span>
+              </button>
+              <button
+                onClick={() => {
+                  onOpenReminder('morning')
+                  setReminderMenuOpen(false)
+                }}
+                className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-white/5"
+              >
+                <span className="text-sm font-medium text-white">Morning Pulse</span>
+                <span className="text-[11px] text-gray-500">Open</span>
+              </button>
+              <button
+                onClick={() => {
+                  onOpenReminder('afternoon')
+                  setReminderMenuOpen(false)
+                }}
+                className="mt-1 flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-white/5"
+              >
+                <span className="text-sm font-medium text-white">Afternoon Check-in</span>
+                <span className="text-[11px] text-gray-500">Open</span>
+              </button>
+            </div>
+          )}
+        </div>
         <button
           onClick={onImport}
           className="btn-primary flex items-center gap-1.5 text-[13px] xl:text-sm px-3 xl:px-4 py-2 xl:py-2.5"

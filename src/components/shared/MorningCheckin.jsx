@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react'
 import { Wind, Brain, Shield, ChevronRight, Sword } from 'lucide-react'
 import { useHabitsStore } from '../../store/useHabitsStore.js'
 import { resolveCheckinHabitIds } from '../../utils/checkinHabits.js'
-
-const STORAGE_KEY = () => `checkin_${new Date().toISOString().slice(0, 10)}`
+import { buildMorningCheckinStorageKey, shouldOpenMorningCheckin } from '../../utils/morningCheckinState.js'
 
 const HOWELL_CHECKS = [
   {
@@ -54,7 +53,7 @@ const DOUGLAS_TRUTHS = [
 
 const STEPS = ['center', 'truths', 'declare']
 
-export default function MorningCheckin() {
+export default function MorningCheckin({ openRequest = { signal: 0, requestedMode: null } }) {
   const [visible, setVisible]       = useState(false)
   const [step, setStep]             = useState(0)
   const [howellChecks, setHowell]   = useState({})
@@ -64,18 +63,28 @@ export default function MorningCheckin() {
   const { habits, logCompletion, removeCompletion, isCompleted } = useHabitsStore()
 
   useEffect(() => {
-    if (!localStorage.getItem(STORAGE_KEY())) {
-      setVisible(true)
-      // Auto-dismiss the breathing cue after 4s
-      const t = setTimeout(() => setBreathing(false), 4000)
-      return () => clearTimeout(t)
-    }
-  }, [])
+    if (!openRequest?.signal) return
+    const storageKey = buildMorningCheckinStorageKey(new Date())
+    const storageValue = localStorage.getItem(storageKey)
+    if (!shouldOpenMorningCheckin({ storageValue })) return
+    setStep(0)
+    setHowell({})
+    setDouglas({})
+    setDeclared(false)
+    setBreathing(true)
+    setVisible(true)
+  }, [openRequest])
+
+  useEffect(() => {
+    if (!visible || !breathing) return
+    const t = setTimeout(() => setBreathing(false), 4000)
+    return () => clearTimeout(t)
+  }, [visible, breathing])
 
   if (!visible) return null
 
   function dismiss() {
-    localStorage.setItem(STORAGE_KEY(), '1')
+    localStorage.setItem(buildMorningCheckinStorageKey(new Date()), '1')
     setVisible(false)
   }
 

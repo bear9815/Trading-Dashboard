@@ -5,6 +5,7 @@ import { useJournalStore }  from '../../store/useJournalStore.js'
 import { useMorningStore }  from '../../store/useMorningStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { resolveCheckinHabitIds } from '../../utils/checkinHabits.js'
+import { resolveTradingReminderMode } from '../../utils/tradingReminderMode.js'
 
 const THOUGHT_TAGS = ['note', 'insight', 'discipline', 'warning', 'fomo']
 
@@ -77,7 +78,7 @@ function computeStreak(completions, habitId) {
   return streak
 }
 
-export default function TradingReminderPopup({ openSignal = 0 }) {
+export default function TradingReminderPopup({ openRequest = { signal: 0, requestedMode: null } }) {
   const [visible,     setVisible]     = useState(false)
   const [mode,        setMode]        = useState('morning')
   const [thought,     setThought]     = useState('')
@@ -104,14 +105,16 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
   }, [dailyHabits, completions])
 
   useEffect(() => {
-    if (!openSignal) return
-    const hour = new Date().getHours()
+    if (!openRequest?.signal) return
     activeReminderRef.current = null
     snoozeUntilRef.current = null
-    setMode(hour < 13 ? 'morning' : 'afternoon')
+    setMode(resolveTradingReminderMode({
+      requestedMode: openRequest?.requestedMode,
+      currentHour: new Date().getHours(),
+    }))
     setVisible(true)
     setLoggedNow(false)
-  }, [openSignal])
+  }, [openRequest])
 
   const persistDraftThought = () => {
     const trimmed = thought.trim()
@@ -141,7 +144,7 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
         if (minutesLate >= 0 && minutesLate <= 2 && !fired.includes(t)) {
           const hour = parseInt(t.split(':')[0], 10)
           activeReminderRef.current = t
-          setMode(hour < 13 ? 'morning' : 'afternoon')
+          setMode(resolveTradingReminderMode({ currentHour: hour }))
           setVisible(true)
           setLoggedNow(false)
 
@@ -247,28 +250,28 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={dismiss} />
 
       {/* Panel */}
-      <div className="relative w-full max-w-[420px] rounded-2xl overflow-hidden shadow-2xl"
+      <div className="relative w-full max-w-[720px] rounded-[28px] overflow-hidden shadow-2xl"
            style={{ border: '1px solid rgba(255,255,255,0.07)', background: '#0c0d0f' }}>
 
         {/* Top accent bar */}
         <div className="h-px w-full" style={{ background: `linear-gradient(90deg, ${accentColor}60, transparent)` }} />
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.04]">
+        <div className="flex items-center justify-between px-7 py-6 border-b border-white/[0.04]">
           <div className="flex items-center gap-2.5">
             {isMorning
-              ? <Sun size={14} style={{ color: accentColor }} />
-              : <Zap size={14} style={{ color: accentColor }} />
+              ? <Sun size={18} style={{ color: accentColor }} />
+              : <Zap size={18} style={{ color: accentColor }} />
             }
-            <span className="text-sm font-semibold text-white tracking-tight">
+            <span className="text-base font-semibold text-white tracking-tight">
               {isMorning ? 'Morning Pulse' : 'Afternoon Check-in'}
             </span>
-            <span className="text-[11px] mono text-gray-600">
+            <span className="text-xs mono text-gray-600">
               {new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
             </span>
           </div>
-          <button onClick={dismiss} className="text-gray-600 hover:text-gray-300 transition-colors p-1 rounded">
-            <X size={14} />
+          <button onClick={dismiss} className="text-gray-600 hover:text-gray-300 transition-colors p-1.5 rounded-lg">
+            <X size={16} />
           </button>
         </div>
 
@@ -276,25 +279,25 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
 
           {/* Context strip — today's morning entry */}
           {todayEntry && (
-            <div className="px-5 py-2.5 flex items-center gap-5 bg-white/[0.01]">
-              <span className="text-[10px] tracking-[0.12em] text-gray-700 uppercase">Today</span>
+            <div className="px-7 py-3.5 flex flex-wrap items-center gap-5 bg-white/[0.01]">
+              <span className="text-[11px] tracking-[0.12em] text-gray-700 uppercase">Today</span>
               {todayEntry.fomo != null && (
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-gray-600">FOMO</span>
-                  <span className="text-xs mono font-semibold"
+                  <span className="text-[11px] text-gray-600">FOMO</span>
+                  <span className="text-sm mono font-semibold"
                         style={{ color: todayEntry.fomo >= 70 ? '#ff4757' : todayEntry.fomo >= 45 ? '#ffa502' : '#00d084' }}>
                     {todayEntry.fomo}
                   </span>
                 </div>
               )}
               {todayEntry.riskMode && (
-                <span className="text-[11px] text-gray-500 capitalize">{todayEntry.riskMode} risk</span>
+                <span className="text-sm text-gray-500 capitalize">{todayEntry.riskMode} risk</span>
               )}
               {todayEntry.confidence != null && (
-                <span className="text-[11px] text-gray-600">Conf. {todayEntry.confidence}/5</span>
+                <span className="text-sm text-gray-600">Conf. {todayEntry.confidence}/5</span>
               )}
               {dailyHabits.length > 0 && (
-                <span className="ml-auto text-[11px]"
+                <span className="ml-auto text-sm"
                       style={{ color: completedToday === dailyHabits.length ? '#00d084' : '#6b7280' }}>
                   {completedToday}/{dailyHabits.length} habits
                 </span>
@@ -303,9 +306,9 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
           )}
 
           {/* Quick-log trading thought */}
-          <div className="px-5 py-4">
-            <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-3 flex items-center gap-1.5">
-              <Brain size={10} />
+          <div className="px-7 py-6">
+            <p className="text-[11px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-4 flex items-center gap-2">
+              <Brain size={12} />
               Log a Trading Thought
             </p>
             <button
@@ -313,16 +316,16 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
                 setThought(promptText)
                 textareaRef.current?.focus()
               }}
-              className="text-left w-full mb-2.5 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-gray-500 hover:text-gray-300 hover:border-white/[0.12] transition-all"
+              className="text-left w-full mb-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3 text-sm text-gray-400 hover:text-gray-200 hover:border-white/[0.12] transition-all"
             >
               Prompt: {promptText}
             </button>
-            <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
+            <div className="flex items-center gap-2 flex-wrap mb-3">
               {quickStates.map(item => (
                 <button
                   key={item.label}
                   onClick={() => handleQuickState(item)}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all border text-gray-400 border-white/[0.06] bg-white/[0.02] hover:text-white hover:border-white/[0.12]"
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border text-gray-300 border-white/[0.06] bg-white/[0.02] hover:text-white hover:border-white/[0.12]"
                 >
                   {item.label}
                 </button>
@@ -334,16 +337,16 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
               onChange={e => setThought(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleLogThought() } }}
               placeholder="What's on your mind? Press Enter to save…"
-              rows={2}
-              className="w-full bg-white/[0.03] border border-white/[0.07] rounded-xl px-3 py-2.5 text-sm
-                         text-gray-200 placeholder:text-gray-700 focus:outline-none focus:border-white/[0.15] resize-none mb-2.5"
+              rows={3}
+              className="w-full bg-white/[0.03] border border-white/[0.07] rounded-2xl px-4 py-3.5 text-base
+                         text-gray-200 placeholder:text-gray-700 focus:outline-none focus:border-white/[0.15] resize-none mb-3"
             />
-            <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
               {THOUGHT_TAGS.map(tag => (
                 <button
                   key={tag}
                   onClick={() => setThoughtTag(tag)}
-                  className="px-2.5 py-0.5 rounded-md text-[10px] font-medium capitalize transition-all border"
+                  className="px-3 py-1 rounded-lg text-xs font-medium capitalize transition-all border"
                   style={thoughtTag === tag ? {
                     color: TAG_COLORS[tag],
                     borderColor: `${TAG_COLORS[tag]}60`,
@@ -356,7 +359,7 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
               <button
                 onClick={handleLogThought}
                 disabled={!thought.trim()}
-                className="ml-auto px-4 py-1 rounded-lg text-xs font-semibold transition-all"
+                className="ml-auto px-5 py-2 rounded-xl text-sm font-semibold transition-all"
                 style={thought.trim() ? {
                   background: `${accentColor}22`,
                   color: accentColor,
@@ -372,13 +375,13 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
               </button>
               <button
                 onClick={handleSkipTyping}
-                className="px-3 py-1 rounded-lg text-[11px] font-medium transition-all text-gray-500 hover:text-gray-300 border border-white/[0.06] hover:border-white/[0.12]"
+                className="px-4 py-2 rounded-xl text-sm font-medium transition-all text-gray-500 hover:text-gray-300 border border-white/[0.06] hover:border-white/[0.12]"
               >
                 Skip typing
               </button>
             </div>
             {loggedNow && (
-              <p className="mt-2 text-[11px] text-accent-green">
+              <p className="mt-3 text-sm text-accent-green">
                 Saved to Dashboard → Trading Thoughts.
               </p>
             )}
@@ -386,8 +389,8 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
 
           {/* Daily habits */}
           {!isMorning && (
-            <div className="px-5 py-4">
-              <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-3">Afternoon Movement</p>
+            <div className="px-7 py-6">
+              <p className="text-[11px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-4">Afternoon Movement</p>
               <div className="space-y-1.5">
                 {movementOptions.map(item => {
                   const done = item.habitId ? isCompleted(item.habitId, today) : false
@@ -396,22 +399,22 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
                       key={item.id}
                       onClick={() => toggleMovementHabit(item.habitId)}
                       disabled={!item.habitId}
-                      className={`w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left transition-all group ${
+                      className={`w-full flex items-center gap-3 rounded-xl px-4 py-3 text-left transition-all group ${
                         item.habitId ? '' : 'opacity-60 cursor-not-allowed'
                       }`}
                       style={{ background: done ? 'rgba(255,255,255,0.025)' : 'transparent' }}
                     >
                       {done
-                        ? <CheckCircle2 size={13} style={{ color: '#00d084', flexShrink: 0 }} />
-                        : <Circle size={13} className="text-gray-700 group-hover:text-gray-500 transition-colors" style={{ flexShrink: 0 }} />
+                        ? <CheckCircle2 size={16} style={{ color: '#00d084', flexShrink: 0 }} />
+                        : <Circle size={16} className="text-gray-700 group-hover:text-gray-500 transition-colors" style={{ flexShrink: 0 }} />
                       }
-                      <span className={`text-[13px] flex-1 transition-colors ${
+                      <span className={`text-sm text-gray-300 flex-1 transition-colors ${
                         done ? 'text-gray-600 line-through decoration-gray-700' : 'text-gray-300'
                       }`}>
                         {item.label}
                       </span>
                       {!item.habitId && (
-                        <span className="text-[10px] text-gray-600">Add habit</span>
+                        <span className="text-xs text-gray-600">Add habit</span>
                       )}
                     </button>
                   )
@@ -421,8 +424,8 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
           )}
 
           {dailyHabits.length > 0 && (
-            <div className="px-5 py-4">
-              <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-3">Today's Habits</p>
+            <div className="px-7 py-6">
+              <p className="text-[11px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-4">Today's Habits</p>
               <div className="space-y-1.5">
                 {dailyHabits.slice(0, 6).map(h => {
                   const done   = isCompleted(h.id, today)
@@ -431,21 +434,21 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
                     <button
                       key={h.id}
                       onClick={() => toggleHabit(h)}
-                      className="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left transition-all group"
+                      className="w-full flex items-center gap-3 rounded-xl px-4 py-3 text-left transition-all group"
                       style={{ background: done ? 'rgba(255,255,255,0.025)' : 'transparent' }}
                     >
                       {done
-                        ? <CheckCircle2 size={13} style={{ color: h.color || '#00d084', flexShrink: 0 }} />
-                        : <Circle size={13} className="text-gray-700 group-hover:text-gray-500 transition-colors" style={{ flexShrink: 0 }} />
+                        ? <CheckCircle2 size={16} style={{ color: h.color || '#00d084', flexShrink: 0 }} />
+                        : <Circle size={16} className="text-gray-700 group-hover:text-gray-500 transition-colors" style={{ flexShrink: 0 }} />
                       }
-                      <span className={`text-[13px] flex-1 transition-colors ${
+                      <span className={`text-sm text-gray-300 flex-1 transition-colors ${
                         done ? 'text-gray-600 line-through decoration-gray-700' : 'text-gray-300'
                       }`}>
                         {h.title}
                       </span>
                       {streak > 1 && (
-                        <span className="flex items-center gap-0.5 text-[10px] text-orange-400 opacity-80">
-                          <Flame size={9} />
+                        <span className="flex items-center gap-1 text-xs text-orange-400 opacity-80">
+                          <Flame size={11} />
                           {streak}
                         </span>
                       )}
@@ -458,18 +461,18 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
 
           {/* Active goals */}
           {activeGoals.length > 0 && (
-            <div className="px-5 py-4">
-              <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-3 flex items-center gap-1.5">
-                <Target size={10} />
+            <div className="px-7 py-6">
+              <p className="text-[11px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-4 flex items-center gap-2">
+                <Target size={12} />
                 Active Goals
               </p>
               <div className="space-y-1.5">
                 {activeGoals.map(g => (
                   <div key={g.id} className="flex items-start gap-2">
-                    <span className="text-gray-700 mt-px text-xs">·</span>
-                    <span className="text-[13px] text-gray-400 flex-1">{g.title}</span>
+                    <span className="text-gray-700 mt-px text-sm">·</span>
+                    <span className="text-sm text-gray-300 flex-1">{g.title}</span>
                     {g.priority === 'high' && (
-                      <span className="text-[10px] text-red-500/70 mt-0.5">high</span>
+                      <span className="text-xs text-red-500/70 mt-0.5">high</span>
                     )}
                   </div>
                 ))}
@@ -479,26 +482,26 @@ export default function TradingReminderPopup({ openSignal = 0 }) {
 
           {/* Empty state when no habits or goals configured */}
           {dailyHabits.length === 0 && activeGoals.length === 0 && (
-            <div className="px-5 py-4">
-              <p className="text-xs text-gray-600 text-center">
+            <div className="px-7 py-6">
+              <p className="text-sm text-gray-600 text-center">
                 Add habits and goals in the Journal tab to see them here.
               </p>
             </div>
           )}
 
           {/* Footer */}
-          <div className="px-5 py-4 flex items-center gap-2.5">
+          <div className="px-7 py-6 flex items-center gap-3">
             <button
               onClick={snooze}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium transition-all text-gray-500 hover:text-gray-300"
+              className="flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-medium transition-all text-gray-500 hover:text-gray-300"
               style={{ border: '1px solid rgba(255,255,255,0.07)', background: 'transparent' }}
             >
-              <Clock size={11} />
+              <Clock size={14} />
               Snooze 30 min
             </button>
             <button
               onClick={dismiss}
-              className="flex-1 py-2 rounded-xl text-xs font-semibold text-gray-300 transition-all"
+              className="flex-1 py-3 rounded-2xl text-sm font-semibold text-gray-300 transition-all"
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
             >
               Done
