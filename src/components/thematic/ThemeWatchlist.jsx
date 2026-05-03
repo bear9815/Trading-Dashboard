@@ -8,7 +8,7 @@ import { DEFAULT_LIST_ORDER, MARKET_LEADERS_LIST_ID, useResearchWatchlistStore }
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
-import { resolveTickerToName, searchTickerIdentity } from '../../utils/marketData.js'
+import { fetchSectors, resolveTickerToName, searchTickerIdentity } from '../../utils/marketData.js'
 import { estimateCurrentShortInterest } from '../../utils/finraShortInterestEstimate.js'
 import {
   buildCompanyVerification,
@@ -70,6 +70,7 @@ const SORT_OPTIONS = [
   ['ecosystem', 'Ecosystem'],
   ['theme', 'Theme'],
   ['sector', 'Sector'],
+  ['industry', 'Industry'],
   ['relatedDriver', 'Driver'],
 ]
 
@@ -94,7 +95,7 @@ const ECOSYSTEM_GROUPING_OPTIONS = [
 ]
 
 const CSV_COLUMNS = [
-  'symbol', 'companyName', 'sector', 'ecosystem', 'theme', 'whatTheyDo',
+  'symbol', 'companyName', 'sector', 'industry', 'ecosystem', 'theme', 'whatTheyDo',
   'majorCustomers', 'dependencies', 'relatedDriver', 'anchoredRsZ', 'rollingRsZ', 'finraShortInterest', 'finraEstimatedShortInterest', 'finraEstimatedChangePct', 'finraEstimatedConfidence', 'finraDaysToCover', 'finraSettlementDate', 'customerOf', 'supplierTo', 'competesWith',
 ]
 
@@ -102,6 +103,7 @@ const EMPTY_ROW = {
   symbol: '',
   companyName: '',
   sector: '',
+  industry: '',
   ecosystem: '',
   theme: '',
   whatTheyDo: '',
@@ -206,6 +208,7 @@ function normalizeEditableRow(form) {
     symbol: (form.symbol || '').trim().toUpperCase(),
     companyName: form.companyName?.trim() || '—',
     sector: form.sector?.trim() || '—',
+    industry: form.industry?.trim() || '—',
     ecosystem: form.ecosystem?.trim() || '—',
     theme: form.theme?.trim() || '—',
     whatTheyDo: form.whatTheyDo?.trim() || '—',
@@ -540,7 +543,7 @@ function CompanyVerificationCell({
           {loading ? 'checking…' : badgeText}
         </button>
       </div>
-      <p className="text-xs text-gray-600 mt-0.5">{row.sector}</p>
+      <p className="text-xs text-gray-600 mt-0.5">{[row.sector, row.industry].filter(value => value && value !== '—').join(' · ') || '—'}</p>
       {(isReview || isProvisional) && verification?.officialName && (
         <div className="mt-1 rounded-lg border border-accent-yellow/15 bg-accent-yellow/5 px-2 py-1">
           <p className="text-[11px] text-gray-400">
@@ -928,6 +931,7 @@ function RowEditor({ row, onSave, onClose }) {
             ['symbol', 'Symbol'],
             ['companyName', 'Company'],
             ['sector', 'Sector'],
+            ['industry', 'Industry'],
             ['ecosystem', 'Ecosystem'],
             ['theme', 'Theme'],
             ['relatedDriver', 'Related Driver'],
@@ -2175,7 +2179,17 @@ export default function ThemeWatchlist({
           openRouterApiKey,
           openRouterModel: researchOpenRouterModel,
         })
-        upsertRows(mapped.map(row => mergeTrustedCompanyIdentity(row, rowsBySymbol?.[row.symbol])))
+        const sectorMap = await fetchSectors(chunks[i])
+        const mergedRows = mapped.map(row => {
+          const marketData = sectorMap.get(row.symbol) || {}
+          row = {
+            ...row,
+            sector: row.sector && row.sector !== '—' ? row.sector : (marketData.sector || '—'),
+            industry: row.industry && row.industry !== '—' ? row.industry : (marketData.industry || '—'),
+          }
+          return mergeTrustedCompanyIdentity(row, rowsBySymbol?.[row.symbol])
+        })
+        upsertRows(mergedRows)
       }
       const reusedCount = symbols.length - symbolsToMap.length
       setStatus(

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { LayoutList, Layers, Globe } from 'lucide-react'
+import { LayoutList, Layers, Globe, Factory } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
 import { useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
 import WatchlistWorkspace from './WatchlistWorkspace.jsx'
 import WatchlistEcosystems from './WatchlistEcosystems.jsx'
+import IndustryWatchlist from './IndustryWatchlist.jsx'
 
 const WATCHLIST_TABS = [
   {
@@ -18,6 +19,12 @@ const WATCHLIST_TABS = [
     label: 'Ecosystems',
     icon: Layers,
     description: 'Breadth, rotation, and setup quality across the active watchlist ecosystem map.',
+  },
+  {
+    id: 'industries',
+    label: 'Industries',
+    icon: Factory,
+    description: 'Track industry-level proxies with Liquid list overlap and synthetic fallback when ETFs do not exist.',
   },
 ]
 
@@ -91,6 +98,7 @@ export default function Watchlist() {
 
       {tab === 'lists' && <WatchlistWorkspace {...sharedProps} />}
       {tab === 'ecosystems' && <WatchlistEcosystems {...sharedProps} />}
+      {tab === 'industries' && <IndustryWatchlist />}
     </div>
   )
 }

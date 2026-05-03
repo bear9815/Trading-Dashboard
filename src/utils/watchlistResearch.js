@@ -19,6 +19,7 @@ function normalizeRow(row = {}) {
     symbol: (row.symbol || '').trim().toUpperCase(),
     companyName: row.companyName || '—',
     sector: row.sector || '—',
+    industry: row.industry || '—',
     ecosystem: row.ecosystem || row.theme || '—',
     theme: row.theme || '—',
     whatTheyDo: row.whatTheyDo || '—',
@@ -38,6 +39,7 @@ For each US-listed stock symbol below, return a concise primer-style row with:
 - symbol
 - companyName
 - sector
+- industry
 - ecosystem: a broad bucket like "Semi Equipment", "AI Cloud", "Optical Components", "Power & Cooling", "Networking", "Infrastructure", "Software", etc.
 - theme: a more specific 2-5 word sub-theme
 - whatTheyDo: one very plain-English sentence fragment explaining what the company does
@@ -59,6 +61,7 @@ Return ONLY valid JSON:
       "symbol": "NVDA",
       "companyName": "NVIDIA Corporation",
       "sector": "Technology",
+      "industry": "Semiconductors",
       "ecosystem": "AI Compute",
       "theme": "AI Accelerators",
       "whatTheyDo": "Designs GPUs and AI compute platforms",
