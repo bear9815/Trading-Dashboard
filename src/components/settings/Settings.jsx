@@ -32,6 +32,7 @@ export default function Settings() {
     theme, setTheme,
     alpacaApiKey, alpacaApiSecret, setAlpacaKeys,
     finnhubApiKey, setFinnhubApiKey,
+    alphaVantageApiKey, setAlphaVantageApiKey,
     accounts, addAccount, removeAccount,
     tpMultiplier, setTpMultiplier,
     dailyLossLimit, setDailyLossLimit,
@@ -111,6 +112,9 @@ export default function Settings() {
   const [finnhubKey,   setFinnhubKey]   = useState(finnhubApiKey)
   const [showFinnhub,  setShowFinnhub]  = useState(false)
   const [finnhubSaved, setFinnhubSaved] = useState(false)
+  const [alphaVantageKey, setAlphaVantageKey] = useState(alphaVantageApiKey)
+  const [showAlphaVantage, setShowAlphaVantage] = useState(false)
+  const [alphaVantageSaved, setAlphaVantageSaved] = useState(false)
 
   function saveAlpaca() {
     setAlpacaKeys(alpacaKey.trim(), alpacaSecret.trim())
@@ -122,6 +126,12 @@ export default function Settings() {
     setFinnhubApiKey(finnhubKey.trim())
     setFinnhubSaved(true)
     setTimeout(() => setFinnhubSaved(false), 2000)
+  }
+
+  function saveAlphaVantage() {
+    setAlphaVantageApiKey(alphaVantageKey.trim())
+    setAlphaVantageSaved(true)
+    setTimeout(() => setAlphaVantageSaved(false), 2000)
   }
 
   // Screenshot compression
@@ -538,8 +548,32 @@ export default function Settings() {
           {finnhubApiKey && <p className="text-xs text-accent-green">✓ Finnhub key configured</p>}
         </div>
 
+        <div className="space-y-2 pt-1 border-t border-white/5">
+          <p className="text-xs font-medium text-gray-300">Alpha Vantage <span className="text-gray-600 font-normal">(earnings source of truth)</span></p>
+          <p className="text-xs text-gray-500">Best for the earnings dashboard. The app uses 1 calendar request/day plus up to 24 symbol history refreshes/day and builds coverage across consecutive days.</p>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <input
+                type={showAlphaVantage ? 'text' : 'password'}
+                value={alphaVantageKey}
+                onChange={e => setAlphaVantageKey(e.target.value)}
+                placeholder="Alpha Vantage API key"
+                className="input pr-9 font-mono text-xs w-full"
+              />
+              <button onClick={() => setShowAlphaVantage(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300">
+                {showAlphaVantage ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+            <button onClick={saveAlphaVantage} className="btn-primary flex items-center gap-1.5 shrink-0">
+              <Save size={14} />
+              {alphaVantageSaved ? 'Saved!' : 'Save'}
+            </button>
+          </div>
+          {alphaVantageApiKey && <p className="text-xs text-accent-green">✓ Alpha Vantage earnings cache configured</p>}
+        </div>
+
         <div className="rounded-lg bg-surface-200 px-3 py-2 text-xs text-gray-500">
-          <strong className="text-gray-400">No keys?</strong> Yahoo Finance is used as a fallback with no key required, but it is unofficial and may fail. Adding Alpaca gives you reliable, free historical data.
+          <strong className="text-gray-400">No keys?</strong> Yahoo Finance is used as a fallback with no key required, but it is unofficial and may fail. For the earnings dashboard, Alpha Vantage is the preferred source of truth and Yahoo only fills gaps until the rolling cache catches up.
         </div>
       </div>
 

@@ -169,7 +169,7 @@ function cleanKey(key) {
 
 // Fields synced to Supabase (business data that must match across devices)
 const CLOUD_FIELDS = [
-  'apiKey', 'anthropicApiKey', 'alpacaApiKey', 'alpacaApiSecret', 'finnhubApiKey',
+  'apiKey', 'anthropicApiKey', 'alpacaApiKey', 'alpacaApiSecret', 'finnhubApiKey', 'alphaVantageApiKey',
   'openRouterApiKey', 'researchAiProvider', 'researchOpenRouterModel', 'dashboardVoiceModel',
   'theme', 'accounts', 'dailyLossLimit', 'maxDrawdownLimit',
   'benchmarkSymbol', 'tpMultiplier',
@@ -221,6 +221,7 @@ export const useSettingsStore = create(
       alpacaApiKey: '',
       alpacaApiSecret: '',
       finnhubApiKey: '',
+      alphaVantageApiKey: '',
       braveSearchApiKey: '',
 
       // Note: liveAccountBalance and liveEffectivePct moved to useLiveMarketStore
@@ -302,6 +303,7 @@ export const useSettingsStore = create(
       setAnthropicApiKey:  (key)           => { set({ anthropicApiKey: cleanKey(key) });  saveToCloud({ ...get(), anthropicApiKey: cleanKey(key) })  },
       setAlpacaKeys:       (key, secret)   => { set({ alpacaApiKey: key, alpacaApiSecret: secret }); saveToCloud({ ...get(), alpacaApiKey: key, alpacaApiSecret: secret }) },
       setFinnhubApiKey:    (key)           => { set({ finnhubApiKey: key });    saveToCloud({ ...get(), finnhubApiKey: key })    },
+      setAlphaVantageApiKey: (key)         => { set({ alphaVantageApiKey: cleanKey(key) }); saveToCloud({ ...get(), alphaVantageApiKey: cleanKey(key) }) },
       setBraveSearchApiKey: (key)          => { set({ braveSearchApiKey: cleanKey(key) }) },  // not synced to cloud — local only
       setTheme:            (theme)         => { set({ theme });                 saveToCloud({ ...get(), theme })                 },
       setAccounts:         (accounts)      => { set({ accounts });              saveToCloud({ ...get(), accounts })              },

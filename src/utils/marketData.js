@@ -1,3 +1,9 @@
+import {
+  buildAlphaVantageCoveragePatch,
+  getAlphaVantageSymbolsToRefresh,
+  parseAlphaVantageEarningsCalendarCsv,
+} from './earningsCoverageSource.js'
+
 /**
  * Market data utilities
  *
@@ -13,6 +19,10 @@
 const YF     = '/api/yf'
 const STOOQ  = '/api/stooq'
 const BASE   = `${YF}/v8/finance/chart`
+const ALPHA_VANTAGE_BASE = 'https://www.alphavantage.co/query'
+const EARNINGS_COVERAGE_CACHE_KEY = 'risk-tool-earnings-coverage-cache-v1'
+const ALPHA_VANTAGE_DAILY_LIMIT = 25
+const ALPHA_VANTAGE_SYMBOL_TTL_DAYS = 7
 
 // ── Schwab token (injected from App.jsx) ──────────────────────────────────────
 // _schwabToken: static snapshot (fallback)
@@ -45,9 +55,10 @@ function getApiKeys() {
       alpacaApiKey:    state?.alpacaApiKey    || '',
       alpacaApiSecret: state?.alpacaApiSecret || '',
       finnhubApiKey:   state?.finnhubApiKey   || '',
+      alphaVantageApiKey: state?.alphaVantageApiKey || '',
     }
   } catch {
-    return { alpacaApiKey: '', alpacaApiSecret: '', finnhubApiKey: '' }
+    return { alpacaApiKey: '', alpacaApiSecret: '', finnhubApiKey: '', alphaVantageApiKey: '' }
   }
 }
 
@@ -1212,6 +1223,104 @@ function buildCoverageMetaShape(symbol) {
   }
 }
 
+function todayDateKey() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function loadEarningsCoverageCache() {
+  try {
+    const raw = localStorage.getItem(EARNINGS_COVERAGE_CACHE_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    return {
+      calendar: parsed?.calendar || { fetchedOn: null, bySymbol: {} },
+      quota: parsed?.quota || { date: todayDateKey(), count: 0 },
+      symbols: parsed?.symbols || {},
+    }
+  } catch {
+    return {
+      calendar: { fetchedOn: null, bySymbol: {} },
+      quota: { date: todayDateKey(), count: 0 },
+      symbols: {},
+    }
+  }
+}
+
+function saveEarningsCoverageCache(cache) {
+  try {
+    localStorage.setItem(EARNINGS_COVERAGE_CACHE_KEY, JSON.stringify(cache))
+  } catch { /* ignore cache write errors */ }
+}
+
+function normalizeQuota(cache, dateKey = todayDateKey()) {
+  if (cache?.quota?.date === dateKey) return { ...cache, quota: { date: dateKey, count: Number(cache?.quota?.count || 0) } }
+  return { ...cache, quota: { date: dateKey, count: 0 } }
+}
+
+function incrementAlphaQuota(cache, dateKey = todayDateKey()) {
+  const normalized = normalizeQuota(cache, dateKey)
+  normalized.quota.count += 1
+  return normalized
+}
+
+async function fetchAlphaVantageCalendar(alphaVantageApiKey) {
+  const url = `${ALPHA_VANTAGE_BASE}?function=EARNINGS_CALENDAR&horizon=12month&apikey=${encodeURIComponent(alphaVantageApiKey)}`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Alpha Vantage calendar HTTP ${res.status}`)
+  return parseAlphaVantageEarningsCalendarCsv(await res.text())
+}
+
+async function fetchAlphaVantageEarningsHistory(symbol, alphaVantageApiKey) {
+  const url = `${ALPHA_VANTAGE_BASE}?function=EARNINGS&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(alphaVantageApiKey)}`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Alpha Vantage earnings HTTP ${res.status}`)
+  return buildAlphaVantageCoveragePatch(await res.json())
+}
+
+async function hydrateAlphaVantageCoverage(symbols, alphaVantageApiKey) {
+  const dateKey = todayDateKey()
+  let cache = normalizeQuota(loadEarningsCoverageCache(), dateKey)
+  const plan = getAlphaVantageSymbolsToRefresh({
+    symbols,
+    cache,
+    today: dateKey,
+    maxDailyRequests: ALPHA_VANTAGE_DAILY_LIMIT,
+    reserveForCalendar: true,
+    ttlDays: ALPHA_VANTAGE_SYMBOL_TTL_DAYS,
+  })
+
+  if (plan.needsCalendarFetch) {
+    try {
+      const bySymbol = await fetchAlphaVantageCalendar(alphaVantageApiKey)
+      cache.calendar = { fetchedOn: dateKey, bySymbol }
+      cache = incrementAlphaQuota(cache, dateKey)
+    } catch {
+      // Keep prior calendar cache if today's refresh fails.
+    }
+  }
+
+  for (const symbol of plan.symbolsToRefresh) {
+    if ((cache?.quota?.count || 0) >= ALPHA_VANTAGE_DAILY_LIMIT) break
+    try {
+      const patch = await fetchAlphaVantageEarningsHistory(symbol, alphaVantageApiKey)
+      cache.symbols[symbol] = {
+        ...(cache.symbols[symbol] || {}),
+        ...patch,
+        fetchedOn: dateKey,
+      }
+      cache = incrementAlphaQuota(cache, dateKey)
+    } catch {
+      cache.symbols[symbol] = {
+        ...(cache.symbols[symbol] || {}),
+        fetchedOn: dateKey,
+      }
+      cache = incrementAlphaQuota(cache, dateKey)
+    }
+  }
+
+  saveEarningsCoverageCache(cache)
+  return cache
+}
+
 function parseYahooCoverageResult(result = {}, fallbackSymbol = '') {
   const meta = buildCoverageMetaShape(result?.symbol || fallbackSymbol)
   const earningsDate = result?.calendarEvents?.earnings?.earningsDate
@@ -1258,11 +1367,23 @@ function parseYahooCoverageResult(result = {}, fallbackSymbol = '') {
 }
 
 export async function fetchEarningsCoverageMeta(symbols) {
-  const { finnhubApiKey } = getApiKeys()
+  const { finnhubApiKey, alphaVantageApiKey } = getApiKeys()
   const uniqueSymbols = [...new Set((symbols || []).map(symbol => String(symbol || '').trim().toUpperCase()).filter(Boolean))]
+  const alphaCache = alphaVantageApiKey ? await hydrateAlphaVantageCoverage(uniqueSymbols, alphaVantageApiKey) : loadEarningsCoverageCache()
 
   const results = await Promise.all(uniqueSymbols.map(async (symbol) => {
     const meta = buildCoverageMetaShape(symbol)
+
+    const alphaCalendarDate = alphaCache?.calendar?.bySymbol?.[symbol]
+    if (alphaCalendarDate) meta.nextEarningsDate = new Date(`${alphaCalendarDate}T00:00:00.000Z`)
+    const alphaSymbol = alphaCache?.symbols?.[symbol]
+    if (alphaSymbol?.latestReportedPeriod) meta.latestReportedPeriod = alphaSymbol.latestReportedPeriod
+    if (alphaSymbol?.latestReportedDate) meta.latestReportedDate = new Date(`${alphaSymbol.latestReportedDate}T00:00:00.000Z`)
+    meta.providerStatus = meta.nextEarningsDate && meta.latestReportedPeriod
+      ? 'ok'
+      : (meta.nextEarningsDate || meta.latestReportedPeriod ? 'partial' : 'missing')
+
+    if (meta.providerStatus === 'ok') return meta
 
     if (finnhubApiKey) {
       try {
