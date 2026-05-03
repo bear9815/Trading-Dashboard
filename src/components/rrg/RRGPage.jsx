@@ -25,75 +25,81 @@ const SECTORS = [
   { id: "XLC",  label: "Comm. Services",  ticker: "XLC",  color: "#fb923c" },
 ];
 
-const INDUSTRIES = [
-  // ── Technology ──────────────────────────────────────────
-  { id: "XSD",   label: "Semis Equal Wt",       ticker: "XSD",   color: "#4db8ff" },
-  { id: "IGV",   label: "Software",             ticker: "IGV",   color: "#3b82f6" },
-  { id: "XSW",   label: "Software (EW)",        ticker: "XSW",   color: "#60a5fa" },
-  { id: "WCLD",  label: "Cloud",                ticker: "WCLD",  color: "#818cf8" },
-  { id: "CIBR",  label: "Cybersecurity",        ticker: "CIBR",  color: "#c4b5fd" },
-  { id: "ROBO",  label: "Robotics",             ticker: "ROBO",  color: "#ddd6fe" },
-  { id: "DRIV",  label: "Autonomous & EV",      ticker: "DRIV",  color: "#6ee7b7" },
-  { id: "BLOK",  label: "Blockchain",           ticker: "BLOK",  color: "#fbbf24" },
-  // ── Financials ──────────────────────────────────────────
-  { id: "KBE",   label: "Banks",                ticker: "KBE",   color: "#ffaa00" },
-  { id: "KRE",   label: "Regional Banks",       ticker: "KRE",   color: "#fef08a" },
-  { id: "KIE",   label: "Insurance",            ticker: "KIE",   color: "#fcd34d" },
-  { id: "IPAY",  label: "Digital Payments",     ticker: "IPAY",  color: "#fb923c" },
-  { id: "GBTC",  label: "Bitcoin Trust",        ticker: "GBTC",  color: "#f59e0b" },
-  // ── Healthcare ──────────────────────────────────────────
-  { id: "XBI",   label: "Biotech",              ticker: "XBI",   color: "#00e5a0" },
-  { id: "IHI",   label: "Med Devices",          ticker: "IHI",   color: "#34d399" },
-  { id: "XHS",   label: "Healthcare Services",  ticker: "XHS",   color: "#22d3ee" },
-  { id: "XHE",   label: "Healthcare Equipment", ticker: "XHE",   color: "#67e8f9" },
-  // ── Energy ──────────────────────────────────────────────
-  { id: "XOP",   label: "Oil & Gas E&P",        ticker: "XOP",   color: "#d97706" },
-  { id: "XES",   label: "Oil Equipment",        ticker: "XES",   color: "#b45309" },
-  { id: "USO",   label: "Crude Oil",            ticker: "USO",   color: "#92400e" },
-  { id: "PBW",   label: "Clean Energy",         ticker: "PBW",   color: "#86efac" },
-  { id: "RSPG",  label: "EW Energy",            ticker: "RSPG",  color: "#f97316" },
-  // ── Materials ───────────────────────────────────────────
-  { id: "XME",   label: "Metals & Mining",      ticker: "XME",   color: "#94a3b8" },
-  { id: "SLX",   label: "Steel",                ticker: "SLX",   color: "#cbd5e1" },
-  { id: "COPX",  label: "Copper Miners",        ticker: "COPX",  color: "#f87171" },
-  { id: "GNR",   label: "Natural Resources",    ticker: "GNR",   color: "#a3e635" },
-  { id: "RSPM",  label: "EW Materials",         ticker: "RSPM",  color: "#84cc16" },
-  // ── Industrials & Transport ─────────────────────────────
-  { id: "XAR",   label: "Aerospace & Defense",  ticker: "XAR",   color: "#64748b" },
-  { id: "PAVE",  label: "Infrastructure",       ticker: "PAVE",  color: "#e2e8f0" },
-  { id: "JETS",  label: "Airlines",             ticker: "JETS",  color: "#bfdbfe" },
-  { id: "XTN",   label: "Transportation",       ticker: "XTN",   color: "#93c5fd" },
-  { id: "BOAT",  label: "Global Shipping",      ticker: "BOAT",  color: "#7dd3fc" },
-  { id: "RSPN",  label: "EW Industrials",       ticker: "RSPN",  color: "#475569" },
-  // ── Consumer ────────────────────────────────────────────
-  { id: "XHB",   label: "Homebuilders",         ticker: "XHB",   color: "#ff6b9d" },
-  { id: "XRT",   label: "Retail",               ticker: "XRT",   color: "#fb7185" },
-  { id: "IBUY",  label: "Online Retail",        ticker: "IBUY",  color: "#e879f9" },
-  { id: "PBJ",   label: "Food & Beverage",      ticker: "PBJ",   color: "#fda4af" },
-  { id: "PEJ",   label: "Leisure & Entertain.", ticker: "PEJ",   color: "#f9a8d4" },
-  { id: "RSPD",  label: "EW Consumer Disc",     ticker: "RSPD",  color: "#ec4899" },
-  { id: "RSPS",  label: "EW Consumer Staples",  ticker: "RSPS",  color: "#f0abfc" },
-  // ── Agriculture ─────────────────────────────────────────
-  { id: "MOO",   label: "Agribusiness",         ticker: "MOO",   color: "#4ade80" },
-  // ── Telecom / Comm / Other ──────────────────────────────
-  { id: "XTL",   label: "Telecom",              ticker: "XTL",   color: "#d946ef" },
-  { id: "BUZZ",  label: "Social Media",         ticker: "BUZZ",  color: "#f472b6" },
-  { id: "FFTY",  label: "IBD Innovators",       ticker: "FFTY",  color: "#8b5cf6" },
-  // ── Broad Indices ───────────────────────────────────────
-  { id: "IWM",   label: "Russell 2000",         ticker: "IWM",   color: "#38bdf8" },
-  { id: "QQQE",  label: "Equal Wt Nasdaq",      ticker: "QQQE",  color: "#a78bfa" },
-  { id: "RSP",   label: "Equal Wt S&P 500",     ticker: "RSP",   color: "#cbd5e1" },
-  // ── Equal Weight Sectors ────────────────────────────────
-  { id: "RSPT",  label: "EW Technology",        ticker: "RSPT",  color: "#3b82f6" },
-  { id: "RSPH",  label: "EW Health Care",       ticker: "RSPH",  color: "#10b981" },
-  { id: "RSPF",  label: "EW Financials",        ticker: "RSPF",  color: "#fbbf24" },
-  { id: "RSPU",  label: "EW Utilities",         ticker: "RSPU",  color: "#d9f99d" },
-  { id: "RSPR",  label: "EW Real Estate",       ticker: "RSPR",  color: "#fca5a5" },
-  { id: "RSPC",  label: "EW Comm Services",     ticker: "RSPC",  color: "#c026d3" },
-  // ── China ───────────────────────────────────────────────
-  { id: "FXI",   label: "China Large Cap",      ticker: "FXI",   color: "#ef4444" },
-  { id: "GXC",   label: "China All Cap",        ticker: "GXC",   color: "#fca5a5" },
+const INDUSTRY_ETFS = [
+  "AMEX:MORT",
+  "NASDAQ:AIRR",
+  "AMEX:IAI",
+  "AMEX:IHF",
+  "AMEX:IHE",
+  "CBOE:VPN",
+  "NASDAQ:INDS",
+  "AMEX:REZ",
+  "AMEX:COPX",
+  "AMEX:FFTY",
+  "AMEX:XES",
+  "AMEX:BLOK",
+  "AMEX:XTL",
+  "AMEX:XME",
+  "AMEX:GNR",
+  "AMEX:BUZZ",
+  "AMEX:PBW",
+  "NASDAQ:CIBR",
+  "AMEX:USO",
+  "AMEX:XAR",
+  "AMEX:SLX",
+  "AMEX:ROBO",
+  "AMEX:XSD",
+  "AMEX:MOO",
+  "AMEX:GXC",
+  "NASDAQ:DRIV",
+  "CBOE:PAVE",
+  "AMEX:GBTC",
+  "NASDAQ:WCLD",
+  "AMEX:PEJ",
+  "AMEX:KRE",
+  "AMEX:FXI",
+  "AMEX:IPAY",
+  "AMEX:XOP",
+  "AMEX:XBI",
+  "AMEX:KBE",
+  "AMEX:XHB",
+  "AMEX:XSW",
+  "AMEX:BOAT",
+  "AMEX:JETS",
+  "AMEX:PBJ",
+  "AMEX:XTN",
+  "AMEX:IBUY",
+  "AMEX:XRT",
+  "AMEX:XHS",
+  "AMEX:XHE",
+  "AMEX:KIE",
 ];
+
+const INDUSTRY_COLORS = [
+  "#4db8ff",
+  "#00e5a0",
+  "#ffaa00",
+  "#ff6b9d",
+  "#a78bfa",
+  "#f59e0b",
+  "#6ee7b7",
+  "#fca5a5",
+  "#93c5fd",
+  "#d9f99d",
+  "#fb923c",
+  "#818cf8",
+];
+
+const INDUSTRIES = INDUSTRY_ETFS.map((entry, index) => {
+  const ticker = entry.split(":").pop();
+  return {
+    id: ticker,
+    label: ticker,
+    ticker,
+    source: entry,
+    color: INDUSTRY_COLORS[index % INDUSTRY_COLORS.length],
+  };
+});
 
 const THEMES = [
   // ── Metals & Resources ──────────────────────────────────
