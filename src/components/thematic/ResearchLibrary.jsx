@@ -1132,7 +1132,7 @@ export default function ResearchLibrary({ earningsMode = false }) {
   )
 
   const companyCount  = [...new Set(filteredSources.map(s => s.primary_ticker || s.tickers?.[0]).filter(Boolean))].length
-  const marketLeaders = useResearchWatchlistStore(state => state.listsById?.market-leaders || null)
+  const marketLeaders = useResearchWatchlistStore(state => state.listsById?.['market-leaders'] || null)
 
   const handleDashboardUploadTicker = useCallback((symbol) => {
     setTickerInput(symbol)
