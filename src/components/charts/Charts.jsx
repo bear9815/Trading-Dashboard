@@ -24,11 +24,13 @@ import { buildCondensedEcosystemRows, normalizeEcosystemGroupingMode, normalizeE
 import { buildEcosystemCompositeBars } from '../../utils/ecosystemCompositeChart.js'
 import { buildSqueezeSnapshot } from '../../utils/squeezeAnalytics.js'
 import { formatSqueezeMetric } from '../../utils/squeezeUi.js'
+import { INDUSTRY_ETF_UNIVERSE } from '../../utils/industryEtfUniverse.js'
 
 const WATCHLIST_ORDER = DEFAULT_LIST_ORDER.reduce((next, id, index) => {
   next[id] = index
   return next
 }, {})
+const INDUSTRY_ETF_LIST_ID = 'industries-etf'
 const DAILY_RANGE_OPTIONS = [3, 6, 9, 12]
 const WEEKLY_RANGE_OPTIONS = [2, 5]
 const SIDEBAR_VIEW_OPTIONS = [
@@ -316,17 +318,54 @@ export default function Charts() {
   const [editingAnchorId, setEditingAnchorId] = useState(null)
   const [sidebarMode, setSidebarMode] = useState('symbols')
   const [selectedEcosystemKey, setSelectedEcosystemKey] = useState('')
+  const [chartListId, setChartListId] = useState(activeListId)
 
-  const watchlists = useMemo(
-    () => Object.values(listsById || {}).sort((a, b) => (WATCHLIST_ORDER[a.id] ?? 99) - (WATCHLIST_ORDER[b.id] ?? 99)),
-    [listsById]
-  )
-  const activeList = listsById[activeListId]
+  useEffect(() => {
+    setChartListId(current => current === INDUSTRY_ETF_LIST_ID ? current : activeListId)
+  }, [activeListId])
+
+  const industryEtfList = useMemo(() => ({
+    id: INDUSTRY_ETF_LIST_ID,
+    name: 'Industries',
+    symbols: INDUSTRY_ETF_UNIVERSE.map(item => item.ticker),
+    rowsBySymbol: Object.fromEntries(INDUSTRY_ETF_UNIVERSE.map(item => [item.ticker, {
+      symbol: item.ticker,
+      companyName: item.label,
+      ecosystem: 'Industry ETFs',
+      theme: 'Industry ETFs',
+      sector: 'Industries',
+      relatedDriver: item.source,
+      whatTheyDo: `Industry ETF tracked from ${item.source}`,
+      majorCustomers: [],
+      dependencies: [],
+      customerOf: [],
+      supplierTo: [],
+      competesWith: [],
+    }])),
+  }), [])
+  const watchlists = useMemo(() => (
+    [
+      ...Object.values(listsById || {}).sort((a, b) => (WATCHLIST_ORDER[a.id] ?? 99) - (WATCHLIST_ORDER[b.id] ?? 99)),
+      industryEtfList,
+    ]
+  ), [industryEtfList, listsById])
+  const isIndustryEtfList = chartListId === INDUSTRY_ETF_LIST_ID
+  const activeList = isIndustryEtfList ? industryEtfList : listsById[chartListId]
   const ecosystemGroupingMode = normalizeEcosystemGroupingMode(activeList?.ecosystemGroupingMode)
   const condensedEcosystemOverrides = activeList?.condensedEcosystemOverrides || {}
   const symbols = activeList?.symbols || []
   const rowsBySymbol = activeList?.rowsBySymbol || {}
   const rows = useMemo(() => symbols.map(symbol => rowsBySymbol[symbol]).filter(Boolean), [rowsBySymbol, symbols])
+  const canUseEcosystems = !isIndustryEtfList
+  const sidebarViewOptions = canUseEcosystems
+    ? SIDEBAR_VIEW_OPTIONS
+    : SIDEBAR_VIEW_OPTIONS.filter(([value]) => value !== 'ecosystems')
+
+  useEffect(() => {
+    if (!canUseEcosystems && sidebarMode === 'ecosystems') {
+      setSidebarMode('symbols')
+    }
+  }, [canUseEcosystems, sidebarMode])
 
   const filteredRows = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -529,7 +568,7 @@ export default function Charts() {
     setPendingSymbolInput('')
     setSelectedAnchorId(null)
     setEditingAnchorId(null)
-  }, [activeListId])
+  }, [chartListId])
 
   useEffect(() => {
     if (!symbols.length) return
@@ -824,9 +863,12 @@ export default function Charts() {
                   <button
                     key={list.id}
                     type="button"
-                    onClick={() => setActiveList(list.id)}
+                    onClick={() => {
+                      setChartListId(list.id)
+                      if (list.id !== INDUSTRY_ETF_LIST_ID) setActiveList(list.id)
+                    }}
                     className={`rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors ${
-                      activeListId === list.id
+                      chartListId === list.id
                         ? 'bg-accent-blue/15 text-accent-blue'
                         : 'text-gray-500 hover:text-gray-300'
                     }`}
@@ -836,7 +878,7 @@ export default function Charts() {
                 ))}
               </div>
               <div className="min-w-0 rounded-xl border border-white/10 bg-white/[0.03] p-1">
-                {SIDEBAR_VIEW_OPTIONS.map(([value, label]) => (
+                {sidebarViewOptions.map(([value, label]) => (
                   <button
                     key={value}
                     type="button"
@@ -851,7 +893,7 @@ export default function Charts() {
               </div>
             </div>
 
-            {sidebarMode === 'ecosystems' ? (
+            {sidebarMode === 'ecosystems' && canUseEcosystems ? (
               <div className="rounded-xl border border-white/10 bg-white/[0.03] p-1">
                 <div className="grid grid-cols-3 gap-1">
                   {ECOSYSTEM_GROUPING_OPTIONS.map(([value, label]) => (
@@ -876,7 +918,7 @@ export default function Charts() {
                 type="text"
                 value={query}
                 onChange={event => setQuery(event.target.value)}
-                placeholder={sidebarMode === 'ecosystems' ? 'Filter ecosystems or members…' : 'Filter symbols or company names…'}
+                placeholder={isIndustryEtfList ? 'Filter industry ETF tickers…' : sidebarMode === 'ecosystems' ? 'Filter ecosystems or members…' : 'Filter symbols or company names…'}
                 className="w-full bg-transparent text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none"
               />
             </div>
