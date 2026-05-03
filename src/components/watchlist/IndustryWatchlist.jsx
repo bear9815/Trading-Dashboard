@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BarChart3, Factory, Layers3, Search } from 'lucide-react'
+import { BarChart3, Factory, Search } from 'lucide-react'
 import { useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
-import { buildIndustryRows } from '../../utils/industryWatchlist.js'
+import { LIQUID_LIST_ID } from '../../store/useResearchWatchlistStore.js'
+import { INDUSTRY_ETF_UNIVERSE } from '../../utils/industryEtfUniverse.js'
 import { resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
-import { buildEcosystemCompositeBars } from '../../utils/ecosystemCompositeChart.js'
 import ResearchMultiTimeframeChart from '../charts/ResearchMultiTimeframeChart.jsx'
-import { buildChartDataFromBars, buildTickerChartData, useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
+import { buildTickerChartData, useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
 
 const INDUSTRY_SORT_OPTIONS = [
   ['strength', 'Strength'],
@@ -32,15 +32,13 @@ function computeStrengthPct(bars = [], lookback = 20) {
 }
 
 function badgeClass(sourceMode) {
-  if (sourceMode === 'proxy') return 'border-accent-green/25 bg-accent-green/10 text-accent-green'
-  if (sourceMode === 'synthetic') return 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow'
-  return 'border-white/10 bg-white/[0.03] text-gray-500'
+  if (sourceMode === 'tracked') return 'border-accent-blue/25 bg-accent-blue/10 text-accent-blue'
+  return 'border-accent-green/25 bg-accent-green/10 text-accent-green'
 }
 
 function sourceLabel(sourceMode) {
-  if (sourceMode === 'proxy') return 'ETF Proxy'
-  if (sourceMode === 'synthetic') return 'Synthetic Basket'
-  return 'No Data'
+  if (sourceMode === 'tracked') return 'In Liquid'
+  return 'ETF Proxy'
 }
 
 export default function IndustryWatchlist() {
@@ -54,18 +52,25 @@ export default function IndustryWatchlist() {
     () => resolveLatestAnchorDate(tradeReviewChartSettings?.anchorDates),
     [tradeReviewChartSettings?.anchorDates]
   )
-  const industryRows = useMemo(
-    () => buildIndustryRows({ listsById }),
-    [listsById]
+  const liquidRowsBySymbol = listsById?.[LIQUID_LIST_ID]?.rowsBySymbol || {}
+  const industryRows = useMemo(() => (
+    INDUSTRY_ETF_UNIVERSE.map(item => {
+      const liquidRow = liquidRowsBySymbol[item.ticker] || null
+      return {
+        industry: item.label,
+        proxySymbol: item.ticker,
+        source: item.source,
+        sourceMode: liquidRow ? 'tracked' : 'proxy',
+        liquidOverlapCount: liquidRow ? 1 : 0,
+        liquidSymbols: liquidRow ? [item.ticker] : [],
+        liquidRows: liquidRow ? [liquidRow] : [],
+      }
+    })
+  ), [liquidRowsBySymbol])
+  const historySymbols = useMemo(
+    () => industryRows.map(row => row.proxySymbol).filter(Boolean),
+    [industryRows]
   )
-  const historySymbols = useMemo(() => {
-    const next = new Set()
-    for (const row of industryRows) {
-      if (row.proxySymbol) next.add(row.proxySymbol)
-      for (const symbol of row.memberSymbols || []) next.add(symbol)
-    }
-    return [...next]
-  }, [industryRows])
   const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
   const {
     benchmarkHistoryBars,
@@ -86,16 +91,9 @@ export default function IndustryWatchlist() {
 
   const rowsWithMetrics = useMemo(() => (
     industryRows.map(row => {
-      const composite = row.sourceMode === 'synthetic'
-        ? buildEcosystemCompositeBars(row.memberSymbols, historyBarsBySymbol)
-        : null
-      const sourceBars = row.sourceMode === 'proxy'
-        ? historyBarsBySymbol[row.proxySymbol] || []
-        : composite?.dailyBars || []
       return {
         ...row,
-        composite,
-        strengthPct: computeStrengthPct(sourceBars),
+        strengthPct: computeStrengthPct(historyBarsBySymbol[row.proxySymbol] || []),
       }
     })
   ), [historyBarsBySymbol, industryRows])
@@ -106,14 +104,13 @@ export default function IndustryWatchlist() {
       ? rowsWithMetrics.filter(row => (
         row.industry.toLowerCase().includes(normalizedQuery) ||
         row.proxySymbol.toLowerCase().includes(normalizedQuery) ||
-        row.liquidSymbols.some(symbol => symbol.toLowerCase().includes(normalizedQuery)) ||
-        row.memberSymbols.some(symbol => symbol.toLowerCase().includes(normalizedQuery))
+        row.source.toLowerCase().includes(normalizedQuery)
       ))
       : rowsWithMetrics
 
     return [...base].sort((a, b) => {
       if (sortKey === 'overlap') return b.liquidOverlapCount - a.liquidOverlapCount || a.industry.localeCompare(b.industry)
-      if (sortKey === 'coverage') return b.memberCount - a.memberCount || a.industry.localeCompare(b.industry)
+      if (sortKey === 'coverage') return a.industry.localeCompare(b.industry)
       if (sortKey === 'industry') return a.industry.localeCompare(b.industry)
       return (b.strengthPct ?? Number.NEGATIVE_INFINITY) - (a.strengthPct ?? Number.NEGATIVE_INFINITY) || a.industry.localeCompare(b.industry)
     })
@@ -135,23 +132,12 @@ export default function IndustryWatchlist() {
   )
   const selectedChartData = useMemo(() => {
     if (!selectedRow) return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
-    if (selectedRow.sourceMode === 'proxy' && selectedRow.proxySymbol) {
-      return buildTickerChartData(
-        selectedRow.proxySymbol,
-        historyBarsBySymbol,
-        tradeReviewChartSettings,
-        benchmarkHistoryBars
-      )
-    }
-    if (selectedRow.sourceMode === 'synthetic' && selectedRow.composite?.dailyBars?.length) {
-      return buildChartDataFromBars(
-        selectedRow.composite.dailyBars,
-        tradeReviewChartSettings,
-        benchmarkHistoryBars,
-        selectedRow.industry
-      )
-    }
-    return { dailyBars: [], weeklyBars: [], avwapOverlays: [], keltnerShades: [], weeklyKeltnerShades: [] }
+    return buildTickerChartData(
+      selectedRow.proxySymbol,
+      historyBarsBySymbol,
+      tradeReviewChartSettings,
+      benchmarkHistoryBars
+    )
   }, [benchmarkHistoryBars, historyBarsBySymbol, selectedRow, tradeReviewChartSettings])
 
   const dailyRangeMonths = DAILY_RANGE_OPTIONS.includes(tradeReviewChartSettings?.growthResearchDailyRangeMonths)
@@ -174,12 +160,12 @@ export default function IndustryWatchlist() {
           <p className="mt-1 text-lg font-semibold text-accent-blue">{industryRows.filter(row => row.liquidOverlapCount > 0).length}</p>
         </div>
         <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-          <p className="text-[10px] uppercase tracking-[0.22em] text-gray-600">Proxy Backed</p>
-          <p className="mt-1 text-lg font-semibold text-accent-green">{industryRows.filter(row => row.sourceMode === 'proxy').length}</p>
+          <p className="text-[10px] uppercase tracking-[0.22em] text-gray-600">ETF Universe</p>
+          <p className="mt-1 text-lg font-semibold text-accent-green">{industryRows.length}</p>
         </div>
         <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-          <p className="text-[10px] uppercase tracking-[0.22em] text-gray-600">Synthetic Fallback</p>
-          <p className="mt-1 text-lg font-semibold text-accent-yellow">{industryRows.filter(row => row.sourceMode === 'synthetic').length}</p>
+          <p className="text-[10px] uppercase tracking-[0.22em] text-gray-600">Untracked in Liquid</p>
+          <p className="mt-1 text-lg font-semibold text-accent-yellow">{industryRows.filter(row => row.liquidOverlapCount === 0).length}</p>
         </div>
       </div>
 
@@ -187,8 +173,8 @@ export default function IndustryWatchlist() {
         <div className="rounded-2xl border border-white/10 bg-white/[0.02]">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-3">
             <div>
-              <p className="text-sm font-semibold text-white">Industry Tracker</p>
-              <p className="mt-1 text-xs text-gray-500">ETF proxy first, synthetic fallback second, with Liquid names surfaced directly in each row.</p>
+              <p className="text-sm font-semibold text-white">Industry ETF Tracker</p>
+              <p className="mt-1 text-xs text-gray-500">This tab now follows the same ETF-only industry universe as Rotation, with no extra industry entries mixed in.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <label className="relative min-w-[220px]">
@@ -222,7 +208,7 @@ export default function IndustryWatchlist() {
 
           <div className="max-h-[780px] overflow-y-auto">
             <div className="grid grid-cols-[minmax(0,1.6fr)_110px_110px_110px] gap-3 border-b border-white/[0.06] px-4 py-2 text-[10px] uppercase tracking-[0.22em] text-gray-600">
-              <p>Industry</p>
+              <p>ETF</p>
               <p>Source</p>
               <p>Strength</p>
               <p>Liquid</p>
@@ -239,10 +225,10 @@ export default function IndustryWatchlist() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-white">{row.industry}</p>
                   <p className="mt-1 truncate text-xs text-gray-500">
-                    {row.proxySymbol ? `${row.proxySymbol} proxy` : row.memberCount ? `${row.memberCount} mapped members` : 'Waiting for mapped members'}
+                    {row.source}
                   </p>
                   <p className="mt-2 truncate text-[11px] text-gray-400">
-                    {row.liquidSymbols.length ? row.liquidSymbols.join(', ') : 'No Liquid names matched yet'}
+                    {row.liquidSymbols.length ? `${row.proxySymbol} is already in Liquid.` : `${row.proxySymbol} is not currently in Liquid.`}
                   </p>
                 </div>
                 <div className="flex items-center">
@@ -263,8 +249,8 @@ export default function IndustryWatchlist() {
               <ResearchMultiTimeframeChart
                 data={selectedChartData}
                 chartType={tradeReviewChartSettings?.chartType}
-                title={selectedRow.proxySymbol || `IND:${selectedRow.industry.toUpperCase()}`}
-                memberCount={selectedRow.sourceMode === 'synthetic' ? selectedRow.composite?.memberCount || selectedRow.memberCount : 1}
+                title={selectedRow.proxySymbol}
+                memberCount={1}
                 dailyRangeMonths={dailyRangeMonths}
                 weeklyRangeMonths={weeklyRangeYears * 12}
                 onChangeDailyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchDailyRangeMonths: months })}
@@ -291,11 +277,7 @@ export default function IndustryWatchlist() {
                       <p className="text-sm font-semibold text-white">{selectedRow.industry}</p>
                     </div>
                     <p className="mt-1 text-xs text-gray-500">
-                      {selectedRow.proxySymbol
-                        ? `Proxy ${selectedRow.proxySymbol} drives the top-level read.`
-                        : selectedRow.memberCount
-                          ? 'Synthetic basket built from mapped member stocks.'
-                          : 'No proxy or mapped stocks available yet.'}
+                      {selectedRow.source} · {selectedRow.proxySymbol}
                     </p>
                   </div>
                   <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold ${badgeClass(selectedRow.sourceMode)}`}>
@@ -313,8 +295,8 @@ export default function IndustryWatchlist() {
                     <p className="mt-1 text-sm font-semibold text-accent-blue">{selectedRow.liquidOverlapCount}</p>
                   </div>
                   <div className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2">
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-gray-600">Coverage</p>
-                    <p className="mt-1 text-sm font-semibold text-gray-200">{selectedRow.memberCount}</p>
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-gray-600">Ticker</p>
+                    <p className="mt-1 text-sm font-semibold text-gray-200">{selectedRow.proxySymbol}</p>
                   </div>
                 </div>
 
@@ -322,33 +304,16 @@ export default function IndustryWatchlist() {
                   <div>
                     <div className="flex items-center gap-2">
                       <BarChart3 size={14} className="text-accent-green" />
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">Liquid Names</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">Liquid Status</p>
                     </div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {selectedRow.liquidRows.length ? selectedRow.liquidRows.map(row => (
-                        <div key={`liquid-${row.symbol}`} className="rounded-lg border border-accent-blue/20 bg-accent-blue/10 px-3 py-2">
-                          <p className="text-sm font-semibold text-accent-blue">{row.symbol}</p>
-                          <p className="mt-1 text-[11px] text-gray-300">{row.companyName || '—'}</p>
-                        </div>
-                      )) : (
-                        <p className="text-sm text-gray-500">No Liquid symbols currently map into this industry.</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Layers3 size={14} className="text-accent-yellow" />
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">Broader Members</p>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {selectedRow.memberRows.length ? selectedRow.memberRows.map(row => (
-                        <div key={`member-${row.symbol}`} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-                          <p className="text-sm font-semibold text-white">{row.symbol}</p>
-                          <p className="mt-1 text-[11px] text-gray-400">{row.companyName || '—'}</p>
-                        </div>
-                      )) : (
-                        <p className="text-sm text-gray-500">No mapped member stocks yet. Refresh your watchlist map to backfill industry membership.</p>
+                    <div className="mt-2 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-3">
+                      {selectedRow.liquidRows.length ? (
+                        <>
+                          <p className="text-sm font-semibold text-accent-blue">{selectedRow.proxySymbol} is already tracked in Liquid.</p>
+                          <p className="mt-1 text-[11px] text-gray-400">{selectedRow.liquidRows[0]?.companyName || 'Existing Liquid row'}</p>
+                        </>
+                      ) : (
+                        <p className="text-sm text-gray-500">{selectedRow.proxySymbol} is not currently in your Liquid list.</p>
                       )}
                     </div>
                   </div>

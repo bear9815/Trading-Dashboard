@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSettingsStore } from "../../store/useSettingsStore.js";
 import { fetchHistory, fetchQuotes } from "../../utils/marketData.js";
+import { INDUSTRY_ETF_UNIVERSE } from "../../utils/industryEtfUniverse.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const BENCHMARKS = [
@@ -25,81 +26,7 @@ const SECTORS = [
   { id: "XLC",  label: "Comm. Services",  ticker: "XLC",  color: "#fb923c" },
 ];
 
-const INDUSTRY_ETFS = [
-  "AMEX:MORT",
-  "NASDAQ:AIRR",
-  "AMEX:IAI",
-  "AMEX:IHF",
-  "AMEX:IHE",
-  "CBOE:VPN",
-  "NASDAQ:INDS",
-  "AMEX:REZ",
-  "AMEX:COPX",
-  "AMEX:FFTY",
-  "AMEX:XES",
-  "AMEX:BLOK",
-  "AMEX:XTL",
-  "AMEX:XME",
-  "AMEX:GNR",
-  "AMEX:BUZZ",
-  "AMEX:PBW",
-  "NASDAQ:CIBR",
-  "AMEX:USO",
-  "AMEX:XAR",
-  "AMEX:SLX",
-  "AMEX:ROBO",
-  "AMEX:XSD",
-  "AMEX:MOO",
-  "AMEX:GXC",
-  "NASDAQ:DRIV",
-  "CBOE:PAVE",
-  "AMEX:GBTC",
-  "NASDAQ:WCLD",
-  "AMEX:PEJ",
-  "AMEX:KRE",
-  "AMEX:FXI",
-  "AMEX:IPAY",
-  "AMEX:XOP",
-  "AMEX:XBI",
-  "AMEX:KBE",
-  "AMEX:XHB",
-  "AMEX:XSW",
-  "AMEX:BOAT",
-  "AMEX:JETS",
-  "AMEX:PBJ",
-  "AMEX:XTN",
-  "AMEX:IBUY",
-  "AMEX:XRT",
-  "AMEX:XHS",
-  "AMEX:XHE",
-  "AMEX:KIE",
-];
-
-const INDUSTRY_COLORS = [
-  "#4db8ff",
-  "#00e5a0",
-  "#ffaa00",
-  "#ff6b9d",
-  "#a78bfa",
-  "#f59e0b",
-  "#6ee7b7",
-  "#fca5a5",
-  "#93c5fd",
-  "#d9f99d",
-  "#fb923c",
-  "#818cf8",
-];
-
-const INDUSTRIES = INDUSTRY_ETFS.map((entry, index) => {
-  const ticker = entry.split(":").pop();
-  return {
-    id: ticker,
-    label: ticker,
-    ticker,
-    source: entry,
-    color: INDUSTRY_COLORS[index % INDUSTRY_COLORS.length],
-  };
-});
+const INDUSTRIES = INDUSTRY_ETF_UNIVERSE;
 
 const THEMES = [
   // ── Metals & Resources ──────────────────────────────────
