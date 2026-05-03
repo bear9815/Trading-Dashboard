@@ -15,9 +15,11 @@ import { extractWithOpenRouter, processWithOpenRouterCombined, autoAnalyzeWithOp
 import { runAgent } from '../../utils/agentRunner.js'
 import { useAgentsStore } from '../../store/useAgentsStore.js'
 import { filterResearchSources } from '../../utils/researchLibraryFilters.js'
+import { useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
 import { jsPDF } from 'jspdf'
 import EarningsReport from './EarningsReport.jsx'
 import CompaniesView  from './CompaniesView.jsx'
+import EarningsDashboard from './EarningsDashboard.jsx'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 const GOOGLE_API_KEY   = import.meta.env.VITE_GOOGLE_API_KEY   || ''
@@ -779,10 +781,11 @@ export default function ResearchLibrary({ earningsMode = false }) {
   const [showLibrary,  setShowLibrary]  = useState(true)
   const [driveLoading, setDriveLoading] = useState(false)
   const [lastSaved,    setLastSaved]    = useState(null)
-  const [viewMode,     setViewMode]     = useState(earningsMode ? 'companies' : 'library')  // 'library' | 'companies' | 'upload'
+  const [viewMode,     setViewMode]     = useState(earningsMode ? 'dashboard' : 'library')  // 'dashboard' | 'library' | 'companies' | 'upload'
   const [openReport,   setOpenReport]   = useState(null)       // source object or null
   const [selectedAgentId, setSelectedAgentId] = useState(null) // explicit agent override
   const [searchQuery,  setSearchQuery]  = useState('')
+  const [selectedCompanyTicker, setSelectedCompanyTicker] = useState(null)
   const inputRef = useRef()
 
   useEffect(() => { setCreateDossier(sourceType === 'deep_dive') }, [sourceType])
@@ -1129,15 +1132,27 @@ export default function ResearchLibrary({ earningsMode = false }) {
   )
 
   const companyCount  = [...new Set(filteredSources.map(s => s.primary_ticker || s.tickers?.[0]).filter(Boolean))].length
+  const marketLeaders = useResearchWatchlistStore(state => state.listsById?.market-leaders || null)
+
+  const handleDashboardUploadTicker = useCallback((symbol) => {
+    setTickerInput(symbol)
+    setViewMode('upload')
+  }, [])
+
+  const handleDashboardViewTicker = useCallback((symbol) => {
+    setSelectedCompanyTicker(symbol)
+    setViewMode('companies')
+  }, [])
 
   // ── Earnings mode: flat layout, no accordion ──
   if (earningsMode) {
     return (
       <div className="space-y-4">
 
-        {/* Sub-tabs: Companies | All Reports */}
+        {/* Sub-tabs: Dashboard | Companies | All Reports */}
         <div className="flex items-center gap-1 border-b border-white/[0.07]">
           {[
+            { id: 'dashboard', label: 'Dashboard', count: marketLeaders?.symbols?.length || 0 },
             { id: 'companies', label: 'Companies', count: companyCount },
             { id: 'library',   label: 'All Reports', count: sources.length },
           ].map(({ id, label, count }) => (
@@ -1173,9 +1188,22 @@ export default function ResearchLibrary({ earningsMode = false }) {
           </button>
         </div>
 
+        {viewMode === 'dashboard' && (
+          <EarningsDashboard
+            earningsSources={sources}
+            onUploadTicker={handleDashboardUploadTicker}
+            onViewTicker={handleDashboardViewTicker}
+          />
+        )}
+
         {/* Companies sub-tab */}
         {viewMode === 'companies' && (
-          <CompaniesView sources={filteredSources} onViewReport={setOpenReport} onUpdateSource={updateSource} />
+          <CompaniesView
+            sources={filteredSources}
+            onViewReport={setOpenReport}
+            onUpdateSource={updateSource}
+            selectedTicker={selectedCompanyTicker}
+          />
         )}
 
         {/* All Reports sub-tab */}

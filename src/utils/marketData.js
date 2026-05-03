@@ -1169,43 +1169,117 @@ export async function computeSchwabMAE(trade) {
  * Returns an array sorted by date ascending: [{ symbol, date }]
  */
 export async function fetchEarningsDates(symbols) {
-  const { finnhubApiKey } = getApiKeys()
-  const results = []
+  const meta = await fetchEarningsCoverageMeta(symbols)
+  return meta
+    .filter(item => item.nextEarningsDate instanceof Date && !Number.isNaN(item.nextEarningsDate.getTime()))
+    .map(item => ({ symbol: item.symbol, date: item.nextEarningsDate }))
+    .sort((a, b) => a.date - b.date)
+}
 
-  await Promise.all(symbols.map(async (symbol) => {
-    // 1. Finnhub earnings calendar (if key present)
+function quarterLabelFromDate(value) {
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const quarter = Math.floor(date.getUTCMonth() / 3) + 1
+  return `Q${quarter} ${date.getUTCFullYear()}`
+}
+
+function normalizeQuarterLabel(value) {
+  if (!value && value !== 0) return null
+  if (typeof value === 'string') {
+    const quarterMatch = value.match(/Q([1-4])\s*(20\d{2})/i)
+    if (quarterMatch) return `Q${quarterMatch[1]} ${quarterMatch[2]}`
+    const isoMatch = value.match(/(20\d{2})-(\d{2})-(\d{2})/)
+    if (isoMatch) return quarterLabelFromDate(`${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`)
+  }
+  if (typeof value === 'number') return quarterLabelFromDate(value * 1000)
+  if (value instanceof Date) return quarterLabelFromDate(value)
+  if (typeof value === 'object') {
+    if (typeof value?.fmt === 'string') return normalizeQuarterLabel(value.fmt)
+    if (typeof value?.raw === 'number') return normalizeQuarterLabel(value.raw)
+  }
+  return null
+}
+
+function buildCoverageMetaShape(symbol) {
+  return {
+    symbol,
+    nextEarningsDate: null,
+    latestReportedPeriod: null,
+    latestReportedDate: null,
+    providerStatus: 'missing',
+  }
+}
+
+function parseYahooCoverageResult(result = {}, fallbackSymbol = '') {
+  const meta = buildCoverageMetaShape(result?.symbol || fallbackSymbol)
+  const earningsDate = result?.calendarEvents?.earnings?.earningsDate
+  const firstUpcoming = Array.isArray(earningsDate) ? earningsDate[0] : null
+  if (firstUpcoming?.raw) meta.nextEarningsDate = new Date(firstUpcoming.raw * 1000)
+
+  const history = Array.isArray(result?.earningsHistory?.history) ? result.earningsHistory.history : []
+  const latestHistory = history
+    .map(entry => ({
+      quarter: entry?.quarter,
+      earningsDate: entry?.earningsDate,
+      raw: entry?.quarter?.raw || entry?.earningsDate?.raw || 0,
+    }))
+    .sort((a, b) => b.raw - a.raw)[0]
+
+  if (latestHistory) {
+    meta.latestReportedPeriod = normalizeQuarterLabel(latestHistory.quarter)
+    if (latestHistory.earningsDate?.raw) meta.latestReportedDate = new Date(latestHistory.earningsDate.raw * 1000)
+    if (!meta.latestReportedDate && latestHistory.quarter?.raw) meta.latestReportedDate = new Date(latestHistory.quarter.raw * 1000)
+  }
+
+  meta.providerStatus = meta.nextEarningsDate && meta.latestReportedPeriod
+    ? 'ok'
+    : (meta.nextEarningsDate || meta.latestReportedPeriod ? 'partial' : 'missing')
+
+  return meta
+}
+
+export async function fetchEarningsCoverageMeta(symbols) {
+  const { finnhubApiKey } = getApiKeys()
+  const uniqueSymbols = [...new Set((symbols || []).map(symbol => String(symbol || '').trim().toUpperCase()).filter(Boolean))]
+
+  const results = await Promise.all(uniqueSymbols.map(async (symbol) => {
+    const meta = buildCoverageMetaShape(symbol)
+
     if (finnhubApiKey) {
       try {
         const from = new Date().toISOString().slice(0, 10)
-        const to   = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10)
-        const res  = await fetch(
+        const to = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10)
+        const res = await fetch(
           `https://finnhub.io/api/v1/calendar/earnings?from=${from}&to=${to}&symbol=${encodeURIComponent(symbol)}&token=${finnhubApiKey}`
         )
         if (res.ok) {
           const json = await res.json()
           const entry = json?.earningsCalendar?.[0]
-          if (entry?.date) {
-            results.push({ symbol, date: new Date(entry.date) })
-            return
-          }
+          if (entry?.date) meta.nextEarningsDate = new Date(entry.date)
         }
       } catch { /* fall through */ }
     }
 
-    // 2. Yahoo Finance calendarEvents (try v10 then v11)
     for (const ver of ['v10', 'v11']) {
       try {
-        const res  = await fetch(`${YF}/${ver}/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=calendarEvents`)
+        const res = await fetch(`${YF}/${ver}/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=calendarEvents,earningsHistory`)
         if (!res.ok) continue
         const json = await res.json()
-        const dates = json?.quoteSummary?.result?.[0]?.calendarEvents?.earnings?.earningsDate
-        if (dates?.length) {
-          results.push({ symbol, date: new Date(dates[0].raw * 1000) })
-          break
-        }
+        const result = json?.quoteSummary?.result?.[0]
+        if (!result) continue
+        const parsed = parseYahooCoverageResult(result, symbol)
+        if (!meta.nextEarningsDate && parsed.nextEarningsDate) meta.nextEarningsDate = parsed.nextEarningsDate
+        if (!meta.latestReportedPeriod && parsed.latestReportedPeriod) meta.latestReportedPeriod = parsed.latestReportedPeriod
+        if (!meta.latestReportedDate && parsed.latestReportedDate) meta.latestReportedDate = parsed.latestReportedDate
+        meta.providerStatus = meta.nextEarningsDate && meta.latestReportedPeriod
+          ? 'ok'
+          : (meta.nextEarningsDate || meta.latestReportedPeriod ? 'partial' : meta.providerStatus)
+        if (meta.providerStatus === 'ok') break
       } catch { /* try next */ }
     }
+
+    return meta
   }))
 
-  return results.sort((a, b) => a.date - b.date)
+  return results
 }

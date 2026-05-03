@@ -3,7 +3,7 @@
 // Left panel: all companies with report counts + sentiment trend.
 // Right panel: chronological timeline of reports for the selected company.
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   TrendingUp, TrendingDown, Minus, BarChart2,
   FileText, ChevronRight, Zap, Tag, Search, Pencil,
@@ -265,7 +265,7 @@ function UnassignedRow({ source, onAssign, onView }) {
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function CompaniesView({ sources, onViewReport, onUpdateSource }) {
+export default function CompaniesView({ sources, onViewReport, onUpdateSource, selectedTicker: controlledSelectedTicker = null }) {
   const [selectedTicker, setSelectedTicker] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [sortMode, setSortMode] = useState('recent')
@@ -278,6 +278,12 @@ export default function CompaniesView({ sources, onViewReport, onUpdateSource })
   }, [filteredSources])
 
   const tickers = useMemo(() => sortCompanyTickers(grouped, sortMode), [grouped, sortMode])
+
+  useEffect(() => {
+    if (controlledSelectedTicker && controlledSelectedTicker !== selectedTicker) {
+      setSelectedTicker(controlledSelectedTicker)
+    }
+  }, [controlledSelectedTicker, selectedTicker])
 
   // Auto-select first ticker if nothing selected
   const active = selectedTicker === '__unassigned__'
