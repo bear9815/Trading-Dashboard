@@ -21,3 +21,10 @@ test('ResearchLibrary wires dashboard actions into upload and companies workflow
   assert.match(source, /setSelectedCompanyTicker\(symbol\)/)
   assert.match(source, /setViewMode\('companies'\)/)
 })
+
+test('ResearchLibrary earnings dashboard uses truncation and clearer no-data copy', () => {
+  const dashboardSource = fs.readFileSync(new URL('./EarningsDashboard.jsx', import.meta.url), 'utf8')
+  assert.match(dashboardSource, /return 'No Data'/)
+  assert.match(dashboardSource, /truncate max-w-\[22ch\] lg:max-w-\[18ch\]/)
+  assert.match(dashboardSource, /lg:grid-cols-\[minmax\(180px,1\.15fr\)_minmax\(150px,1fr\)_minmax\(96px,0\.7fr\)_minmax\(150px,1fr\)_minmax\(150px,1fr\)_auto\]/)
+})

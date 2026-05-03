@@ -1186,6 +1186,8 @@ function quarterLabelFromDate(value) {
 function normalizeQuarterLabel(value) {
   if (!value && value !== 0) return null
   if (typeof value === 'string') {
+    const compactQuarterMatch = value.match(/([1-4])Q\s*(20\d{2})/i)
+    if (compactQuarterMatch) return `Q${compactQuarterMatch[1]} ${compactQuarterMatch[2]}`
     const quarterMatch = value.match(/Q([1-4])\s*(20\d{2})/i)
     if (quarterMatch) return `Q${quarterMatch[1]} ${quarterMatch[2]}`
     const isoMatch = value.match(/(20\d{2})-(\d{2})-(\d{2})/)
@@ -1216,6 +1218,23 @@ function parseYahooCoverageResult(result = {}, fallbackSymbol = '') {
   const firstUpcoming = Array.isArray(earningsDate) ? earningsDate[0] : null
   if (firstUpcoming?.raw) meta.nextEarningsDate = new Date(firstUpcoming.raw * 1000)
 
+  const quarterlyFinancials = Array.isArray(result?.earnings?.financialsChart?.quarterly)
+    ? result.earnings.financialsChart.quarterly
+    : []
+
+  const latestQuarterly = quarterlyFinancials
+    .map((entry, index) => ({
+      date: entry?.date,
+      index,
+    }))
+    .filter(entry => normalizeQuarterLabel(entry.date))
+    .sort((a, b) => a.index - b.index)
+    .at(-1)
+
+  if (latestQuarterly?.date) {
+    meta.latestReportedPeriod = normalizeQuarterLabel(latestQuarterly.date)
+  }
+
   const history = Array.isArray(result?.earningsHistory?.history) ? result.earningsHistory.history : []
   const latestHistory = history
     .map(entry => ({
@@ -1226,7 +1245,7 @@ function parseYahooCoverageResult(result = {}, fallbackSymbol = '') {
     .sort((a, b) => b.raw - a.raw)[0]
 
   if (latestHistory) {
-    meta.latestReportedPeriod = normalizeQuarterLabel(latestHistory.quarter)
+    if (!meta.latestReportedPeriod) meta.latestReportedPeriod = normalizeQuarterLabel(latestHistory.quarter)
     if (latestHistory.earningsDate?.raw) meta.latestReportedDate = new Date(latestHistory.earningsDate.raw * 1000)
     if (!meta.latestReportedDate && latestHistory.quarter?.raw) meta.latestReportedDate = new Date(latestHistory.quarter.raw * 1000)
   }
@@ -1262,7 +1281,7 @@ export async function fetchEarningsCoverageMeta(symbols) {
 
     for (const ver of ['v10', 'v11']) {
       try {
-        const res = await fetch(`${YF}/${ver}/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=calendarEvents,earningsHistory`)
+        const res = await fetch(`${YF}/${ver}/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=calendarEvents,earnings,earningsHistory`)
         if (!res.ok) continue
         const json = await res.json()
         const result = json?.quoteSummary?.result?.[0]
@@ -1277,6 +1296,22 @@ export async function fetchEarningsCoverageMeta(symbols) {
         if (meta.providerStatus === 'ok') break
       } catch { /* try next */ }
     }
+
+    if (!meta.nextEarningsDate) {
+      try {
+        const res = await fetch(`${YF}/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`)
+        if (res.ok) {
+          const json = await res.json()
+          const quote = json?.quoteResponse?.result?.[0]
+          const raw = quote?.earningsTimestamp || quote?.earningsTimestampStart || quote?.earningsTimestampEnd
+          if (raw) meta.nextEarningsDate = new Date(raw * 1000)
+        }
+      } catch { /* leave missing */ }
+    }
+
+    meta.providerStatus = meta.nextEarningsDate && meta.latestReportedPeriod
+      ? 'ok'
+      : (meta.nextEarningsDate || meta.latestReportedPeriod ? 'partial' : 'missing')
 
     return meta
   }))

@@ -26,7 +26,7 @@ function daysTone(days) {
 function labelForStatus(status) {
   if (status === 'covered') return 'Covered'
   if (status === 'missing') return 'Missing'
-  return 'Unknown'
+  return 'No Data'
 }
 
 export default function EarningsDashboard({ earningsSources = [], onUploadTicker, onViewTicker }) {
@@ -112,39 +112,42 @@ export default function EarningsDashboard({ earningsSources = [], onUploadTicker
         <div className="space-y-3">
           {rows.map(row => (
             <div key={row.symbol} className="bg-white/[0.02] border border-white/[0.08] rounded-xl p-4 hover:border-white/15 transition-colors">
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div className="min-w-[180px]">
+              <div className="grid gap-4 lg:grid-cols-[minmax(180px,1.15fr)_minmax(150px,1fr)_minmax(96px,0.7fr)_minmax(150px,1fr)_minmax(150px,1fr)_auto] lg:items-center">
+                <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-bold text-white">{row.symbol}</span>
                     <span className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wider border rounded-full px-2 py-0.5 ${statusPill(row.coverageStatus)}`}>
                       {labelForStatus(row.coverageStatus)}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">{row.companyName || 'Market Leaders company'}</p>
+                  <p
+                    className="text-xs text-gray-500 mt-1 truncate max-w-[22ch] lg:max-w-[18ch]"
+                    title={row.companyName || 'Market Leaders company'}
+                  >
+                    {row.companyName || 'Market Leaders company'}
+                  </p>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 flex-1 min-w-[320px]">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">Next Earnings</p>
-                    <p className="text-sm text-gray-200 mt-1">{formatDate(row.nextEarningsDate)}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">Days</p>
-                    <p className={`text-sm font-semibold mt-1 ${daysTone(row.daysUntil)}`}>
-                      {row.daysUntil == null ? 'Unknown' : row.daysUntil === 0 ? 'Today' : `${row.daysUntil}d`}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">Expected Latest</p>
-                    <p className="text-sm text-gray-200 mt-1">{row.latestReportedPeriod || 'Unknown'}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">Uploaded Latest</p>
-                    <p className="text-sm text-gray-200 mt-1">{row.latestUploadedPeriod || 'None'}</p>
-                  </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">Next Earnings</p>
+                  <p className="text-sm text-gray-200 mt-1">{formatDate(row.nextEarningsDate)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">Days</p>
+                  <p className={`text-sm font-semibold mt-1 ${daysTone(row.daysUntil)}`}>
+                    {row.daysUntil == null ? 'Unknown' : row.daysUntil === 0 ? 'Today' : `${row.daysUntil}d`}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">Expected Latest</p>
+                  <p className="text-sm text-gray-200 mt-1">{row.latestReportedPeriod || 'No data'}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600">Uploaded Latest</p>
+                  <p className="text-sm text-gray-200 mt-1">{row.latestUploadedPeriod || 'None'}</p>
                 </div>
 
-                <div className="flex items-center gap-2 ml-auto">
+                <div className="flex items-center gap-2 lg:justify-end">
                   <button
                     onClick={() => onUploadTicker?.(row.symbol)}
                     className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent-blue/15 border border-accent-blue/25 text-xs font-semibold text-accent-blue hover:bg-accent-blue/20 transition-all"
