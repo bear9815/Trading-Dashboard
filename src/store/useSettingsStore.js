@@ -27,6 +27,7 @@ const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   anchorDates: ['2026-01-01', '2026-04-02'],
   avwapPresets: [
     { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
+    { id: 'ipo', kind: 'preset', mode: 'ipo', label: 'IPO', enabled: false, color: '#ec4899' },
   ],
   weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
   dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
@@ -76,6 +77,8 @@ function normalizeAvwapPreset(preset, index = 0) {
     ? 'fixed-date'
     : preset?.mode === 'best-fit'
       ? 'best-fit'
+      : preset?.mode === 'ipo'
+        ? 'ipo'
       : 'ytd'
   const anchorDate = typeof preset?.anchorDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(preset.anchorDate)
     ? preset.anchorDate
@@ -88,7 +91,9 @@ function normalizeAvwapPreset(preset, index = 0) {
     ? anchorDate
     : mode === 'best-fit'
       ? 'Best Fit'
-      : 'YTD'
+      : mode === 'ipo'
+        ? 'IPO'
+        : 'YTD'
 
   if (mode === 'fixed-date' && !anchorDate) return null
 
@@ -99,9 +104,20 @@ function normalizeAvwapPreset(preset, index = 0) {
     anchorDate: mode === 'fixed-date' ? anchorDate : null,
     label: (preset?.label || defaultLabel || 'AVWAP').trim(),
     enabled: Boolean(preset?.enabled),
-    color: preset?.color || '#f59e0b',
+    color: preset?.color || (mode === 'ipo' ? '#ec4899' : '#f59e0b'),
     ...(mode === 'best-fit' ? { lookbackMonths } : {}),
   }
+}
+
+function normalizeAvwapPresetsWithDefaults(presets = DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets) {
+  const normalized = (presets || [])
+    .map(normalizeAvwapPreset)
+    .filter(Boolean)
+  const withDefaults = normalized.length ? [...normalized] : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets.map(normalizeAvwapPreset).filter(Boolean)
+  for (const defaultPreset of DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets.map(normalizeAvwapPreset).filter(Boolean)) {
+    if (!withDefaults.some(preset => preset.mode === defaultPreset.mode)) withDefaults.push(defaultPreset)
+  }
+  return withDefaults
 }
 
 function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol) {
@@ -152,9 +168,7 @@ function normalizeTradeReviewChartSettings(settings) {
     researchChartsDailyRightOffset: Number.isFinite(Number(current.researchChartsDailyRightOffset)) ? Number(current.researchChartsDailyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.researchChartsDailyRightOffset,
     tradeReviewWeeklyRightOffset: Number.isFinite(Number(current.tradeReviewWeeklyRightOffset)) ? Number(current.tradeReviewWeeklyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.tradeReviewWeeklyRightOffset,
     tradeReviewDailyRightOffset: Number.isFinite(Number(current.tradeReviewDailyRightOffset)) ? Number(current.tradeReviewDailyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.tradeReviewDailyRightOffset,
-    avwapPresets: ((current.avwapPresets || []).map(normalizeAvwapPreset).filter(Boolean).length
-      ? (current.avwapPresets || []).map(normalizeAvwapPreset).filter(Boolean)
-      : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets.map(normalizeAvwapPreset).filter(Boolean)),
+    avwapPresets: normalizeAvwapPresetsWithDefaults(current.avwapPresets),
     weeklyRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.weeklyRs, ...(current.weeklyRs || {}) },
     dailyAnchoredRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyAnchoredRs, ...(current.dailyAnchoredRs || {}) },
     dailyRollingRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyRollingRs, ...(current.dailyRollingRs || {}) },

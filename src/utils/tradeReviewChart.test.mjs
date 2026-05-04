@@ -244,6 +244,7 @@ assert.equal(Math.round(avwapSeries[1].value * 1000) / 1000, 12.167)
 
 assert.ok(Array.isArray(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets))
 assert.equal(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets[0]?.id, 'ytd')
+assert.equal(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets[1]?.id, 'ipo')
 assert.equal(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.chartType, 'ohlc')
 assert.equal(normalizeTradeReviewChartType('ohlc'), 'ohlc')
 assert.equal(normalizeTradeReviewChartType('hlc'), 'hlc')
@@ -257,6 +258,10 @@ assert.equal(
 assert.equal(
   resolveAvwapPresetAnchorDate({ mode: 'fixed-date', anchorDate: '2026-04-02' }, '2026-04-25'),
   '2026-04-02'
+)
+assert.equal(
+  resolveAvwapPresetAnchorDate({ mode: 'ipo' }, '2026-04-25'),
+  null
 )
 assert.equal(
   normalizeAvwapPresets([{ id: 'best-fit', kind: 'preset', mode: 'best-fit', label: 'Best Fit', enabled: true, color: '#8b5cf6' }])[0]?.lookbackMonths,
@@ -318,6 +323,7 @@ const avwapOverlays = buildAvwapOverlays(
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
     avwapPresets: [
       { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: true, color: '#f59e0b' },
+      { id: 'ipo', kind: 'preset', mode: 'ipo', label: 'IPO', enabled: true, color: '#ec4899' },
       { id: 'fixed', kind: 'preset', mode: 'fixed-date', anchorDate: '2026-01-03', label: 'Jan 3', enabled: true, color: '#38bdf8' },
     ],
   },
@@ -327,9 +333,10 @@ const avwapOverlays = buildAvwapOverlays(
   },
   '2026-04-25'
 )
-assert.equal(avwapOverlays.length, 3)
+assert.equal(avwapOverlays.length, 4)
 assert.ok(avwapOverlays.every(overlay => overlay.series.length > 0))
 assert.ok(avwapOverlays.every(overlay => overlay.anchorDate))
+assert.equal(avwapOverlays.find(overlay => overlay.id === 'ipo')?.anchorDate, '2026-01-02')
 assert.equal(
   buildAvwapOverlays(
     avwapBars,

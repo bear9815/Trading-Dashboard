@@ -430,6 +430,8 @@ export default function ResearchMultiTimeframeChart({
   onChangeWeeklyRangeMonths,
   ytdEnabled = false,
   onToggleYtd,
+  ipoEnabled = false,
+  onToggleIpo,
   chartLabel = 'Ecosystem Symbol',
   badgeLabel = 'Synthetic',
   emptyLabel = 'No chart data for this ecosystem',
@@ -466,7 +468,7 @@ export default function ResearchMultiTimeframeChart({
         <div className="flex items-center justify-between gap-3">
           <div className="group relative w-fit">
             <p className="text-xs font-semibold mono">{title} · {chartLabel}</p>
-            <p className="text-[10px] text-[#505760]">KC13/34/65 · YTD AVWAP · {memberCount} member{memberCount === 1 ? '' : 's'}</p>
+            <p className="text-[10px] text-[#505760]">KC13/34/65 · YTD + IPO AVWAP · {memberCount} member{memberCount === 1 ? '' : 's'}</p>
             {headerHoverCard}
           </div>
           <div className="flex items-center gap-2">
@@ -480,6 +482,18 @@ export default function ResearchMultiTimeframeChart({
             >
               YTD AVWAP
             </button>
+            {onToggleIpo ? (
+              <button
+                onClick={onToggleIpo}
+                className={`px-2 py-0.5 text-[10px] font-semibold rounded border transition-colors ${
+                  ipoEnabled
+                    ? 'bg-[#ec4899]/20 border-[#ec4899]/40 text-[#831843]'
+                    : 'bg-white/70 border-black/10 text-[#505760]'
+                }`}
+              >
+                IPO AVWAP
+              </button>
+            ) : null}
             {onToggleDailyAnchoredRs ? (
               <button
                 onClick={onToggleDailyAnchoredRs}

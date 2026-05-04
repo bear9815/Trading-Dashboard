@@ -391,6 +391,7 @@ export default function Charts() {
     ? tradeReviewChartSettings.growthResearchWeeklyRangeYears
     : 2
   const ecosystemYtdEnabled = Boolean(tradeReviewChartSettings?.avwapPresets?.find(preset => preset.id === 'ytd')?.enabled)
+  const ecosystemIpoEnabled = Boolean(tradeReviewChartSettings?.avwapPresets?.find(preset => preset.id === 'ipo')?.enabled)
   const dailyAnchoredRsEnabled = tradeReviewChartSettings?.researchChartsShowDailyAnchoredRs !== false
   const weeklyRollingRsEnabled = tradeReviewChartSettings?.researchChartsShowWeeklyRollingRs !== false
   const chartsWeeklyRightOffset = Number.isFinite(tradeReviewChartSettings?.researchChartsWeeklyRightOffset) ? tradeReviewChartSettings.researchChartsWeeklyRightOffset : 3
@@ -720,6 +721,13 @@ export default function Charts() {
     setTradeReviewChartSettings({ avwapPresets: nextPresets })
   }
 
+  const toggleIpo = () => {
+    const nextPresets = (tradeReviewChartSettings?.avwapPresets || []).map(preset =>
+      preset.id === 'ipo' ? { ...preset, enabled: !preset.enabled } : preset
+    )
+    setTradeReviewChartSettings({ avwapPresets: nextPresets })
+  }
+
   const handleAddAvwapAtDate = (anchorDate) => {
     if (!selectedDisplaySymbol || !anchorDate) return
     addTradeReviewManualAnchor(selectedDisplaySymbol, {
@@ -823,6 +831,8 @@ export default function Charts() {
               onChangeWeeklyRangeMonths={(months) => setTradeReviewChartSettings({ growthResearchWeeklyRangeYears: Math.round(months / 12) })}
               ytdEnabled={ecosystemYtdEnabled}
               onToggleYtd={toggleYtd}
+              ipoEnabled={ecosystemIpoEnabled}
+              onToggleIpo={toggleIpo}
               weeklyRsEnabled={weeklyRollingRsEnabled}
               onToggleWeeklyRs={() => setTradeReviewChartSettings({ researchChartsShowWeeklyRollingRs: !weeklyRollingRsEnabled })}
               dailyAnchoredRsEnabled={dailyAnchoredRsEnabled}

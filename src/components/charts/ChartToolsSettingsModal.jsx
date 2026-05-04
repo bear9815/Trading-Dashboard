@@ -14,7 +14,10 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
     anchorDates: Array.isArray(settings?.anchorDates) && settings.anchorDates.length ? settings.anchorDates : ['2026-01-01', '2026-04-02'],
     avwapPresets: Array.isArray(settings?.avwapPresets) && settings.avwapPresets.length
       ? settings.avwapPresets
-      : [{ id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' }],
+      : [
+          { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
+          { id: 'ipo', kind: 'preset', mode: 'ipo', label: 'IPO', enabled: false, color: '#ec4899' },
+        ],
     weeklyRs: {
       rollingPeriod: settings?.weeklyRs?.rollingPeriod ?? 13,
       lookbackStd: settings?.weeklyRs?.lookbackStd ?? 50,
@@ -130,7 +133,7 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
       benchmarkSymbol: (draft.benchmarkSymbol || 'SPY').trim().toUpperCase(),
       anchorDates,
       avwapPresets: draft.avwapPresets.filter(preset =>
-        preset.mode === 'ytd' || preset.mode === 'best-fit' || preset.anchorDate
+        preset.mode === 'ytd' || preset.mode === 'ipo' || preset.mode === 'best-fit' || preset.anchorDate
       ),
     })
     onClose()

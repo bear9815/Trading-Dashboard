@@ -13,6 +13,7 @@ test('ResearchMultiTimeframeChart exposes separate daily and weekly range contro
   assert.match(source, /DEFAULT_WEEKLY_RANGE_OPTIONS = \[2, 5\]/)
   assert.match(source, /1Y/)
   assert.match(source, /absolute left-2 top-2 z-10 flex items-center gap-2/)
+  assert.match(source, /IPO AVWAP/)
   assert.doesNotMatch(source, /Setup Readiness|setup readiness|SqueezePane|Price-Action Squeeze/)
 })
 

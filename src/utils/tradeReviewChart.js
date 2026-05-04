@@ -32,6 +32,7 @@ export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   anchorDates: ['2026-01-01', '2026-04-02'],
   avwapPresets: [
     { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
+    { id: 'ipo', kind: 'preset', mode: 'ipo', label: 'IPO', enabled: false, color: '#ec4899' },
   ],
   weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
   dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
@@ -102,6 +103,8 @@ function normalizeAvwapPreset(preset, index = 0) {
     ? 'fixed-date'
     : preset?.mode === 'best-fit'
       ? 'best-fit'
+      : preset?.mode === 'ipo'
+        ? 'ipo'
       : 'ytd'
   const rawLookbackMonths = Number(preset?.lookbackMonths)
   const lookbackMonths = BEST_FIT_LOOKBACK_MONTH_OPTIONS.includes(rawLookbackMonths)
@@ -111,7 +114,9 @@ function normalizeAvwapPreset(preset, index = 0) {
     ? anchorDate
     : mode === 'best-fit'
       ? 'Best Fit'
-      : 'YTD'
+      : mode === 'ipo'
+        ? 'IPO'
+        : 'YTD'
   return {
     id: preset?.id || `${mode}-${anchorDate || index}`,
     kind: 'preset',
@@ -119,7 +124,7 @@ function normalizeAvwapPreset(preset, index = 0) {
     anchorDate: mode === 'fixed-date' ? anchorDate : null,
     label: (preset?.label || defaultLabel || 'AVWAP').trim(),
     enabled: Boolean(preset?.enabled),
-    color: preset?.color || '#f59e0b',
+    color: preset?.color || (mode === 'ipo' ? '#ec4899' : '#f59e0b'),
     ...(mode === 'best-fit' ? { lookbackMonths } : {}),
   }
 }
@@ -140,8 +145,12 @@ function normalizeManualAnchor(anchor, index = 0) {
 export function normalizeAvwapPresets(presets = DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets) {
   const normalized = (presets || [])
     .map((preset, index) => normalizeAvwapPreset(preset, index))
-    .filter(preset => preset.mode === 'ytd' || preset.mode === 'best-fit' || preset.anchorDate)
-  return normalized.length ? normalized : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets.map(normalizeAvwapPreset)
+    .filter(preset => preset.mode === 'ytd' || preset.mode === 'ipo' || preset.mode === 'best-fit' || preset.anchorDate)
+  const withDefaults = normalized.length ? [...normalized] : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets.map(normalizeAvwapPreset)
+  for (const defaultPreset of DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets.map(normalizeAvwapPreset)) {
+    if (!withDefaults.some(preset => preset.mode === defaultPreset.mode)) withDefaults.push(defaultPreset)
+  }
+  return withDefaults
 }
 
 export function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol = {}) {
@@ -253,9 +262,12 @@ export function resolveAvwapPresetAnchorDate(preset, asOf = new Date()) {
     ? 'fixed-date'
     : preset?.mode === 'best-fit'
       ? 'best-fit'
+      : preset?.mode === 'ipo'
+        ? 'ipo'
       : 'ytd'
   if (mode === 'fixed-date') return toDateKey(preset?.anchorDate)
   if (mode === 'best-fit') return null
+  if (mode === 'ipo') return null
 
   const asOfKey = toDateKey(asOf)
   if (!asOfKey) return null
@@ -440,9 +452,12 @@ export function resolveAvwapAnchorDate(preset, bars = [], asOf = new Date()) {
     ? 'fixed-date'
     : preset?.mode === 'best-fit'
       ? 'best-fit'
+      : preset?.mode === 'ipo'
+        ? 'ipo'
       : 'ytd'
   if (mode === 'fixed-date') return toDateKey(preset?.anchorDate)
   if (mode === 'best-fit') return resolveBestFitAvwapAnchorDate(bars, preset, asOf)
+  if (mode === 'ipo') return cleanBars(bars)[0]?.time || null
 
   const asOfKey = toDateKey(asOf)
   if (!asOfKey) return null
