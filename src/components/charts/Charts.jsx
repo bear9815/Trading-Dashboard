@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Search, BarChart3, ArrowUpDown, X, Trash2 } from 'lucide-react'
+import { Search, BarChart3, ArrowUpDown, X, Trash2, Flag } from 'lucide-react'
 import ChartToolsSettingsModal from './ChartToolsSettingsModal.jsx'
 import ResearchMultiTimeframeChart from './ResearchMultiTimeframeChart.jsx'
 import {
@@ -362,6 +362,7 @@ export default function Charts() {
   const symbols = activeList?.symbols || []
   const rowsBySymbol = activeList?.rowsBySymbol || {}
   const rows = useMemo(() => symbols.map(symbol => rowsBySymbol[symbol]).filter(Boolean), [rowsBySymbol, symbols])
+  const flaggedSymbols = listsById?.[FLAG_LIST_ID]?.symbols || []
   const canUseEcosystems = !isIndustryEtfList
   const sidebarViewOptions = canUseEcosystems
     ? SIDEBAR_VIEW_OPTIONS
@@ -1075,6 +1076,7 @@ export default function Charts() {
               ) : (
                 sortedRows.map(row => {
                   const active = row.symbol === selectedDisplaySymbol
+                  const isFlagged = flaggedSymbols.includes(row.symbol)
                   const fit = fitBySymbol[row.symbol]
                   const rolling = rollingRsBySymbol[row.symbol]
                   const anchored = anchoredRsBySymbol[row.symbol]
@@ -1098,7 +1100,28 @@ export default function Charts() {
                         <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${fitTone(fit?.fitColor)}`} />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-baseline justify-between gap-3">
-                            <p className={`text-sm font-semibold ${active ? 'text-accent-blue' : 'text-white'}`}>{row.symbol}</p>
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <p className={`text-sm font-semibold ${active ? 'text-accent-blue' : 'text-white'}`}>{row.symbol}</p>
+                              <span
+                                role="button"
+                                tabIndex={-1}
+                                data-chart-flag-toggle={row.symbol}
+                                onClick={(event) => {
+                                  event.preventDefault()
+                                  event.stopPropagation()
+                                  toggleSymbolInList(FLAG_LIST_ID, row)
+                                }}
+                                className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors ${
+                                  isFlagged
+                                    ? 'border-amber-400/35 bg-amber-400/15 text-amber-200'
+                                    : 'border-white/10 text-gray-500 hover:border-white/20 hover:text-gray-300'
+                                }`}
+                                aria-label={isFlagged ? `Unflag ${row.symbol}` : `Flag ${row.symbol}`}
+                                title={isFlagged ? 'Remove from Flag watchlist' : 'Add to Flag watchlist'}
+                              >
+                                <Flag size={11} />
+                              </span>
+                            </div>
                             <span className="text-[11px] text-gray-500">{formatSigned(ytd?.distancePct, 0, '%')}</span>
                           </div>
                           <p className="mt-1 truncate text-[11px] text-gray-500">{row.companyName || row.ecosystem || '—'}</p>
