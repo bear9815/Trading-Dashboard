@@ -16,6 +16,7 @@ export const LIQUID_TREND_LIST_ID = WATCHLIST_LIST_ID
 export const LIQUID_LIST_ID = 'liquid'
 export const TOP_100_LIST_ID = 'top-100'
 export const QQQ_LIST_ID = 'qqq'
+export const IPO_LIST_ID = 'ipo'
 
 export const DEFAULT_LIST_ORDER = [
   MARKET_LEADERS_LIST_ID,
@@ -23,6 +24,7 @@ export const DEFAULT_LIST_ORDER = [
   LIQUID_LIST_ID,
   TOP_100_LIST_ID,
   QQQ_LIST_ID,
+  IPO_LIST_ID,
 ]
 const DEFAULT_COLUMN_PRESET = applyColumnPreset('compact')
 const DEFAULT_LISTS = {
@@ -93,6 +95,22 @@ const DEFAULT_LISTS = {
   [QQQ_LIST_ID]: {
     id: QQQ_LIST_ID,
     name: 'QQQ',
+    symbols: [],
+    rowsBySymbol: {},
+    savedViews: [],
+    columnOrder: [...DEFAULT_COLUMN_PRESET.columnOrder],
+    hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
+    activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
+    controlsCollapsed: true,
+    collapsedPanels: {},
+    ecosystemGroupingMode: 'normal',
+    condensedEcosystemOverrides: {},
+    themeAnalyticsHistory: { theme: [], ecosystem: [] },
+    lastUpdated: null,
+  },
+  [IPO_LIST_ID]: {
+    id: IPO_LIST_ID,
+    name: 'IPO',
     symbols: [],
     rowsBySymbol: {},
     savedViews: [],
@@ -293,6 +311,9 @@ function ensureWorkspaceShape(state) {
       }),
       [WATCHLIST_LIST_ID]: { ...DEFAULT_LISTS[WATCHLIST_LIST_ID] },
       [LIQUID_LIST_ID]: { ...DEFAULT_LISTS[LIQUID_LIST_ID] },
+      [TOP_100_LIST_ID]: { ...DEFAULT_LISTS[TOP_100_LIST_ID] },
+      [QQQ_LIST_ID]: { ...DEFAULT_LISTS[QQQ_LIST_ID] },
+      [IPO_LIST_ID]: { ...DEFAULT_LISTS[IPO_LIST_ID] },
     }, rebuildTrustedSymbolMemory({
       [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {
         symbols: state?.symbols || [],
@@ -304,6 +325,7 @@ function ensureWorkspaceShape(state) {
       [LIQUID_LIST_ID]: { ...DEFAULT_LISTS[LIQUID_LIST_ID] },
       [TOP_100_LIST_ID]: { ...DEFAULT_LISTS[TOP_100_LIST_ID] },
       [QQQ_LIST_ID]: { ...DEFAULT_LISTS[QQQ_LIST_ID] },
+      [IPO_LIST_ID]: { ...DEFAULT_LISTS[IPO_LIST_ID] },
     }, persistedSymbolMemory)).listsById,
     symbolMemoryBySymbol: rebuildTrustedSymbolMemory({
       [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {
@@ -316,6 +338,7 @@ function ensureWorkspaceShape(state) {
       [LIQUID_LIST_ID]: { ...DEFAULT_LISTS[LIQUID_LIST_ID] },
       [TOP_100_LIST_ID]: { ...DEFAULT_LISTS[TOP_100_LIST_ID] },
       [QQQ_LIST_ID]: { ...DEFAULT_LISTS[QQQ_LIST_ID] },
+      [IPO_LIST_ID]: { ...DEFAULT_LISTS[IPO_LIST_ID] },
     }, persistedSymbolMemory),
   }
 }
