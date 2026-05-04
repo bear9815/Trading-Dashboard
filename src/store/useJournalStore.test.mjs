@@ -144,3 +144,67 @@ test('dashboard journal thoughts persist into journal entries across local reloa
     }
   }
 })
+
+test('trading reminder thoughts persist into both dashboard thoughts and journal entries', () => {
+  const previousLocalStorage = globalThis.localStorage
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
+
+  try {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+
+    useJournalStore.getState().addReminderThought('Stay patient into the open.', 'discipline', '2026-05-04T13:35:00.000Z')
+
+    const stateAfterSave = useJournalStore.getState()
+    assert.equal(stateAfterSave.tradingThoughts.length, 1)
+    assert.equal(stateAfterSave.tradingThoughts[0].text, 'Stay patient into the open.')
+    assert.equal(stateAfterSave.tradingThoughts[0].tag, 'discipline')
+    assert.equal(stateAfterSave.entries.length, 1)
+    assert.equal(isDashboardJournalEntry(stateAfterSave.entries[0]), true)
+    assert.equal(stateAfterSave.entries[0].noteText, 'Stay patient into the open.')
+
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+    useJournalStore.getState().loadFromLocal()
+
+    const restoredState = useJournalStore.getState()
+    assert.equal(restoredState.tradingThoughts.length, 1)
+    assert.equal(restoredState.tradingThoughts[0].text, 'Stay patient into the open.')
+    assert.equal(restoredState.entries.length, 1)
+    assert.equal(isDashboardJournalEntry(restoredState.entries[0]), true)
+    assert.equal(restoredState.entries[0].noteText, 'Stay patient into the open.')
+  } finally {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+  }
+})

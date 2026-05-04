@@ -7,3 +7,8 @@ export function shouldOpenMorningCheckin({ storageValue, date = new Date() } = {
   if (!key) return false
   return !storageValue
 }
+
+export function shouldDisplayMorningCheckin({ requestedMode = null, storageValue, date = new Date() } = {}) {
+  if (requestedMode === 'pre-market') return true
+  return shouldOpenMorningCheckin({ storageValue, date })
+}

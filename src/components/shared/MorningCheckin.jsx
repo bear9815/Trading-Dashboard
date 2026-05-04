@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Wind, Brain, Shield, ChevronRight, Sword } from 'lucide-react'
 import { useHabitsStore } from '../../store/useHabitsStore.js'
 import { resolveCheckinHabitIds } from '../../utils/checkinHabits.js'
-import { buildMorningCheckinStorageKey, shouldOpenMorningCheckin } from '../../utils/morningCheckinState.js'
+import { buildMorningCheckinStorageKey, shouldDisplayMorningCheckin } from '../../utils/morningCheckinState.js'
 
 const HOWELL_CHECKS = [
   {
@@ -66,7 +66,7 @@ export default function MorningCheckin({ openRequest = { signal: 0, requestedMod
     if (!openRequest?.signal) return
     const storageKey = buildMorningCheckinStorageKey(new Date())
     const storageValue = localStorage.getItem(storageKey)
-    if (!shouldOpenMorningCheckin({ storageValue })) return
+    if (!shouldDisplayMorningCheckin({ requestedMode: openRequest?.requestedMode, storageValue })) return
     setStep(0)
     setHowell({})
     setDouglas({})

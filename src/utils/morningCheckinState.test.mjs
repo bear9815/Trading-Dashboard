@@ -1,32 +1,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import {
-  buildMorningCheckinStorageKey,
-  shouldOpenMorningCheckin,
-} from './morningCheckinState.js'
+import { shouldDisplayMorningCheckin, shouldOpenMorningCheckin } from './morningCheckinState.js'
 
-test('buildMorningCheckinStorageKey uses a stable per-day key', () => {
-  assert.equal(
-    buildMorningCheckinStorageKey(new Date('2026-05-03T12:00:00.000Z')),
-    'checkin_2026-05-03'
-  )
+test('shouldOpenMorningCheckin only auto-opens when the day has not been completed yet', () => {
+  assert.equal(shouldOpenMorningCheckin({ storageValue: null }), true)
+  assert.equal(shouldOpenMorningCheckin({ storageValue: '1' }), false)
 })
 
-test('shouldOpenMorningCheckin only opens when today has not been completed yet', () => {
-  assert.equal(
-    shouldOpenMorningCheckin({
-      storageValue: null,
-      date: new Date('2026-05-03T12:00:00.000Z'),
-    }),
-    true
-  )
+test('shouldDisplayMorningCheckin always allows an explicit pre-market launch', () => {
+  assert.equal(shouldDisplayMorningCheckin({ requestedMode: 'pre-market', storageValue: '1' }), true)
+  assert.equal(shouldDisplayMorningCheckin({ requestedMode: 'pre-market', storageValue: null }), true)
+})
 
-  assert.equal(
-    shouldOpenMorningCheckin({
-      storageValue: '1',
-      date: new Date('2026-05-03T12:00:00.000Z'),
-    }),
-    false
-  )
+test('shouldDisplayMorningCheckin keeps the once-per-day guard for automatic opens', () => {
+  assert.equal(shouldDisplayMorningCheckin({ requestedMode: null, storageValue: null }), true)
+  assert.equal(shouldDisplayMorningCheckin({ requestedMode: null, storageValue: '1' }), false)
 })

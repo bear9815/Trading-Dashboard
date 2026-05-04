@@ -89,7 +89,7 @@ export default function TradingReminderPopup({ openRequest = { signal: 0, reques
   const textareaRef    = useRef(null)
 
   const { habits, completions, logCompletion, removeCompletion, isCompleted } = useHabitsStore()
-  const { goals, addThought } = useJournalStore()
+  const { goals, addReminderThought } = useJournalStore()
   const { getEntryByDate }    = useMorningStore()
   const { reminderTimes = ['10:00', '14:00'] } = useSettingsStore()
 
@@ -119,7 +119,7 @@ export default function TradingReminderPopup({ openRequest = { signal: 0, reques
   const persistDraftThought = () => {
     const trimmed = thought.trim()
     if (!trimmed) return false
-    addThought(trimmed, thoughtTag)
+    addReminderThought(trimmed, thoughtTag)
     setThought('')
     setThoughtTag('note')
     flashSaved()
@@ -203,7 +203,7 @@ export default function TradingReminderPopup({ openRequest = { signal: 0, reques
 
   const handleQuickState = (item) => {
     setThoughtTag(item.tag)
-    addThought(item.text, item.tag)
+    addReminderThought(item.text, item.tag)
     setThought('')
     flashSaved()
   }
@@ -212,7 +212,7 @@ export default function TradingReminderPopup({ openRequest = { signal: 0, reques
     const quickText = mode === 'morning'
       ? 'Morning pulse complete — still aligned with the plan.'
       : 'Afternoon check-in complete — no major drift from the plan.'
-    addThought(quickText, 'note')
+    addReminderThought(quickText, 'note')
     setThought('')
     setThoughtTag('note')
     flashSaved()
@@ -382,7 +382,7 @@ export default function TradingReminderPopup({ openRequest = { signal: 0, reques
             </div>
             {loggedNow && (
               <p className="mt-3 text-sm text-accent-green">
-                Saved to Dashboard → Trading Thoughts.
+                Saved to Dashboard → Trading Thoughts and Journal.
               </p>
             )}
           </div>
