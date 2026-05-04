@@ -5,6 +5,7 @@ import { useJournalStore }  from '../../store/useJournalStore.js'
 import { useMorningStore }  from '../../store/useMorningStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { resolveCheckinHabitIds } from '../../utils/checkinHabits.js'
+import { isHabitScheduledOnDate } from '../../utils/habitSchedule.js'
 import { resolveTradingReminderMode } from '../../utils/tradingReminderMode.js'
 
 const THOUGHT_TAGS = ['note', 'insight', 'discipline', 'warning', 'fomo']
@@ -95,7 +96,10 @@ export default function TradingReminderPopup({ openRequest = { signal: 0, reques
 
   const todayEntry  = getEntryByDate(localDateString())
   const activeGoals = goals.filter(g => g.status === 'active').slice(0, 4)
-  const dailyHabits = habits.filter(h => h.active !== false && (h.frequency === 'daily' || !h.frequency))
+  const currentDate = localDateString()
+  const dailyHabits = habits.filter(
+    h => h.active !== false && (h.frequency === 'daily' || !h.frequency) && isHabitScheduledOnDate(h, currentDate)
+  )
   const { cyclingHabitId, walkHabitId } = useMemo(() => resolveCheckinHabitIds(habits), [habits])
 
   const streaks = useMemo(() => {
@@ -228,10 +232,10 @@ export default function TradingReminderPopup({ openRequest = { signal: 0, reques
 
   const isMorning   = mode === 'morning'
   const accentColor = isMorning ? '#ffa502' : '#3d84ff'
-  const completedToday = dailyHabits.filter(h => isCompleted(h.id, localDateString())).length
+  const completedToday = dailyHabits.filter(h => isCompleted(h.id, currentDate)).length
   const quickStates = QUICK_STATES[mode] || QUICK_STATES.morning
   const promptText = pickDailyPrompt(mode)
-  const today = localDateString()
+  const today = currentDate
 
   const movementOptions = [
     { id: 'cycling', label: 'Cycling', habitId: cyclingHabitId },

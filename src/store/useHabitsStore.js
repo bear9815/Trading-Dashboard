@@ -1,6 +1,18 @@
 import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
 import { supabase } from '../lib/supabase.js'
+import { normalizeHabitDaysOfWeek } from '../utils/habitSchedule.js'
+
+function normalizeHabit(habit = {}) {
+  const frequency = habit.frequency || 'daily'
+  const normalizedDaysOfWeek = normalizeHabitDaysOfWeek(frequency, habit.daysOfWeek)
+
+  return {
+    ...habit,
+    frequency,
+    ...(normalizedDaysOfWeek === undefined ? {} : { daysOfWeek: normalizedDaysOfWeek }),
+  }
+}
 
 function persistLocal(state) {
   try {
@@ -43,7 +55,7 @@ export const useHabitsStore = create((set, get) => ({
       if (!raw) { set({ cloudReady: true, cloudUserId: null }); return }
       const parsed = JSON.parse(raw)
       const { habits = [], completions = [], reminders = [] } = parsed?.state || {}
-      set({ habits, completions, reminders, cloudReady: true, cloudUserId: null })
+      set({ habits: habits.map(normalizeHabit), completions, reminders, cloudReady: true, cloudUserId: null })
     } catch {
       set({ cloudReady: true, cloudUserId: null })
     }
@@ -67,9 +79,10 @@ export const useHabitsStore = create((set, get) => ({
 
     if (data?.data) {
       const { habits = [], completions = [], reminders = [] } = data.data
-      set({ habits, completions, reminders, cloudReady: true, cloudUserId: userId })
+      const normalizedHabits = habits.map(normalizeHabit)
+      set({ habits: normalizedHabits, completions, reminders, cloudReady: true, cloudUserId: userId })
       // Back up locally so data survives if Supabase is removed
-      persistLocal({ habits, completions, reminders })
+      persistLocal({ habits: normalizedHabits, completions, reminders })
     } else {
       set({ cloudReady: true, cloudUserId: userId })
     }
@@ -87,19 +100,20 @@ export const useHabitsStore = create((set, get) => ({
 
   addHabit: (h) => {
     const now = new Date().toISOString()
-    const item = {
+    const item = normalizeHabit({
       frequency: 'daily', category: '', color: '#3d84ff',
       active: true, description: '',
+      daysOfWeek: [],
       ...h,
       id: h.id || uuidv4(),
       createdAt: now,
-    }
+    })
     set(s => ({ habits: [item, ...s.habits] }))
     get()._sync()
   },
 
   updateHabit: (id, updates) => {
-    set(s => ({ habits: s.habits.map(h => h.id === id ? { ...h, ...updates } : h) }))
+    set(s => ({ habits: s.habits.map(h => h.id === id ? normalizeHabit({ ...h, ...updates }) : h) }))
     get()._sync()
   },
 

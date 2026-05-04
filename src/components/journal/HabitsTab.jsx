@@ -5,6 +5,7 @@ import {
   Circle, CheckCircle2, Calendar, Zap,
 } from 'lucide-react'
 import { useHabitsStore } from '../../store/useHabitsStore.js'
+import { getHabitScheduleLabel, isHabitScheduledOnDate, normalizeHabitDaysOfWeek } from '../../utils/habitSchedule.js'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -73,15 +74,19 @@ function calcStreak(frequency, completions) {
 
 function HabitRow({ habit, completionsForHabit, onToggle, onEdit, onDelete }) {
   const today = todayStr()
+  const scheduledToday = isHabitScheduledOnDate(habit, today)
   const key   = periodKey(habit.frequency, today)
   const done  = completionsForHabit.some(c => periodKey(habit.frequency, c.date) === key)
   const streak = useMemo(() => calcStreak(habit.frequency, completionsForHabit), [habit.frequency, completionsForHabit])
+  const scheduleLabel = getHabitScheduleLabel(habit)
 
   return (
     <div
       className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all group ${
         done
           ? 'bg-white/5 border-white/10 opacity-60'
+          : !scheduledToday
+            ? 'bg-surface-200 border-white/10 opacity-45'
           : 'bg-surface-200 border-white/10 hover:border-white/20'
       }`}
     >
@@ -89,7 +94,8 @@ function HabitRow({ habit, completionsForHabit, onToggle, onEdit, onDelete }) {
       <button
         onClick={() => onToggle(habit, today, done)}
         className="shrink-0 transition-all"
-        title={done ? 'Mark incomplete' : 'Mark complete'}
+        title={!scheduledToday ? 'Not scheduled today' : done ? 'Mark incomplete' : 'Mark complete'}
+        disabled={!scheduledToday}
       >
         {done
           ? <CheckCircle2 size={20} style={{ color: habit.color || '#3d84ff' }} />
@@ -108,6 +114,11 @@ function HabitRow({ habit, completionsForHabit, onToggle, onEdit, onDelete }) {
         </p>
         {habit.category && (
           <p className="text-[10px] text-gray-600 mt-0.5">{habit.category}</p>
+        )}
+        {scheduleLabel && (
+          <p className="text-[10px] text-gray-600 mt-0.5">
+            {scheduleLabel}{!scheduledToday ? ' · Not scheduled today' : ''}
+          </p>
         )}
       </div>
 
@@ -142,11 +153,26 @@ function HabitRow({ habit, completionsForHabit, onToggle, onEdit, onDelete }) {
 
 function HabitForm({ initial, onSave, onCancel }) {
   const isEdit = !!initial?.id
+  const initialDailyDays = initial?.frequency === 'daily' && initial?.daysOfWeek == null
+    ? [0, 1, 2, 3, 4, 5, 6]
+    : initial?.daysOfWeek
   const [form, setForm] = useState({
     title: '', frequency: 'daily', category: '', color: HABIT_COLORS[0], description: '',
-    ...(initial || {}),
+    daysOfWeek: [],
+    ...(initial ? { ...initial, daysOfWeek: initialDailyDays } : {}),
   })
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const normalizedDaysOfWeek = normalizeHabitDaysOfWeek(form.frequency, form.daysOfWeek) ?? []
+  const requiresDaySelection = form.frequency === 'daily'
+  const canSave = form.title.trim() && (!requiresDaySelection || normalizedDaysOfWeek.length > 0)
+
+  function toggleHabitDay(day) {
+    const currentDays = normalizeHabitDaysOfWeek(form.frequency, form.daysOfWeek) ?? []
+    const nextDays = currentDays.includes(day)
+      ? currentDays.filter(item => item !== day)
+      : [...currentDays, day]
+    set('daysOfWeek', nextDays)
+  }
 
   return (
     <div className="card space-y-3" style={{ borderColor: 'rgba(61,132,255,0.25)' }}>
@@ -186,6 +212,35 @@ function HabitForm({ initial, onSave, onCancel }) {
         </div>
       </div>
 
+      {form.frequency === 'daily' && (
+        <div>
+          <div className="flex items-center justify-between gap-2">
+            <label className="label text-[10px]">Choose Days</label>
+            <span className="text-[10px] text-gray-600">
+              {normalizedDaysOfWeek.length ? normalizedDaysOfWeek.map(day => DAY_LABELS[day]).join(', ') : 'Select at least one day'}
+            </span>
+          </div>
+          <div className="flex gap-1 mt-1">
+            {DAY_SHORT.map((label, day) => (
+              <button
+                key={label + day}
+                type="button"
+                onClick={() => toggleHabitDay(day)}
+                className="w-8 h-8 text-[10px] font-semibold rounded-full border transition-all"
+                style={normalizedDaysOfWeek.includes(day)
+                  ? { background: 'rgba(61,132,255,0.25)', borderColor: 'rgba(61,132,255,0.5)', color: '#3d84ff' }
+                  : { background: 'transparent', borderColor: 'rgba(255,255,255,0.12)', color: '#666' }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {!normalizedDaysOfWeek.length && (
+            <p className="text-[10px] text-accent-yellow mt-2">Select at least one day for a daily habit.</p>
+          )}
+        </div>
+      )}
+
       <div>
         <label className="label text-[10px]">Description (optional)</label>
         <textarea
@@ -212,9 +267,9 @@ function HabitForm({ initial, onSave, onCancel }) {
 
       <div className="flex gap-2">
         <button
-          onClick={() => form.title.trim() && onSave(form)}
+          onClick={() => canSave && onSave({ ...form, daysOfWeek: normalizedDaysOfWeek })}
           className="btn-primary text-xs"
-          disabled={!form.title.trim()}
+          disabled={!canSave}
         >
           {isEdit ? 'Save Changes' : 'Add Habit'}
         </button>
@@ -355,7 +410,9 @@ function ReminderCard({ reminder, habits, onUpdate, onDelete }) {
 function HabitReminderPopup({ reminder, habits, completions, onDismiss, onToggle }) {
   const today = todayStr()
   const relevantHabits = habits.filter(h =>
-    h.active !== false && (reminder.habitIds.length === 0 || reminder.habitIds.includes(h.id))
+    h.active !== false
+    && isHabitScheduledOnDate(h, today)
+    && (reminder.habitIds.length === 0 || reminder.habitIds.includes(h.id))
   )
 
   return (
@@ -529,7 +586,7 @@ function RemindersSection({ reminders, habits, onAdd, onUpdate, onDelete }) {
 
 function TodayProgress({ habits, completions }) {
   const today = todayStr()
-  const active = habits.filter(h => h.active !== false)
+  const active = habits.filter(h => h.active !== false && isHabitScheduledOnDate(h, today))
   const done = active.filter(h => {
     const key = periodKey(h.frequency, today)
     return completions.some(c => c.habitId === h.id && periodKey(h.frequency, c.date) === key)

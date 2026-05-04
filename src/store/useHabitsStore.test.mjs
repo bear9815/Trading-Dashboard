@@ -50,3 +50,33 @@ test('habits survive a refresh when cloud sync is unavailable', () => {
     }
   }
 })
+
+test('daily habits persist their selected weekdays across local reload', () => {
+  const previousLocalStorage = globalThis.localStorage
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
+
+  try {
+    useHabitsStore.setState({ habits: [], completions: [], reminders: [], cloudReady: false })
+
+    useHabitsStore.getState().addHabit({
+      title: 'Weekday review',
+      frequency: 'daily',
+      daysOfWeek: [1, 2, 3, 4, 5],
+    })
+
+    useHabitsStore.setState({ habits: [], completions: [], reminders: [], cloudReady: false })
+    useHabitsStore.getState().loadFromLocal()
+
+    const restored = useHabitsStore.getState().habits
+    assert.equal(restored.length, 1)
+    assert.deepEqual(restored[0].daysOfWeek, [1, 2, 3, 4, 5])
+  } finally {
+    useHabitsStore.setState({ habits: [], completions: [], reminders: [], cloudReady: false })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+  }
+})
