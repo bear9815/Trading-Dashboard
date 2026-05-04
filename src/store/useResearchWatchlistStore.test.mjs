@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  FLAG_LIST_ID,
   IPO_LIST_ID,
   LIQUID_LIST_ID,
   LIQUID_TREND_LIST_ID,
@@ -41,6 +42,7 @@ test('research watchlist exposes the expected default list order and labels', ()
     TOP_100_LIST_ID,
     QQQ_LIST_ID,
     IPO_LIST_ID,
+    FLAG_LIST_ID,
   ])
   assert.deepEqual(lists.map(list => list.name), [
     'Market Leaders',
@@ -49,6 +51,7 @@ test('research watchlist exposes the expected default list order and labels', ()
     'Top 100',
     'QQQ',
     'IPO',
+    'Flag',
   ])
 })
 
@@ -116,6 +119,8 @@ test('persist merge backfills Top 100 and QQQ without disturbing existing three-
   assert.deepEqual(merged.listsById[QQQ_LIST_ID].symbols, [])
   assert.equal(merged.listsById[IPO_LIST_ID].name, 'IPO')
   assert.deepEqual(merged.listsById[IPO_LIST_ID].symbols, [])
+  assert.equal(merged.listsById[FLAG_LIST_ID].name, 'Flag')
+  assert.deepEqual(merged.listsById[FLAG_LIST_ID].symbols, [])
 })
 
 test('syncListsWithTrustedCompanyMemory propagates trusted company names across all lists containing the symbol', () => {
@@ -383,9 +388,12 @@ test('resetWorkspaceState rebuilds the IPO watchlist after QQQ', async () => {
       TOP_100_LIST_ID,
       QQQ_LIST_ID,
       IPO_LIST_ID,
+      FLAG_LIST_ID,
     ])
     assert.equal(state.listsById[IPO_LIST_ID].name, 'IPO')
     assert.deepEqual(state.listsById[IPO_LIST_ID].symbols, [])
+    assert.equal(state.listsById[FLAG_LIST_ID].name, 'Flag')
+    assert.deepEqual(state.listsById[FLAG_LIST_ID].symbols, [])
     await new Promise(resolve => setTimeout(resolve, 0))
   } finally {
     if (previousLocalStorage === undefined) {

@@ -4,7 +4,9 @@ import {
   buildManualAnchorDragUpdate,
   normalizePendingSymbolInput,
   resolveAnchorSelectionAfterDelete,
+  resolveDailyChartRangeMonths,
   resolveSymbolTypeahead,
+  shouldToggleFlagForKeydown,
 } from './chartInteractions.js'
 
 const rows = [
@@ -115,4 +117,42 @@ const rows = [
   assert.equal(resolveAnchorSelectionAfterDelete(anchors, 'a-2'), 'a-3')
   assert.equal(resolveAnchorSelectionAfterDelete(anchors, 'a-3'), 'a-2')
   assert.equal(resolveAnchorSelectionAfterDelete([{ id: 'solo' }], 'solo'), null)
+}
+
+{
+  assert.equal(resolveDailyChartRangeMonths(3), 3)
+  assert.equal(resolveDailyChartRangeMonths(6), 6)
+  assert.equal(resolveDailyChartRangeMonths(9), 8.5)
+  assert.equal(resolveDailyChartRangeMonths(12), 12)
+}
+
+{
+  assert.equal(shouldToggleFlagForKeydown({
+    key: 'F',
+    shiftKey: true,
+    sidebarMode: 'symbols',
+    selectedSymbol: 'NVDA',
+    isTyping: false,
+  }), true)
+  assert.equal(shouldToggleFlagForKeydown({
+    key: 'f',
+    shiftKey: false,
+    sidebarMode: 'symbols',
+    selectedSymbol: 'NVDA',
+    isTyping: false,
+  }), false)
+  assert.equal(shouldToggleFlagForKeydown({
+    key: 'F',
+    shiftKey: true,
+    sidebarMode: 'ecosystems',
+    selectedSymbol: null,
+    isTyping: false,
+  }), false)
+  assert.equal(shouldToggleFlagForKeydown({
+    key: 'F',
+    shiftKey: true,
+    sidebarMode: 'symbols',
+    selectedSymbol: 'NVDA',
+    isTyping: true,
+  }), false)
 }

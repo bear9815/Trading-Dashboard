@@ -5,9 +5,11 @@ import ResearchMultiTimeframeChart from './ResearchMultiTimeframeChart.jsx'
 import {
   buildManualAnchorDragUpdate,
   normalizePendingSymbolInput,
+  resolveDailyChartRangeMonths,
   resolveAnchorSelectionAfterDelete,
+  shouldToggleFlagForKeydown,
 } from './chartInteractions.js'
-import { DEFAULT_LIST_ORDER, useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
+import { DEFAULT_LIST_ORDER, FLAG_LIST_ID, useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import {
   buildAnchoredRsSnapshot,
@@ -298,7 +300,7 @@ function ManualAvwapModal({ anchor, onSave, onDelete, onClose }) {
 }
 
 export default function Charts() {
-  const { activeListId, listsById, setActiveList, setEcosystemGroupingMode } = useResearchWatchlistStore()
+  const { activeListId, listsById, setActiveList, setEcosystemGroupingMode, toggleSymbolInList } = useResearchWatchlistStore()
   const {
     tradeReviewChartSettings,
     tradeReviewManualAnchorsBySymbol,
@@ -545,6 +547,7 @@ export default function Charts() {
     symbol: selectedDisplaySymbol,
     companyName: customSymbolMeta?.longName || customSymbolMeta?.shortName || '',
   } : null)) : null
+  const selectedWatchlistRow = !customSymbol && selectedDisplaySymbol ? (rowsBySymbol[selectedDisplaySymbol] || null) : null
   const selectedManualAnchors = selectedDisplaySymbol
     ? (tradeReviewManualAnchorsBySymbol?.[selectedDisplaySymbol] || [])
     : []
@@ -680,6 +683,19 @@ export default function Charts() {
         return
       }
 
+      if (shouldToggleFlagForKeydown({
+        key: event.key,
+        shiftKey: event.shiftKey,
+        sidebarMode,
+        selectedSymbol: selectedWatchlistRow?.symbol,
+        isTyping: isTypingTarget(event.target),
+      })) {
+        if (!selectedWatchlistRow?.symbol) return
+        event.preventDefault()
+        toggleSymbolInList(FLAG_LIST_ID, selectedWatchlistRow)
+        return
+      }
+
       if (event.metaKey || event.ctrlKey || event.altKey) return
       if (event.key === 'Enter') {
         if (!pendingSymbolInput) return
@@ -703,7 +719,7 @@ export default function Charts() {
 
     window.addEventListener('keydown', handleKeydown)
     return () => window.removeEventListener('keydown', handleKeydown)
-  }, [editingAnchorId, pendingSymbolInput, selectedAnchorId, selectedDisplaySymbol, selectedEcosystemGroup?.key, selectedManualAnchors, sidebarMode, sortedEcosystemGroups, sortedRows])
+  }, [editingAnchorId, pendingSymbolInput, selectedAnchorId, selectedDisplaySymbol, selectedEcosystemGroup?.key, selectedManualAnchors, selectedWatchlistRow, sidebarMode, sortedEcosystemGroups, sortedRows, toggleSymbolInList])
 
   useEffect(() => {
     const selectedRowKey = sidebarMode === 'ecosystems' ? selectedEcosystemGroup?.key : selectedDisplaySymbol
@@ -823,7 +839,7 @@ export default function Charts() {
               chartType={normalizeTradeReviewChartType(tradeReviewChartSettings?.chartType)}
               title={activeChartTitle}
               memberCount={activeChartMemberCount}
-              dailyRangeMonths={growthResearchDailyRangeMonths}
+              dailyRangeMonths={resolveDailyChartRangeMonths(growthResearchDailyRangeMonths)}
               weeklyRangeMonths={growthResearchWeeklyRangeYears * 12}
               dailyRangeOptions={DAILY_RANGE_OPTIONS}
               weeklyRangeOptions={WEEKLY_RANGE_OPTIONS}

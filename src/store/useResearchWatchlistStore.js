@@ -17,6 +17,7 @@ export const LIQUID_LIST_ID = 'liquid'
 export const TOP_100_LIST_ID = 'top-100'
 export const QQQ_LIST_ID = 'qqq'
 export const IPO_LIST_ID = 'ipo'
+export const FLAG_LIST_ID = 'flag'
 
 export const DEFAULT_LIST_ORDER = [
   MARKET_LEADERS_LIST_ID,
@@ -25,6 +26,7 @@ export const DEFAULT_LIST_ORDER = [
   TOP_100_LIST_ID,
   QQQ_LIST_ID,
   IPO_LIST_ID,
+  FLAG_LIST_ID,
 ]
 const DEFAULT_COLUMN_PRESET = applyColumnPreset('compact')
 const DEFAULT_LISTS = {
@@ -111,6 +113,22 @@ const DEFAULT_LISTS = {
   [IPO_LIST_ID]: {
     id: IPO_LIST_ID,
     name: 'IPO',
+    symbols: [],
+    rowsBySymbol: {},
+    savedViews: [],
+    columnOrder: [...DEFAULT_COLUMN_PRESET.columnOrder],
+    hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
+    activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
+    controlsCollapsed: true,
+    collapsedPanels: {},
+    ecosystemGroupingMode: 'normal',
+    condensedEcosystemOverrides: {},
+    themeAnalyticsHistory: { theme: [], ecosystem: [] },
+    lastUpdated: null,
+  },
+  [FLAG_LIST_ID]: {
+    id: FLAG_LIST_ID,
+    name: 'Flag',
     symbols: [],
     rowsBySymbol: {},
     savedViews: [],
@@ -314,6 +332,7 @@ function ensureWorkspaceShape(state) {
       [TOP_100_LIST_ID]: { ...DEFAULT_LISTS[TOP_100_LIST_ID] },
       [QQQ_LIST_ID]: { ...DEFAULT_LISTS[QQQ_LIST_ID] },
       [IPO_LIST_ID]: { ...DEFAULT_LISTS[IPO_LIST_ID] },
+      [FLAG_LIST_ID]: { ...DEFAULT_LISTS[FLAG_LIST_ID] },
     }, rebuildTrustedSymbolMemory({
       [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {
         symbols: state?.symbols || [],
@@ -326,6 +345,7 @@ function ensureWorkspaceShape(state) {
       [TOP_100_LIST_ID]: { ...DEFAULT_LISTS[TOP_100_LIST_ID] },
       [QQQ_LIST_ID]: { ...DEFAULT_LISTS[QQQ_LIST_ID] },
       [IPO_LIST_ID]: { ...DEFAULT_LISTS[IPO_LIST_ID] },
+      [FLAG_LIST_ID]: { ...DEFAULT_LISTS[FLAG_LIST_ID] },
     }, persistedSymbolMemory)).listsById,
     symbolMemoryBySymbol: rebuildTrustedSymbolMemory({
       [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {
@@ -339,6 +359,7 @@ function ensureWorkspaceShape(state) {
       [TOP_100_LIST_ID]: { ...DEFAULT_LISTS[TOP_100_LIST_ID] },
       [QQQ_LIST_ID]: { ...DEFAULT_LISTS[QQQ_LIST_ID] },
       [IPO_LIST_ID]: { ...DEFAULT_LISTS[IPO_LIST_ID] },
+      [FLAG_LIST_ID]: { ...DEFAULT_LISTS[FLAG_LIST_ID] },
     }, persistedSymbolMemory),
   }
 }
@@ -448,6 +469,40 @@ export const useResearchWatchlistStore = create(
           ...current.savedViews.filter(v => v.name !== view.name),
         ],
       }))),
+
+      toggleSymbolInList: (listId, row) => set(state => {
+        const resolvedListId = String(listId || '').trim()
+        const target = state.listsById?.[resolvedListId] || DEFAULT_LISTS[resolvedListId]
+        const symbol = String(row?.symbol || '').trim().toUpperCase()
+        if (!target || !symbol) return state
+
+        const nextRowsBySymbol = { ...(target.rowsBySymbol || {}) }
+        const nextSymbols = target.symbols?.includes(symbol)
+          ? (target.symbols || []).filter(currentSymbol => currentSymbol !== symbol)
+          : [...(target.symbols || []), symbol]
+
+        if (target.symbols?.includes(symbol)) {
+          delete nextRowsBySymbol[symbol]
+        } else {
+          nextRowsBySymbol[symbol] = {
+            ...(target.rowsBySymbol?.[symbol] || {}),
+            ...row,
+            symbol,
+            updatedAt: new Date().toISOString(),
+          }
+        }
+
+        return {
+          listsById: {
+            ...state.listsById,
+            [resolvedListId]: makeListPatch(target, {
+              symbols: nextSymbols,
+              rowsBySymbol: nextRowsBySymbol,
+              lastUpdated: new Date().toISOString(),
+            }),
+          },
+        }
+      }),
 
       updateColumnLayout: ({ columnOrder, hiddenColumns, activeColumnPreset } = {}) => set(state => updateActiveList(state, current => ({
         columnOrder: columnOrder ?? current.columnOrder,

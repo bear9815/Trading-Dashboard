@@ -90,3 +90,23 @@ export function resolveAnchorSelectionAfterDelete(anchors = [], selectedAnchorId
   const fallbackIndex = currentIndex >= anchors.length - 1 ? currentIndex - 1 : currentIndex + 1
   return anchors[fallbackIndex]?.id || null
 }
+
+export function resolveDailyChartRangeMonths(optionMonths) {
+  const numeric = Number(optionMonths)
+  if (!Number.isFinite(numeric)) return 6
+  return numeric === 9 ? 8.5 : numeric
+}
+
+export function shouldToggleFlagForKeydown({
+  key,
+  shiftKey = false,
+  sidebarMode = 'symbols',
+  selectedSymbol = null,
+  isTyping = false,
+}) {
+  return !isTyping &&
+    shiftKey &&
+    String(key || '').toUpperCase() === 'F' &&
+    sidebarMode === 'symbols' &&
+    Boolean(selectedSymbol)
+}
