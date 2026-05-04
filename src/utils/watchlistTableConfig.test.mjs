@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import {
   DEFAULT_WATCHLIST_COLUMN_ORDER,
+  WATCHLIST_SYMBOL_SORT_OPTIONS,
   WATCHLIST_COLUMN_PRESETS,
   applyColumnPreset,
   buildVisibleColumnOrder,
+  getChartsSymbolSortOptions,
   moveColumn,
 } from './watchlistTableConfig.js'
 
@@ -12,6 +14,23 @@ assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('actions'))
 assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('dailyCompression'))
 assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('weeklyExpansion'))
 assert.ok(WATCHLIST_COLUMN_PRESETS.length >= 4)
+assert.ok(WATCHLIST_SYMBOL_SORT_OPTIONS.some(option => option.key === 'finraShortInterest'))
+assert.ok(WATCHLIST_SYMBOL_SORT_OPTIONS.some(option => option.key === 'finraEstimatedShortInterest'))
+assert.deepEqual(
+  getChartsSymbolSortOptions().map(option => option.key),
+  [
+    'symbol',
+    'rollingRs',
+    'anchoredRs',
+    'ytdAvwap',
+    'dailyCompression',
+    'dailyExpansion',
+    'weeklyCompression',
+    'weeklyExpansion',
+    'finraShortInterest',
+    'finraEstimatedShortInterest',
+  ]
+)
 
 const compactPreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'compact')
 const squeezePreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'squeeze')

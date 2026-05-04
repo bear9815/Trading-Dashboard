@@ -25,6 +25,7 @@ import { buildEcosystemCompositeBars } from '../../utils/ecosystemCompositeChart
 import { buildSqueezeSnapshot } from '../../utils/squeezeAnalytics.js'
 import { formatSqueezeMetric } from '../../utils/squeezeUi.js'
 import { INDUSTRY_ETF_UNIVERSE } from '../../utils/industryEtfUniverse.js'
+import { getChartsSymbolSortOptions } from '../../utils/watchlistTableConfig.js'
 
 const WATCHLIST_ORDER = DEFAULT_LIST_ORDER.reduce((next, id, index) => {
   next[id] = index
@@ -42,15 +43,12 @@ const ECOSYSTEM_GROUPING_OPTIONS = [
   ['condensed', 'Condensed'],
   ['ultra', 'Ultra'],
 ]
-const SORT_OPTIONS = [
-  ['symbol', 'Symbol'],
-  ['rollingRs', 'Rolling Z'],
-  ['anchoredRs', 'Anchored Z'],
-  ['ytdAvwap', 'YTD AVWAP'],
-  ['dailyCompression', 'Daily Compression'],
-  ['dailyExpansion', 'Daily Expansion'],
-  ['weeklyCompression', 'Weekly Compression'],
-  ['weeklyExpansion', 'Weekly Expansion'],
+const SYMBOL_SORT_OPTIONS = getChartsSymbolSortOptions()
+const ECOSYSTEM_SORT_OPTIONS = [
+  { key: 'symbol', label: 'Symbol' },
+  { key: 'rollingRs', label: 'Rolling Z' },
+  { key: 'anchoredRs', label: 'Anchored Z' },
+  { key: 'ytdAvwap', label: 'YTD AVWAP' },
 ]
 
 function isTypingTarget(target) {
@@ -82,6 +80,12 @@ function averageMetric(values) {
   const finite = values.filter(Number.isFinite)
   if (!finite.length) return null
   return finite.reduce((sum, value) => sum + value, 0) / finite.length
+}
+
+function coerceNumeric(value) {
+  if (Number.isFinite(value)) return value
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function buildEcosystemSidebarGroups(rows, groupingMode, overrides, anchoredRsBySymbol, rollingRsBySymbol, ytdAvwapBySymbol, fitBySymbol) {
@@ -457,6 +461,14 @@ export default function Charts() {
     })
   }, [anchoredRsBySymbol, condensedEcosystemOverrides, ecosystemGroupingMode, fitBySymbol, query, rollingRsBySymbol, rows, ytdAvwapBySymbol])
 
+  const activeSortOptions = sidebarMode === 'symbols' ? SYMBOL_SORT_OPTIONS : ECOSYSTEM_SORT_OPTIONS
+
+  useEffect(() => {
+    if (activeSortOptions.some(option => option.key === sortKey)) return
+    setSortKey('symbol')
+    setSortDir('asc')
+  }, [activeSortOptions, sortKey])
+
   const sortedRows = useMemo(() => {
     const base = [...filteredRows]
     const numericValue = (row) => {
@@ -467,6 +479,8 @@ export default function Charts() {
       if (sortKey === 'dailyExpansion') return squeezeBySymbol[row.symbol]?.daily?.expansionScore
       if (sortKey === 'weeklyCompression') return squeezeBySymbol[row.symbol]?.weekly?.compressionScore
       if (sortKey === 'weeklyExpansion') return squeezeBySymbol[row.symbol]?.weekly?.expansionScore
+      if (sortKey === 'finraShortInterest') return coerceNumeric(row.finraShortInterest)
+      if (sortKey === 'finraEstimatedShortInterest') return coerceNumeric(row.finraEstimatedShortInterest)
       return null
     }
 
@@ -965,7 +979,7 @@ export default function Charts() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] px-4 py-2">
-            {SORT_OPTIONS.map(([key, label]) => (
+            {activeSortOptions.map(({ key, label }) => (
               <button
                 key={key}
                 type="button"

@@ -22,6 +22,19 @@ export const DEFAULT_WATCHLIST_COLUMN_ORDER = [
   'actions',
 ]
 
+export const WATCHLIST_SYMBOL_SORT_OPTIONS = [
+  { key: 'symbol', label: 'Symbol', chartsSupported: true },
+  { key: 'rollingRs', label: 'Rolling Z', chartsSupported: true },
+  { key: 'anchoredRs', label: 'Anchored Z', chartsSupported: true },
+  { key: 'ytdAvwap', label: 'YTD AVWAP', chartsSupported: true },
+  { key: 'dailyCompression', label: 'Daily Compression', chartsSupported: true },
+  { key: 'dailyExpansion', label: 'Daily Expansion', chartsSupported: true },
+  { key: 'weeklyCompression', label: 'Weekly Compression', chartsSupported: true },
+  { key: 'weeklyExpansion', label: 'Weekly Expansion', chartsSupported: true },
+  { key: 'finraShortInterest', label: 'FINRA Short %', chartsSupported: true },
+  { key: 'finraEstimatedShortInterest', label: 'Est. Short %', chartsSupported: true },
+]
+
 export const WATCHLIST_COLUMN_PRESETS = [
   {
     key: 'compact',
@@ -94,6 +107,10 @@ export const WATCHLIST_COLUMN_PRESETS = [
 export function normalizeColumnOrder(columnOrder = []) {
   const next = [...new Set([...(columnOrder || []), ...DEFAULT_WATCHLIST_COLUMN_ORDER])]
   return next.filter(columnId => DEFAULT_WATCHLIST_COLUMN_ORDER.includes(columnId))
+}
+
+export function getChartsSymbolSortOptions() {
+  return WATCHLIST_SYMBOL_SORT_OPTIONS.filter(option => option.chartsSupported)
 }
 
 export function buildVisibleColumnOrder({ columnOrder = DEFAULT_WATCHLIST_COLUMN_ORDER, hiddenColumns = [] } = {}) {

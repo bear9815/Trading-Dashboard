@@ -588,27 +588,29 @@ export default function ResearchMultiTimeframeChart({
       ) : (
         <div className={fillAvailableHeight ? 'flex min-h-0 flex-1 flex-col' : ''}>
           <div className={`relative border-b-4 border-[#242424] ${fillAvailableHeight ? 'min-h-[180px] basis-[34%]' : ''}`}>
-            <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1W</span>
-            {onChangeWeeklyRangeMonths ? (
-              <div className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded border border-black/10 bg-white/80 p-0.5">
-                {weeklyRangeOptions.map(years => {
-                  const months = years * 12
-                  return (
-                    <button
-                      key={years}
-                      type="button"
-                      onClick={() => onChangeWeeklyRangeMonths(months)}
-                      className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-colors ${
-                        weeklyRangeMonths === months ? 'bg-[#242830] text-white' : 'text-[#505760] hover:bg-black/5'
-                      }`}
-                      title={`Show ${years} years on the weekly chart`}
-                    >
-                      {years}Y
-                    </button>
-                  )
-                })}
-              </div>
-            ) : null}
+            <div className="absolute left-2 top-2 z-10 flex items-center gap-2">
+              <span className="text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1W</span>
+              {onChangeWeeklyRangeMonths ? (
+                <div className="flex items-center gap-1 rounded border border-black/10 bg-white/80 p-0.5">
+                  {weeklyRangeOptions.map(years => {
+                    const months = years * 12
+                    return (
+                      <button
+                        key={years}
+                        type="button"
+                        onClick={() => onChangeWeeklyRangeMonths(months)}
+                        className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-colors ${
+                          weeklyRangeMonths === months ? 'bg-[#242830] text-white' : 'text-[#505760] hover:bg-black/5'
+                        }`}
+                        title={`Show ${years} years on the weekly chart`}
+                      >
+                        {years}Y
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </div>
             <LightweightPane
               data={data}
               kind="weekly"
@@ -625,24 +627,26 @@ export default function ResearchMultiTimeframeChart({
             </div>
           </div>
           <div className={`relative ${fillAvailableHeight ? 'min-h-[280px] flex-1' : ''}`}>
-            <span className="absolute left-2 top-2 z-10 text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1D</span>
-            {onChangeDailyRangeMonths ? (
-              <div className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded border border-black/10 bg-white/80 p-0.5">
-                {dailyRangeOptions.map(months => (
-                  <button
-                    key={months}
-                    type="button"
-                    onClick={() => onChangeDailyRangeMonths(months)}
-                    className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-colors ${
-                      dailyRangeMonths === months ? 'bg-[#242830] text-white' : 'text-[#505760] hover:bg-black/5'
-                    }`}
-                    title={`Show ${months < 12 ? `${months} months` : '1 year'} on the daily chart`}
-                  >
-                    {months === 12 ? '1Y' : `${months}M`}
-                  </button>
-                ))}
-              </div>
-            ) : null}
+            <div className="absolute left-2 top-2 z-10 flex items-center gap-2">
+              <span className="text-[10px] font-semibold text-[#242830] bg-[#d7d7d7]/80 px-1 rounded">1D</span>
+              {onChangeDailyRangeMonths ? (
+                <div className="flex items-center gap-1 rounded border border-black/10 bg-white/80 p-0.5">
+                  {dailyRangeOptions.map(months => (
+                    <button
+                      key={months}
+                      type="button"
+                      onClick={() => onChangeDailyRangeMonths(months)}
+                      className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-colors ${
+                        dailyRangeMonths === months ? 'bg-[#242830] text-white' : 'text-[#505760] hover:bg-black/5'
+                      }`}
+                      title={`Show ${months < 12 ? `${months} months` : '1 year'} on the daily chart`}
+                    >
+                      {months === 12 ? '1Y' : `${months}M`}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <LightweightPane
               data={data}
               kind="daily"
