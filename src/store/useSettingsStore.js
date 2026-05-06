@@ -36,6 +36,10 @@ const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
 }
 
+const AVWAP_LINE_STYLE_OPTIONS = ['solid', 'dashed', 'dotted']
+const DEFAULT_AVWAP_LINE_WIDTH = 2
+const DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH = 1
+
 export const DEFAULT_BREADTH_TABLE_SETTINGS = {
   activeGroup: 'avwap',
   heatmap: {
@@ -122,6 +126,50 @@ function normalizeAvwapPresetsWithDefaults(presets = DEFAULT_TRADE_REVIEW_CHART_
   return withDefaults
 }
 
+function withAlpha(color, alpha = 1) {
+  if (typeof color !== 'string') return color
+  const hex = color.trim()
+  const normalizedAlpha = Math.max(0, Math.min(1, alpha))
+  if (/^#([0-9a-f]{6})$/i.test(hex)) {
+    const [, body] = hex.match(/^#([0-9a-f]{6})$/i)
+    const int = Number.parseInt(body, 16)
+    const r = (int >> 16) & 255
+    const g = (int >> 8) & 255
+    const b = int & 255
+    return `rgba(${r}, ${g}, ${b}, ${normalizedAlpha})`
+  }
+  return color
+}
+
+function normalizeAvwapLineStyle(lineStyle) {
+  return AVWAP_LINE_STYLE_OPTIONS.includes(lineStyle) ? lineStyle : 'solid'
+}
+
+function normalizeAvwapLineWidth(lineWidth, fallback = DEFAULT_AVWAP_LINE_WIDTH) {
+  const numeric = Number(lineWidth)
+  return Number.isFinite(numeric)
+    ? Math.max(1, Math.min(6, Math.round(numeric)))
+    : fallback
+}
+
+function normalizeAvwapLineConfig(config = {}, fallbackColor, fallbackWidth = DEFAULT_AVWAP_LINE_WIDTH) {
+  const current = config || {}
+  return {
+    color: current.color || fallbackColor,
+    lineStyle: normalizeAvwapLineStyle(current.lineStyle),
+    lineWidth: normalizeAvwapLineWidth(current.lineWidth, fallbackWidth),
+  }
+}
+
+function normalizeAvwapBandLineStyles(styles = {}, baseColor = '#22c55e') {
+  const current = styles || {}
+  return {
+    typical: normalizeAvwapLineConfig(current.typical, baseColor, DEFAULT_AVWAP_LINE_WIDTH),
+    high: normalizeAvwapLineConfig(current.high, withAlpha(baseColor, 0.72), DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH),
+    low: normalizeAvwapLineConfig(current.low, withAlpha(baseColor, 0.72), DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH),
+  }
+}
+
 function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol) {
   return Object.fromEntries(
     Object.entries(manualAnchorsBySymbol || {})
@@ -133,6 +181,7 @@ function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol) {
               ? anchor.anchorDate
               : null
             if (!anchorDate) return null
+            const color = anchor?.color || '#22c55e'
             return {
               id: anchor?.id || `manual-${anchorDate}-${index}`,
               kind: 'manual',
@@ -140,7 +189,10 @@ function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol) {
               anchorDate,
               label: (anchor?.label || anchorDate).trim(),
               enabled: anchor?.enabled !== false,
-              color: anchor?.color || '#22c55e',
+              color,
+              lineStyle: normalizeAvwapLineStyle(anchor?.lineStyle),
+              lineWidth: normalizeAvwapLineWidth(anchor?.lineWidth, DEFAULT_AVWAP_LINE_WIDTH),
+              bandLineStyles: normalizeAvwapBandLineStyles(anchor?.bandLineStyles, color),
             }
           })
           .filter(Boolean),

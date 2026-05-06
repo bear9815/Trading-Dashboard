@@ -424,6 +424,82 @@ assert.equal(bandOverlay.lineSeries.length, 2)
 assert.deepEqual(bandOverlay.lineSeries.map(line => line.source), ['typical', 'low'])
 assert.ok(bandOverlay.lineSeries.every(line => line.series.length > 0))
 
+const styledBandPrepared = buildTradeReviewChartData(
+  avwapBars,
+  { ...trade, symbol: 'NVDA' },
+  [],
+  {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    avwapPresets: [],
+  },
+  {
+    NVDA: [{
+      id: 'manual-band-styled',
+      kind: 'manual',
+      variant: 'band',
+      anchorDate: '2026-01-03',
+      label: 'Styled Band',
+      enabled: true,
+      color: '#22c55e',
+      bandLineStyles: {
+        typical: { color: '#ffffff', lineStyle: 'dashed', lineWidth: 3 },
+        high: { color: '#ff0000', lineStyle: 'dotted', lineWidth: 1 },
+        low: { color: '#00ff00', lineStyle: 'solid', lineWidth: 4 },
+      },
+    }],
+  }
+)
+const styledBandOverlay = styledBandPrepared.avwapOverlays.find(overlay => overlay.id === 'manual-band-styled')
+assert.ok(styledBandOverlay)
+assert.deepEqual(
+  styledBandOverlay.lineSeries.map(line => ({
+    source: line.source,
+    color: line.color,
+    lineStyle: line.lineStyle,
+    lineWidth: line.lineWidth,
+  })),
+  [
+    { source: 'typical', color: '#ffffff', lineStyle: 'dashed', lineWidth: 3 },
+    { source: 'high', color: '#ff0000', lineStyle: 'dotted', lineWidth: 1 },
+    { source: 'low', color: '#00ff00', lineStyle: 'solid', lineWidth: 4 },
+  ]
+)
+
+const styledSinglePrepared = buildTradeReviewChartData(
+  avwapBars,
+  { ...trade, symbol: 'AMD' },
+  [],
+  {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    avwapPresets: [],
+  },
+  {
+    AMD: [{
+      id: 'manual-single-styled',
+      kind: 'manual',
+      anchorDate: '2026-01-03',
+      label: 'Styled AVWAP',
+      enabled: true,
+      color: '#22c55e',
+      lineStyle: 'dotted',
+      lineWidth: 5,
+    }],
+  }
+)
+const styledSingleOverlay = styledSinglePrepared.avwapOverlays.find(overlay => overlay.id === 'manual-single-styled')
+assert.ok(styledSingleOverlay)
+assert.deepEqual(
+  styledSingleOverlay.lineSeries.map(line => ({
+    source: line.source,
+    color: line.color,
+    lineStyle: line.lineStyle,
+    lineWidth: line.lineWidth,
+  })),
+  [
+    { source: 'typical', color: '#22c55e', lineStyle: 'dotted', lineWidth: 5 },
+  ]
+)
+
 const normalizedManualAnchors = buildTradeReviewChartData(
   avwapBars,
   { ...trade, symbol: 'AMD' },
@@ -437,6 +513,8 @@ const normalizedManualAnchors = buildTradeReviewChartData(
   }
 ).avwapOverlays
 assert.equal(normalizedManualAnchors[0]?.variant, 'single')
+assert.equal(normalizedManualAnchors[0]?.lineSeries[0]?.lineStyle, 'solid')
+assert.equal(normalizedManualAnchors[0]?.lineSeries[0]?.lineWidth, 2)
 
 const entryAvwapPrepared = buildTradeReviewChartData(
   avwapBars,

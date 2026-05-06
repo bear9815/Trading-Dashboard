@@ -6,6 +6,7 @@ import {
   CrosshairMode,
   createChart,
   HistogramSeries,
+  LineStyle,
   LineSeries,
   createSeriesMarkers,
 } from 'lightweight-charts'
@@ -23,6 +24,12 @@ const CHART_UP_COLOR = '#2877e3'
 const CHART_DOWN_COLOR = '#ea4ce7'
 const DEFAULT_DAILY_RANGE_OPTIONS = [3, 6, 9, 12]
 const DEFAULT_WEEKLY_RANGE_OPTIONS = [2, 5]
+
+function toLightweightLineStyle(lineStyle) {
+  if (lineStyle === 'dashed') return LineStyle.Dashed
+  if (lineStyle === 'dotted') return LineStyle.Dotted
+  return LineStyle.Solid
+}
 
 const CHART_OPTIONS = {
   layout: {
@@ -220,6 +227,7 @@ function LightweightPane({
           const series = chart.addSeries(LineSeries, {
             color: line.color,
             lineWidth: line.lineWidth ?? 2,
+            lineStyle: toLightweightLineStyle(line.lineStyle),
             priceLineVisible: false,
             lastValueVisible: false,
             crosshairMarkerVisible: false,

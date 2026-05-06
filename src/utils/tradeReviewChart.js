@@ -25,6 +25,10 @@ export const DEFAULT_AVWAP_BAND_VISIBILITY = {
   showLow: true,
 }
 
+export const AVWAP_LINE_STYLE_OPTIONS = ['solid', 'dashed', 'dotted']
+export const DEFAULT_AVWAP_LINE_WIDTH = 2
+const DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH = 1
+
 export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
   chartType: 'ohlc',
@@ -140,6 +144,7 @@ function normalizeManualAnchor(anchor, index = 0) {
   const anchorDate = toDateKey(anchor?.anchorDate)
   if (!anchorDate) return null
   const variant = anchor?.variant === 'band' ? 'band' : 'single'
+  const color = anchor?.color || '#22c55e'
   return {
     id: anchor?.id || `manual-${anchorDate}-${index}`,
     kind: 'manual',
@@ -147,7 +152,10 @@ function normalizeManualAnchor(anchor, index = 0) {
     anchorDate,
     label: (anchor?.label || anchorDate).trim(),
     enabled: anchor?.enabled !== false,
-    color: anchor?.color || '#22c55e',
+    color,
+    lineStyle: normalizeAvwapLineStyle(anchor?.lineStyle),
+    lineWidth: normalizeAvwapLineWidth(anchor?.lineWidth, DEFAULT_AVWAP_LINE_WIDTH),
+    bandLineStyles: normalizeAvwapBandLineStyles(anchor?.bandLineStyles, color),
   }
 }
 
@@ -181,6 +189,35 @@ function normalizeAvwapBandVisibility(visibility = DEFAULT_AVWAP_BAND_VISIBILITY
     showTypical: current.showTypical !== false,
     showHigh: current.showHigh !== false,
     showLow: current.showLow !== false,
+  }
+}
+
+function normalizeAvwapLineStyle(lineStyle) {
+  return AVWAP_LINE_STYLE_OPTIONS.includes(lineStyle) ? lineStyle : 'solid'
+}
+
+function normalizeAvwapLineWidth(lineWidth, fallback = DEFAULT_AVWAP_LINE_WIDTH) {
+  const numeric = Number(lineWidth)
+  return Number.isFinite(numeric)
+    ? Math.max(1, Math.min(6, Math.round(numeric)))
+    : fallback
+}
+
+function normalizeAvwapLineConfig(config = {}, fallbackColor, fallbackWidth = DEFAULT_AVWAP_LINE_WIDTH) {
+  const current = config || {}
+  return {
+    color: current.color || fallbackColor,
+    lineStyle: normalizeAvwapLineStyle(current.lineStyle),
+    lineWidth: normalizeAvwapLineWidth(current.lineWidth, fallbackWidth),
+  }
+}
+
+function normalizeAvwapBandLineStyles(styles = {}, baseColor = '#22c55e') {
+  const current = styles || {}
+  return {
+    typical: normalizeAvwapLineConfig(current.typical, baseColor, DEFAULT_AVWAP_LINE_WIDTH),
+    high: normalizeAvwapLineConfig(current.high, withAlpha(baseColor, 0.72), DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH),
+    low: normalizeAvwapLineConfig(current.low, withAlpha(baseColor, 0.72), DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH),
   }
 }
 
@@ -503,22 +540,23 @@ function withAlpha(color, alpha = 1) {
   return color
 }
 
-function buildAvwapLineSeries(anchorDate, bars, source, color, lineWidth = 2) {
+function buildAvwapLineSeries(anchorDate, bars, source, style = {}) {
   return {
     id: `${source}-${anchorDate}`,
     source,
-    color,
-    lineWidth,
+    color: style.color,
+    lineStyle: normalizeAvwapLineStyle(style.lineStyle),
+    lineWidth: normalizeAvwapLineWidth(style.lineWidth, DEFAULT_AVWAP_LINE_WIDTH),
     series: calculateAvwapSeries(bars, anchorDate, source),
   }
 }
 
-function resolveBandLineSeries(anchorDate, bars, color, visibility) {
+function resolveBandLineSeries(anchorDate, bars, styles, visibility) {
   const currentVisibility = normalizeAvwapBandVisibility(visibility)
   const candidates = [
-    currentVisibility.showTypical ? buildAvwapLineSeries(anchorDate, bars, 'typical', color, 2) : null,
-    currentVisibility.showHigh ? buildAvwapLineSeries(anchorDate, bars, 'high', withAlpha(color, 0.72), 1) : null,
-    currentVisibility.showLow ? buildAvwapLineSeries(anchorDate, bars, 'low', withAlpha(color, 0.72), 1) : null,
+    currentVisibility.showTypical ? buildAvwapLineSeries(anchorDate, bars, 'typical', styles.typical) : null,
+    currentVisibility.showHigh ? buildAvwapLineSeries(anchorDate, bars, 'high', styles.high) : null,
+    currentVisibility.showLow ? buildAvwapLineSeries(anchorDate, bars, 'low', styles.low) : null,
   ].filter(line => line?.series?.length)
   return candidates
 }
@@ -589,8 +627,12 @@ export function buildAvwapOverlays(
       const anchorDate = toDateKey(overlay.anchorDate)
       if (!anchorDate) return null
       const lineSeries = overlay.kind === 'manual' && overlay.variant === 'band'
-        ? resolveBandLineSeries(anchorDate, bars, overlay.color, chartSettings.avwapBandVisibility)
-        : [buildAvwapLineSeries(anchorDate, bars, 'typical', overlay.color, 2)].filter(line => line?.series?.length)
+        ? resolveBandLineSeries(anchorDate, bars, normalizeAvwapBandLineStyles(overlay.bandLineStyles, overlay.color), chartSettings.avwapBandVisibility)
+        : [buildAvwapLineSeries(anchorDate, bars, 'typical', {
+          color: overlay.color,
+          lineStyle: overlay.lineStyle,
+          lineWidth: overlay.lineWidth,
+        })].filter(line => line?.series?.length)
       const primarySeries = lineSeries[0]?.series || []
       if (!primarySeries.length) return null
       return {

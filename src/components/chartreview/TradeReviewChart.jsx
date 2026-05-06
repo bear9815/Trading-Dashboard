@@ -4,6 +4,7 @@ import {
   BarSeries,
   CandlestickSeries,
   HistogramSeries,
+  LineStyle,
   LineSeries,
   createChart,
   createSeriesMarkers,
@@ -122,6 +123,12 @@ function addOhlcBars(chart, candles) {
   return series
 }
 
+function toLightweightLineStyle(lineStyle) {
+  if (lineStyle === 'dashed') return LineStyle.Dashed
+  if (lineStyle === 'dotted') return LineStyle.Dotted
+  return LineStyle.Solid
+}
+
 function fitToData(chart, markers, bars, rightOffset, maxBars = 120, anchorToMarkers = true) {
   if (!bars.length) return
   const firstMarker = anchorToMarkers ? markers[0]?.time : null
@@ -160,6 +167,7 @@ function addAvwapLines(chart, overlays) {
       const series = chart.addSeries(LineSeries, {
         color: line.color,
         lineWidth: line.lineWidth ?? 2,
+        lineStyle: toLightweightLineStyle(line.lineStyle),
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,

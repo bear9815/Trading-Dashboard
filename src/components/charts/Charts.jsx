@@ -199,11 +199,93 @@ function CompanyHoverCard({ row, fit, anchored, rolling, ytd }) {
   )
 }
 
+const AVWAP_LINE_STYLE_OPTIONS = [
+  { value: 'solid', label: 'Solid' },
+  { value: 'dashed', label: 'Dashed' },
+  { value: 'dotted', label: 'Dotted' },
+]
+
+function createLineStyleDraft(color = '#22c55e', lineStyle = 'solid', lineWidth = 2) {
+  return {
+    color,
+    lineStyle,
+    lineWidth,
+  }
+}
+
+function createBandLineStyleDraft(baseColor = '#22c55e', styles = {}) {
+  return {
+    typical: createLineStyleDraft(
+      styles?.typical?.color || baseColor,
+      styles?.typical?.lineStyle || 'solid',
+      styles?.typical?.lineWidth ?? 2
+    ),
+    high: createLineStyleDraft(
+      styles?.high?.color || styles?.typical?.color || baseColor,
+      styles?.high?.lineStyle || 'solid',
+      styles?.high?.lineWidth ?? 1
+    ),
+    low: createLineStyleDraft(
+      styles?.low?.color || styles?.typical?.color || baseColor,
+      styles?.low?.lineStyle || 'solid',
+      styles?.low?.lineWidth ?? 1
+    ),
+  }
+}
+
+function LineStyleEditor({ label, value, onChange }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium text-white">{label}</p>
+          <p className="text-[11px] text-gray-500">Color, line style, and thickness.</p>
+        </div>
+        <input
+          type="color"
+          value={value.color}
+          onChange={event => onChange({ ...value, color: event.target.value })}
+          className="h-10 w-14 rounded bg-transparent"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block text-xs text-gray-400">
+          Line Style
+          <select
+            value={value.lineStyle}
+            onChange={event => onChange({ ...value, lineStyle: event.target.value })}
+            className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-surface-200 px-3 text-sm text-gray-200 outline-none focus:border-accent-blue/50"
+          >
+            {AVWAP_LINE_STYLE_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-xs text-gray-400">
+          Line Thickness
+          <input
+            type="number"
+            min="1"
+            max="6"
+            step="1"
+            value={value.lineWidth}
+            onChange={event => onChange({ ...value, lineWidth: event.target.value })}
+            className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-surface-200 px-3 text-sm text-gray-200 outline-none focus:border-accent-blue/50"
+          />
+        </label>
+      </div>
+    </div>
+  )
+}
+
 function ManualAvwapModal({ anchor, onSave, onDelete, onClose }) {
   const [draft, setDraft] = useState(() => ({
     label: anchor?.label || '',
     anchorDate: anchor?.anchorDate || '',
     color: anchor?.color || '#22c55e',
+    lineStyle: anchor?.lineStyle || 'solid',
+    lineWidth: anchor?.lineWidth ?? 2,
+    bandLineStyles: createBandLineStyleDraft(anchor?.color || '#22c55e', anchor?.bandLineStyles),
     enabled: anchor?.enabled !== false,
   }))
 
@@ -243,18 +325,55 @@ function ManualAvwapModal({ anchor, onSave, onDelete, onClose }) {
             />
           </label>
 
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3">
-            <div>
-              <p className="text-xs font-medium text-white">Anchor Color</p>
-              <p className="text-[11px] text-gray-500">This updates the chart line and marker.</p>
+          {anchor.variant === 'band' ? (
+            <div className="space-y-3">
+              <LineStyleEditor
+                label="AVWAP"
+                value={draft.bandLineStyles.typical}
+                onChange={(value) => setDraft(current => ({
+                  ...current,
+                  color: value.color,
+                  bandLineStyles: {
+                    ...current.bandLineStyles,
+                    typical: value,
+                  },
+                }))}
+              />
+              <LineStyleEditor
+                label="AVWAP High"
+                value={draft.bandLineStyles.high}
+                onChange={(value) => setDraft(current => ({
+                  ...current,
+                  bandLineStyles: {
+                    ...current.bandLineStyles,
+                    high: value,
+                  },
+                }))}
+              />
+              <LineStyleEditor
+                label="AVWAP Low"
+                value={draft.bandLineStyles.low}
+                onChange={(value) => setDraft(current => ({
+                  ...current,
+                  bandLineStyles: {
+                    ...current.bandLineStyles,
+                    low: value,
+                  },
+                }))}
+              />
             </div>
-            <input
-              type="color"
-              value={draft.color}
-              onChange={event => setDraft(current => ({ ...current, color: event.target.value }))}
-              className="h-10 w-14 rounded bg-transparent"
+          ) : (
+            <LineStyleEditor
+              label="AVWAP"
+              value={{ color: draft.color, lineStyle: draft.lineStyle, lineWidth: draft.lineWidth }}
+              onChange={(value) => setDraft(current => ({
+                ...current,
+                color: value.color,
+                lineStyle: value.lineStyle,
+                lineWidth: value.lineWidth,
+              }))}
             />
-          </div>
+          )}
 
           <label className="flex items-center gap-2 text-xs text-gray-300">
             <input
@@ -284,6 +403,22 @@ function ManualAvwapModal({ anchor, onSave, onDelete, onClose }) {
                   label: draft.label.trim() || draft.anchorDate,
                   anchorDate: draft.anchorDate,
                   color: draft.color,
+                  lineStyle: draft.lineStyle,
+                  lineWidth: Number(draft.lineWidth) || 2,
+                  bandLineStyles: {
+                    typical: {
+                      ...draft.bandLineStyles.typical,
+                      lineWidth: Number(draft.bandLineStyles.typical.lineWidth) || 2,
+                    },
+                    high: {
+                      ...draft.bandLineStyles.high,
+                      lineWidth: Number(draft.bandLineStyles.high.lineWidth) || 1,
+                    },
+                    low: {
+                      ...draft.bandLineStyles.low,
+                      lineWidth: Number(draft.bandLineStyles.low.lineWidth) || 1,
+                    },
+                  },
                   enabled: draft.enabled,
                 })
                 onClose()
