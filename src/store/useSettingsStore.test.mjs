@@ -29,6 +29,16 @@ test('trade review chart settings persist AVWAP band visibility defaults across 
   try {
     const firstModule = await import(`./useSettingsStore.js?settings-band-save=${Date.now()}`)
     firstModule.useSettingsStore.getState().setTradeReviewChartSettings({
+      avwapDefaultStyle: {
+        color: '#0ea5e9',
+        lineStyle: 'dashed',
+        lineWidth: 4,
+      },
+      avwapBandDefaultStyles: {
+        typical: { color: '#22c55e', lineStyle: 'solid', lineWidth: 3 },
+        high: { color: '#f97316', lineStyle: 'dotted', lineWidth: 2 },
+        low: { color: '#ef4444', lineStyle: 'dashed', lineWidth: 1 },
+      },
       avwapBandVisibility: {
         showTypical: false,
         showHigh: true,
@@ -38,8 +48,20 @@ test('trade review chart settings persist AVWAP band visibility defaults across 
     await new Promise(resolve => setTimeout(resolve, 0))
 
     const reloadedModule = await import(`./useSettingsStore.js?settings-band-reload=${Date.now()}`)
+    const avwapDefaultStyle = reloadedModule.useSettingsStore.getState().tradeReviewChartSettings.avwapDefaultStyle
+    const bandDefaultStyles = reloadedModule.useSettingsStore.getState().tradeReviewChartSettings.avwapBandDefaultStyles
     const bandVisibility = reloadedModule.useSettingsStore.getState().tradeReviewChartSettings.avwapBandVisibility
 
+    assert.deepEqual(avwapDefaultStyle, {
+      color: '#0ea5e9',
+      lineStyle: 'dashed',
+      lineWidth: 4,
+    })
+    assert.deepEqual(bandDefaultStyles, {
+      typical: { color: '#22c55e', lineStyle: 'solid', lineWidth: 3 },
+      high: { color: '#f97316', lineStyle: 'dotted', lineWidth: 2 },
+      low: { color: '#ef4444', lineStyle: 'dashed', lineWidth: 1 },
+    })
     assert.deepEqual(bandVisibility, {
       showTypical: false,
       showHigh: true,

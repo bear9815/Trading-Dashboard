@@ -1,11 +1,79 @@
 import { Plus, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import {
+  AVWAP_LINE_STYLE_OPTIONS,
   BEST_FIT_LOOKBACK_MONTH_DEFAULT,
   BEST_FIT_LOOKBACK_MONTH_OPTIONS,
+  DEFAULT_AVWAP_BAND_DEFAULT_STYLES,
+  DEFAULT_AVWAP_STYLE,
   normalizeTradeReviewChartType,
   TRADE_REVIEW_CHART_TYPE_OPTIONS,
 } from '../../utils/tradeReviewChart.js'
+
+const AVWAP_LINE_STYLE_SELECT_OPTIONS = AVWAP_LINE_STYLE_OPTIONS.map(value => ({
+  value,
+  label: value.charAt(0).toUpperCase() + value.slice(1),
+}))
+
+function createLineStyleDraft(style = {}, fallback = DEFAULT_AVWAP_STYLE) {
+  return {
+    color: style?.color || fallback.color,
+    lineStyle: style?.lineStyle || fallback.lineStyle,
+    lineWidth: Number(style?.lineWidth) || fallback.lineWidth,
+  }
+}
+
+function createBandLineStyleDraft(styles = {}) {
+  return {
+    typical: createLineStyleDraft(styles?.typical, DEFAULT_AVWAP_BAND_DEFAULT_STYLES.typical),
+    high: createLineStyleDraft(styles?.high, DEFAULT_AVWAP_BAND_DEFAULT_STYLES.high),
+    low: createLineStyleDraft(styles?.low, DEFAULT_AVWAP_BAND_DEFAULT_STYLES.low),
+  }
+}
+
+function LineStyleEditor({ label, value, onChange }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium text-white">{label}</p>
+          <p className="text-[11px] text-gray-500">Color, line style, and thickness for new anchors.</p>
+        </div>
+        <input
+          type="color"
+          value={value.color}
+          onChange={event => onChange({ ...value, color: event.target.value })}
+          className="h-10 w-14 rounded bg-transparent"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block text-xs text-gray-400">
+          Line Style
+          <select
+            value={value.lineStyle}
+            onChange={event => onChange({ ...value, lineStyle: event.target.value })}
+            className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-surface-200 px-3 text-sm text-gray-200 outline-none focus:border-accent-blue/50"
+          >
+            {AVWAP_LINE_STYLE_SELECT_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-xs text-gray-400">
+          Line Thickness
+          <input
+            type="number"
+            min="1"
+            max="6"
+            value={value.lineWidth}
+            onChange={event => onChange({ ...value, lineWidth: event.target.value })}
+            className="mt-1 h-9 w-full rounded-lg border border-white/10 bg-surface-200 px-3 text-sm text-gray-200 outline-none focus:border-accent-blue/50"
+          />
+        </label>
+      </div>
+    </div>
+  )
+}
 
 export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
   const [draft, setDraft] = useState(() => ({
@@ -18,6 +86,8 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
           { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
           { id: 'ipo', kind: 'preset', mode: 'ipo', label: 'IPO', enabled: false, color: '#ec4899' },
         ],
+    avwapDefaultStyle: createLineStyleDraft(settings?.avwapDefaultStyle, DEFAULT_AVWAP_STYLE),
+    avwapBandDefaultStyles: createBandLineStyleDraft(settings?.avwapBandDefaultStyles),
     avwapBandVisibility: {
       showTypical: settings?.avwapBandVisibility?.showTypical !== false,
       showHigh: settings?.avwapBandVisibility?.showHigh !== false,
@@ -352,6 +422,21 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
 
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
             <div>
+              <p className="label text-white">AVWAP Defaults</p>
+              <p className="mt-1 text-[11px] text-gray-500">New manually added AVWAP anchors start with these style settings.</p>
+            </div>
+            <LineStyleEditor
+              label="AVWAP"
+              value={draft.avwapDefaultStyle}
+              onChange={value => setDraft(current => ({
+                ...current,
+                avwapDefaultStyle: createLineStyleDraft(value, DEFAULT_AVWAP_STYLE),
+              }))}
+            />
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
+            <div>
               <p className="label text-white">AVWAP Band Defaults</p>
               <p className="mt-1 text-[11px] text-gray-500">These saved toggles control which lines appear when an anchored AVWAP band is added on Charts.</p>
             </div>
@@ -398,6 +483,44 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
                 />
                 <span>AVWAP Low</span>
               </label>
+            </div>
+            <div className="pt-1">
+              <p className="mb-3 text-[11px] uppercase tracking-[0.18em] text-gray-500">Band Line Defaults</p>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                <LineStyleEditor
+                  label="AVWAP"
+                  value={draft.avwapBandDefaultStyles.typical}
+                  onChange={value => setDraft(current => ({
+                    ...current,
+                    avwapBandDefaultStyles: {
+                      ...current.avwapBandDefaultStyles,
+                      typical: createLineStyleDraft(value, DEFAULT_AVWAP_BAND_DEFAULT_STYLES.typical),
+                    },
+                  }))}
+                />
+                <LineStyleEditor
+                  label="AVWAP High"
+                  value={draft.avwapBandDefaultStyles.high}
+                  onChange={value => setDraft(current => ({
+                    ...current,
+                    avwapBandDefaultStyles: {
+                      ...current.avwapBandDefaultStyles,
+                      high: createLineStyleDraft(value, DEFAULT_AVWAP_BAND_DEFAULT_STYLES.high),
+                    },
+                  }))}
+                />
+                <LineStyleEditor
+                  label="AVWAP Low"
+                  value={draft.avwapBandDefaultStyles.low}
+                  onChange={value => setDraft(current => ({
+                    ...current,
+                    avwapBandDefaultStyles: {
+                      ...current.avwapBandDefaultStyles,
+                      low: createLineStyleDraft(value, DEFAULT_AVWAP_BAND_DEFAULT_STYLES.low),
+                    },
+                  }))}
+                />
+              </div>
             </div>
           </div>
 

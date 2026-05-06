@@ -900,13 +900,26 @@ export default function Charts() {
 
   const handleAddAvwapAtDate = (anchorDate) => {
     if (!selectedDisplaySymbol || !anchorDate) return
+    const defaultAvwapStyle = createLineStyleDraft(
+      tradeReviewChartSettings?.avwapDefaultStyle?.color || '#22c55e',
+      tradeReviewChartSettings?.avwapDefaultStyle?.lineStyle || 'solid',
+      tradeReviewChartSettings?.avwapDefaultStyle?.lineWidth ?? 2
+    )
+    const defaultBandLineStyles = createBandLineStyleDraft(
+      tradeReviewChartSettings?.avwapBandDefaultStyles?.typical?.color || '#22c55e',
+      tradeReviewChartSettings?.avwapBandDefaultStyles
+    )
+    const isBand = addAvwapBandMode
     addTradeReviewManualAnchor(selectedDisplaySymbol, {
       id: `manual-${selectedDisplaySymbol.toLowerCase()}-${anchorDate}-${Date.now()}`,
-      variant: addAvwapBandMode ? 'band' : 'single',
+      variant: isBand ? 'band' : 'single',
       anchorDate,
       label: anchorDate,
       enabled: true,
-      color: '#22c55e',
+      color: isBand ? defaultBandLineStyles.typical.color : defaultAvwapStyle.color,
+      lineStyle: defaultAvwapStyle.lineStyle,
+      lineWidth: defaultAvwapStyle.lineWidth,
+      bandLineStyles: defaultBandLineStyles,
     })
     setAddAvwapMode(false)
     setAddAvwapBandMode(false)

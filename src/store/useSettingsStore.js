@@ -3,9 +3,13 @@ import { persist } from 'zustand/middleware'
 import { supabase } from '../lib/supabase.js'
 import { DEFAULT_DASHBOARD_VOICE_MODEL } from '../utils/dashboardVoiceModels.js'
 import {
+  AVWAP_LINE_STYLE_OPTIONS,
   BEST_FIT_LOOKBACK_MONTH_DEFAULT,
   BEST_FIT_LOOKBACK_MONTH_OPTIONS,
+  DEFAULT_AVWAP_BAND_DEFAULT_STYLES,
   DEFAULT_AVWAP_BAND_VISIBILITY,
+  DEFAULT_AVWAP_LINE_WIDTH,
+  DEFAULT_AVWAP_STYLE,
   normalizeTradeReviewChartType,
 } from '../utils/tradeReviewChart.js'
 import { normalizeWeeklyScorecardSettings } from '../utils/weeklyScorecard.js'
@@ -30,15 +34,19 @@ const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
     { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
     { id: 'ipo', kind: 'preset', mode: 'ipo', label: 'IPO', enabled: false, color: '#ec4899' },
   ],
+  avwapDefaultStyle: { ...DEFAULT_AVWAP_STYLE },
+  avwapBandDefaultStyles: {
+    typical: { ...DEFAULT_AVWAP_BAND_DEFAULT_STYLES.typical },
+    high: { ...DEFAULT_AVWAP_BAND_DEFAULT_STYLES.high },
+    low: { ...DEFAULT_AVWAP_BAND_DEFAULT_STYLES.low },
+  },
   avwapBandVisibility: { ...DEFAULT_AVWAP_BAND_VISIBILITY },
   weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
   dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
   dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
 }
 
-const AVWAP_LINE_STYLE_OPTIONS = ['solid', 'dashed', 'dotted']
-const DEFAULT_AVWAP_LINE_WIDTH = 2
-const DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH = 1
+const DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH = DEFAULT_AVWAP_BAND_DEFAULT_STYLES.high.lineWidth || 1
 
 export const DEFAULT_BREADTH_TABLE_SETTINGS = {
   activeGroup: 'avwap',
@@ -161,13 +169,31 @@ function normalizeAvwapLineConfig(config = {}, fallbackColor, fallbackWidth = DE
   }
 }
 
-function normalizeAvwapBandLineStyles(styles = {}, baseColor = '#22c55e') {
+function normalizeAvwapDefaultStyle(style = DEFAULT_AVWAP_STYLE) {
+  const fallback = style || DEFAULT_AVWAP_STYLE
+  return normalizeAvwapLineConfig(
+    fallback,
+    fallback.color || DEFAULT_AVWAP_STYLE.color,
+    DEFAULT_AVWAP_STYLE.lineWidth
+  )
+}
+
+function normalizeAvwapBandDefaultStyles(styles = {}, baseColor = DEFAULT_AVWAP_STYLE.color) {
   const current = styles || {}
+  const typical = normalizeAvwapLineConfig(
+    current.typical,
+    current.typical?.color || current.color || baseColor,
+    DEFAULT_AVWAP_STYLE.lineWidth
+  )
   return {
-    typical: normalizeAvwapLineConfig(current.typical, baseColor, DEFAULT_AVWAP_LINE_WIDTH),
-    high: normalizeAvwapLineConfig(current.high, withAlpha(baseColor, 0.72), DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH),
-    low: normalizeAvwapLineConfig(current.low, withAlpha(baseColor, 0.72), DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH),
+    typical,
+    high: normalizeAvwapLineConfig(current.high, current.high?.color || withAlpha(typical.color, 0.72), DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH),
+    low: normalizeAvwapLineConfig(current.low, current.low?.color || withAlpha(typical.color, 0.72), DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH),
   }
+}
+
+function normalizeAvwapBandLineStyles(styles = {}, baseColor = '#22c55e') {
+  return normalizeAvwapBandDefaultStyles(styles, baseColor)
 }
 
 function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol) {
@@ -233,6 +259,8 @@ function normalizeTradeReviewChartSettings(settings) {
     tradeReviewWeeklyRightOffset: Number.isFinite(Number(current.tradeReviewWeeklyRightOffset)) ? Number(current.tradeReviewWeeklyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.tradeReviewWeeklyRightOffset,
     tradeReviewDailyRightOffset: Number.isFinite(Number(current.tradeReviewDailyRightOffset)) ? Number(current.tradeReviewDailyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.tradeReviewDailyRightOffset,
     avwapPresets: normalizeAvwapPresetsWithDefaults(current.avwapPresets),
+    avwapDefaultStyle: normalizeAvwapDefaultStyle(current.avwapDefaultStyle),
+    avwapBandDefaultStyles: normalizeAvwapBandDefaultStyles(current.avwapBandDefaultStyles),
     avwapBandVisibility: normalizeAvwapBandVisibility(current.avwapBandVisibility),
     weeklyRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.weeklyRs, ...(current.weeklyRs || {}) },
     dailyAnchoredRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyAnchoredRs, ...(current.dailyAnchoredRs || {}) },

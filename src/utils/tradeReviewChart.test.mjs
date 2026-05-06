@@ -259,6 +259,16 @@ assert.deepEqual(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapBandVisibility, {
   showHigh: true,
   showLow: true,
 })
+assert.deepEqual(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapDefaultStyle, {
+  color: '#22c55e',
+  lineStyle: 'solid',
+  lineWidth: 2,
+})
+assert.deepEqual(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapBandDefaultStyles, {
+  typical: { color: '#22c55e', lineStyle: 'solid', lineWidth: 2 },
+  high: { color: 'rgba(34, 197, 94, 0.72)', lineStyle: 'solid', lineWidth: 1 },
+  low: { color: 'rgba(34, 197, 94, 0.72)', lineStyle: 'solid', lineWidth: 1 },
+})
 assert.equal(normalizeTradeReviewChartType('ohlc'), 'ohlc')
 assert.equal(normalizeTradeReviewChartType('hlc'), 'hlc')
 assert.equal(normalizeTradeReviewChartType('candlestick'), 'candlestick')

@@ -27,7 +27,29 @@ export const DEFAULT_AVWAP_BAND_VISIBILITY = {
 
 export const AVWAP_LINE_STYLE_OPTIONS = ['solid', 'dashed', 'dotted']
 export const DEFAULT_AVWAP_LINE_WIDTH = 2
+const DEFAULT_AVWAP_COLOR = '#22c55e'
 const DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH = 1
+const DEFAULT_AVWAP_BAND_EDGE_COLOR = 'rgba(34, 197, 94, 0.72)'
+
+export const DEFAULT_AVWAP_STYLE = {
+  color: DEFAULT_AVWAP_COLOR,
+  lineStyle: 'solid',
+  lineWidth: DEFAULT_AVWAP_LINE_WIDTH,
+}
+
+export const DEFAULT_AVWAP_BAND_DEFAULT_STYLES = {
+  typical: { ...DEFAULT_AVWAP_STYLE },
+  high: {
+    color: DEFAULT_AVWAP_BAND_EDGE_COLOR,
+    lineStyle: 'solid',
+    lineWidth: DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH,
+  },
+  low: {
+    color: DEFAULT_AVWAP_BAND_EDGE_COLOR,
+    lineStyle: 'solid',
+    lineWidth: DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH,
+  },
+}
 
 export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
@@ -44,6 +66,12 @@ export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
     { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
     { id: 'ipo', kind: 'preset', mode: 'ipo', label: 'IPO', enabled: false, color: '#ec4899' },
   ],
+  avwapDefaultStyle: { ...DEFAULT_AVWAP_STYLE },
+  avwapBandDefaultStyles: {
+    typical: { ...DEFAULT_AVWAP_BAND_DEFAULT_STYLES.typical },
+    high: { ...DEFAULT_AVWAP_BAND_DEFAULT_STYLES.high },
+    low: { ...DEFAULT_AVWAP_BAND_DEFAULT_STYLES.low },
+  },
   avwapBandVisibility: { ...DEFAULT_AVWAP_BAND_VISIBILITY },
   weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
   dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
@@ -212,13 +240,31 @@ function normalizeAvwapLineConfig(config = {}, fallbackColor, fallbackWidth = DE
   }
 }
 
-function normalizeAvwapBandLineStyles(styles = {}, baseColor = '#22c55e') {
+export function normalizeAvwapDefaultStyle(style = DEFAULT_AVWAP_STYLE) {
+  const fallback = style || DEFAULT_AVWAP_STYLE
+  return normalizeAvwapLineConfig(
+    fallback,
+    fallback.color || DEFAULT_AVWAP_STYLE.color,
+    DEFAULT_AVWAP_STYLE.lineWidth
+  )
+}
+
+export function normalizeAvwapBandDefaultStyles(styles = {}, baseColor = DEFAULT_AVWAP_STYLE.color) {
   const current = styles || {}
+  const typical = normalizeAvwapLineConfig(
+    current.typical,
+    current.typical?.color || current.color || baseColor,
+    DEFAULT_AVWAP_STYLE.lineWidth
+  )
   return {
-    typical: normalizeAvwapLineConfig(current.typical, baseColor, DEFAULT_AVWAP_LINE_WIDTH),
-    high: normalizeAvwapLineConfig(current.high, withAlpha(baseColor, 0.72), DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH),
-    low: normalizeAvwapLineConfig(current.low, withAlpha(baseColor, 0.72), DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH),
+    typical,
+    high: normalizeAvwapLineConfig(current.high, current.high?.color || withAlpha(typical.color, 0.72), DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH),
+    low: normalizeAvwapLineConfig(current.low, current.low?.color || withAlpha(typical.color, 0.72), DEFAULT_AVWAP_BAND_EDGE_LINE_WIDTH),
   }
+}
+
+function normalizeAvwapBandLineStyles(styles = {}, baseColor = DEFAULT_AVWAP_STYLE.color) {
+  return normalizeAvwapBandDefaultStyles(styles, baseColor)
 }
 
 export function aggregateWeeklyBars(bars) {
@@ -597,6 +643,8 @@ export function buildAvwapOverlays(
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
     ...(settings || {}),
     avwapPresets: normalizeAvwapPresets(settings?.avwapPresets),
+    avwapDefaultStyle: normalizeAvwapDefaultStyle(settings?.avwapDefaultStyle),
+    avwapBandDefaultStyles: normalizeAvwapBandDefaultStyles(settings?.avwapBandDefaultStyles),
     avwapBandVisibility: normalizeAvwapBandVisibility(settings?.avwapBandVisibility),
   }
   const normalizedManualAnchors = normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol)
