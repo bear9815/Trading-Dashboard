@@ -167,6 +167,7 @@ export default function TradingThoughts() {
     deleteEntry,
     moveThoughtToJournal,
     moveJournalToThought,
+    lastSaveError,
   } = useJournalStore()
   const {
     apiKey,
@@ -467,6 +468,14 @@ export default function TradingThoughts() {
           {openRouterApiKey && (voiceStatus === 'idle' || voiceStatus === 'error') && (
             <p className="mt-1 text-xs text-gray-500">Using {selectedVoiceModel.label} for dashboard voice, with automatic cleanup-model matching.</p>
           )}
+        </div>
+      )}
+
+      {lastSaveError && (
+        <div className="mb-3 rounded-lg border border-accent-red/25 bg-accent-red/10 px-3 py-2">
+          <p className="text-sm text-accent-red">
+            Local save warning: {lastSaveError}. Leave this page open and export a backup from Settings before clearing browser data.
+          </p>
         </div>
       )}
 

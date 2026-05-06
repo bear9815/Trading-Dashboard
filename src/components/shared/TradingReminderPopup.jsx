@@ -90,7 +90,7 @@ export default function TradingReminderPopup({ openRequest = { signal: 0, reques
   const textareaRef    = useRef(null)
 
   const { habits, completions, logCompletion, removeCompletion, isCompleted } = useHabitsStore()
-  const { goals, addReminderThought } = useJournalStore()
+  const { goals, addReminderThought, lastSaveError } = useJournalStore()
   const { getEntryByDate }    = useMorningStore()
   const { reminderTimes = ['10:00', '14:00'] } = useSettingsStore()
 
@@ -387,6 +387,11 @@ export default function TradingReminderPopup({ openRequest = { signal: 0, reques
             {loggedNow && (
               <p className="mt-3 text-sm text-accent-green">
                 Saved to Dashboard → Trading Thoughts and Journal.
+              </p>
+            )}
+            {lastSaveError && (
+              <p className="mt-3 rounded-lg border border-accent-red/25 bg-accent-red/10 px-3 py-2 text-sm text-accent-red">
+                Local save warning: {lastSaveError}. Keep this popup open until you export a backup from Settings.
               </p>
             )}
           </div>

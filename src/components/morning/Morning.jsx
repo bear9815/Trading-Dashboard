@@ -1099,7 +1099,7 @@ function AnalysisTab({ entries }) {
 // ── Log Tab (form + history) ──────────────────────────────────────────────────
 
 function LogTab() {
-  const { entries, addEntry, updateEntry, deleteEntry, getEntryByDate } = useMorningStore()
+  const { entries, addEntry, updateEntry, deleteEntry, getEntryByDate, lastSaveError } = useMorningStore()
   const { trades, getAccountBalance }  = useTradeStore()
   const { benchmarkSymbol } = useSettingsStore()
   const liveEffectivePct   = useLiveMarketStore(s => s.liveEffectivePct)
@@ -1225,6 +1225,14 @@ function LogTab() {
             <Plus size={14} />
             {todayEntry ? 'Add Another Entry' : "Log Today's Morning"}
           </button>
+        </div>
+      )}
+
+      {lastSaveError && (
+        <div className="rounded-lg border border-accent-red/25 bg-accent-red/10 px-3 py-2">
+          <p className="text-sm text-accent-red">
+            Local save warning: {lastSaveError}. Leave this page open and export a backup from Settings before clearing browser data.
+          </p>
         </div>
       )}
 

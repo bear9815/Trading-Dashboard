@@ -21,7 +21,63 @@ function createLocalStorageMock() {
   }
 }
 
-test('morning entries survive a refresh when cloud sync is unavailable', () => {
+function createIndexedDBMock() {
+  const stores = new Map()
+  let initialized = false
+
+  function ensureStore(name) {
+    if (!stores.has(name)) stores.set(name, new Map())
+    return stores.get(name)
+  }
+
+  return {
+    open() {
+      const request = {}
+      queueMicrotask(() => {
+        const db = {
+          createObjectStore(name) {
+            ensureStore(name)
+          },
+          transaction(name) {
+            const store = ensureStore(name)
+            const tx = {
+              objectStore() {
+                return {
+                  get(key) {
+                    const req = {}
+                    queueMicrotask(() => {
+                      req.result = store.has(key) ? store.get(key) : undefined
+                      req.onsuccess?.({ target: req })
+                    })
+                    return req
+                  },
+                  put(value, key) {
+                    store.set(key, value)
+                    queueMicrotask(() => tx.oncomplete?.())
+                  },
+                  delete(key) {
+                    store.delete(key)
+                    queueMicrotask(() => tx.oncomplete?.())
+                  },
+                }
+              },
+            }
+            return tx
+          },
+        }
+        request.result = db
+        if (!initialized) {
+          initialized = true
+          request.onupgradeneeded?.({ target: request })
+        }
+        request.onsuccess?.({ target: request })
+      })
+      return request
+    },
+  }
+}
+
+test('morning entries survive a refresh when cloud sync is unavailable', async () => {
   const previousLocalStorage = globalThis.localStorage
   const localStorageMock = createLocalStorageMock()
   globalThis.localStorage = localStorageMock
@@ -34,9 +90,10 @@ test('morning entries survive a refresh when cloud sync is unavailable', () => {
       gameplan: 'Wait for confirmation before sizing up.',
       marketBias: 'Bullish',
     })
+    await saved.saved
 
     useMorningStore.setState({ entries: [], cloudReady: false })
-    useMorningStore.getState().loadFromLocal()
+    await useMorningStore.getState().loadFromLocal()
 
     const restored = useMorningStore.getState().entries
     assert.equal(restored.length, 1)
@@ -48,6 +105,126 @@ test('morning entries survive a refresh when cloud sync is unavailable', () => {
       delete globalThis.localStorage
     } else {
       globalThis.localStorage = previousLocalStorage
+    }
+  }
+})
+
+test('morning entries restore from durable IndexedDB storage when localStorage is empty', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  const previousIndexedDB = globalThis.indexedDB
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
+  globalThis.indexedDB = createIndexedDBMock()
+
+  try {
+    useMorningStore.setState({ entries: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null })
+
+    const saved = useMorningStore.getState().addEntry({
+      date: '2026-05-05',
+      gameplan: 'Protect attention and wait for clean continuation.',
+      marketBias: 'Neutral',
+    })
+    await saved.saved
+    localStorageMock.clear()
+
+    useMorningStore.setState({ entries: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null })
+    await useMorningStore.getState().loadFromLocal()
+
+    const restored = useMorningStore.getState().entries
+    assert.equal(restored.length, 1)
+    assert.equal(restored[0].id, saved.id)
+    assert.equal(restored[0].gameplan, 'Protect attention and wait for clean continuation.')
+    assert.equal(useMorningStore.getState().lastSaveError, null)
+  } finally {
+    useMorningStore.setState({ entries: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+    if (previousIndexedDB === undefined) {
+      delete globalThis.indexedDB
+    } else {
+      globalThis.indexedDB = previousIndexedDB
+    }
+  }
+})
+
+test('legacy localStorage morning payload migrates into durable storage', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  const previousIndexedDB = globalThis.indexedDB
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
+  globalThis.indexedDB = createIndexedDBMock()
+
+  try {
+    localStorageMock.setItem('risk-tool-morning', JSON.stringify({
+      state: {
+        entries: [{ id: 'legacy-morning', date: '2026-05-05', gameplan: 'Legacy morning plan.' }],
+      },
+    }))
+    useMorningStore.setState({ entries: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null })
+
+    await useMorningStore.getState().loadFromLocal()
+    assert.equal(localStorageMock.getItem('risk-tool-morning'), null)
+    assert.equal(useMorningStore.getState().entries[0].gameplan, 'Legacy morning plan.')
+
+    useMorningStore.setState({ entries: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null })
+    await useMorningStore.getState().loadFromLocal()
+
+    const restored = useMorningStore.getState().entries
+    assert.equal(restored.length, 1)
+    assert.equal(restored[0].id, 'legacy-morning')
+    assert.equal(restored[0].gameplan, 'Legacy morning plan.')
+  } finally {
+    useMorningStore.setState({ entries: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+    if (previousIndexedDB === undefined) {
+      delete globalThis.indexedDB
+    } else {
+      globalThis.indexedDB = previousIndexedDB
+    }
+  }
+})
+
+test('morning save failures are visible in store state', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  const previousIndexedDB = globalThis.indexedDB
+  globalThis.localStorage = {
+    getItem() { return null },
+    setItem() { throw new Error('quota exceeded') },
+    removeItem() {},
+    clear() {},
+  }
+  delete globalThis.indexedDB
+
+  try {
+    useMorningStore.setState({ entries: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null })
+
+    const saved = useMorningStore.getState().addEntry({
+      date: '2026-05-05',
+      gameplan: 'This write should report failure.',
+    })
+    const saveResult = await saved.saved
+
+    assert.equal(saveResult.ok, false)
+    assert.match(useMorningStore.getState().lastSaveError, /quota exceeded|indexedDB/i)
+    assert.equal(useMorningStore.getState().lastSavedAt, null)
+  } finally {
+    useMorningStore.setState({ entries: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+    if (previousIndexedDB === undefined) {
+      delete globalThis.indexedDB
+    } else {
+      globalThis.indexedDB = previousIndexedDB
     }
   }
 })

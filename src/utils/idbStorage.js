@@ -15,11 +15,30 @@ const STORE     = 'keyval'
 const DB_VERSION = 1
 
 let _dbPromise = null
+let _indexedDBRef = null
 
 function openDB() {
+  if (typeof indexedDB === 'undefined') {
+    _dbPromise = null
+    _indexedDBRef = null
+    return Promise.reject(new Error('IndexedDB is not available'))
+  }
+
+  if (_indexedDBRef && _indexedDBRef !== indexedDB) {
+    _dbPromise = null
+  }
+  _indexedDBRef = indexedDB
+
   if (!_dbPromise) {
     _dbPromise = new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION)
+      let req
+      try {
+        req = indexedDB.open(DB_NAME, DB_VERSION)
+      } catch (error) {
+        _dbPromise = null
+        reject(error)
+        return
+      }
       req.onupgradeneeded = (e) => {
         e.target.result.createObjectStore(STORE)
       }

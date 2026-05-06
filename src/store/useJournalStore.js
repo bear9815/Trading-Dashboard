@@ -2,14 +2,15 @@ import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
 import { supabase } from '../lib/supabase.js'
 import { buildDashboardJournalEntry, extractJournalEntryText } from '../utils/dashboardThoughts.js'
+import { readDurableJson, removeDurableJson, writeDurableJson } from '../utils/durableLocalJson.js'
 import { normalizeWeeklyScorecardSnapshot } from '../utils/weeklyScorecard.js'
 
-function persistLocal(state) {
-  try {
-    localStorage.setItem('risk-tool-journal', JSON.stringify({ state }))
-  } catch (error) {
-    console.error('[local] saveJournal:', error)
-  }
+const JOURNAL_STORAGE_KEY = 'risk-tool-journal'
+
+async function persistLocal(state) {
+  const result = await writeDurableJson(JOURNAL_STORAGE_KEY, { state })
+  if (!result.ok) console.error('[local] saveJournal:', result.message)
+  return result
 }
 
 async function getUid() {
@@ -37,28 +38,31 @@ export const useJournalStore = create((set, get) => ({
   weeklyScorecards: [],
   cloudReady:      false,
   cloudUserId:     null,
+  lastSaveError:   null,
+  lastSavedAt:     null,
 
   // ── Cloud ──────────────────────────────────────────────────────────────────
 
-  loadFromLocal: () => {
-    try {
-      const raw = localStorage.getItem('risk-tool-journal')
-      if (!raw) { set({ cloudReady: true, cloudUserId: null }); return }
-      const parsed = JSON.parse(raw)
-      const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [], weeklyScorecards = [] } = parsed?.state || {}
-      set({
-        entries,
-        priorities,
-        goals,
-        checkins,
-        tradingThoughts,
-        weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
-        cloudReady: true,
-        cloudUserId: null,
-      })
-    } catch {
-      set({ cloudReady: true, cloudUserId: null })
+  loadFromLocal: async () => {
+    const result = await readDurableJson(JOURNAL_STORAGE_KEY)
+    if (!result.ok) {
+      set({ cloudReady: true, cloudUserId: null, lastSaveError: result.message })
+      return
     }
+    const parsed = result.value
+    if (!parsed) { set({ cloudReady: true, cloudUserId: null }); return }
+    const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [], weeklyScorecards = [] } = parsed?.state || {}
+    set({
+      entries,
+      priorities,
+      goals,
+      checkins,
+      tradingThoughts,
+      weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
+      cloudReady: true,
+      cloudUserId: null,
+      lastSaveError: null,
+    })
   },
 
   loadFromCloud: async (userId) => {
@@ -88,6 +92,7 @@ export const useJournalStore = create((set, get) => ({
         weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
         cloudReady: true,
         cloudUserId: userId,
+        lastSaveError: null,
       })
       // Back up locally so data survives if Supabase is removed
       persistLocal({
@@ -100,9 +105,9 @@ export const useJournalStore = create((set, get) => ({
       })
     } else {
       try {
-        const raw = localStorage.getItem('risk-tool-journal')
-        if (raw) {
-          const parsed = JSON.parse(raw)
+        const localResult = await readDurableJson(JOURNAL_STORAGE_KEY)
+        if (localResult.value) {
+          const parsed = localResult.value
           const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [], weeklyScorecards = [] } = parsed?.state || {}
           set({
             entries,
@@ -113,6 +118,7 @@ export const useJournalStore = create((set, get) => ({
             weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
             cloudReady: true,
             cloudUserId: null,
+            lastSaveError: null,
           })
           const ok = await saveToCloud({
             entries,
@@ -123,7 +129,7 @@ export const useJournalStore = create((set, get) => ({
             weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
           })
           if (ok) {
-            localStorage.removeItem('risk-tool-journal')
+            await removeDurableJson(JOURNAL_STORAGE_KEY)
             console.info('[cloud] Journal migrated from localStorage ✓')
             set({ cloudUserId: userId })
           }
@@ -137,23 +143,33 @@ export const useJournalStore = create((set, get) => ({
   },
 
   clearLocalState: () => set({
-    entries: [], priorities: [], goals: [], checkins: [], tradingThoughts: [], weeklyScorecards: [], cloudReady: false, cloudUserId: null,
+    entries: [], priorities: [], goals: [], checkins: [], tradingThoughts: [], weeklyScorecards: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null,
   }),
 
   // ── Internal sync helper ───────────────────────────────────────────────────
   _sync: () => {
     const { entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards } = get()
-    persistLocal({ entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards })
+    const savedAt = new Date().toISOString()
+    const savePromise = persistLocal({ entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards })
+      .then(result => {
+        if (result.ok) {
+          set({ lastSaveError: null, lastSavedAt: savedAt })
+        } else {
+          set({ lastSaveError: result.message || 'Local save failed.', lastSavedAt: null })
+        }
+        return result
+      })
     saveToCloud({ entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards })
+    return savePromise
   },
 
   // ── Journal entries ────────────────────────────────────────────────────────
 
   addEntry: (entry) => {
-    set(s => ({
-      entries: [{ ...entry, id: entry.id || uuidv4(), timestamp: entry.timestamp || new Date().toISOString() }, ...s.entries]
-    }))
-    get()._sync()
+    const item = { ...entry, id: entry.id || uuidv4(), timestamp: entry.timestamp || new Date().toISOString() }
+    set(s => ({ entries: [item, ...s.entries] }))
+    const saved = get()._sync()
+    return { ...item, saved }
   },
 
   addEntries: (newEntries) => {
@@ -164,17 +180,17 @@ export const useJournalStore = create((set, get) => ({
         .filter(e => !existing.has(e.id))
       return { entries: [...toAdd, ...s.entries] }
     })
-    get()._sync()
+    return get()._sync()
   },
 
   updateEntry: (id, updates) => {
     set(s => ({ entries: s.entries.map(e => e.id === id ? { ...e, ...updates } : e) }))
-    get()._sync()
+    return get()._sync()
   },
 
   deleteEntry: (id) => {
     set(s => ({ entries: s.entries.filter(e => e.id !== id) }))
-    get()._sync()
+    return get()._sync()
   },
 
   getEntries: () => [...get().entries].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)),
@@ -186,17 +202,17 @@ export const useJournalStore = create((set, get) => ({
       const item = { ...p, id: p.id || uuidv4(), order: s.priorities.length }
       return { priorities: [...s.priorities, item] }
     })
-    get()._sync()
+    return get()._sync()
   },
 
   updatePriority: (id, updates) => {
     set(s => ({ priorities: s.priorities.map(p => p.id === id ? { ...p, ...updates } : p) }))
-    get()._sync()
+    return get()._sync()
   },
 
   deletePriority: (id) => {
     set(s => ({ priorities: s.priorities.filter(p => p.id !== id) }))
-    get()._sync()
+    return get()._sync()
   },
 
   reorderPriorities: (orderedIds) => {
@@ -205,7 +221,7 @@ export const useJournalStore = create((set, get) => ({
         .map((id, i) => ({ ...s.priorities.find(p => p.id === id), order: i }))
         .filter(Boolean)
     }))
-    get()._sync()
+    return get()._sync()
   },
 
   // ── Goals ──────────────────────────────────────────────────────────────────
@@ -256,7 +272,8 @@ export const useJournalStore = create((set, get) => ({
       timestamp: Date.now(),
     }
     set(s => ({ tradingThoughts: [thought, ...s.tradingThoughts] }))
-    get()._sync()
+    const saved = get()._sync()
+    return { thought, saved }
   },
 
   addReminderThought: (text, tag = 'note', timestamp = new Date().toISOString()) => {
@@ -281,18 +298,15 @@ export const useJournalStore = create((set, get) => ({
       tradingThoughts: [thought, ...s.tradingThoughts],
       entries: [entry, ...s.entries],
     }))
-    get()._sync()
-    return { thought, entry }
+    const saved = get()._sync()
+    return { thought, entry, saved }
   },
 
   addJournalThought: (text, timestamp = new Date().toISOString()) => {
-    set(s => ({
-      entries: [
-        { ...buildDashboardJournalEntry(text, timestamp), id: uuidv4() },
-        ...s.entries,
-      ],
-    }))
-    get()._sync()
+    const entry = { ...buildDashboardJournalEntry(text, timestamp), id: uuidv4() }
+    set(s => ({ entries: [entry, ...s.entries] }))
+    const saved = get()._sync()
+    return { entry, saved }
   },
 
   moveThoughtToJournal: (id) => {
@@ -308,7 +322,7 @@ export const useJournalStore = create((set, get) => ({
         entries: [entry, ...s.entries],
       }
     })
-    get()._sync()
+    return get()._sync()
   },
 
   moveJournalToThought: (id, tag = 'note') => {
@@ -327,12 +341,12 @@ export const useJournalStore = create((set, get) => ({
         tradingThoughts: [thought, ...s.tradingThoughts],
       }
     })
-    get()._sync()
+    return get()._sync()
   },
 
   deleteThought: (id) => {
     set(s => ({ tradingThoughts: s.tradingThoughts.filter(t => t.id !== id) }))
-    get()._sync()
+    return get()._sync()
   },
 
   upsertWeeklyScorecard: (snapshot) => {
@@ -344,8 +358,8 @@ export const useJournalStore = create((set, get) => ({
         : [normalized, ...s.weeklyScorecards]
       return { weeklyScorecards: next.sort((a, b) => b.weekStart.localeCompare(a.weekStart)) }
     })
-    get()._sync()
-    return normalized
+    const saved = get()._sync()
+    return { ...normalized, saved }
   },
 
   getWeeklyScorecard: (weekKey) => {
@@ -367,7 +381,7 @@ export const useJournalStore = create((set, get) => ({
           : item
       )),
     }))
-    get()._sync()
+    return get()._sync()
   },
 
   finalizeWeeklyScorecard: (weekKey) => {
@@ -384,7 +398,7 @@ export const useJournalStore = create((set, get) => ({
           : item
       )),
     }))
-    get()._sync()
+    return get()._sync()
   },
 
   unfinalizeWeeklyScorecard: (weekKey) => {
@@ -401,6 +415,6 @@ export const useJournalStore = create((set, get) => ({
           : item
       )),
     }))
-    get()._sync()
+    return get()._sync()
   },
 }))

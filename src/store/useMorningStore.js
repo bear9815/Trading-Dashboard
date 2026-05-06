@@ -1,12 +1,13 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase.js'
+import { readDurableJson, removeDurableJson, writeDurableJson } from '../utils/durableLocalJson.js'
 
-function persistLocal(entries) {
-  try {
-    localStorage.setItem('risk-tool-morning', JSON.stringify({ state: { entries } }))
-  } catch (error) {
-    console.error('[local] saveMorning:', error)
-  }
+const MORNING_STORAGE_KEY = 'risk-tool-morning'
+
+async function persistLocal(entries) {
+  const result = await writeDurableJson(MORNING_STORAGE_KEY, { state: { entries } })
+  if (!result.ok) console.error('[local] saveMorning:', result.message)
+  return result
 }
 
 async function getUid() {
@@ -29,19 +30,21 @@ export const useMorningStore = create((set, get) => ({
   entries: [],
   cloudReady: false,
   cloudUserId: null,
+  lastSaveError: null,
+  lastSavedAt: null,
 
   // ── Cloud ──────────────────────────────────────────────────────────────────
 
-  loadFromLocal: () => {
-    try {
-      const raw = localStorage.getItem('risk-tool-morning')
-      if (!raw) { set({ cloudReady: true, cloudUserId: null }); return }
-      const parsed = JSON.parse(raw)
-      const { entries = [] } = parsed?.state || {}
-      set({ entries, cloudReady: true, cloudUserId: null })
-    } catch {
-      set({ cloudReady: true, cloudUserId: null })
+  loadFromLocal: async () => {
+    const result = await readDurableJson(MORNING_STORAGE_KEY)
+    if (!result.ok) {
+      set({ cloudReady: true, cloudUserId: null, lastSaveError: result.message })
+      return
     }
+    const parsed = result.value
+    if (!parsed) { set({ cloudReady: true, cloudUserId: null }); return }
+    const { entries = [] } = parsed?.state || {}
+    set({ entries, cloudReady: true, cloudUserId: null, lastSaveError: null })
   },
 
   loadFromCloud: async (userId) => {
@@ -62,19 +65,19 @@ export const useMorningStore = create((set, get) => ({
 
     if (data?.data) {
       const { entries = [] } = data.data
-      set({ entries, cloudReady: true, cloudUserId: userId })
+      set({ entries, cloudReady: true, cloudUserId: userId, lastSaveError: null })
       // Back up locally so data survives if Supabase is removed
       persistLocal(entries)
     } else {
       try {
-        const raw = localStorage.getItem('risk-tool-morning')
-        if (raw) {
-          const parsed = JSON.parse(raw)
+        const localResult = await readDurableJson(MORNING_STORAGE_KEY)
+        if (localResult.value) {
+          const parsed = localResult.value
           const { entries = [] } = parsed?.state || {}
-          set({ entries, cloudReady: true, cloudUserId: null })
+          set({ entries, cloudReady: true, cloudUserId: null, lastSaveError: null })
           const ok = await saveToCloud(entries)
           if (ok) {
-            localStorage.removeItem('risk-tool-morning')
+            await removeDurableJson(MORNING_STORAGE_KEY)
             console.info('[cloud] Morning entries migrated from localStorage ✓')
             set({ cloudUserId: userId })
           }
@@ -87,12 +90,22 @@ export const useMorningStore = create((set, get) => ({
     }
   },
 
-  clearLocalState: () => set({ entries: [], cloudReady: false, cloudUserId: null }),
+  clearLocalState: () => set({ entries: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null }),
 
   _sync: () => {
     const { entries } = get()
-    persistLocal(entries)
+    const savedAt = new Date().toISOString()
+    const savePromise = persistLocal(entries)
+      .then(result => {
+        if (result.ok) {
+          set({ lastSaveError: null, lastSavedAt: savedAt })
+        } else {
+          set({ lastSaveError: result.message || 'Local save failed.', lastSavedAt: null })
+        }
+        return result
+      })
     saveToCloud(entries)
+    return savePromise
   },
 
   // ── Entries ────────────────────────────────────────────────────────────────
@@ -104,8 +117,8 @@ export const useMorningStore = create((set, get) => ({
       ...data,
     }
     set(s => ({ entries: [entry, ...s.entries] }))
-    get()._sync()
-    return entry
+    const saved = get()._sync()
+    return { ...entry, saved }
   },
 
   updateEntry(id, data) {
@@ -114,12 +127,12 @@ export const useMorningStore = create((set, get) => ({
         e.id === id ? { ...e, ...data, updatedAt: new Date().toISOString() } : e
       ),
     }))
-    get()._sync()
+    return get()._sync()
   },
 
   deleteEntry(id) {
     set(s => ({ entries: s.entries.filter(e => e.id !== id) }))
-    get()._sync()
+    return get()._sync()
   },
 
   getEntryByDate(dateStr) {
