@@ -316,6 +316,7 @@ export default function Charts() {
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [historyError, setHistoryError] = useState('')
   const [addAvwapMode, setAddAvwapMode] = useState(false)
+  const [addAvwapBandMode, setAddAvwapBandMode] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pendingSymbolInput, setPendingSymbolInput] = useState('')
   const [customSymbol, setCustomSymbol] = useState('')
@@ -582,6 +583,7 @@ export default function Charts() {
     setQuery('')
     setHistoryError('')
     setAddAvwapMode(false)
+    setAddAvwapBandMode(false)
     setCustomSymbol('')
     setCustomSymbolMeta(null)
     setPendingSymbolInput('')
@@ -745,16 +747,34 @@ export default function Charts() {
     setTradeReviewChartSettings({ avwapPresets: nextPresets })
   }
 
+  const handleToggleAddAvwap = () => {
+    setAddAvwapMode(current => {
+      const next = !current
+      if (next) setAddAvwapBandMode(false)
+      return next
+    })
+  }
+
+  const handleToggleAddAvwapBand = () => {
+    setAddAvwapBandMode(current => {
+      const next = !current
+      if (next) setAddAvwapMode(false)
+      return next
+    })
+  }
+
   const handleAddAvwapAtDate = (anchorDate) => {
     if (!selectedDisplaySymbol || !anchorDate) return
     addTradeReviewManualAnchor(selectedDisplaySymbol, {
       id: `manual-${selectedDisplaySymbol.toLowerCase()}-${anchorDate}-${Date.now()}`,
+      variant: addAvwapBandMode ? 'band' : 'single',
       anchorDate,
       label: anchorDate,
       enabled: true,
       color: '#22c55e',
     })
     setAddAvwapMode(false)
+    setAddAvwapBandMode(false)
   }
 
   const handleCommitPendingSymbol = async () => {
@@ -854,15 +874,17 @@ export default function Charts() {
               onToggleWeeklyRs={() => setTradeReviewChartSettings({ researchChartsShowWeeklyRollingRs: !weeklyRollingRsEnabled })}
               dailyAnchoredRsEnabled={dailyAnchoredRsEnabled}
               onToggleDailyAnchoredRs={() => setTradeReviewChartSettings({ researchChartsShowDailyAnchoredRs: !dailyAnchoredRsEnabled })}
-              onAddAvwap={isEcosystemMode ? null : (() => setAddAvwapMode(current => !current))}
+              onAddAvwap={isEcosystemMode ? null : handleToggleAddAvwap}
+              onAddAvwapBand={isEcosystemMode ? null : handleToggleAddAvwapBand}
               addAvwapMode={addAvwapMode}
+              addAvwapBandMode={addAvwapBandMode}
               manualAnchors={isEcosystemMode ? [] : selectedManualAnchors}
               onToggleManualAnchor={(anchor) => {
                 if (!selectedDisplaySymbol) return
                 updateTradeReviewManualAnchor(selectedDisplaySymbol, anchor.id, { enabled: !anchor.enabled })
               }}
               onRemoveManualAnchor={isEcosystemMode ? null : handleDeleteManualAnchor}
-              onMoveManualAnchor={isEcosystemMode || addAvwapMode ? null : handleMoveManualAnchor}
+              onMoveManualAnchor={isEcosystemMode || addAvwapMode || addAvwapBandMode ? null : handleMoveManualAnchor}
               selectedManualAnchorId={selectedAnchorId}
               onSelectManualAnchor={isEcosystemMode ? null : ((anchor) => {
                 setSelectedAnchorId(current => current === anchor?.id ? null : anchor?.id)

@@ -5,6 +5,7 @@ import { DEFAULT_DASHBOARD_VOICE_MODEL } from '../utils/dashboardVoiceModels.js'
 import {
   BEST_FIT_LOOKBACK_MONTH_DEFAULT,
   BEST_FIT_LOOKBACK_MONTH_OPTIONS,
+  DEFAULT_AVWAP_BAND_VISIBILITY,
   normalizeTradeReviewChartType,
 } from '../utils/tradeReviewChart.js'
 import { normalizeWeeklyScorecardSettings } from '../utils/weeklyScorecard.js'
@@ -29,6 +30,7 @@ const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
     { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
     { id: 'ipo', kind: 'preset', mode: 'ipo', label: 'IPO', enabled: false, color: '#ec4899' },
   ],
+  avwapBandVisibility: { ...DEFAULT_AVWAP_BAND_VISIBILITY },
   weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
   dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
   dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
@@ -134,6 +136,7 @@ function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol) {
             return {
               id: anchor?.id || `manual-${anchorDate}-${index}`,
               kind: 'manual',
+              variant: anchor?.variant === 'band' ? 'band' : 'single',
               anchorDate,
               label: (anchor?.label || anchorDate).trim(),
               enabled: anchor?.enabled !== false,
@@ -144,6 +147,15 @@ function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol) {
       ])
       .filter(([symbol, anchors]) => symbol && anchors.length > 0)
   )
+}
+
+function normalizeAvwapBandVisibility(visibility = DEFAULT_AVWAP_BAND_VISIBILITY) {
+  const current = visibility || {}
+  return {
+    showTypical: current.showTypical !== false,
+    showHigh: current.showHigh !== false,
+    showLow: current.showLow !== false,
+  }
 }
 
 function normalizeTradeReviewChartSettings(settings) {
@@ -169,6 +181,7 @@ function normalizeTradeReviewChartSettings(settings) {
     tradeReviewWeeklyRightOffset: Number.isFinite(Number(current.tradeReviewWeeklyRightOffset)) ? Number(current.tradeReviewWeeklyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.tradeReviewWeeklyRightOffset,
     tradeReviewDailyRightOffset: Number.isFinite(Number(current.tradeReviewDailyRightOffset)) ? Number(current.tradeReviewDailyRightOffset) : DEFAULT_TRADE_REVIEW_CHART_SETTINGS.tradeReviewDailyRightOffset,
     avwapPresets: normalizeAvwapPresetsWithDefaults(current.avwapPresets),
+    avwapBandVisibility: normalizeAvwapBandVisibility(current.avwapBandVisibility),
     weeklyRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.weeklyRs, ...(current.weeklyRs || {}) },
     dailyAnchoredRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyAnchoredRs, ...(current.dailyAnchoredRs || {}) },
     dailyRollingRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyRollingRs, ...(current.dailyRollingRs || {}) },

@@ -216,14 +216,16 @@ function LightweightPane({
       })
 
       for (const overlay of data.avwapOverlays || []) {
-        const series = chart.addSeries(LineSeries, {
-          color: overlay.color,
-          lineWidth: 2,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        })
-        series.setData(overlay.series)
+        for (const line of overlay.lineSeries || []) {
+          const series = chart.addSeries(LineSeries, {
+            color: line.color,
+            lineWidth: line.lineWidth ?? 2,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            crosshairMarkerVisible: false,
+          })
+          series.setData(line.series)
+        }
       }
 
       createSeriesMarkers(priceSeries, (data.avwapOverlays || []).map(overlay => ({
@@ -447,8 +449,10 @@ export default function ResearchMultiTimeframeChart({
   dailyAnchoredRsEnabled = false,
   onToggleDailyAnchoredRs,
   onAddAvwap,
+  onAddAvwapBand,
   onChartClick,
   addAvwapMode = false,
+  addAvwapBandMode = false,
   manualAnchors = [],
   onToggleManualAnchor,
   onRemoveManualAnchor,
@@ -528,6 +532,18 @@ export default function ResearchMultiTimeframeChart({
                 }`}
               >
                 {addAvwapMode ? 'Click Chart…' : 'Add AVWAP'}
+              </button>
+            ) : null}
+            {onAddAvwapBand ? (
+              <button
+                onClick={onAddAvwapBand}
+                className={`px-2 py-0.5 text-[10px] font-semibold rounded border transition-colors ${
+                  addAvwapBandMode
+                    ? 'bg-[#16a34a]/20 border-[#16a34a]/40 text-[#14532d]'
+                    : 'bg-white/70 border-black/10 text-[#505760]'
+                }`}
+              >
+                {addAvwapBandMode ? 'Click Chart…' : 'Add AVWAP Band'}
               </button>
             ) : null}
             {onOpenSettings ? (
@@ -633,7 +649,7 @@ export default function ResearchMultiTimeframeChart({
               dailyRangeMonths={weeklyRangeMonths}
               rightOffset={weeklyRightOffset}
               showRsGradient={weeklyRsEnabled}
-              onChartClick={addAvwapMode ? onChartClick : null}
+              onChartClick={addAvwapMode || addAvwapBandMode ? onChartClick : null}
               className={fillAvailableHeight ? 'h-full' : ''}
             />
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[54px] font-light tracking-wide text-black/10 mono">
@@ -669,7 +685,7 @@ export default function ResearchMultiTimeframeChart({
               dailyRangeMonths={dailyRangeMonths}
               rightOffset={dailyRightOffset}
               showRsGradient={dailyAnchoredRsEnabled}
-              onChartClick={addAvwapMode ? onChartClick : null}
+              onChartClick={addAvwapMode || addAvwapBandMode ? onChartClick : null}
               draggableAnchors={(data.avwapOverlays || []).filter(overlay => overlay.kind === 'manual')}
               onMoveAnchor={onMoveManualAnchor}
               selectedAnchorId={selectedManualAnchorId}

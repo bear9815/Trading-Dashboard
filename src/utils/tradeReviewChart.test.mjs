@@ -242,10 +242,23 @@ assert.deepEqual(avwapSeries.map(row => row.time), ['2026-01-03', '2026-01-04'])
 assert.equal(Math.round(avwapSeries[0].value * 1000) / 1000, 11.667)
 assert.equal(Math.round(avwapSeries[1].value * 1000) / 1000, 12.167)
 
+const avwapHighSeries = calculateAvwapSeries(avwapBars, '2026-01-03', 'high')
+assert.equal(Math.round(avwapHighSeries[0].value * 1000) / 1000, 13)
+assert.equal(Math.round(avwapHighSeries[1].value * 1000) / 1000, 13.5)
+
+const avwapLowSeries = calculateAvwapSeries(avwapBars, '2026-01-03', 'low')
+assert.equal(Math.round(avwapLowSeries[0].value * 1000) / 1000, 10)
+assert.equal(Math.round(avwapLowSeries[1].value * 1000) / 1000, 10.5)
+
 assert.ok(Array.isArray(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets))
 assert.equal(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets[0]?.id, 'ytd')
 assert.equal(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapPresets[1]?.id, 'ipo')
 assert.equal(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.chartType, 'ohlc')
+assert.deepEqual(DEFAULT_TRADE_REVIEW_CHART_SETTINGS.avwapBandVisibility, {
+  showTypical: true,
+  showHigh: true,
+  showLow: true,
+})
 assert.equal(normalizeTradeReviewChartType('ohlc'), 'ohlc')
 assert.equal(normalizeTradeReviewChartType('hlc'), 'hlc')
 assert.equal(normalizeTradeReviewChartType('candlestick'), 'candlestick')
@@ -386,6 +399,44 @@ const avwapPrepared = buildTradeReviewChartData(
 )
 assert.equal(avwapPrepared.avwapOverlays.length, 2)
 assert.ok(avwapPrepared.avwapOverlays.every(overlay => overlay.series.length > 0))
+
+const avwapBandPrepared = buildTradeReviewChartData(
+  avwapBars,
+  { ...trade, symbol: 'NVDA' },
+  [],
+  {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    avwapBandVisibility: {
+      showTypical: true,
+      showHigh: false,
+      showLow: true,
+    },
+    avwapPresets: [],
+  },
+  {
+    NVDA: [{ id: 'manual-band', kind: 'manual', variant: 'band', anchorDate: '2026-01-03', label: 'Gap Band', enabled: true, color: '#22c55e' }],
+  }
+)
+const bandOverlay = avwapBandPrepared.avwapOverlays.find(overlay => overlay.id === 'manual-band')
+assert.ok(bandOverlay)
+assert.equal(bandOverlay.variant, 'band')
+assert.equal(bandOverlay.lineSeries.length, 2)
+assert.deepEqual(bandOverlay.lineSeries.map(line => line.source), ['typical', 'low'])
+assert.ok(bandOverlay.lineSeries.every(line => line.series.length > 0))
+
+const normalizedManualAnchors = buildTradeReviewChartData(
+  avwapBars,
+  { ...trade, symbol: 'AMD' },
+  [],
+  {
+    ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
+    avwapPresets: [],
+  },
+  {
+    AMD: [{ id: 'manual-legacy', kind: 'manual', anchorDate: '2026-01-03', label: 'Legacy', enabled: true, color: '#22c55e' }],
+  }
+).avwapOverlays
+assert.equal(normalizedManualAnchors[0]?.variant, 'single')
 
 const entryAvwapPrepared = buildTradeReviewChartData(
   avwapBars,

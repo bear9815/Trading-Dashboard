@@ -155,17 +155,19 @@ function nearestDailyBarAtOrBefore(time, bars) {
 }
 
 function addAvwapLines(chart, overlays) {
-  return (overlays || []).map(overlay => {
-    const series = chart.addSeries(LineSeries, {
-      color: overlay.color,
-      lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
+  return (overlays || []).flatMap(overlay => (
+    (overlay.lineSeries || []).map(line => {
+      const series = chart.addSeries(LineSeries, {
+        color: line.color,
+        lineWidth: line.lineWidth ?? 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      })
+      series.setData(line.series)
+      return series
     })
-    series.setData(overlay.series)
-    return series
-  })
+  ))
 }
 
 function formatAnchorLabel(dateKey) {

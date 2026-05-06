@@ -18,6 +18,11 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
           { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
           { id: 'ipo', kind: 'preset', mode: 'ipo', label: 'IPO', enabled: false, color: '#ec4899' },
         ],
+    avwapBandVisibility: {
+      showTypical: settings?.avwapBandVisibility?.showTypical !== false,
+      showHigh: settings?.avwapBandVisibility?.showHigh !== false,
+      showLow: settings?.avwapBandVisibility?.showLow !== false,
+    },
     weeklyRs: {
       rollingPeriod: settings?.weeklyRs?.rollingPeriod ?? 13,
       lookbackStd: settings?.weeklyRs?.lookbackStd ?? 50,
@@ -342,6 +347,57 @@ export default function ChartToolsSettingsModal({ settings, onSave, onClose }) {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
+            <div>
+              <p className="label text-white">AVWAP Band Defaults</p>
+              <p className="mt-1 text-[11px] text-gray-500">These saved toggles control which lines appear when an anchored AVWAP band is added on Charts.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <label className="flex items-center gap-2 rounded-lg border border-white/10 bg-surface-200 px-3 py-2 text-xs text-gray-200">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.avwapBandVisibility?.showTypical)}
+                  onChange={event => setDraft(current => ({
+                    ...current,
+                    avwapBandVisibility: {
+                      ...current.avwapBandVisibility,
+                      showTypical: event.target.checked,
+                    },
+                  }))}
+                />
+                <span>AVWAP</span>
+              </label>
+              <label className="flex items-center gap-2 rounded-lg border border-white/10 bg-surface-200 px-3 py-2 text-xs text-gray-200">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.avwapBandVisibility?.showHigh)}
+                  onChange={event => setDraft(current => ({
+                    ...current,
+                    avwapBandVisibility: {
+                      ...current.avwapBandVisibility,
+                      showHigh: event.target.checked,
+                    },
+                  }))}
+                />
+                <span>AVWAP High</span>
+              </label>
+              <label className="flex items-center gap-2 rounded-lg border border-white/10 bg-surface-200 px-3 py-2 text-xs text-gray-200">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.avwapBandVisibility?.showLow)}
+                  onChange={event => setDraft(current => ({
+                    ...current,
+                    avwapBandVisibility: {
+                      ...current.avwapBandVisibility,
+                      showLow: event.target.checked,
+                    },
+                  }))}
+                />
+                <span>AVWAP Low</span>
+              </label>
             </div>
           </div>
 

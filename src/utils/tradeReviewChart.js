@@ -19,6 +19,12 @@ export const DEFAULT_ANCHORED_RS_ANCHOR_RULES = [
   { from: '2026-04-01', to: '2026-06-30', anchor: '2026-04-02' },
 ]
 
+export const DEFAULT_AVWAP_BAND_VISIBILITY = {
+  showTypical: true,
+  showHigh: true,
+  showLow: true,
+}
+
 export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
   benchmarkSymbol: 'SPY',
   chartType: 'ohlc',
@@ -34,6 +40,7 @@ export const DEFAULT_TRADE_REVIEW_CHART_SETTINGS = {
     { id: 'ytd', kind: 'preset', mode: 'ytd', label: 'YTD', enabled: false, color: '#f59e0b' },
     { id: 'ipo', kind: 'preset', mode: 'ipo', label: 'IPO', enabled: false, color: '#ec4899' },
   ],
+  avwapBandVisibility: { ...DEFAULT_AVWAP_BAND_VISIBILITY },
   weeklyRs: { rollingPeriod: 13, lookbackStd: 50, sensitivity: 2, opacity: 85 },
   dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
   dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
@@ -132,9 +139,11 @@ function normalizeAvwapPreset(preset, index = 0) {
 function normalizeManualAnchor(anchor, index = 0) {
   const anchorDate = toDateKey(anchor?.anchorDate)
   if (!anchorDate) return null
+  const variant = anchor?.variant === 'band' ? 'band' : 'single'
   return {
     id: anchor?.id || `manual-${anchorDate}-${index}`,
     kind: 'manual',
+    variant,
     anchorDate,
     label: (anchor?.label || anchorDate).trim(),
     enabled: anchor?.enabled !== false,
@@ -164,6 +173,15 @@ export function normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol 
       ])
       .filter(([symbol, anchors]) => symbol && anchors.length > 0)
   )
+}
+
+function normalizeAvwapBandVisibility(visibility = DEFAULT_AVWAP_BAND_VISIBILITY) {
+  const current = visibility || {}
+  return {
+    showTypical: current.showTypical !== false,
+    showHigh: current.showHigh !== false,
+    showLow: current.showLow !== false,
+  }
 }
 
 export function aggregateWeeklyBars(bars) {
@@ -464,7 +482,48 @@ export function resolveAvwapAnchorDate(preset, bars = [], asOf = new Date()) {
   return `${asOfKey.slice(0, 4)}-01-01`
 }
 
-export function calculateAvwapSeries(bars, anchorDate) {
+function avwapPriceForSource(bar, source = 'typical') {
+  if (source === 'high') return bar.high
+  if (source === 'low') return bar.low
+  return (bar.high + bar.low + bar.close) / 3
+}
+
+function withAlpha(color, alpha = 1) {
+  if (typeof color !== 'string') return color
+  const hex = color.trim()
+  const normalizedAlpha = clamp(alpha, 0, 1)
+  if (/^#([0-9a-f]{6})$/i.test(hex)) {
+    const [, body] = hex.match(/^#([0-9a-f]{6})$/i)
+    const int = Number.parseInt(body, 16)
+    const r = (int >> 16) & 255
+    const g = (int >> 8) & 255
+    const b = int & 255
+    return `rgba(${r}, ${g}, ${b}, ${normalizedAlpha})`
+  }
+  return color
+}
+
+function buildAvwapLineSeries(anchorDate, bars, source, color, lineWidth = 2) {
+  return {
+    id: `${source}-${anchorDate}`,
+    source,
+    color,
+    lineWidth,
+    series: calculateAvwapSeries(bars, anchorDate, source),
+  }
+}
+
+function resolveBandLineSeries(anchorDate, bars, color, visibility) {
+  const currentVisibility = normalizeAvwapBandVisibility(visibility)
+  const candidates = [
+    currentVisibility.showTypical ? buildAvwapLineSeries(anchorDate, bars, 'typical', color, 2) : null,
+    currentVisibility.showHigh ? buildAvwapLineSeries(anchorDate, bars, 'high', withAlpha(color, 0.72), 1) : null,
+    currentVisibility.showLow ? buildAvwapLineSeries(anchorDate, bars, 'low', withAlpha(color, 0.72), 1) : null,
+  ].filter(line => line?.series?.length)
+  return candidates
+}
+
+export function calculateAvwapSeries(bars, anchorDate, source = 'typical') {
   const cleaned = cleanBars(bars)
   const anchorKey = toDateKey(anchorDate)
   if (!anchorKey) return []
@@ -477,8 +536,8 @@ export function calculateAvwapSeries(bars, anchorDate) {
 
   return cleaned.slice(startIndex).flatMap(bar => {
     if (!Number.isFinite(bar.volume) || bar.volume <= 0) return []
-    const typicalPrice = (bar.high + bar.low + bar.close) / 3
-    numerator += typicalPrice * bar.volume
+    const price = avwapPriceForSource(bar, source)
+    numerator += price * bar.volume
     denominator += bar.volume
     if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) return []
     return [{
@@ -500,6 +559,7 @@ export function buildAvwapOverlays(
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
     ...(settings || {}),
     avwapPresets: normalizeAvwapPresets(settings?.avwapPresets),
+    avwapBandVisibility: normalizeAvwapBandVisibility(settings?.avwapBandVisibility),
   }
   const normalizedManualAnchors = normalizeTradeReviewManualAnchorsBySymbol(manualAnchorsBySymbol)
   const upperSymbol = String(symbol || '').trim().toUpperCase()
@@ -528,15 +588,20 @@ export function buildAvwapOverlays(
     .map(overlay => {
       const anchorDate = toDateKey(overlay.anchorDate)
       if (!anchorDate) return null
-      const series = calculateAvwapSeries(bars, anchorDate)
-      if (!series.length) return null
+      const lineSeries = overlay.kind === 'manual' && overlay.variant === 'band'
+        ? resolveBandLineSeries(anchorDate, bars, overlay.color, chartSettings.avwapBandVisibility)
+        : [buildAvwapLineSeries(anchorDate, bars, 'typical', overlay.color, 2)].filter(line => line?.series?.length)
+      const primarySeries = lineSeries[0]?.series || []
+      if (!primarySeries.length) return null
       return {
         ...overlay,
+        variant: overlay.variant === 'band' ? 'band' : 'single',
         anchorDate,
         resolvedLabel: overlay.kind === 'preset' && overlay.mode === 'best-fit'
           ? `${overlay.label} · ${anchorDate}`
           : overlay.label,
-        series,
+        lineSeries,
+        series: primarySeries,
       }
     })
     .filter(Boolean)
@@ -867,6 +932,7 @@ export function buildTradeReviewChartData(
     ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS,
     ...(settings || {}),
     avwapPresets: normalizeAvwapPresets(settings?.avwapPresets),
+    avwapBandVisibility: normalizeAvwapBandVisibility(settings?.avwapBandVisibility),
     weeklyRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.weeklyRs, ...(settings?.weeklyRs || {}) },
     dailyAnchoredRs: { ...DEFAULT_TRADE_REVIEW_CHART_SETTINGS.dailyAnchoredRs, ...(settings?.dailyAnchoredRs || {}) },
   }

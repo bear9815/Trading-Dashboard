@@ -14,6 +14,7 @@ test('ResearchMultiTimeframeChart exposes separate daily and weekly range contro
   assert.match(source, /1Y/)
   assert.match(source, /absolute left-2 top-2 z-10 flex items-center gap-2/)
   assert.match(source, /IPO AVWAP/)
+  assert.match(source, /Add AVWAP Band/)
   assert.doesNotMatch(source, /Setup Readiness|setup readiness|SqueezePane|Price-Action Squeeze/)
 })
 
@@ -26,4 +27,7 @@ test('chart settings persist separate daily and weekly research ranges without s
   assert.doesNotMatch(settingsSource, /Show Price-Action Squeeze|Hide Price-Action Squeeze/)
   assert.match(storeSource, /growthResearchDailyRangeMonths/)
   assert.match(storeSource, /growthResearchWeeklyRangeYears/)
+  assert.match(settingsSource, /AVWAP High/)
+  assert.match(settingsSource, /AVWAP Low/)
+  assert.match(storeSource, /avwapBandVisibility/)
 })
