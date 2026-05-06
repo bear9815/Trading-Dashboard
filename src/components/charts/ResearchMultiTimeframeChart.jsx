@@ -170,6 +170,8 @@ function LightweightPane({
   const chartContainerRef = useRef(null)
   const shadeCanvasRef = useRef(null)
   const dragRef = useRef(null)
+  const preservedVisibleBarsRef = useRef(null)
+  const lastRequestedRangeRef = useRef(dailyRangeMonths)
 
   useEffect(() => {
     if (!chartContainerRef.current) return undefined
@@ -258,8 +260,12 @@ function LightweightPane({
       })
     }
 
-    const visibleBars = countVisibleBarsForMonths(candles, dailyRangeMonths)
+    const shouldRestoreVisibleBars = Number.isFinite(preservedVisibleBarsRef.current) && lastRequestedRangeRef.current === dailyRangeMonths
+    const visibleBars = shouldRestoreVisibleBars
+      ? preservedVisibleBarsRef.current
+      : countVisibleBarsForMonths(candles, dailyRangeMonths)
     applyRightAnchoredLogicalRange(chart, candles.length, visibleBars, resolvedRightOffset)
+    lastRequestedRangeRef.current = dailyRangeMonths
 
     redraw()
     chart.timeScale().subscribeVisibleTimeRangeChange(redraw)
@@ -404,6 +410,11 @@ function LightweightPane({
     resizeObserver.observe(chartContainerRef.current)
 
     return () => {
+      const logicalRange = getVisibleLogicalRange(chart)
+      preservedVisibleBarsRef.current = Math.max(
+        MIN_LIGHTWEIGHT_VISIBLE_BARS,
+        Math.ceil((logicalRange?.to ?? candles.length + resolvedRightOffset) - (logicalRange?.from ?? 0))
+      )
       if (clickHandler) chart.unsubscribeClick(clickHandler)
       chart.timeScale().unsubscribeVisibleTimeRangeChange(redraw)
       chartContainerRef.current?.removeEventListener?.('wheel', handleWheel, true)

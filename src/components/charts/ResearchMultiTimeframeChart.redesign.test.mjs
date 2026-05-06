@@ -37,3 +37,12 @@ test('chart settings persist separate daily and weekly research ranges without s
   assert.match(storeSource, /avwapDefaultStyle/)
   assert.match(storeSource, /avwapBandDefaultStyles/)
 })
+
+test('daily pane preserves the current visible span while selecting anchored AVWAP overlays', async () => {
+  const source = await readFile(chartPath, 'utf8')
+
+  assert.match(source, /const preservedVisibleBarsRef = useRef\(null\)/)
+  assert.match(source, /const shouldRestoreVisibleBars = Number\.isFinite\(preservedVisibleBarsRef\.current\) && lastRequestedRangeRef\.current === dailyRangeMonths/)
+  assert.match(source, /preservedVisibleBarsRef\.current = Math\.max\(/)
+  assert.match(source, /selectedAnchorId, showRsGradient\]/)
+})
