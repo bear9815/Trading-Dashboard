@@ -25,3 +25,14 @@ test('MorningBreadthDashboard includes the AVWAP distance panel with active focu
   assert.match(source, /includedListIds:\s*BREADTH_LISTS\.map\(config => config\.id\)/)
   assert.match(source, /historical percentile rank/i)
 })
+
+test('MorningBreadthDashboard renders AVWAP distance series as raw daily lines with fixed reference thresholds', async () => {
+  const source = await readFile(componentPath, 'utf8')
+
+  assert.match(source, /<ReferenceLine y=\{0\} /)
+  assert.match(source, /key=\{`high-\$\{anchor\.key\}`\}/)
+  assert.match(source, /y=\{stats\.p85\}/)
+  assert.match(source, /key=\{`low-\$\{anchor\.key\}`\}/)
+  assert.match(source, /y=\{stats\.p15\}/)
+  assert.match(source, /type="linear"/)
+})

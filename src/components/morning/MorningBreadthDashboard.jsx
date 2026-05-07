@@ -816,53 +816,35 @@ function AvwapDistanceLadderChart({ model, timeframe = '6M', focusLabel = 'Combi
         <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={28} />
         <YAxis domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
         <ReferenceLine y={0} stroke="#ffffff25" strokeDasharray="4 4" />
-        {dragRange.startLabel && dragRange.endLabel && dragRange.startLabel !== dragRange.endLabel && (
-          <ReferenceArea x1={dragRange.startLabel} x2={dragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
-        )}
         {activeAnchors.map(anchor => {
           const stats = model?.statsByAnchor?.[anchor.key]
-          if (!Number.isFinite(stats?.p15) || !Number.isFinite(stats?.p85)) return null
+          if (!Number.isFinite(stats?.p85) || !Number.isFinite(stats?.p15)) return null
           return (
-            <Line
-              key={`threshold-${anchor.key}`}
-              data={[
-                { date: timeframeRows[0]?.date, low: stats.p15, high: stats.p85 },
-                { date: timeframeRows.at(-1)?.date, low: stats.p15, high: stats.p85 },
-              ]}
-              type="linear"
-              dataKey="high"
+            <ReferenceLine
+              key={`high-${anchor.key}`}
+              y={stats.p85}
               stroke={anchor.color}
               strokeDasharray="5 5"
               strokeOpacity={0.45}
-              dot={false}
-              isAnimationActive={false}
-              legendType="none"
-              connectNulls
             />
           )
         })}
         {activeAnchors.map(anchor => {
           const stats = model?.statsByAnchor?.[anchor.key]
-          if (!Number.isFinite(stats?.p15) || !Number.isFinite(stats?.p85)) return null
+          if (!Number.isFinite(stats?.p85) || !Number.isFinite(stats?.p15)) return null
           return (
-            <Line
-              key={`threshold-low-${anchor.key}`}
-              data={[
-                { date: timeframeRows[0]?.date, low: stats.p15, high: stats.p85 },
-                { date: timeframeRows.at(-1)?.date, low: stats.p15, high: stats.p85 },
-              ]}
-              type="linear"
-              dataKey="low"
+            <ReferenceLine
+              key={`low-${anchor.key}`}
+              y={stats.p15}
               stroke={anchor.color}
               strokeDasharray="5 5"
               strokeOpacity={0.28}
-              dot={false}
-              isAnimationActive={false}
-              legendType="none"
-              connectNulls
             />
           )
         })}
+        {dragRange.startLabel && dragRange.endLabel && dragRange.startLabel !== dragRange.endLabel && (
+          <ReferenceArea x1={dragRange.startLabel} x2={dragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
+        )}
         <Tooltip
           contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
           formatter={(value, name) => [fmtSigned(Number(value), 1, '%'), name]}
@@ -871,7 +853,7 @@ function AvwapDistanceLadderChart({ model, timeframe = '6M', focusLabel = 'Combi
           seriesVisibility[anchor.key] !== false && (
             <Line
               key={anchor.key}
-              type="monotone"
+              type="linear"
               dataKey={anchor.key}
               name={anchor.label}
               stroke={anchor.color}
