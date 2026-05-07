@@ -36,3 +36,15 @@ test('MorningBreadthDashboard renders AVWAP distance series as raw daily lines w
   assert.match(source, /y=\{stats\.p15\}/)
   assert.match(source, /type="linear"/)
 })
+
+test('MorningBreadthDashboard includes an AVWAP trend strength panel above the distance ladder', async () => {
+  const source = await readFile(componentPath, 'utf8')
+
+  assert.match(source, /title="AVWAP Trend Strength"/)
+  assert.match(source, /buildBreadthAvwapTrendModel\(\{/)
+  assert.match(source, /focusId:\s*activeOverviewFocus/)
+  assert.match(source, /currentPace5/)
+  assert.match(source, /currentAcceleration10/)
+  assert.match(source, /Early Upturn|Early Roll|Rising|Falling|Flat/)
+  assert.match(source, /anchor\.shortLabel\}/)
+})

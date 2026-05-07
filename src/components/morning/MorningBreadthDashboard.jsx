@@ -60,6 +60,10 @@ import {
   BREADTH_AVWAP_DISTANCE_ANCHORS,
   buildBreadthAvwapDistanceModel,
 } from '../../utils/morningBreadthAvwapDistance.js'
+import {
+  BREADTH_AVWAP_TREND_ANCHORS,
+  buildBreadthAvwapTrendModel,
+} from '../../utils/morningBreadthAvwapTrend.js'
 import { resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
 import {
   applyTimeframeToRows,
@@ -262,6 +266,13 @@ function postureTone(tone) {
   if (tone === 'yellow') return 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow'
   if (tone === 'red') return 'border-accent-red/25 bg-accent-red/10 text-accent-red'
   if (tone === 'blue') return 'border-accent-blue/25 bg-accent-blue/10 text-accent-blue'
+  return 'border-white/10 bg-white/[0.04] text-gray-300'
+}
+
+function trendTone(state) {
+  if (state === 'Rising' || state === 'Early Upturn') return 'border-accent-green/25 bg-accent-green/10 text-accent-green'
+  if (state === 'Falling' || state === 'Early Roll') return 'border-accent-red/25 bg-accent-red/10 text-accent-red'
+  if (state === 'Flat') return 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow'
   return 'border-white/10 bg-white/[0.04] text-gray-300'
 }
 
@@ -768,6 +779,153 @@ function ParticipationStackChart({ rows, timeframe = '6M', focusId = 'all', focu
           <SeriesTogglePills items={series} visibility={seriesVisibility} onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))} />
           <div className="mt-4">
             {chart(500)}
+          </div>
+        </ChartPopoutModal>
+      )}
+    </>
+  )
+}
+
+function AvwapTrendStrengthChart({ model, timeframe = '6M', focusLabel = 'Combined Breadth' }) {
+  const { timeframeRows, brushRange, dragRange, visibleSessions, handleBrushChange, handleMouseDown, handleMouseMove, handleMouseUp, resetZoom } = useInteractiveChartRows(model?.rows || [], timeframe)
+  const [popoutOpen, setPopoutOpen] = useState(false)
+  const [seriesVisibility, setSeriesVisibility] = useState(() => (
+    Object.fromEntries(BREADTH_AVWAP_TREND_ANCHORS.map(anchor => [anchor.key, true]))
+  ))
+
+  const cards = (
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+      {BREADTH_AVWAP_TREND_ANCHORS.map(anchor => {
+        const stats = model?.statsByAnchor?.[anchor.key]
+        return (
+          <div key={anchor.key} className="rounded-lg border border-white/10 bg-surface-200 px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full" style={{ background: anchor.color }} />
+                <p className="text-[10px] uppercase tracking-wider text-gray-500">{anchor.shortLabel} Trend</p>
+              </div>
+              <span className={`rounded border px-2 py-1 text-[10px] font-semibold ${trendTone(stats?.state)}`}>
+                {stats?.state || 'No data'}
+              </span>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-gray-600">Value</p>
+                <p className="mt-1 text-lg font-black text-white">{fmtNumber(stats?.currentValue)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-gray-600">5D Pace</p>
+                <p className={`mt-1 text-lg font-black ${metricColor(stats?.currentPace5)}`}>{fmtSigned(stats?.currentPace5, 2, '%')}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-gray-600">10D Accel</p>
+                <p className={`mt-1 text-lg font-black ${metricColor(stats?.currentAcceleration10)}`}>{fmtSigned(stats?.currentAcceleration10, 2, ' pts')}</p>
+              </div>
+            </div>
+            <p className="mt-2 text-[10px] text-gray-500">{stats?.strength || 'No trend'} trend strength</p>
+          </div>
+        )
+      })}
+    </div>
+  )
+
+  const chart = (height = 320) => (
+    <ResponsiveContainer width="100%" height={height}>
+      <LineChart
+        data={timeframeRows}
+        margin={{ top: 8, right: 18, left: -10, bottom: 4 }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+      >
+        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+        <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={28} />
+        <YAxis domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+        {dragRange.startLabel && dragRange.endLabel && dragRange.startLabel !== dragRange.endLabel && (
+          <ReferenceArea x1={dragRange.startLabel} x2={dragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
+        )}
+        <Tooltip
+          contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+          formatter={(value, name) => [fmtNumber(Number(value)), name]}
+        />
+        {BREADTH_AVWAP_TREND_ANCHORS.map(anchor => (
+          seriesVisibility[anchor.key] !== false && (
+            <Line
+              key={anchor.key}
+              type="linear"
+              dataKey={anchor.key}
+              name={anchor.label}
+              stroke={anchor.color}
+              strokeWidth={2.5}
+              dot={false}
+              activeDot={{ r: 4 }}
+              connectNulls
+            />
+          )
+        ))}
+        <Brush
+          dataKey="date"
+          height={28}
+          stroke="rgba(61,132,255,0.45)"
+          fill="rgba(15,17,23,0.95)"
+          travellerWidth={8}
+          startIndex={brushRange.startIndex}
+          endIndex={brushRange.endIndex}
+          onChange={handleBrushChange}
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+
+  return (
+    <>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <SectionTitleWithInfo title="AVWAP Trend Strength" infoTitle="How to read AVWAP trend strength">
+              <p>This panel tracks the average <span className="font-medium text-white">1W</span>, <span className="font-medium text-white">1M</span>, and <span className="font-medium text-white">3M</span> AVWAP values across <span className="font-medium text-white">{focusLabel}</span>.</p>
+              <p><span className="font-medium text-white">5D Pace</span> measures how quickly each average anchor is moving, while <span className="font-medium text-white">10D Acceleration</span> shows whether that pace is improving or deteriorating early.</p>
+              <p>The state labels are tuned for early turns: <span className="font-medium text-white">Early Upturn</span> and <span className="font-medium text-white">Early Roll</span> should appear before a full trend reversal is obvious.</p>
+            </SectionTitleWithInfo>
+            <p className="mt-1 text-xs text-gray-600">Anchor direction, pace, acceleration, and early-turn context.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold text-gray-500">
+              {visibleSessions} visible
+            </p>
+            <button type="button" onClick={resetZoom} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1 text-[11px] font-semibold text-gray-400 hover:text-gray-200">
+              <RotateCcw size={12} />
+              Reset Zoom
+            </button>
+            <button type="button" onClick={() => setPopoutOpen(true)} className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200" aria-label="Open AVWAP trend strength popout">
+              <Maximize2 size={14} />
+            </button>
+          </div>
+        </div>
+        {cards}
+        <div className="mt-4">
+          <SeriesTogglePills
+            items={BREADTH_AVWAP_TREND_ANCHORS.map(anchor => ({ key: anchor.key, label: anchor.shortLabel, color: anchor.color }))}
+            visibility={seriesVisibility}
+            onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))}
+          />
+        </div>
+        <div className="mt-3">
+          {chart()}
+        </div>
+      </div>
+      {popoutOpen && (
+        <ChartPopoutModal title="AVWAP Trend Strength" onClose={() => setPopoutOpen(false)}>
+          {cards}
+          <div className="mt-4">
+            <SeriesTogglePills
+              items={BREADTH_AVWAP_TREND_ANCHORS.map(anchor => ({ key: anchor.key, label: anchor.shortLabel, color: anchor.color }))}
+              visibility={seriesVisibility}
+              onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))}
+            />
+          </div>
+          <div className="mt-4">
+            {chart(560)}
           </div>
         </ChartPopoutModal>
       )}
@@ -1757,6 +1915,14 @@ export default function MorningBreadthDashboard() {
     }),
     [activeOverviewFocus, overviewHistoriesById]
   )
+  const avwapTrendModel = useMemo(
+    () => buildBreadthAvwapTrendModel({
+      historiesById: overviewHistoriesById,
+      focusId: activeOverviewFocus,
+      includedListIds: BREADTH_LISTS.map(config => config.id),
+    }),
+    [activeOverviewFocus, overviewHistoriesById]
+  )
   const snapshotsById = useMemo(
     () => BREADTH_LISTS.reduce((next, config) => {
       next[config.id] = buildListBreadthSymbolSnapshots({ symbols: symbolsById[config.id], historyBarsBySymbol })
@@ -1912,6 +2078,7 @@ export default function MorningBreadthDashboard() {
         <ParticipationStackChart rows={breadthStateRows} timeframe={activeTimeframe} focusId={activeOverviewFocus} focusLabel={activeOverviewLabel} />
       </div>
 
+      <AvwapTrendStrengthChart model={avwapTrendModel} timeframe={activeTimeframe} focusLabel={activeOverviewLabel} />
       <AvwapDistanceLadderChart model={avwapDistanceModel} timeframe={activeTimeframe} focusLabel={activeOverviewLabel} />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">

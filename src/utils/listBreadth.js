@@ -296,7 +296,10 @@ function emptyPositionMetric() {
 function emptyAvwapMetric() {
   return {
     ...emptyPositionMetric(),
+    avgValue: null,
     avgDistancePct: null,
+    _valueSum: 0,
+    _valueCount: 0,
     _distanceSum: 0,
     _distanceCount: 0,
   }
@@ -398,6 +401,10 @@ function addAvwap(metric, payload) {
   metric.totalCount += 1
   if (payload.isAbove) metric.aboveCount += 1
   else metric.belowCount += 1
+  if (Number.isFinite(payload?.value)) {
+    metric._valueSum += payload.value
+    metric._valueCount += 1
+  }
   metric._distanceSum += payload.distancePct
   metric._distanceCount += 1
 }
@@ -444,7 +451,10 @@ function finalizePosition(metric) {
 
 function finalizeAvwap(metric) {
   finalizePosition(metric)
+  metric.avgValue = metric._valueCount ? round(metric._valueSum / metric._valueCount, 3) : null
   metric.avgDistancePct = metric._distanceCount ? round(metric._distanceSum / metric._distanceCount, 2) : null
+  delete metric._valueSum
+  delete metric._valueCount
   delete metric._distanceSum
   delete metric._distanceCount
   return metric
