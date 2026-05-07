@@ -55,3 +55,13 @@ test('MorningBreadthDashboard removes the phase space panel so regime timeline a
   assert.doesNotMatch(source, /<PhaseSpaceChart\b/)
   assert.match(source, /<div className="space-y-4">\s*<RegimeTimeline rows=\{breadthStateRows\} timeframe=\{activeTimeframe\} \/>\s*<TradeAnalyticsPanel analytics=\{breadthTradeAnalytics\} \/>\s*<\/div>/s)
 })
+
+test('MorningBreadthDashboard removes duplicate snapshot summary panels from the overview', async () => {
+  const source = await readFile(componentPath, 'utf8')
+
+  assert.doesNotMatch(source, /<MetricTable entriesById=\{latestById\} \/>/)
+  assert.doesNotMatch(source, /Broadening Signals/)
+  assert.doesNotMatch(source, /Risk Flags/)
+  assert.match(source, /title="Historical Breadth"/)
+  assert.match(source, /<Drilldowns snapshotsById=\{snapshotsById\} \/>/)
+})

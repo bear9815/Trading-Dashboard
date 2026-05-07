@@ -11,8 +11,6 @@ import {
   Gauge,
   RefreshCw,
   SlidersHorizontal,
-  TrendingDown,
-  TrendingUp,
   X,
 } from 'lucide-react'
 import {
@@ -1276,54 +1274,6 @@ function ListScoreCard({ label, entry, tone = 'blue', active = false, onClick })
   )
 }
 
-function MetricTable({ entriesById }) {
-  const valueFor = (listId, formatter) => formatter(entriesById[listId])
-  const rows = [
-    ['5DMA Above', entry => fmtPct(entry?.sma5?.abovePct)],
-    ['YTD AVWAP Above', entry => fmtPct(entry?.avwap?.ytd?.abovePct)],
-    ['3M AVWAP Above', entry => fmtPct(entry?.avwap?.m3?.abovePct)],
-    ['1M AVWAP Above', entry => fmtPct(entry?.avwap?.m1?.abovePct)],
-    ['1W AVWAP Above', entry => fmtPct(entry?.avwap?.w1?.abovePct)],
-    ['3M Distance', entry => fmtSigned(entry?.avwap?.m3?.avgDistancePct)],
-    ['1M Distance', entry => fmtSigned(entry?.avwap?.m1?.avgDistancePct)],
-    ['1W Distance', entry => fmtSigned(entry?.avwap?.w1?.avgDistancePct)],
-    ['Up / Down 4%', entry => `+${entry?.moves?.day4?.upCount || 0} / -${entry?.moves?.day4?.downCount || 0}`],
-    ['Up / Down 25% 1M', entry => `+${entry?.moves?.month25?.upCount || 0} / -${entry?.moves?.month25?.downCount || 0}`],
-    ['Up / Down 50% 1M', entry => `+${entry?.moves?.month50?.upCount || 0} / -${entry?.moves?.month50?.downCount || 0}`],
-    ['Up / Down 25% Quarter', entry => `+${entry?.moves?.quarter25?.upCount || 0} / -${entry?.moves?.quarter25?.downCount || 0}`],
-    ['Up / Down 13% 34D', entry => `+${entry?.moves?.days34_13?.upCount || 0} / -${entry?.moves?.days34_13?.downCount || 0}`],
-    ['Above 50DMA', entry => fmtPct(entry?.sma50?.abovePct)],
-    ['10x ATR Extended', entry => fmtNumber(entry?.atrExtension10x?.count)],
-  ]
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.02]">
-      <table className="w-full text-sm">
-        <thead className="bg-white/[0.03] text-[11px] uppercase tracking-wider text-gray-500">
-          <tr>
-            <th className="px-3 py-2 text-left">Metric</th>
-            {BREADTH_LISTS.map(config => (
-              <th key={config.id} className="px-3 py-2 text-left">{config.label}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-white/[0.05]">
-          {rows.map(([label, formatter]) => (
-            <tr key={label}>
-              <td className="px-3 py-2.5 text-gray-500">{label}</td>
-              {BREADTH_LISTS.map(config => (
-                <td key={`${label}-${config.id}`} className="px-3 py-2.5 font-medium text-gray-200">
-                  {valueFor(config.id, formatter)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
 function pairHeatClass(value) {
   if (!value) return 'bg-transparent text-gray-600'
   const up = value.up || 0
@@ -1787,9 +1737,6 @@ export default function MorningBreadthDashboard() {
     () => filterBreadthHistoriesForFocus(overviewHistoriesById, activeOverviewFocus),
     [activeOverviewFocus, overviewHistoriesById]
   )
-  const marketLatest = latestById.market
-  const liquidTrendLatest = latestById.liquidTrend
-  const liquidLatest = latestById.liquid
   const chartData = useMemo(() => mergeHistory(overviewHistoriesById), [overviewHistoriesById])
   const breadthStateRows = useMemo(
     () => buildBreadthStateRows({
@@ -2118,53 +2065,6 @@ export default function MorningBreadthDashboard() {
             <p className="mt-3 text-[11px] text-gray-600">{historyVisibleSessions} visible sessions in the current zoom window.</p>
           </div>
         )}
-      </div>
-
-      <MetricTable entriesById={latestById} />
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <TrendingUp size={14} className="text-accent-green" />
-            <p className="text-sm font-semibold text-white">Broadening Signals</p>
-          </div>
-          <div className="space-y-2 text-sm text-gray-400">
-            {BREADTH_LISTS.map(config => (
-              <p key={`${config.id}-avwap`}>
-                {config.label} AVWAP stack: <span className="font-semibold text-white">{fmtPct(avwapStack(latestById[config.id]))}</span>
-              </p>
-            ))}
-            <p>
-              Strongest non-leader minus Leaders score spread:{' '}
-              <span className="font-semibold text-white">
-                {fmtSigned(Math.max(
-                  ...BREADTH_LISTS
-                    .filter(config => config.id !== 'market')
-                    .map(config => (latestById[config.id]?.regimeScore ?? Number.NEGATIVE_INFINITY) - (marketLatest?.regimeScore ?? 0))
-                ), 0, '')}
-              </span>
-            </p>
-          </div>
-        </div>
-        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <TrendingDown size={14} className="text-accent-red" />
-            <p className="text-sm font-semibold text-white">Risk Flags</p>
-          </div>
-          <div className="space-y-2 text-sm text-gray-400">
-            {BREADTH_LISTS.map(config => (
-              <p key={`${config.id}-day4`}>
-                {config.label} down 4%: <span className="font-semibold text-white">{latestById[config.id]?.moves?.day4?.downCount || 0}</span>
-              </p>
-            ))}
-            <p>
-              Worst down 25% in 1M count:{' '}
-              <span className="font-semibold text-white">
-                {Math.max(...BREADTH_LISTS.map(config => latestById[config.id]?.moves?.month25?.downCount || 0))}
-              </span>
-            </p>
-          </div>
-        </div>
       </div>
 
       <Drilldowns snapshotsById={snapshotsById} />
