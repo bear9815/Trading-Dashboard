@@ -56,6 +56,10 @@ import {
   buildListBreadthHistory,
   buildListBreadthSymbolSnapshots,
 } from '../../utils/listBreadth.js'
+import {
+  BREADTH_AVWAP_DISTANCE_ANCHORS,
+  buildBreadthAvwapDistanceModel,
+} from '../../utils/morningBreadthAvwapDistance.js'
 import { resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
 import {
   applyTimeframeToRows,
@@ -764,6 +768,183 @@ function ParticipationStackChart({ rows, timeframe = '6M', focusId = 'all', focu
           <SeriesTogglePills items={series} visibility={seriesVisibility} onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))} />
           <div className="mt-4">
             {chart(500)}
+          </div>
+        </ChartPopoutModal>
+      )}
+    </>
+  )
+}
+
+function AvwapDistanceLadderChart({ model, timeframe = '6M', focusLabel = 'Combined Breadth' }) {
+  const { timeframeRows, brushRange, dragRange, visibleSessions, handleBrushChange, handleMouseDown, handleMouseMove, handleMouseUp, resetZoom } = useInteractiveChartRows(model?.rows || [], timeframe)
+  const [popoutOpen, setPopoutOpen] = useState(false)
+  const [seriesVisibility, setSeriesVisibility] = useState(() => (
+    Object.fromEntries(BREADTH_AVWAP_DISTANCE_ANCHORS.map(anchor => [anchor.key, true]))
+  ))
+  const activeAnchors = BREADTH_AVWAP_DISTANCE_ANCHORS.filter(anchor => seriesVisibility[anchor.key] !== false)
+
+  const chips = (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {BREADTH_AVWAP_DISTANCE_ANCHORS.map(anchor => {
+        const stats = model?.statsByAnchor?.[anchor.key]
+        return (
+          <div key={anchor.key} className="rounded-lg border border-white/10 bg-surface-200 px-3 py-3">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full" style={{ background: anchor.color }} />
+              <p className="text-[10px] uppercase tracking-wider text-gray-500">{anchor.shortLabel}</p>
+            </div>
+            <p className={`mt-2 text-xl font-black ${metricColor(stats?.currentValue)}`}>{fmtSigned(stats?.currentValue)}</p>
+            <p className="mt-1 text-[10px] text-gray-500">
+              Historical percentile rank {Number.isFinite(stats?.percentileRank) ? `${stats.percentileRank.toFixed(0)}th` : '—'}
+            </p>
+          </div>
+        )
+      })}
+    </div>
+  )
+
+  const chart = (height = 320) => (
+    <ResponsiveContainer width="100%" height={height}>
+      <LineChart
+        data={timeframeRows}
+        margin={{ top: 8, right: 18, left: -10, bottom: 4 }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+      >
+        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
+        <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={28} />
+        <YAxis domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+        <ReferenceLine y={0} stroke="#ffffff25" strokeDasharray="4 4" />
+        {dragRange.startLabel && dragRange.endLabel && dragRange.startLabel !== dragRange.endLabel && (
+          <ReferenceArea x1={dragRange.startLabel} x2={dragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
+        )}
+        {activeAnchors.map(anchor => {
+          const stats = model?.statsByAnchor?.[anchor.key]
+          if (!Number.isFinite(stats?.p15) || !Number.isFinite(stats?.p85)) return null
+          return (
+            <Line
+              key={`threshold-${anchor.key}`}
+              data={[
+                { date: timeframeRows[0]?.date, low: stats.p15, high: stats.p85 },
+                { date: timeframeRows.at(-1)?.date, low: stats.p15, high: stats.p85 },
+              ]}
+              type="linear"
+              dataKey="high"
+              stroke={anchor.color}
+              strokeDasharray="5 5"
+              strokeOpacity={0.45}
+              dot={false}
+              isAnimationActive={false}
+              legendType="none"
+              connectNulls
+            />
+          )
+        })}
+        {activeAnchors.map(anchor => {
+          const stats = model?.statsByAnchor?.[anchor.key]
+          if (!Number.isFinite(stats?.p15) || !Number.isFinite(stats?.p85)) return null
+          return (
+            <Line
+              key={`threshold-low-${anchor.key}`}
+              data={[
+                { date: timeframeRows[0]?.date, low: stats.p15, high: stats.p85 },
+                { date: timeframeRows.at(-1)?.date, low: stats.p15, high: stats.p85 },
+              ]}
+              type="linear"
+              dataKey="low"
+              stroke={anchor.color}
+              strokeDasharray="5 5"
+              strokeOpacity={0.28}
+              dot={false}
+              isAnimationActive={false}
+              legendType="none"
+              connectNulls
+            />
+          )
+        })}
+        <Tooltip
+          contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
+          formatter={(value, name) => [fmtSigned(Number(value), 1, '%'), name]}
+        />
+        {BREADTH_AVWAP_DISTANCE_ANCHORS.map(anchor => (
+          seriesVisibility[anchor.key] !== false && (
+            <Line
+              key={anchor.key}
+              type="monotone"
+              dataKey={anchor.key}
+              name={anchor.label}
+              stroke={anchor.color}
+              strokeWidth={2.5}
+              dot={false}
+              activeDot={{ r: 4 }}
+              connectNulls
+            />
+          )
+        ))}
+        <Brush
+          dataKey="date"
+          height={28}
+          stroke="rgba(61,132,255,0.45)"
+          fill="rgba(15,17,23,0.95)"
+          travellerWidth={8}
+          startIndex={brushRange.startIndex}
+          endIndex={brushRange.endIndex}
+          onChange={handleBrushChange}
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+
+  return (
+    <>
+      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <SectionTitleWithInfo title="AVWAP Distance Ladder" infoTitle="How to read the AVWAP distance ladder">
+              <p>The four lines show how far the active breadth universe is from its <span className="font-medium text-white">YTD</span>, <span className="font-medium text-white">3M</span>, <span className="font-medium text-white">1M</span>, and <span className="font-medium text-white">1W</span> AVWAP anchors.</p>
+              <p>The dashed lines mark each anchor&apos;s own <span className="font-medium text-white">85th / 15th historical percentiles</span>, so overbought and oversold are judged relative to that anchor&apos;s history instead of one fixed threshold.</p>
+              <p>Use this to spot when <span className="font-medium text-white">{focusLabel}</span> is stretched enough that short or intermediate-term follow-through may be more fragile than it looks.</p>
+            </SectionTitleWithInfo>
+            <p className="mt-1 text-xs text-gray-600">Anchor-specific extension with historical percentile rank context.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold text-gray-500">
+              {visibleSessions} visible
+            </p>
+            <button type="button" onClick={resetZoom} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1 text-[11px] font-semibold text-gray-400 hover:text-gray-200">
+              <RotateCcw size={12} />
+              Reset Zoom
+            </button>
+            <button type="button" onClick={() => setPopoutOpen(true)} className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200" aria-label="Open AVWAP distance ladder popout">
+              <Maximize2 size={14} />
+            </button>
+          </div>
+        </div>
+        {chips}
+        <div className="mt-4">
+          <SeriesTogglePills
+            items={BREADTH_AVWAP_DISTANCE_ANCHORS.map(anchor => ({ key: anchor.key, label: anchor.shortLabel, color: anchor.color }))}
+            visibility={seriesVisibility}
+            onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))}
+          />
+        </div>
+        <div className="mt-3">
+          {chart()}
+        </div>
+      </div>
+      {popoutOpen && (
+        <ChartPopoutModal title="AVWAP Distance Ladder" onClose={() => setPopoutOpen(false)}>
+          {chips}
+          <div className="mt-4">
+            <SeriesTogglePills
+              items={BREADTH_AVWAP_DISTANCE_ANCHORS.map(anchor => ({ key: anchor.key, label: anchor.shortLabel, color: anchor.color }))}
+              visibility={seriesVisibility}
+              onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))}
+            />
+          </div>
+          <div className="mt-4">
+            {chart(560)}
           </div>
         </ChartPopoutModal>
       )}
@@ -1586,6 +1767,14 @@ export default function MorningBreadthDashboard() {
     }),
     [historiesById]
   )
+  const avwapDistanceModel = useMemo(
+    () => buildBreadthAvwapDistanceModel({
+      historiesById: overviewHistoriesById,
+      focusId: activeOverviewFocus,
+      includedListIds: BREADTH_LISTS.map(config => config.id),
+    }),
+    [activeOverviewFocus, overviewHistoriesById]
+  )
   const snapshotsById = useMemo(
     () => BREADTH_LISTS.reduce((next, config) => {
       next[config.id] = buildListBreadthSymbolSnapshots({ symbols: symbolsById[config.id], historyBarsBySymbol })
@@ -1740,6 +1929,8 @@ export default function MorningBreadthDashboard() {
         <BreadthPhysicsChart rows={breadthStateRows} timeframe={activeTimeframe} />
         <ParticipationStackChart rows={breadthStateRows} timeframe={activeTimeframe} focusId={activeOverviewFocus} focusLabel={activeOverviewLabel} />
       </div>
+
+      <AvwapDistanceLadderChart model={avwapDistanceModel} timeframe={activeTimeframe} focusLabel={activeOverviewLabel} />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <PhaseSpaceChart rows={breadthStateRows} timeframe={activeTimeframe} focusLabel={activeOverviewLabel} />

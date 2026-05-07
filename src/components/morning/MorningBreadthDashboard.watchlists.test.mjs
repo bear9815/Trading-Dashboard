@@ -14,3 +14,14 @@ test('MorningBreadthDashboard includes Top 100 and QQQ anywhere breadth list con
   assert.doesNotMatch(source, /Import Market Leaders, Liquid Trend, and Liquid lists in Growth Research to unlock breadth reads\./)
   assert.doesNotMatch(source, /Add symbols to Market Leaders, Liquid Trend, or Liquid in Growth Research, then Morning can build the breadth dashboard\./)
 })
+
+test('MorningBreadthDashboard includes the AVWAP distance panel with active focus and percentile context', async () => {
+  const source = await readFile(componentPath, 'utf8')
+
+  assert.match(source, /title="AVWAP Distance Ladder"/)
+  assert.match(source, /BREADTH_AVWAP_DISTANCE_ANCHORS/)
+  assert.match(source, /buildBreadthAvwapDistanceModel\(\{/)
+  assert.match(source, /focusId:\s*activeOverviewFocus/)
+  assert.match(source, /includedListIds:\s*BREADTH_LISTS\.map\(config => config\.id\)/)
+  assert.match(source, /historical percentile rank/i)
+})
