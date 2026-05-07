@@ -48,7 +48,6 @@ import {
   BREADTH_TABLE_SESSION_COUNT,
   buildHistoricalBreadthMetricRows,
   buildListBreadthHistory,
-  buildListBreadthSymbolSnapshots,
 } from '../../utils/listBreadth.js'
 import {
   BREADTH_AVWAP_DISTANCE_ANCHORS,
@@ -86,20 +85,6 @@ const BREADTH_LISTS = [
 ]
 const BREADTH_LIST_CONFIG_BY_ID = Object.fromEntries(BREADTH_LISTS.map(config => [config.id, config]))
 const BREADTH_LIST_LABELS = BREADTH_LISTS.map(config => config.label)
-
-const DRILLDOWN_GROUPS = [
-  { key: 'strongestAboveAvwap', title: 'Strongest Above 1M AVWAP', metric: 'm1DistancePct', suffix: '%' },
-  { key: 'deepestBelowAvwap', title: 'Deepest Below 1M AVWAP', metric: 'm1DistancePct', suffix: '%' },
-  { key: 'upDay4', title: 'Up 4% Today', metric: 'dayChangePct', suffix: '%' },
-  { key: 'downDay4', title: 'Down 4% Today', metric: 'dayChangePct', suffix: '%' },
-  { key: 'upMonth25', title: 'Up 25% In 1M', metric: 'monthChangePct', suffix: '%' },
-  { key: 'upMonth50', title: 'Up 50% In 1M', metric: 'monthChangePct', suffix: '%' },
-  { key: 'upQuarter25', title: 'Up 25% In Quarter', metric: 'quarterChangePct', suffix: '%' },
-  { key: 'downMonth25', title: 'Down 25% In 1M', metric: 'monthChangePct', suffix: '%' },
-  { key: 'upDays34_13', title: 'Up 13% In 34D', metric: 'days34ChangePct', suffix: '%' },
-  { key: 'atrExtension10x', title: '10x ATR Extended', metric: 'atrExtensionMultiple', suffix: 'x' },
-  { key: 'aboveSma50', title: 'Above 50DMA Leaders', metric: 'monthChangePct', suffix: '%' },
-]
 
 const BREADTH_VIEW_TABS = [
   { id: 'overview', label: 'Overview' },
@@ -1570,77 +1555,6 @@ function HistoricalBreadthMetricTable({ rows, settings, onSettingsChange }) {
   )
 }
 
-function DrilldownTable({ title, rows, metric, suffix }) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
-      <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-gray-500">{title}</p>
-      {rows?.length ? (
-        <div className="space-y-1.5">
-          {rows.slice(0, 8).map(row => (
-            <div key={`${title}-${row.symbol}`} className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] px-2.5 py-2">
-              <div>
-                <p className="text-sm font-semibold text-white">{row.symbol}</p>
-                <p className="text-[11px] text-gray-600">{row.date}</p>
-              </div>
-              <div className="text-right">
-                <p className={Number(row[metric]) >= 0 ? 'text-sm font-semibold text-accent-green' : 'text-sm font-semibold text-accent-red'}>
-                  {suffix === 'x' && Number.isFinite(row[metric]) ? `${row[metric].toFixed(1)}x` : fmtSigned(row[metric], 1, suffix)}
-                </p>
-                <p className="text-[11px] text-gray-600">Close {Number.isFinite(row.close) ? row.close.toFixed(2) : '—'}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="text-xs text-gray-600">No symbols triggered this bucket.</p>
-      )}
-    </div>
-  )
-}
-
-function Drilldowns({ snapshotsById }) {
-  const [active, setActive] = useState('market')
-  const safeActive = snapshotsById?.[active] ? active : 'market'
-  const snapshots = snapshotsById[safeActive]
-
-  return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-white">Symbol Drivers</p>
-          <p className="mt-1 text-xs text-gray-500">Expand what is actually driving each breadth read.</p>
-        </div>
-        <div className="inline-flex rounded-lg border border-white/10 bg-white/[0.02] p-1">
-          {BREADTH_LISTS.map(({ id, label }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setActive(id)}
-              className={`rounded-md px-2.5 py-1 text-xs transition-all ${
-                safeActive === id ? 'bg-accent-blue/15 text-accent-blue' : 'text-gray-500 hover:text-gray-300'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-3">
-        {DRILLDOWN_GROUPS.map(group => (
-          <DrilldownTable
-            key={group.key}
-            title={group.title}
-            rows={snapshots?.[group.key] || []}
-            metric={group.metric}
-            suffix={group.suffix}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
-
 export default function MorningBreadthDashboard() {
   const { listsById } = useResearchWatchlistStore()
   const { trades } = useTradeStore()
@@ -1779,13 +1693,6 @@ export default function MorningBreadthDashboard() {
       includedListIds: BREADTH_LISTS.map(config => config.id),
     }),
     [activeOverviewFocus, overviewHistoriesById]
-  )
-  const snapshotsById = useMemo(
-    () => BREADTH_LISTS.reduce((next, config) => {
-      next[config.id] = buildListBreadthSymbolSnapshots({ symbols: symbolsById[config.id], historyBarsBySymbol })
-      return next
-    }, {}),
-    [historyBarsBySymbol, symbolsById]
   )
   const {
     timeframeRows: filteredChartData,
@@ -2067,7 +1974,6 @@ export default function MorningBreadthDashboard() {
         )}
       </div>
 
-      <Drilldowns snapshotsById={snapshotsById} />
       {historyPopoutOpen && (
         <ChartPopoutModal title="Historical Breadth" onClose={() => setHistoryPopoutOpen(false)}>
           <SeriesTogglePills

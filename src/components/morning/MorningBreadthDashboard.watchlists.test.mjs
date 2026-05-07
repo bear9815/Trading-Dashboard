@@ -62,6 +62,7 @@ test('MorningBreadthDashboard removes duplicate snapshot summary panels from the
   assert.doesNotMatch(source, /<MetricTable entriesById=\{latestById\} \/>/)
   assert.doesNotMatch(source, /Broadening Signals/)
   assert.doesNotMatch(source, /Risk Flags/)
+  assert.doesNotMatch(source, /Symbol Drivers/)
+  assert.doesNotMatch(source, /<Drilldowns snapshotsById=\{snapshotsById\} \/>/)
   assert.match(source, /title="Historical Breadth"/)
-  assert.match(source, /<Drilldowns snapshotsById=\{snapshotsById\} \/>/)
 })
