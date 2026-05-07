@@ -20,19 +20,15 @@ import {
   AreaChart,
   Brush,
   CartesianGrid,
-  Cell,
   ComposedChart,
   Line,
   LineChart,
   ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
-  Scatter,
-  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
-  ZAxis,
 } from 'recharts'
 import {
   LIQUID_LIST_ID,
@@ -1092,92 +1088,6 @@ function AvwapDistanceLadderChart({ model, timeframe = '6M', focusLabel = 'Combi
   )
 }
 
-function PhaseSpaceChart({ rows, timeframe = '6M', focusLabel = 'Combined Breadth' }) {
-  const [popoutOpen, setPopoutOpen] = useState(false)
-  const data = applyTimeframeToRows(rows, timeframe).filter(row => Number.isFinite(row.level) && Number.isFinite(row.velocity10))
-  return (
-    <>
-      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <SectionTitleWithInfo title="Phase Space" infoTitle="How to use phase space">
-              <p>This chart plots <span className="font-medium text-white">10-day velocity</span> on X and <span className="font-medium text-white">breadth level</span> on Y for <span className="font-medium text-white">{focusLabel}</span>.</p>
-              <p><span className="font-medium text-white">Upper-right</span> means strong breadth that is still improving. <span className="font-medium text-white">Upper-left</span> means breadth is still elevated, but momentum is fading and getting more fragile.</p>
-              <p><span className="font-medium text-white">Lower-right</span> is the early repair zone: weak breadth that is starting to improve. <span className="font-medium text-white">Lower-left</span> is deterioration, where failed breakouts and defense matter most.</p>
-              <p>Read the quadrant first, then use the phase color as a second layer of context.</p>
-            </SectionTitleWithInfo>
-            <p className="mt-1 text-xs text-gray-400">Breadth level on Y and momentum on X. The quadrant tells you whether the tape is accelerating, stalling, repairing, or breaking down.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold text-gray-500">
-              {data.length} sessions
-            </p>
-            <button type="button" onClick={() => setPopoutOpen(true)} className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200" aria-label="Open phase space popout">
-              <Maximize2 size={14} />
-            </button>
-          </div>
-        </div>
-        <ResponsiveContainer width="100%" height={285}>
-          <ScatterChart margin={{ top: 10, right: 18, left: -8, bottom: 4 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
-            <XAxis type="number" dataKey="velocity10" name="10D Velocity" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={value => `${value}`} />
-            <YAxis type="number" dataKey="level" name="Breadth Level" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
-            <ZAxis range={[35, 90]} />
-            <ReferenceLine x={0} stroke="#ffffff22" strokeDasharray="4 4" />
-            <ReferenceLine y={52} stroke="#ffffff22" strokeDasharray="4 4" />
-            <Tooltip
-              cursor={{ strokeDasharray: '3 3' }}
-              contentStyle={{ backgroundColor: '#151927', border: '1px solid #ffffff18', borderRadius: 8, fontSize: 12, color: '#e5e7eb' }}
-              itemStyle={{ color: '#e5e7eb' }}
-              labelStyle={{ color: '#f9fafb', fontWeight: 600 }}
-              formatter={(value, name) => [name === 'Breadth Level' ? `${Number(value).toFixed(0)}/100` : fmtSigned(Number(value), 1, ' pts'), name]}
-              labelFormatter={(_, payload) => {
-                const row = payload?.[0]?.payload
-                return row ? `${row.date} · ${row.phase}` : ''
-              }}
-            />
-            <Scatter data={data} dataKey="level">
-              {data.map(row => (
-                <Cell key={row.date} fill={BREADTH_PHASE_COLOR_BY_KEY[row.phase] || '#94a3b8'} fillOpacity={row === data.at(-1) ? 1 : 0.48} />
-              ))}
-            </Scatter>
-          </ScatterChart>
-        </ResponsiveContainer>
-      </div>
-      {popoutOpen && (
-        <ChartPopoutModal title="Phase Space" onClose={() => setPopoutOpen(false)}>
-          <ResponsiveContainer width="100%" height={560}>
-            <ScatterChart margin={{ top: 10, right: 18, left: -8, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
-              <XAxis type="number" dataKey="velocity10" name="10D Velocity" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={value => `${value}`} />
-              <YAxis type="number" dataKey="level" name="Breadth Level" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
-              <ZAxis range={[45, 110]} />
-              <ReferenceLine x={0} stroke="#ffffff22" strokeDasharray="4 4" />
-              <ReferenceLine y={52} stroke="#ffffff22" strokeDasharray="4 4" />
-              <Tooltip
-                cursor={{ strokeDasharray: '3 3' }}
-                contentStyle={{ backgroundColor: '#151927', border: '1px solid #ffffff18', borderRadius: 8, fontSize: 12, color: '#e5e7eb' }}
-                itemStyle={{ color: '#e5e7eb' }}
-                labelStyle={{ color: '#f9fafb', fontWeight: 600 }}
-                formatter={(value, name) => [name === 'Breadth Level' ? `${Number(value).toFixed(0)}/100` : fmtSigned(Number(value), 1, ' pts'), name]}
-                labelFormatter={(_, payload) => {
-                  const row = payload?.[0]?.payload
-                  return row ? `${row.date} · ${row.phase}` : ''
-                }}
-              />
-              <Scatter data={data} dataKey="level">
-                {data.map(row => (
-                  <Cell key={`popout-${row.date}`} fill={BREADTH_PHASE_COLOR_BY_KEY[row.phase] || '#94a3b8'} fillOpacity={row === data.at(-1) ? 1 : 0.55} />
-                ))}
-              </Scatter>
-            </ScatterChart>
-          </ResponsiveContainer>
-        </ChartPopoutModal>
-      )}
-    </>
-  )
-}
-
 function RegimeTimeline({ rows, timeframe = '6M' }) {
   const recent = applyTimeframeToRows(rows, timeframe)
   const [popoutOpen, setPopoutOpen] = useState(false)
@@ -2081,12 +1991,9 @@ export default function MorningBreadthDashboard() {
       <AvwapTrendStrengthChart model={avwapTrendModel} timeframe={activeTimeframe} focusLabel={activeOverviewLabel} />
       <AvwapDistanceLadderChart model={avwapDistanceModel} timeframe={activeTimeframe} focusLabel={activeOverviewLabel} />
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <PhaseSpaceChart rows={breadthStateRows} timeframe={activeTimeframe} focusLabel={activeOverviewLabel} />
-        <div className="space-y-4">
-          <RegimeTimeline rows={breadthStateRows} timeframe={activeTimeframe} />
-          <TradeAnalyticsPanel analytics={breadthTradeAnalytics} />
-        </div>
+      <div className="space-y-4">
+        <RegimeTimeline rows={breadthStateRows} timeframe={activeTimeframe} />
+        <TradeAnalyticsPanel analytics={breadthTradeAnalytics} />
       </div>
 
       <div className="rounded-xl border border-white/10 bg-white/[0.02]">

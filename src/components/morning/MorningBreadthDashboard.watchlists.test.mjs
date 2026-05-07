@@ -48,3 +48,10 @@ test('MorningBreadthDashboard includes an AVWAP trend strength panel above the d
   assert.match(source, /Early Upturn|Early Roll|Rising|Falling|Flat/)
   assert.match(source, /anchor\.shortLabel\}/)
 })
+
+test('MorningBreadthDashboard removes the phase space panel so regime timeline and breadth trade analytics fill the upper breadth layout', async () => {
+  const source = await readFile(componentPath, 'utf8')
+
+  assert.doesNotMatch(source, /<PhaseSpaceChart\b/)
+  assert.match(source, /<div className="space-y-4">\s*<RegimeTimeline rows=\{breadthStateRows\} timeframe=\{activeTimeframe\} \/>\s*<TradeAnalyticsPanel analytics=\{breadthTradeAnalytics\} \/>\s*<\/div>/s)
+})
