@@ -22,7 +22,7 @@ import { useJournalStore }  from '../../store/useJournalStore.js'
 import { calcCashDeployed, calcEffectiveExposure } from '../../utils/riskCalcs.js'
 import { fetchHistory, fetchATR14 }     from '../../utils/marketData.js'
 import { formatCurrency }   from '../../utils/formatters.js'
-import { buildPriorTradingThoughtsText } from '../../utils/priorTradingThoughts.js'
+import { buildPriorDayNotesText } from '../../utils/priorTradingThoughts.js'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -1099,12 +1099,13 @@ function AnalysisTab({ entries }) {
 // ── Log Tab (form + history) ──────────────────────────────────────────────────
 
 function LogTab() {
-  const { entries, addEntry, updateEntry, deleteEntry, getEntryByDate, lastSaveError } = useMorningStore()
+  const { entries, addEntry, updateEntry, deleteEntry, getEntryByDate, lastSaveError, lastCloudSaveError } = useMorningStore()
   const { trades, getAccountBalance }  = useTradeStore()
   const { benchmarkSymbol } = useSettingsStore()
   const liveEffectivePct   = useLiveMarketStore(s => s.liveEffectivePct)
   const liveAccountBalance = useLiveMarketStore(s => s.liveAccountBalance)
   const tradingThoughts    = useJournalStore(s => s.tradingThoughts)
+  const journalEntries     = useJournalStore(s => s.entries)
 
   // Use live balance (with unrealized P&L) when RiskPanel has fetched prices
   const accountBalance = liveAccountBalance > 0 ? liveAccountBalance : getAccountBalance()
@@ -1198,11 +1199,11 @@ function LogTab() {
     // Carry forward selected fields from the most recent prior entry
     const lastEntry    = sorted.find(e => e.date < targetDate) ?? sorted[0] ?? null
     const lastRiskMode = lastEntry?.riskMode ?? null
-    // Pre-fill Prior Day Notes from the last trading day's thoughts (skip weekends)
-    const priorThoughtsText = buildPriorTradingThoughtsText(tradingThoughts, targetDate)
+    // Pre-fill Prior Day Notes from the last trading day's saved notes (skip weekends)
+    const priorThoughtsText = buildPriorDayNotesText({ tradingThoughts, journalEntries, targetDate })
     // New entry: pre-fill cash deployed + effective exposure (if ATR already resolved)
     return blankForm(targetDate, autoCash, autoEffective, lastRiskMode, lastEntry, priorThoughtsText)
-  }, [mode, editingEntry, editDate, autoCash, autoEffective, sorted, tradingThoughts])
+  }, [mode, editingEntry, editDate, autoCash, autoEffective, sorted, tradingThoughts, journalEntries])
 
   return (
     <div className="space-y-4">
@@ -1232,6 +1233,13 @@ function LogTab() {
         <div className="rounded-lg border border-accent-red/25 bg-accent-red/10 px-3 py-2">
           <p className="text-sm text-accent-red">
             Local save warning: {lastSaveError}. Leave this page open and export a backup from Settings before clearing browser data.
+          </p>
+        </div>
+      )}
+      {!lastSaveError && lastCloudSaveError && (
+        <div className="rounded-lg border border-accent-yellow/25 bg-accent-yellow/10 px-3 py-2">
+          <p className="text-sm text-accent-yellow">
+            Saved locally. Cloud backup warning: {lastCloudSaveError}.
           </p>
         </div>
       )}

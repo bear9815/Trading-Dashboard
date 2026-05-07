@@ -1,8 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { useJournalStore } from './useJournalStore.js'
+import * as journalStoreModule from './useJournalStore.js'
 import { isDashboardJournalEntry } from '../utils/dashboardThoughts.js'
+
+const { useJournalStore } = journalStoreModule
 
 function createLocalStorageMock() {
   const store = new Map()
@@ -542,4 +544,46 @@ test('trading reminder thoughts persist into both dashboard thoughts and journal
       globalThis.localStorage = previousLocalStorage
     }
   }
+})
+
+test('mergeJournalState preserves local-only notes and chooses the newest duplicate records', () => {
+  assert.equal(typeof journalStoreModule.mergeJournalState, 'function')
+
+  const merged = journalStoreModule.mergeJournalState({
+    localState: {
+      entries: [
+        { id: 'entry-shared', noteText: 'Newer local note', timestamp: '2026-05-06T15:00:00.000Z', entryType: 'dashboard-note' },
+        { id: 'entry-local', noteText: 'Local-only note', timestamp: '2026-05-06T16:00:00.000Z', entryType: 'dashboard-note' },
+      ],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [
+        { id: 'thought-local', text: 'Local-only thought', timestamp: new Date('2026-05-06T14:00:00.000Z').getTime() },
+      ],
+      weeklyScorecards: [
+        { weekKey: '2026-05-04', weekStart: '2026-05-04', updatedAt: '2026-05-06T18:00:00.000Z', notes: 'Local scorecard' },
+      ],
+    },
+    cloudState: {
+      entries: [
+        { id: 'entry-shared', noteText: 'Older cloud note', timestamp: '2026-05-05T15:00:00.000Z', entryType: 'dashboard-note' },
+        { id: 'entry-cloud', noteText: 'Cloud-only note', timestamp: '2026-05-04T16:00:00.000Z', entryType: 'dashboard-note' },
+      ],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [
+        { id: 'thought-cloud', text: 'Cloud-only thought', timestamp: new Date('2026-05-05T14:00:00.000Z').getTime() },
+      ],
+      weeklyScorecards: [
+        { weekKey: '2026-05-04', weekStart: '2026-05-04', updatedAt: '2026-05-05T18:00:00.000Z', notes: 'Older cloud scorecard' },
+      ],
+    },
+  })
+
+  assert.deepEqual(merged.entries.map(entry => entry.id), ['entry-local', 'entry-shared', 'entry-cloud'])
+  assert.equal(merged.entries.find(entry => entry.id === 'entry-shared').noteText, 'Newer local note')
+  assert.deepEqual(merged.tradingThoughts.map(thought => thought.id), ['thought-local', 'thought-cloud'])
+  assert.equal(merged.weeklyScorecards[0].notes, 'Local scorecard')
 })

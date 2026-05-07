@@ -168,6 +168,7 @@ export default function TradingThoughts() {
     moveThoughtToJournal,
     moveJournalToThought,
     lastSaveError,
+    lastCloudSaveError,
   } = useJournalStore()
   const {
     apiKey,
@@ -475,6 +476,13 @@ export default function TradingThoughts() {
         <div className="mb-3 rounded-lg border border-accent-red/25 bg-accent-red/10 px-3 py-2">
           <p className="text-sm text-accent-red">
             Local save warning: {lastSaveError}. Leave this page open and export a backup from Settings before clearing browser data.
+          </p>
+        </div>
+      )}
+      {!lastSaveError && lastCloudSaveError && (
+        <div className="mb-3 rounded-lg border border-accent-yellow/25 bg-accent-yellow/10 px-3 py-2">
+          <p className="text-sm text-accent-yellow">
+            Saved locally. Cloud backup warning: {lastCloudSaveError}.
           </p>
         </div>
       )}

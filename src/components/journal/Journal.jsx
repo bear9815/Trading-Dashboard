@@ -216,7 +216,7 @@ function NewEntryForm({ initial = BLANK, onSave, onCancel }) {
 }
 
 function EntriesTab() {
-  const { entries, tradingThoughts = [], addEntry, deleteEntry, getEntries } = useJournalStore()
+  const { entries, tradingThoughts = [], addEntry, deleteEntry, getEntries, lastSaveError, lastCloudSaveError } = useJournalStore()
   const [adding, setAdding] = useState(false)
   const [search, setSearch] = useState('')
 
@@ -248,6 +248,21 @@ function EntriesTab() {
           New Entry
         </button>
       </div>
+
+      {lastSaveError && (
+        <div className="rounded-lg border border-accent-red/25 bg-accent-red/10 px-3 py-2">
+          <p className="text-sm text-accent-red">
+            Local save warning: {lastSaveError}. Leave this page open and export a backup from Settings before clearing browser data.
+          </p>
+        </div>
+      )}
+      {!lastSaveError && lastCloudSaveError && (
+        <div className="rounded-lg border border-accent-yellow/25 bg-accent-yellow/10 px-3 py-2">
+          <p className="text-sm text-accent-yellow">
+            Saved locally. Cloud backup warning: {lastCloudSaveError}.
+          </p>
+        </div>
+      )}
 
       {adding && <NewEntryForm initial={prefill} onSave={handleSave} onCancel={() => setAdding(false)} />}
 

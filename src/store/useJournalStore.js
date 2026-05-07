@@ -2,10 +2,129 @@ import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
 import { supabase } from '../lib/supabase.js'
 import { buildDashboardJournalEntry, extractJournalEntryText } from '../utils/dashboardThoughts.js'
-import { readDurableJson, removeDurableJson, writeDurableJson } from '../utils/durableLocalJson.js'
+import { readDurableJson, writeDurableJson } from '../utils/durableLocalJson.js'
 import { normalizeWeeklyScorecardSnapshot } from '../utils/weeklyScorecard.js'
 
 const JOURNAL_STORAGE_KEY = 'risk-tool-journal'
+
+function toTime(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
+  if (!value) return 0
+  const parsed = new Date(value).getTime()
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function itemTime(item = {}) {
+  return Math.max(
+    toTime(item.updatedAt),
+    toTime(item.updated_at),
+    toTime(item.timestamp),
+    toTime(item.createdAt),
+    toTime(item.created_at),
+    toTime(item.date)
+  )
+}
+
+function stableIdentity(item = {}, collection = '') {
+  if (item.id) return String(item.id)
+  if (collection === 'weeklyScorecards' && item.weekKey) return String(item.weekKey)
+  if (collection === 'entries') return [item.timestamp, item.noteText, item.objective, item.marketState].filter(Boolean).join('|')
+  if (collection === 'tradingThoughts') return [item.timestamp, item.text].filter(Boolean).join('|')
+  if (collection === 'priorities') return [item.label, item.order].filter(Boolean).join('|')
+  if (collection === 'goals') return [item.title, item.targetDate, item.createdAt].filter(Boolean).join('|')
+  if (collection === 'checkins') return [item.date, item.createdAt, item.wins, item.onTrack].filter(Boolean).join('|')
+  return JSON.stringify(item)
+}
+
+function mergeByIdentity({ localItems = [], cloudItems = [], collection = '', sort }) {
+  const merged = new Map()
+
+  const addItem = (item, source) => {
+    if (!item || typeof item !== 'object') return
+    const key = stableIdentity(item, collection)
+    if (!key) return
+    const existing = merged.get(key)
+    if (!existing) {
+      merged.set(key, { item, source })
+      return
+    }
+
+    const existingTime = itemTime(existing.item)
+    const nextTime = itemTime(item)
+    const nextWins = nextTime > existingTime || (nextTime === existingTime && source === 'local' && existing.source !== 'local')
+    if (nextWins) merged.set(key, { item: { ...existing.item, ...item }, source })
+  }
+
+  cloudItems.forEach(item => addItem(item, 'cloud'))
+  localItems.forEach(item => addItem(item, 'local'))
+
+  const items = [...merged.values()].map(({ item }) => item)
+  return sort ? items.sort(sort) : items
+}
+
+function normalizeJournalState(state = {}) {
+  const {
+    entries = [],
+    priorities = [],
+    goals = [],
+    checkins = [],
+    tradingThoughts = [],
+    weeklyScorecards = [],
+  } = state || {}
+
+  return {
+    entries,
+    priorities,
+    goals,
+    checkins,
+    tradingThoughts,
+    weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
+  }
+}
+
+export function mergeJournalState({ localState = {}, cloudState = {} } = {}) {
+  const local = normalizeJournalState(localState)
+  const cloud = normalizeJournalState(cloudState)
+
+  return {
+    entries: mergeByIdentity({
+      localItems: local.entries,
+      cloudItems: cloud.entries,
+      collection: 'entries',
+      sort: (a, b) => itemTime(b) - itemTime(a),
+    }),
+    priorities: mergeByIdentity({
+      localItems: local.priorities,
+      cloudItems: cloud.priorities,
+      collection: 'priorities',
+      sort: (a, b) => (a.order ?? 0) - (b.order ?? 0),
+    }),
+    goals: mergeByIdentity({
+      localItems: local.goals,
+      cloudItems: cloud.goals,
+      collection: 'goals',
+      sort: (a, b) => itemTime(b) - itemTime(a),
+    }),
+    checkins: mergeByIdentity({
+      localItems: local.checkins,
+      cloudItems: cloud.checkins,
+      collection: 'checkins',
+      sort: (a, b) => itemTime(b) - itemTime(a),
+    }),
+    tradingThoughts: mergeByIdentity({
+      localItems: local.tradingThoughts,
+      cloudItems: cloud.tradingThoughts,
+      collection: 'tradingThoughts',
+      sort: (a, b) => itemTime(b) - itemTime(a),
+    }),
+    weeklyScorecards: mergeByIdentity({
+      localItems: local.weeklyScorecards,
+      cloudItems: cloud.weeklyScorecards,
+      collection: 'weeklyScorecards',
+      sort: (a, b) => String(b.weekStart || b.weekKey || '').localeCompare(String(a.weekStart || a.weekKey || '')),
+    }).map(normalizeWeeklyScorecardSnapshot),
+  }
+}
 
 async function persistLocal(state) {
   const result = await writeDurableJson(JOURNAL_STORAGE_KEY, { state })
@@ -19,14 +138,17 @@ async function getUid() {
 }
 
 async function saveToCloud(state) {
-  if (!supabase) return false
+  if (!supabase) return { ok: false, skipped: true }
   const uid = await getUid()
-  if (!uid) return false
+  if (!uid) return { ok: false, skipped: true }
   const { error } = await supabase
     .from('user_journal')
     .upsert({ user_id: uid, data: state, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
-  if (error) { console.error('[cloud] saveJournal:', error.message); return false }
-  return true
+  if (error) {
+    console.error('[cloud] saveJournal:', error.message)
+    return { ok: false, message: error.message }
+  }
+  return { ok: true }
 }
 
 export const useJournalStore = create((set, get) => ({
@@ -40,6 +162,7 @@ export const useJournalStore = create((set, get) => ({
   cloudUserId:     null,
   lastSaveError:   null,
   lastSavedAt:     null,
+  lastCloudSaveError: null,
 
   // ── Cloud ──────────────────────────────────────────────────────────────────
 
@@ -51,14 +174,14 @@ export const useJournalStore = create((set, get) => ({
     }
     const parsed = result.value
     if (!parsed) { set({ cloudReady: true, cloudUserId: null }); return }
-    const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [], weeklyScorecards = [] } = parsed?.state || {}
+    const { entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards } = normalizeJournalState(parsed?.state || {})
     set({
       entries,
       priorities,
       goals,
       checkins,
       tradingThoughts,
-      weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
+      weeklyScorecards,
       cloudReady: true,
       cloudUserId: null,
       lastSaveError: null,
@@ -77,62 +200,41 @@ export const useJournalStore = create((set, get) => ({
 
     if (error && error.code !== 'PGRST116') {
       console.error('[cloud] loadJournal:', error.message)
-      set({ cloudReady: true, cloudUserId: null })
+      set({ cloudReady: true, cloudUserId: null, lastCloudSaveError: error.message })
       return
     }
 
+    const localResult = await readDurableJson(JOURNAL_STORAGE_KEY)
+    const localState = localResult.ok ? (localResult.value?.state || {}) : {}
+
     if (data?.data) {
-      const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [], weeklyScorecards = [] } = data.data
+      const merged = mergeJournalState({ localState, cloudState: data.data })
       set({
-        entries,
-        priorities,
-        goals,
-        checkins,
-        tradingThoughts,
-        weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
+        ...merged,
         cloudReady: true,
         cloudUserId: userId,
         lastSaveError: null,
+        lastCloudSaveError: null,
       })
-      // Back up locally so data survives if Supabase is removed
-      persistLocal({
-        entries,
-        priorities,
-        goals,
-        checkins,
-        tradingThoughts,
-        weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
+      persistLocal(merged)
+      saveToCloud(merged).then(result => {
+        if (result.ok || result.skipped) set({ lastCloudSaveError: null })
+        else set({ lastCloudSaveError: result.message || 'Cloud backup failed.' })
       })
     } else {
       try {
-        const localResult = await readDurableJson(JOURNAL_STORAGE_KEY)
         if (localResult.value) {
           const parsed = localResult.value
-          const { entries = [], priorities = [], goals = [], checkins = [], tradingThoughts = [], weeklyScorecards = [] } = parsed?.state || {}
+          const local = normalizeJournalState(parsed?.state || {})
           set({
-            entries,
-            priorities,
-            goals,
-            checkins,
-            tradingThoughts,
-            weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
+            ...local,
             cloudReady: true,
-            cloudUserId: null,
+            cloudUserId: userId,
             lastSaveError: null,
+            lastCloudSaveError: null,
           })
-          const ok = await saveToCloud({
-            entries,
-            priorities,
-            goals,
-            checkins,
-            tradingThoughts,
-            weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
-          })
-          if (ok) {
-            await removeDurableJson(JOURNAL_STORAGE_KEY)
-            console.info('[cloud] Journal migrated from localStorage ✓')
-            set({ cloudUserId: userId })
-          }
+          const result = await saveToCloud(local)
+          if (!result.ok && !result.skipped) set({ lastCloudSaveError: result.message || 'Cloud backup failed.' })
         } else {
           set({ cloudReady: true, cloudUserId: userId })
         }
@@ -143,7 +245,7 @@ export const useJournalStore = create((set, get) => ({
   },
 
   clearLocalState: () => set({
-    entries: [], priorities: [], goals: [], checkins: [], tradingThoughts: [], weeklyScorecards: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null,
+    entries: [], priorities: [], goals: [], checkins: [], tradingThoughts: [], weeklyScorecards: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null, lastCloudSaveError: null,
   }),
 
   // ── Internal sync helper ───────────────────────────────────────────────────
@@ -160,6 +262,10 @@ export const useJournalStore = create((set, get) => ({
         return result
       })
     saveToCloud({ entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards })
+      .then(result => {
+        if (result.ok || result.skipped) set({ lastCloudSaveError: null })
+        else set({ lastCloudSaveError: result.message || 'Cloud backup failed.' })
+      })
     return savePromise
   },
 

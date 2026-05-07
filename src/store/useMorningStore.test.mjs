@@ -1,7 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { useMorningStore } from './useMorningStore.js'
+import * as morningStoreModule from './useMorningStore.js'
+
+const { useMorningStore } = morningStoreModule
 
 function createLocalStorageMock() {
   const store = new Map()
@@ -227,4 +229,22 @@ test('morning save failures are visible in store state', async () => {
       globalThis.indexedDB = previousIndexedDB
     }
   }
+})
+
+test('mergeMorningEntries preserves local-only entries and chooses the newest duplicate record', () => {
+  assert.equal(typeof morningStoreModule.mergeMorningEntries, 'function')
+
+  const merged = morningStoreModule.mergeMorningEntries({
+    localEntries: [
+      { id: 'morning-shared', date: '2026-05-06', gameplan: 'Newer local plan.', updatedAt: '2026-05-06T15:00:00.000Z' },
+      { id: 'morning-local', date: '2026-05-07', gameplan: 'Local-only plan.', createdAt: '2026-05-07T13:00:00.000Z' },
+    ],
+    cloudEntries: [
+      { id: 'morning-shared', date: '2026-05-06', gameplan: 'Older cloud plan.', updatedAt: '2026-05-06T12:00:00.000Z' },
+      { id: 'morning-cloud', date: '2026-05-05', gameplan: 'Cloud-only plan.', createdAt: '2026-05-05T13:00:00.000Z' },
+    ],
+  })
+
+  assert.deepEqual(merged.map(entry => entry.id), ['morning-local', 'morning-shared', 'morning-cloud'])
+  assert.equal(merged.find(entry => entry.id === 'morning-shared').gameplan, 'Newer local plan.')
 })
