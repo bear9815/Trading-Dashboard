@@ -37,16 +37,16 @@ test('MorningBreadthDashboard renders AVWAP distance series as raw daily lines w
   assert.match(source, /type="linear"/)
 })
 
-test('MorningBreadthDashboard includes an AVWAP trend strength panel above the distance ladder', async () => {
+test('MorningBreadthDashboard includes an AVWAP timing pulse panel above the distance ladder', async () => {
   const source = await readFile(componentPath, 'utf8')
 
-  assert.match(source, /title="AVWAP Trend Strength"/)
+  assert.match(source, /title="AVWAP Timing Pulse"/)
   assert.match(source, /buildBreadthAvwapTrendModel\(\{/)
   assert.match(source, /focusId:\s*activeOverviewFocus/)
-  assert.match(source, /currentPace5/)
-  assert.match(source, /currentAcceleration10/)
-  assert.match(source, /Early Upturn|Early Roll|Rising|Falling|Flat/)
-  assert.match(source, /anchor\.shortLabel\}/)
+  assert.match(source, /current\.read/)
+  assert.match(source, /pulseScore/)
+  assert.match(source, /distanceImpulse/)
+  assert.match(source, /Bullish Timing|Constructive Pullback|Chase Risk|Deteriorating/)
 })
 
 test('MorningBreadthDashboard removes the phase space panel so regime timeline and breadth trade analytics fill the upper breadth layout', async () => {

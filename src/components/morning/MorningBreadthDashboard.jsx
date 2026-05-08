@@ -54,7 +54,6 @@ import {
   buildBreadthAvwapDistanceModel,
 } from '../../utils/morningBreadthAvwapDistance.js'
 import {
-  BREADTH_AVWAP_TREND_ANCHORS,
   buildBreadthAvwapTrendModel,
 } from '../../utils/morningBreadthAvwapTrend.js'
 import { resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
@@ -249,9 +248,11 @@ function postureTone(tone) {
 }
 
 function trendTone(state) {
-  if (state === 'Rising' || state === 'Early Upturn') return 'border-accent-green/25 bg-accent-green/10 text-accent-green'
-  if (state === 'Falling' || state === 'Early Roll') return 'border-accent-red/25 bg-accent-red/10 text-accent-red'
-  if (state === 'Flat') return 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow'
+  if (state === 'Bullish Timing') return 'border-accent-green/25 bg-accent-green/10 text-accent-green'
+  if (state === 'Constructive Pullback') return 'border-accent-blue/25 bg-accent-blue/10 text-accent-blue'
+  if (state === 'Chase Risk') return 'border-accent-yellow/25 bg-accent-yellow/10 text-accent-yellow'
+  if (state === 'Deteriorating') return 'border-accent-red/25 bg-accent-red/10 text-accent-red'
+  if (state === 'Neutral') return 'border-white/10 bg-white/[0.04] text-gray-300'
   return 'border-white/10 bg-white/[0.04] text-gray-300'
 }
 
@@ -769,48 +770,49 @@ function AvwapTrendStrengthChart({ model, timeframe = '6M', focusLabel = 'Combin
   const { timeframeRows, brushRange, dragRange, visibleSessions, handleBrushChange, handleMouseDown, handleMouseMove, handleMouseUp, resetZoom } = useInteractiveChartRows(model?.rows || [], timeframe)
   const [popoutOpen, setPopoutOpen] = useState(false)
   const [seriesVisibility, setSeriesVisibility] = useState(() => (
-    Object.fromEntries(BREADTH_AVWAP_TREND_ANCHORS.map(anchor => [anchor.key, true]))
+    { pulseScore: true, distanceImpulse: true }
   ))
+  const current = model?.current || {}
 
-  const cards = (
-    <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-      {BREADTH_AVWAP_TREND_ANCHORS.map(anchor => {
-        const stats = model?.statsByAnchor?.[anchor.key]
-        return (
-          <div key={anchor.key} className="rounded-lg border border-white/10 bg-surface-200 px-3 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full" style={{ background: anchor.color }} />
-                <p className="text-[10px] uppercase tracking-wider text-gray-500">{anchor.shortLabel} Trend</p>
-              </div>
-              <span className={`rounded border px-2 py-1 text-[10px] font-semibold ${trendTone(stats?.state)}`}>
-                {stats?.state || 'No data'}
-              </span>
-            </div>
-            <div className="mt-3 grid grid-cols-3 gap-3">
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-gray-600">Value</p>
-                <p className="mt-1 text-lg font-black text-white">{fmtNumber(stats?.currentValue)}</p>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-gray-600">5D Pace</p>
-                <p className={`mt-1 text-lg font-black ${metricColor(stats?.currentPace5)}`}>{fmtSigned(stats?.currentPace5, 2, '%')}</p>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-gray-600">10D Accel</p>
-                <p className={`mt-1 text-lg font-black ${metricColor(stats?.currentAcceleration10)}`}>{fmtSigned(stats?.currentAcceleration10, 2, ' pts')}</p>
-              </div>
-            </div>
-            <p className="mt-2 text-[10px] text-gray-500">{stats?.strength || 'No trend'} trend strength</p>
+  const readout = (
+    <div className="rounded-lg border border-white/10 bg-surface-200 px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded border px-2 py-1 text-[10px] font-black uppercase tracking-[0.16em] ${trendTone(current.state)}`}>
+              {current.state || 'No data'}
+            </span>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-600">Swing Timing</p>
           </div>
-        )
-      })}
+          <p className="mt-2 max-w-5xl text-sm font-semibold leading-relaxed text-white">
+            {current.read || 'Need more AVWAP history for timing pulse.'}
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 text-right sm:grid-cols-4">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-gray-600">Pulse</p>
+            <p className={`mt-1 text-xl font-black ${metricColor((current.pulseScore ?? 50) - 50)}`}>{fmtNumber(current.pulseScore)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-gray-600">Reclaim</p>
+            <p className="mt-1 text-xl font-black text-accent-green">{fmtPct(current.reclaimPct)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-gray-600">Failure</p>
+            <p className="mt-1 text-xl font-black text-accent-red">{fmtPct(current.failurePct)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-gray-600">Impulse</p>
+            <p className={`mt-1 text-xl font-black ${metricColor(current.distanceImpulse)}`}>{fmtSigned(current.distanceImpulse, 2, ' pts')}</p>
+          </div>
+        </div>
+      </div>
     </div>
   )
 
   const chart = (height = 320) => (
     <ResponsiveContainer width="100%" height={height}>
-      <LineChart
+      <ComposedChart
         data={timeframeRows}
         margin={{ top: 8, right: 18, left: -10, bottom: 4 }}
         onMouseDown={handleMouseDown}
@@ -819,29 +821,27 @@ function AvwapTrendStrengthChart({ model, timeframe = '6M', focusLabel = 'Combin
       >
         <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
         <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} minTickGap={28} />
-        <YAxis domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+        <YAxis yAxisId="pulse" domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+        <YAxis yAxisId="impulse" orientation="right" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} />
+        <ReferenceLine yAxisId="pulse" y={70} stroke="#22c55e44" strokeDasharray="4 4" />
+        <ReferenceLine yAxisId="pulse" y={50} stroke="#ffffff22" strokeDasharray="4 4" />
+        <ReferenceLine yAxisId="pulse" y={35} stroke="#ff475744" strokeDasharray="4 4" />
         {dragRange.startLabel && dragRange.endLabel && dragRange.startLabel !== dragRange.endLabel && (
-          <ReferenceArea x1={dragRange.startLabel} x2={dragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
+          <ReferenceArea yAxisId="pulse" x1={dragRange.startLabel} x2={dragRange.endLabel} fill="#3d84ff" fillOpacity={0.12} />
         )}
         <Tooltip
           contentStyle={{ backgroundColor: '#1e2130', border: '1px solid #ffffff15', borderRadius: 8, fontSize: 12 }}
-          formatter={(value, name) => [fmtNumber(Number(value)), name]}
+          formatter={(value, name) => {
+            if (name === 'Distance Impulse') return [fmtSigned(Number(value), 2, ' pts'), name]
+            return [fmtNumber(Number(value)), name]
+          }}
         />
-        {BREADTH_AVWAP_TREND_ANCHORS.map(anchor => (
-          seriesVisibility[anchor.key] !== false && (
-            <Line
-              key={anchor.key}
-              type="linear"
-              dataKey={anchor.key}
-              name={anchor.label}
-              stroke={anchor.color}
-              strokeWidth={2.5}
-              dot={false}
-              activeDot={{ r: 4 }}
-              connectNulls
-            />
-          )
-        ))}
+        {seriesVisibility.pulseScore && (
+          <Line yAxisId="pulse" type="monotone" dataKey="pulseScore" name="Timing Pulse" stroke="#22c55e" strokeWidth={3} dot={false} activeDot={{ r: 4 }} connectNulls />
+        )}
+        {seriesVisibility.distanceImpulse && (
+          <Line yAxisId="impulse" type="monotone" dataKey="distanceImpulse" name="Distance Impulse" stroke="#f5c542" strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls />
+        )}
         <Brush
           dataKey="date"
           height={28}
@@ -852,7 +852,7 @@ function AvwapTrendStrengthChart({ model, timeframe = '6M', focusLabel = 'Combin
           endIndex={brushRange.endIndex}
           onChange={handleBrushChange}
         />
-      </LineChart>
+      </ComposedChart>
     </ResponsiveContainer>
   )
 
@@ -861,12 +861,12 @@ function AvwapTrendStrengthChart({ model, timeframe = '6M', focusLabel = 'Combin
       <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <SectionTitleWithInfo title="AVWAP Trend Strength" infoTitle="How to read AVWAP trend strength">
-              <p>This panel tracks the average <span className="font-medium text-white">1W</span>, <span className="font-medium text-white">1M</span>, and <span className="font-medium text-white">3M</span> AVWAP values across <span className="font-medium text-white">{focusLabel}</span>.</p>
-              <p><span className="font-medium text-white">5D Pace</span> measures how quickly each average anchor is moving, while <span className="font-medium text-white">10D Acceleration</span> shows whether that pace is improving or deteriorating early.</p>
-              <p>The state labels are tuned for early turns: <span className="font-medium text-white">Early Upturn</span> and <span className="font-medium text-white">Early Roll</span> should appear before a full trend reversal is obvious.</p>
+            <SectionTitleWithInfo title="AVWAP Timing Pulse" infoTitle="How to read AVWAP timing pulse">
+              <p>This panel scores <span className="font-medium text-white">1W</span> and <span className="font-medium text-white">1M</span> AVWAP timing across <span className="font-medium text-white">{focusLabel}</span>, with <span className="font-medium text-white">3M</span> structure as confirmation.</p>
+              <p><span className="font-medium text-white">Reclaim</span> and <span className="font-medium text-white">Failure</span> estimate short-window AVWAP participation shifts, while <span className="font-medium text-white">Impulse</span> tracks whether average distance is expanding or compressing.</p>
+              <p>The pulse favors fresh reclaim waves and orderly pullbacks, while warning when the tape is stretched or losing AVWAP support.</p>
             </SectionTitleWithInfo>
-            <p className="mt-1 text-xs text-gray-600">Anchor direction, pace, acceleration, and early-turn context.</p>
+            <p className="mt-1 text-xs text-gray-600">Fast AVWAP timing signal for swing-trade entries, pullbacks, and chase risk.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <p className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold text-gray-500">
@@ -876,15 +876,18 @@ function AvwapTrendStrengthChart({ model, timeframe = '6M', focusLabel = 'Combin
               <RotateCcw size={12} />
               Reset Zoom
             </button>
-            <button type="button" onClick={() => setPopoutOpen(true)} className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200" aria-label="Open AVWAP trend strength popout">
+            <button type="button" onClick={() => setPopoutOpen(true)} className="rounded-lg border border-white/10 p-2 text-gray-500 transition-colors hover:text-gray-200" aria-label="Open AVWAP timing pulse popout">
               <Maximize2 size={14} />
             </button>
           </div>
         </div>
-        {cards}
+        {readout}
         <div className="mt-4">
           <SeriesTogglePills
-            items={BREADTH_AVWAP_TREND_ANCHORS.map(anchor => ({ key: anchor.key, label: anchor.shortLabel, color: anchor.color }))}
+            items={[
+              { key: 'pulseScore', label: 'Pulse', color: '#22c55e' },
+              { key: 'distanceImpulse', label: 'Impulse', color: '#f5c542' },
+            ]}
             visibility={seriesVisibility}
             onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))}
           />
@@ -894,11 +897,14 @@ function AvwapTrendStrengthChart({ model, timeframe = '6M', focusLabel = 'Combin
         </div>
       </div>
       {popoutOpen && (
-        <ChartPopoutModal title="AVWAP Trend Strength" onClose={() => setPopoutOpen(false)}>
-          {cards}
+        <ChartPopoutModal title="AVWAP Timing Pulse" onClose={() => setPopoutOpen(false)}>
+          {readout}
           <div className="mt-4">
             <SeriesTogglePills
-              items={BREADTH_AVWAP_TREND_ANCHORS.map(anchor => ({ key: anchor.key, label: anchor.shortLabel, color: anchor.color }))}
+              items={[
+                { key: 'pulseScore', label: 'Pulse', color: '#22c55e' },
+                { key: 'distanceImpulse', label: 'Impulse', color: '#f5c542' },
+              ]}
               visibility={seriesVisibility}
               onToggle={(key) => setSeriesVisibility(current => ({ ...current, [key]: !current[key] }))}
             />
