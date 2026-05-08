@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js'
 import { readDurableJson, writeDurableJson } from '../utils/durableLocalJson.js'
 
 const MORNING_STORAGE_KEY = 'risk-tool-morning'
+const MORNING_RESCUE_STORAGE_KEY = `${MORNING_STORAGE_KEY}:backup`
 
 function toTime(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0
@@ -57,7 +58,31 @@ export function mergeMorningEntries({ localEntries = [], cloudEntries = [] } = {
     })
 }
 
+function writeRescueBackup(entries) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(MORNING_RESCUE_STORAGE_KEY, JSON.stringify({
+      state: { entries },
+      savedAt: new Date().toISOString(),
+    }))
+  } catch {
+    // Best effort: IndexedDB remains the primary durable store.
+  }
+}
+
+function readRescueBackup() {
+  if (typeof localStorage === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(MORNING_RESCUE_STORAGE_KEY)
+    if (!raw) return []
+    return JSON.parse(raw)?.state?.entries || []
+  } catch {
+    return []
+  }
+}
+
 async function persistLocal(entries) {
+  writeRescueBackup(entries)
   const result = await writeDurableJson(MORNING_STORAGE_KEY, { state: { entries } })
   if (!result.ok) console.error('[local] saveMorning:', result.message)
   return result
@@ -94,14 +119,23 @@ export const useMorningStore = create((set, get) => ({
 
   loadFromLocal: async () => {
     const result = await readDurableJson(MORNING_STORAGE_KEY)
+    const rescueEntries = readRescueBackup()
     if (!result.ok) {
+      if (rescueEntries.length) {
+        set({ entries: rescueEntries, cloudReady: true, cloudUserId: null, lastSaveError: result.message })
+        return
+      }
       set({ cloudReady: true, cloudUserId: null, lastSaveError: result.message })
       return
     }
     const parsed = result.value
-    if (!parsed) { set({ cloudReady: true, cloudUserId: null }); return }
+    if (!parsed && !rescueEntries.length) { set({ cloudReady: true, cloudUserId: null }); return }
     const { entries = [] } = parsed?.state || {}
-    set({ entries, cloudReady: true, cloudUserId: null, lastSaveError: null })
+    const mergedEntries = rescueEntries.length
+      ? mergeMorningEntries({ localEntries: rescueEntries, cloudEntries: entries })
+      : entries
+    set({ entries: mergedEntries, cloudReady: true, cloudUserId: null, lastSaveError: null })
+    if (rescueEntries.length) persistLocal(mergedEntries)
   },
 
   loadFromCloud: async (userId) => {

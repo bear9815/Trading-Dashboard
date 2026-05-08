@@ -152,6 +152,40 @@ test('morning entries restore from durable IndexedDB storage when localStorage i
   }
 })
 
+test('morning entries write a synchronous rescue backup before IndexedDB settles', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  const previousIndexedDB = globalThis.indexedDB
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
+  delete globalThis.indexedDB
+
+  try {
+    useMorningStore.setState({ entries: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null })
+
+    const saved = useMorningStore.getState().addEntry({
+      date: '2026-05-08',
+      gameplan: 'This morning note needs immediate rescue.',
+    })
+    const backup = JSON.parse(localStorageMock.getItem('risk-tool-morning:backup') || '{}')
+
+    assert.equal(backup.state.entries[0].gameplan, 'This morning note needs immediate rescue.')
+
+    await saved.saved
+  } finally {
+    useMorningStore.setState({ entries: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+    if (previousIndexedDB === undefined) {
+      delete globalThis.indexedDB
+    } else {
+      globalThis.indexedDB = previousIndexedDB
+    }
+  }
+})
+
 test('legacy localStorage morning payload migrates into durable storage', async () => {
   const previousLocalStorage = globalThis.localStorage
   const previousIndexedDB = globalThis.indexedDB

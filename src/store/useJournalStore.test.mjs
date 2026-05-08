@@ -288,6 +288,60 @@ test('trading reminder thoughts restore from durable IndexedDB storage when loca
   }
 })
 
+test('trading reminder thoughts write a synchronous rescue backup before IndexedDB settles', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  const previousIndexedDB = globalThis.indexedDB
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
+  delete globalThis.indexedDB
+
+  try {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+      lastSaveError: null,
+      lastSavedAt: null,
+    })
+
+    const result = useJournalStore.getState().addReminderThought('Rescue this reminder immediately.', 'discipline', '2026-05-08T14:00:00.000Z')
+    const backup = JSON.parse(localStorageMock.getItem('risk-tool-journal:backup') || '{}')
+
+    assert.equal(backup.state.tradingThoughts[0].text, 'Rescue this reminder immediately.')
+    assert.equal(backup.state.entries[0].noteText, 'Rescue this reminder immediately.')
+
+    await result.saved
+  } finally {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+      lastSaveError: null,
+      lastSavedAt: null,
+    })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+    if (previousIndexedDB === undefined) {
+      delete globalThis.indexedDB
+    } else {
+      globalThis.indexedDB = previousIndexedDB
+    }
+  }
+})
+
 test('legacy localStorage journal payload migrates into durable storage', async () => {
   const previousLocalStorage = globalThis.localStorage
   const previousIndexedDB = globalThis.indexedDB

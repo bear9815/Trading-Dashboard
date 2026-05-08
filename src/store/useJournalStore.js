@@ -6,6 +6,7 @@ import { readDurableJson, writeDurableJson } from '../utils/durableLocalJson.js'
 import { normalizeWeeklyScorecardSnapshot } from '../utils/weeklyScorecard.js'
 
 const JOURNAL_STORAGE_KEY = 'risk-tool-journal'
+const JOURNAL_RESCUE_STORAGE_KEY = `${JOURNAL_STORAGE_KEY}:backup`
 
 function toTime(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0
@@ -126,7 +127,31 @@ export function mergeJournalState({ localState = {}, cloudState = {} } = {}) {
   }
 }
 
+function writeRescueBackup(state) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(JOURNAL_RESCUE_STORAGE_KEY, JSON.stringify({
+      state,
+      savedAt: new Date().toISOString(),
+    }))
+  } catch {
+    // Best effort: IndexedDB remains the primary durable store.
+  }
+}
+
+function readRescueBackup() {
+  if (typeof localStorage === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(JOURNAL_RESCUE_STORAGE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw)?.state || null
+  } catch {
+    return null
+  }
+}
+
 async function persistLocal(state) {
+  writeRescueBackup(state)
   const result = await writeDurableJson(JOURNAL_STORAGE_KEY, { state })
   if (!result.ok) console.error('[local] saveJournal:', result.message)
   return result
@@ -168,13 +193,22 @@ export const useJournalStore = create((set, get) => ({
 
   loadFromLocal: async () => {
     const result = await readDurableJson(JOURNAL_STORAGE_KEY)
+    const rescueState = readRescueBackup()
     if (!result.ok) {
+      if (rescueState) {
+        const local = normalizeJournalState(rescueState)
+        set({ ...local, cloudReady: true, cloudUserId: null, lastSaveError: result.message })
+        return
+      }
       set({ cloudReady: true, cloudUserId: null, lastSaveError: result.message })
       return
     }
     const parsed = result.value
-    if (!parsed) { set({ cloudReady: true, cloudUserId: null }); return }
-    const { entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards } = normalizeJournalState(parsed?.state || {})
+    if (!parsed && !rescueState) { set({ cloudReady: true, cloudUserId: null }); return }
+    const localState = rescueState
+      ? mergeJournalState({ localState: rescueState, cloudState: parsed?.state || {} })
+      : normalizeJournalState(parsed?.state || {})
+    const { entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards } = localState
     set({
       entries,
       priorities,
@@ -186,6 +220,7 @@ export const useJournalStore = create((set, get) => ({
       cloudUserId: null,
       lastSaveError: null,
     })
+    if (rescueState) persistLocal(localState)
   },
 
   loadFromCloud: async (userId) => {

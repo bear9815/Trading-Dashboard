@@ -1030,7 +1030,7 @@ export default function Settings() {
         )}
 
         <div className="flex flex-wrap gap-2">
-          <button onClick={exportData} className="btn-ghost text-xs">Export Backup (JSON)</button>
+          <button onClick={handleExportLocalBackup} className="btn-ghost text-xs">Export Backup (JSON)</button>
           <button
             disabled={compressing}
             onClick={async () => {
