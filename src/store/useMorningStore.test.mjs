@@ -325,7 +325,14 @@ test('backfillMissingSleepScores fills only entries that are missing a Garmin sl
 test('backfillMissingSleepScores leaves blank Garmin dates blank', async () => {
   useMorningStore.setState({
     entries: [
-      { id: 'morning-c', date: '2026-05-07', sleepScore: null },
+      {
+        id: 'morning-c',
+        date: '2026-05-07',
+        sleepScore: null,
+        sleepScoreSource: null,
+        sleepScoreDate: null,
+        sleepScoreSyncedAt: null,
+      },
     ],
     cloudReady: false,
     cloudUserId: null,
@@ -343,5 +350,12 @@ test('backfillMissingSleepScores leaves blank Garmin dates blank', async () => {
   }))
 
   assert.deepEqual(result, { checked: 1, synced: 0, empty: 1, failed: 0 })
-  assert.equal(useMorningStore.getState().entries[0].sleepScore, null)
+  assert.deepEqual(useMorningStore.getState().entries[0], {
+    id: 'morning-c',
+    date: '2026-05-07',
+    sleepScore: null,
+    sleepScoreSource: null,
+    sleepScoreDate: null,
+    sleepScoreSyncedAt: null,
+  })
 })
