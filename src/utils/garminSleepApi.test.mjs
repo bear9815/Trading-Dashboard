@@ -38,6 +38,10 @@ function createMockRes() {
 const originalEnv = {
   GARMIN_HEALTH_KV_REST_API_URL: process.env.GARMIN_HEALTH_KV_REST_API_URL,
   GARMIN_HEALTH_KV_REST_API_TOKEN: process.env.GARMIN_HEALTH_KV_REST_API_TOKEN,
+  SUPABASE_URL: process.env.SUPABASE_URL,
+  SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
+  VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL,
+  VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY,
   KV_REST_API_URL: process.env.KV_REST_API_URL,
   KV_REST_API_TOKEN: process.env.KV_REST_API_TOKEN,
   UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
@@ -130,29 +134,50 @@ test('sleep score handler returns a real 200 contract for nested Upstash Garmin 
   try {
     process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
     process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
-    global.fetch = async () => ({
-      ok: true,
-      async json() {
+    process.env.VITE_SUPABASE_URL = 'https://example-supabase.test'
+    process.env.VITE_SUPABASE_ANON_KEY = 'anon-key'
+    global.fetch = async (url, options = {}) => {
+      if (url === 'https://example-supabase.test/auth/v1/user') {
+        assert.equal(options.headers.Authorization, 'Bearer valid-token')
+        assert.equal(options.headers.apikey, 'anon-key')
         return {
-          result: JSON.stringify(JSON.stringify({
-            daily_data: [
-              { date: '2026-05-09', sleep_score: 91 },
-            ],
-            last_updated: '2026-05-10T12:00:00.000Z',
-          })),
+          ok: true,
+          async json() {
+            return { id: 'user-123' }
+          },
         }
-      },
-    })
+      }
+
+      if (url === 'https://example-garmin-kv.test/get/health_metrics') {
+        return {
+          ok: true,
+          async json() {
+            return {
+              result: JSON.stringify(JSON.stringify({
+                daily_data: [
+                  { date: '2026-05-09', sleep_score: 91 },
+                ],
+                last_updated: '2026-05-10T12:00:00.000Z',
+              })),
+            }
+          },
+        }
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`)
+    }
 
     const req = {
       method: 'GET',
       query: { date: '2026-05-09' },
+      headers: { authorization: 'Bearer valid-token' },
     }
     const res = createMockRes()
 
     await sleepScoreHandler(req, res)
 
     assert.equal(res.statusCode, 200)
+    assert.notEqual(res.headers['Access-Control-Allow-Origin'], '*')
     assert.deepEqual(res.body, {
       status: 'ok',
       date: '2026-05-09',
@@ -166,24 +191,105 @@ test('sleep score handler returns a real 200 contract for nested Upstash Garmin 
   }
 })
 
-test('sleep score handler returns a normalized 400 contract for invalid dates', async () => {
+test('sleep score handler returns a normalized 401 contract when Authorization is missing', async () => {
   const req = {
     method: 'GET',
-    query: { date: '2026-99-99' },
+    query: { date: '2026-05-09' },
+    headers: {},
   }
   const res = createMockRes()
 
   await sleepScoreHandler(req, res)
 
-  assert.equal(res.statusCode, 400)
+  assert.equal(res.statusCode, 401)
+  assert.notEqual(res.headers['Access-Control-Allow-Origin'], '*')
   assert.deepEqual(res.body, {
     status: 'error',
-    date: '2026-99-99',
+    date: '2026-05-09',
     sleepScore: null,
     source: 'garmin',
-    error: 'date must be YYYY-MM-DD',
+    error: 'Authorization header is required',
     lastUpdated: null,
   })
+})
+
+test('sleep score handler returns a normalized 401 contract for an invalid Supabase token lookup', async () => {
+  const originalFetch = global.fetch
+  try {
+    process.env.SUPABASE_URL = 'https://example-supabase.test'
+    process.env.SUPABASE_ANON_KEY = 'anon-key'
+    global.fetch = async (url, options = {}) => {
+      assert.equal(url, 'https://example-supabase.test/auth/v1/user')
+      assert.equal(options.headers.Authorization, 'Bearer invalid-token')
+      assert.equal(options.headers.apikey, 'anon-key')
+      return {
+        ok: false,
+        status: 401,
+        async json() {
+          return { message: 'Invalid token' }
+        },
+      }
+    }
+
+    const req = {
+      method: 'GET',
+      query: { date: '2026-05-09' },
+      headers: { authorization: 'Bearer invalid-token' },
+    }
+    const res = createMockRes()
+
+    await sleepScoreHandler(req, res)
+
+    assert.equal(res.statusCode, 401)
+    assert.notEqual(res.headers['Access-Control-Allow-Origin'], '*')
+    assert.deepEqual(res.body, {
+      status: 'error',
+      date: '2026-05-09',
+      sleepScore: null,
+      source: 'garmin',
+      error: 'Invalid or expired token',
+      lastUpdated: null,
+    })
+  } finally {
+    global.fetch = originalFetch
+    restoreKvEnv()
+  }
+})
+
+test('sleep score handler returns a normalized 400 contract for invalid dates', async () => {
+  const originalFetch = global.fetch
+  try {
+    process.env.VITE_SUPABASE_URL = 'https://example-supabase.test'
+    process.env.VITE_SUPABASE_ANON_KEY = 'anon-key'
+    global.fetch = async () => ({
+      ok: true,
+      async json() {
+        return { id: 'user-123' }
+      },
+    })
+
+    const req = {
+      method: 'GET',
+      query: { date: '2026-99-99' },
+      headers: { authorization: 'Bearer valid-token' },
+    }
+    const res = createMockRes()
+
+    await sleepScoreHandler(req, res)
+
+    assert.equal(res.statusCode, 400)
+    assert.deepEqual(res.body, {
+      status: 'error',
+      date: '2026-99-99',
+      sleepScore: null,
+      source: 'garmin',
+      error: 'date must be YYYY-MM-DD',
+      lastUpdated: null,
+    })
+  } finally {
+    global.fetch = originalFetch
+    restoreKvEnv()
+  }
 })
 
 test('sleep score handler returns a normalized 405 contract for invalid methods', async () => {
@@ -211,13 +317,25 @@ test('sleep score handler returns a normalized 502 contract for upstream failure
   try {
     process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
     process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
-    global.fetch = async () => {
+    process.env.VITE_SUPABASE_URL = 'https://example-supabase.test'
+    process.env.VITE_SUPABASE_ANON_KEY = 'anon-key'
+    global.fetch = async (url) => {
+      if (url === 'https://example-supabase.test/auth/v1/user') {
+        return {
+          ok: true,
+          async json() {
+            return { id: 'user-123' }
+          },
+        }
+      }
+
       throw new Error('network unavailable')
     }
 
     const req = {
       method: 'GET',
       query: { date: '2026-05-09' },
+      headers: { authorization: 'Bearer valid-token' },
     }
     const res = createMockRes()
 
@@ -243,16 +361,30 @@ test('sleep score handler returns 502 when the KV payload is missing or malforme
   try {
     process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
     process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
-    global.fetch = async () => ({
-      ok: true,
-      async json() {
-        return {}
-      },
-    })
+    process.env.SUPABASE_URL = 'https://example-supabase.test'
+    process.env.SUPABASE_ANON_KEY = 'anon-key'
+    global.fetch = async (url) => {
+      if (url === 'https://example-supabase.test/auth/v1/user') {
+        return {
+          ok: true,
+          async json() {
+            return { id: 'user-123' }
+          },
+        }
+      }
+
+      return {
+        ok: true,
+        async json() {
+          return {}
+        },
+      }
+    }
 
     const req = {
       method: 'GET',
       query: { date: '2026-05-09' },
+      headers: { authorization: 'Bearer valid-token' },
     }
     const res = createMockRes()
 
@@ -278,21 +410,35 @@ test('sleep score handler returns 502 when the KV payload object lacks a valid d
   try {
     process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
     process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
-    global.fetch = async () => ({
-      ok: true,
-      async json() {
+    process.env.VITE_SUPABASE_URL = 'https://example-supabase.test'
+    process.env.VITE_SUPABASE_ANON_KEY = 'anon-key'
+    global.fetch = async (url) => {
+      if (url === 'https://example-supabase.test/auth/v1/user') {
         return {
-          result: JSON.stringify({
-            last_updated: '2026-05-10T12:00:00.000Z',
-            daily_data: 'oops',
-          }),
+          ok: true,
+          async json() {
+            return { id: 'user-123' }
+          },
         }
-      },
-    })
+      }
+
+      return {
+        ok: true,
+        async json() {
+          return {
+            result: JSON.stringify({
+              last_updated: '2026-05-10T12:00:00.000Z',
+              daily_data: 'oops',
+            }),
+          }
+        },
+      }
+    }
 
     const req = {
       method: 'GET',
       query: { date: '2026-05-09' },
+      headers: { authorization: 'Bearer valid-token' },
     }
     const res = createMockRes()
 
