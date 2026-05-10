@@ -1,10 +1,6 @@
 function getHealthKvCreds() {
   const url = process.env.GARMIN_HEALTH_KV_REST_API_URL
-    || process.env.KV_REST_API_URL
-    || process.env.UPSTASH_REDIS_REST_URL
   const token = process.env.GARMIN_HEALTH_KV_REST_API_TOKEN
-    || process.env.KV_REST_API_TOKEN
-    || process.env.UPSTASH_REDIS_REST_TOKEN
 
   return url && token ? { url, token } : null
 }

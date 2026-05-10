@@ -4,10 +4,52 @@ import assert from 'node:assert/strict'
 import {
   extractSleepScoreForDate,
   parseKvJson,
+  readHealthMetrics,
 } from '../../api/_lib/healthMetricsKv.js'
 import {
+  default as sleepScoreHandler,
   normalizeSleepScoreResponse,
 } from '../../api/garmin/sleep-score.js'
+
+function createMockRes() {
+  return {
+    headers: {},
+    statusCode: 200,
+    body: undefined,
+    ended: false,
+    setHeader(name, value) {
+      this.headers[name] = value
+    },
+    status(code) {
+      this.statusCode = code
+      return this
+    },
+    json(payload) {
+      this.body = payload
+      return this
+    },
+    end() {
+      this.ended = true
+      return this
+    },
+  }
+}
+
+const originalEnv = {
+  GARMIN_HEALTH_KV_REST_API_URL: process.env.GARMIN_HEALTH_KV_REST_API_URL,
+  GARMIN_HEALTH_KV_REST_API_TOKEN: process.env.GARMIN_HEALTH_KV_REST_API_TOKEN,
+  KV_REST_API_URL: process.env.KV_REST_API_URL,
+  KV_REST_API_TOKEN: process.env.KV_REST_API_TOKEN,
+  UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
+  UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
+}
+
+function restoreKvEnv() {
+  for (const [key, value] of Object.entries(originalEnv)) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+}
 
 test('extractSleepScoreForDate returns a Garmin sleep score for the requested date', () => {
   const payload = {
@@ -41,6 +83,35 @@ test('parseKvJson unwraps nested JSON strings from Upstash responses', () => {
   })
 })
 
+test('readHealthMetrics requires explicit Garmin KV env vars', async () => {
+  try {
+    process.env.KV_REST_API_URL = 'https://example-upstash.test'
+    process.env.KV_REST_API_TOKEN = 'generic-token'
+    delete process.env.GARMIN_HEALTH_KV_REST_API_URL
+    delete process.env.GARMIN_HEALTH_KV_REST_API_TOKEN
+
+    await assert.rejects(
+      readHealthMetrics(),
+      /Garmin health KV env vars are not configured/
+    )
+  } finally {
+    restoreKvEnv()
+  }
+})
+
+test('normalizeSleepScoreResponse emits the ok contract for Garmin data', () => {
+  assert.deepEqual(
+    normalizeSleepScoreResponse('2026-05-09', 91, '2026-05-10T12:00:00.000Z'),
+    {
+      status: 'ok',
+      date: '2026-05-09',
+      sleepScore: 91,
+      source: 'garmin',
+      lastUpdated: '2026-05-10T12:00:00.000Z',
+    }
+  )
+})
+
 test('normalizeSleepScoreResponse emits the empty contract for missing Garmin data', () => {
   assert.deepEqual(
     normalizeSleepScoreResponse('2026-05-09', null, '2026-05-10T12:00:00.000Z'),
@@ -52,4 +123,54 @@ test('normalizeSleepScoreResponse emits the empty contract for missing Garmin da
       lastUpdated: '2026-05-10T12:00:00.000Z',
     }
   )
+})
+
+test('sleep score handler returns a normalized 400 contract for invalid dates', async () => {
+  const req = {
+    method: 'GET',
+    query: { date: '2026-99-99' },
+  }
+  const res = createMockRes()
+
+  await sleepScoreHandler(req, res)
+
+  assert.equal(res.statusCode, 400)
+  assert.deepEqual(res.body, {
+    status: 'error',
+    date: '2026-99-99',
+    sleepScore: null,
+    source: 'garmin',
+    error: 'date must be YYYY-MM-DD',
+  })
+})
+
+test('sleep score handler returns a normalized 502 contract for upstream failures', async () => {
+  const originalFetch = global.fetch
+  try {
+    process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
+    process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
+    global.fetch = async () => {
+      throw new Error('network unavailable')
+    }
+
+    const req = {
+      method: 'GET',
+      query: { date: '2026-05-09' },
+    }
+    const res = createMockRes()
+
+    await sleepScoreHandler(req, res)
+
+    assert.equal(res.statusCode, 502)
+    assert.deepEqual(res.body, {
+      status: 'error',
+      date: '2026-05-09',
+      sleepScore: null,
+      source: 'garmin',
+      error: 'network unavailable',
+    })
+  } finally {
+    global.fetch = originalFetch
+    restoreKvEnv()
+  }
 })
