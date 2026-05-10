@@ -40,5 +40,14 @@ export async function readHealthMetrics(fetchImpl = fetch) {
   }
 
   const json = await response.json()
-  return parseKvJson(json?.result, {})
+  if (json?.result == null) {
+    throw new Error('Health metrics KV payload is invalid')
+  }
+
+  const payload = parseKvJson(json.result)
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Health metrics KV payload is invalid')
+  }
+
+  return payload
 }

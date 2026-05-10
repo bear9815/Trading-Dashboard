@@ -125,6 +125,47 @@ test('normalizeSleepScoreResponse emits the empty contract for missing Garmin da
   )
 })
 
+test('sleep score handler returns a real 200 contract for nested Upstash Garmin data', async () => {
+  const originalFetch = global.fetch
+  try {
+    process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
+    process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
+    global.fetch = async () => ({
+      ok: true,
+      async json() {
+        return {
+          result: JSON.stringify(JSON.stringify({
+            daily_data: [
+              { date: '2026-05-09', sleep_score: 91 },
+            ],
+            last_updated: '2026-05-10T12:00:00.000Z',
+          })),
+        }
+      },
+    })
+
+    const req = {
+      method: 'GET',
+      query: { date: '2026-05-09' },
+    }
+    const res = createMockRes()
+
+    await sleepScoreHandler(req, res)
+
+    assert.equal(res.statusCode, 200)
+    assert.deepEqual(res.body, {
+      status: 'ok',
+      date: '2026-05-09',
+      sleepScore: 91,
+      source: 'garmin',
+      lastUpdated: '2026-05-10T12:00:00.000Z',
+    })
+  } finally {
+    global.fetch = originalFetch
+    restoreKvEnv()
+  }
+})
+
 test('sleep score handler returns a normalized 400 contract for invalid dates', async () => {
   const req = {
     method: 'GET',
@@ -141,6 +182,25 @@ test('sleep score handler returns a normalized 400 contract for invalid dates', 
     sleepScore: null,
     source: 'garmin',
     error: 'date must be YYYY-MM-DD',
+  })
+})
+
+test('sleep score handler returns a normalized 405 contract for invalid methods', async () => {
+  const req = {
+    method: 'POST',
+    query: { date: '2026-05-09' },
+  }
+  const res = createMockRes()
+
+  await sleepScoreHandler(req, res)
+
+  assert.equal(res.statusCode, 405)
+  assert.deepEqual(res.body, {
+    status: 'error',
+    date: '2026-05-09',
+    sleepScore: null,
+    source: 'garmin',
+    error: 'Method not allowed',
   })
 })
 
@@ -168,6 +228,40 @@ test('sleep score handler returns a normalized 502 contract for upstream failure
       sleepScore: null,
       source: 'garmin',
       error: 'network unavailable',
+    })
+  } finally {
+    global.fetch = originalFetch
+    restoreKvEnv()
+  }
+})
+
+test('sleep score handler returns 502 when the KV payload is missing or malformed', async () => {
+  const originalFetch = global.fetch
+  try {
+    process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
+    process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
+    global.fetch = async () => ({
+      ok: true,
+      async json() {
+        return {}
+      },
+    })
+
+    const req = {
+      method: 'GET',
+      query: { date: '2026-05-09' },
+    }
+    const res = createMockRes()
+
+    await sleepScoreHandler(req, res)
+
+    assert.equal(res.statusCode, 502)
+    assert.deepEqual(res.body, {
+      status: 'error',
+      date: '2026-05-09',
+      sleepScore: null,
+      source: 'garmin',
+      error: 'Health metrics KV payload is invalid',
     })
   } finally {
     global.fetch = originalFetch
