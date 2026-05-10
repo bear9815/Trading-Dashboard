@@ -27,6 +27,7 @@ function normalizeSleepScoreError(date, error) {
     sleepScore: null,
     source: 'garmin',
     error,
+    lastUpdated: null,
   }
 }
 

@@ -48,6 +48,9 @@ export async function readHealthMetrics(fetchImpl = fetch) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Health metrics KV payload is invalid')
   }
+  if (!Array.isArray(payload.daily_data)) {
+    throw new Error('Health metrics KV payload is invalid')
+  }
 
   return payload
 }
