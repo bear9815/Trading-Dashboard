@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react'
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import {
   Sun, Plus, Edit2, Trash2, ChevronDown, ChevronUp,
   RefreshCw, Brain, Target, BarChart2, Zap, AlertTriangle,
@@ -21,6 +21,7 @@ import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
 import { useJournalStore }  from '../../store/useJournalStore.js'
 import { calcCashDeployed, calcEffectiveExposure } from '../../utils/riskCalcs.js'
 import { fetchHistory, fetchATR14 }     from '../../utils/marketData.js'
+import { fetchGarminSleepScore } from '../../utils/garminSleepClient.js'
 import { formatCurrency }   from '../../utils/formatters.js'
 import { buildPriorDayNotesText } from '../../utils/priorTradingThoughts.js'
 
@@ -62,6 +63,11 @@ function confidenceColor(v) {
   return v >= 4 ? '#00d084' : v >= 3 ? '#ffa502' : '#ff4757'
 }
 
+function hasSleepScoreValue(value) {
+  if (value === null || value === undefined || value === '') return false
+  return Number.isFinite(Number(value))
+}
+
 const NDX_MCSI_OPTIONS = [
   { id: 'Bearish',        label: 'Bearish',    cls: 'text-accent-red'    },
   { id: 'Neutral/Bearish',label: 'N/Bearish',  cls: 'text-orange-400'   },
@@ -86,11 +92,6 @@ const RISK_MODE_OPTIONS = [
   { id: 'normal',   label: 'Normal',     pct: '0.5%',  cls: 'text-accent-yellow' },
   { id: 'good',     label: 'Good',       pct: '0.75%', cls: 'text-accent-green'  },
   { id: 'great',    label: 'Great',      pct: '1%',    cls: 'text-accent-blue'   },
-]
-const SLEEP_QUALITY_OPTIONS = [
-  { id: 'poor',    label: 'Poor',    cls: 'text-accent-red'    },
-  { id: 'average', label: 'Average', cls: 'text-accent-yellow' },
-  { id: 'good',    label: 'Good',    cls: 'text-accent-green'  },
 ]
 const TREND_OPTIONS = [
   { id: 'Bearish',         label: 'Bearish',   cls: 'text-accent-red',    color: '#ff4757' },
@@ -191,6 +192,163 @@ function ConfidencePicker({ value, onChange }) {
           {labels[value]}
         </span>
       )}
+    </div>
+  )
+}
+
+function sleepScoreTone(score) {
+  const numericScore = Math.round(Number(score))
+  if (!Number.isFinite(numericScore)) {
+    return {
+      text: 'text-gray-600',
+      border: 'border-white/10',
+      bg: 'bg-white/[0.03]',
+    }
+  }
+  if (numericScore >= 80) {
+    return {
+      text: 'text-accent-green',
+      border: 'border-accent-green/20',
+      bg: 'bg-accent-green/10',
+    }
+  }
+  if (numericScore >= 65) {
+    return {
+      text: 'text-accent-yellow',
+      border: 'border-accent-yellow/20',
+      bg: 'bg-accent-yellow/10',
+    }
+  }
+  return {
+    text: 'text-accent-red',
+    border: 'border-accent-red/20',
+    bg: 'bg-accent-red/10',
+  }
+}
+
+function SleepScoreBadge({ score, compact = false }) {
+  if (!hasSleepScoreValue(score)) return <span className="text-gray-600">—</span>
+  const numericScore = Math.round(Number(score))
+  const tone = sleepScoreTone(numericScore)
+
+  if (compact) {
+    return <span className={`text-xs font-medium ${tone.text}`}>Sleep {numericScore}</span>
+  }
+
+  return (
+    <span className={`inline-flex min-w-11 justify-center rounded-md border px-2 py-1 text-xs font-semibold mono ${tone.text} ${tone.border} ${tone.bg}`}>
+      {numericScore}
+    </span>
+  )
+}
+
+function SleepScoreSyncField({
+  date,
+  sleepScore,
+  sleepScoreDate,
+  sleepScoreSyncedAt,
+  onChange,
+}) {
+  const attemptedDatesRef = useRef(new Set())
+  const previousDateRef = useRef(date)
+  const [syncState, setSyncState] = useState(hasSleepScoreValue(sleepScore) ? 'synced' : 'idle')
+  const [syncError, setSyncError] = useState('')
+
+  const clearSleepScore = useCallback(() => {
+    onChange({
+      sleepScore: null,
+      sleepScoreSource: null,
+      sleepScoreDate: null,
+      sleepScoreSyncedAt: null,
+    })
+  }, [onChange])
+
+  const syncSleepScore = useCallback(async () => {
+    if (!date) return
+
+    setSyncState('loading')
+    setSyncError('')
+
+    const result = await fetchGarminSleepScore(date)
+    if (result.status === 'ok') {
+      onChange({
+        sleepScore: result.sleepScore,
+        sleepScoreSource: result.source || 'garmin',
+        sleepScoreDate: result.date,
+        sleepScoreSyncedAt: result.lastUpdated || new Date().toISOString(),
+      })
+      setSyncState('synced')
+      return
+    }
+
+    if (result.status === 'empty') {
+      clearSleepScore()
+      setSyncState('empty')
+      return
+    }
+
+    setSyncState('error')
+    setSyncError(result.error || 'Unable to load Garmin sleep score')
+  }, [clearSleepScore, date, onChange])
+
+  useEffect(() => {
+    const previousDate = previousDateRef.current
+    if (previousDate && previousDate !== date && sleepScoreDate && sleepScoreDate !== date) {
+      clearSleepScore()
+      setSyncState('idle')
+      setSyncError('')
+    }
+    previousDateRef.current = date
+  }, [clearSleepScore, date, sleepScoreDate])
+
+  useEffect(() => {
+    if (!date || hasSleepScoreValue(sleepScore) || attemptedDatesRef.current.has(date)) return
+    attemptedDatesRef.current.add(date)
+    void syncSleepScore()
+  }, [date, sleepScore, syncSleepScore])
+
+  const statusText = syncState === 'loading'
+    ? 'Fetching Garmin sleep score…'
+    : syncState === 'synced'
+      ? `Garmin synced ${sleepScoreDate || date}${sleepScoreSyncedAt ? ` · ${new Date(sleepScoreSyncedAt).toLocaleString()}` : ''}`
+      : syncState === 'empty'
+        ? 'No Garmin sleep score is available for this date yet.'
+        : syncState === 'error'
+          ? syncError
+          : 'Garmin will auto-fill this field when a sleep score is available.'
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.13em] text-gray-500">Garmin</span>
+            {syncState === 'loading' && <RefreshCw size={12} className="animate-spin text-gray-500" />}
+            {syncState === 'error' && <AlertTriangle size={12} className="text-accent-red" />}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            {hasSleepScoreValue(sleepScore)
+              ? <>
+                  <span className={`text-2xl font-semibold mono ${sleepScoreTone(sleepScore).text}`}>{Math.round(Number(sleepScore))}</span>
+                  <SleepScoreBadge score={sleepScore} />
+                </>
+              : <span className="text-sm text-gray-500">No score yet</span>
+            }
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void syncSleepScore()}
+          disabled={!date || syncState === 'loading'}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-gray-300 transition-colors hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCw size={12} className={syncState === 'loading' ? 'animate-spin' : ''} />
+          Resync
+        </button>
+      </div>
+      <p className={`mt-2 text-xs ${syncState === 'error' ? 'text-accent-red' : syncState === 'empty' ? 'text-gray-500' : 'text-gray-500'}`}>
+        {statusText}
+      </p>
     </div>
   )
 }
@@ -344,7 +502,10 @@ function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode, lastEntr
     intermediateTrend:  lastEntry?.intermediateTrend || '',
     longTermTrend:      lastEntry?.longTermTrend     || '',
     creditConditions:   lastEntry?.creditConditions  || '',
-    sleepQuality:       '',
+    sleepScore:         null,
+    sleepScoreSource:   null,
+    sleepScoreDate:     null,
+    sleepScoreSyncedAt: null,
     confidence:         null,
     mentalState:        '',
     riskMode:           lastRiskMode ?? 'normal',
@@ -366,6 +527,7 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
   )
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }))
+  const patch = useCallback((fields) => setForm(f => ({ ...f, ...fields })), [])
 
   // Auto-fill effective exposure once ATR resolves (only for new entries, only if field is still empty)
   useEffect(() => {
@@ -415,8 +577,14 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
         <div className="space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div>
-              <FieldLabel>Sleep Quality</FieldLabel>
-              <PillSelect value={form.sleepQuality} onChange={v => set('sleepQuality', v)} options={SLEEP_QUALITY_OPTIONS} />
+              <FieldLabel>Sleep Score</FieldLabel>
+              <SleepScoreSyncField
+                date={form.date}
+                sleepScore={form.sleepScore}
+                sleepScoreDate={form.sleepScoreDate}
+                sleepScoreSyncedAt={form.sleepScoreSyncedAt}
+                onChange={patch}
+              />
             </div>
             <div>
               <FieldLabel>Mental State</FieldLabel>
@@ -672,6 +840,7 @@ function AnalysisTab({ entries }) {
           date:        entry.date,
           fomo:        entry.fomo,
           fearGreed:   entry.fearGreed,
+          sleepScore:  entry.sleepScore,
           confidence:  entry.confidence,
           mentalState: entry.mentalState,
           marketBias:  entry.marketBias,
@@ -966,7 +1135,7 @@ function AnalysisTab({ entries }) {
                       {r.fearGreed != null ? (r.fearGreed > 0 ? `+${r.fearGreed}` : r.fearGreed) : '—'}
                     </td>
                     <td className="py-2 text-center">
-                      <MorningBadge value={r.sleepQuality} options={SLEEP_QUALITY_OPTIONS} />
+                      <SleepScoreBadge score={r.sleepScore} />
                     </td>
                     <td className="py-2 text-center">
                       {r.confidence != null
@@ -1099,7 +1268,7 @@ function AnalysisTab({ entries }) {
 // ── Log Tab (form + history) ──────────────────────────────────────────────────
 
 function LogTab() {
-  const { entries, addEntry, updateEntry, deleteEntry, getEntryByDate, lastSaveError, lastCloudSaveError } = useMorningStore()
+  const { entries, addEntry, updateEntry, deleteEntry, getEntryByDate, backfillMissingSleepScores, lastSaveError, lastCloudSaveError } = useMorningStore()
   const { trades, getAccountBalance }  = useTradeStore()
   const { benchmarkSymbol } = useSettingsStore()
   const liveEffectivePct   = useLiveMarketStore(s => s.liveEffectivePct)
@@ -1153,6 +1322,8 @@ function LogTab() {
   const [editId, setEditId]     = useState(null)
   const [editDate, setEditDate] = useState(TODAY)      // for "new" with custom date
   const [openCharts, setOpenCharts] = useState(new Set()) // entry ids with charts expanded
+  const [backfillingSleep, setBackfillingSleep] = useState(false)
+  const [backfillSleepSummary, setBackfillSleepSummary] = useState(null)
 
   const toggleCharts = (id) => setOpenCharts(prev => {
     const next = new Set(prev)
@@ -1184,6 +1355,16 @@ function LogTab() {
 
   const handleDelete = (id) => {
     if (confirm('Delete this morning entry?')) deleteEntry(id)
+  }
+
+  const handleBackfillSleep = async () => {
+    setBackfillingSleep(true)
+    try {
+      const summary = await backfillMissingSleepScores()
+      setBackfillSleepSummary(summary)
+    } finally {
+      setBackfillingSleep(false)
+    }
   }
 
   const sorted = useMemo(
@@ -1222,10 +1403,22 @@ function LogTab() {
               </p>
             )}
           </div>
-          <button onClick={startNew} className="btn btn-primary flex items-center gap-1.5 text-sm">
-            <Plus size={14} />
-            {todayEntry ? 'Add Another Entry' : "Log Today's Morning"}
-          </button>
+          <div className="flex items-center gap-2">
+            {!!sorted.length && (
+              <button
+                onClick={() => void handleBackfillSleep()}
+                disabled={backfillingSleep}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-sm text-gray-300 transition-colors hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw size={13} className={backfillingSleep ? 'animate-spin' : ''} />
+                {backfillingSleep ? 'Backfilling…' : 'Backfill Garmin Sleep'}
+              </button>
+            )}
+            <button onClick={startNew} className="btn btn-primary flex items-center gap-1.5 text-sm">
+              <Plus size={14} />
+              {todayEntry ? 'Add Another Entry' : "Log Today's Morning"}
+            </button>
+          </div>
         </div>
       )}
 
@@ -1240,6 +1433,19 @@ function LogTab() {
         <div className="rounded-lg border border-accent-yellow/25 bg-accent-yellow/10 px-3 py-2">
           <p className="text-sm text-accent-yellow">
             Saved locally. Cloud backup warning: {lastCloudSaveError}.
+          </p>
+        </div>
+      )}
+      {backfillSleepSummary && (
+        <div className={`rounded-lg border px-3 py-2 ${
+          backfillSleepSummary.failed > 0
+            ? 'border-accent-yellow/25 bg-accent-yellow/10'
+            : 'border-accent-blue/20 bg-accent-blue/10'
+        }`}>
+          <p className={`text-sm ${backfillSleepSummary.failed > 0 ? 'text-accent-yellow' : 'text-accent-blue'}`}>
+            {backfillSleepSummary.checked === 0
+              ? 'All saved morning entries already have Garmin sleep scores.'
+              : `Backfill checked ${backfillSleepSummary.checked} morning entries: ${backfillSleepSummary.synced} synced, ${backfillSleepSummary.empty} still blank, ${backfillSleepSummary.failed} failed.`}
           </p>
         </div>
       )}
@@ -1281,7 +1487,6 @@ function LogTab() {
             {sorted.slice(0, 30).map(entry => {
               const ndx     = NDX_MCSI_OPTIONS.find(o => o.id === entry.ndxMcsi)
               const growth  = TREND_OPTIONS.find(o => o.id === entry.growthStocks)
-              const sleep   = SLEEP_QUALITY_OPTIONS.find(o => o.id === entry.sleepQuality)
               const mode  = RISK_MODE_OPTIONS.find(o => o.id === entry.riskMode)
               const ment  = MENTAL_OPTIONS.find(o => o.id === entry.mentalState)
               const stTrend = TREND_OPTIONS.find(o => o.id === entry.shortTermTrend)
@@ -1305,7 +1510,7 @@ function LogTab() {
                             F/G {entry.fearGreed > 0 ? `+${entry.fearGreed}` : entry.fearGreed}
                           </span>
                         )}
-                        {sleep && <span className={`text-xs ${sleep.cls}`}>Sleep: {sleep.label}</span>}
+                        {entry.sleepScore != null && <SleepScoreBadge score={entry.sleepScore} compact />}
                         {growth && <span className={`text-xs ${growth.cls}`}>Growth: {growth.label}</span>}
                         {ndx && <span className={`text-xs ${ndx.cls}`}>{ndx.id}</span>}
                         {stTrend && <span className={`text-xs ${stTrend.cls}`}>ST: {stTrend.label}</span>}
