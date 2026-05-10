@@ -10,6 +10,13 @@ function getSupabaseAuthConfig() {
   return url && anonKey ? { url, anonKey } : null
 }
 
+function getAllowedGarminOwner() {
+  const userId = process.env.GARMIN_HEALTH_ALLOWED_USER_ID || ''
+  const email = process.env.GARMIN_HEALTH_ALLOWED_EMAIL || ''
+
+  return userId || email ? { userId, email } : null
+}
+
 function isDateKey(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
 
@@ -59,8 +66,27 @@ async function validateAccessToken(token, fetchImpl = fetch) {
     },
   })
 
-  if (!response.ok) return false
-  return true
+  if (response.status === 401 || response.status === 403) {
+    return { ok: false, reason: 'invalid_token' }
+  }
+
+  if (!response.ok) {
+    return { ok: false, reason: 'upstream_error' }
+  }
+
+  const user = await response.json()
+  return { ok: true, user }
+}
+
+function isAllowedGarminOwner(user) {
+  const allowedOwner = getAllowedGarminOwner()
+  if (!allowedOwner) {
+    throw new Error('Garmin health owner env vars are not configured')
+  }
+
+  if (allowedOwner.userId && user?.id === allowedOwner.userId) return true
+  if (allowedOwner.email && user?.email === allowedOwner.email) return true
+  return false
 }
 
 export default async function handler(req, res) {
@@ -80,15 +106,27 @@ export default async function handler(req, res) {
   }
 
   try {
-    const isAuthorized = await validateAccessToken(token)
-    if (!isAuthorized) {
-      return res.status(401).json(normalizeSleepScoreError(date, 'Invalid or expired token'))
+    const authResult = await validateAccessToken(token)
+    if (!authResult.ok) {
+      if (authResult.reason === 'invalid_token') {
+        return res.status(401).json(normalizeSleepScoreError(date, 'Invalid or expired token'))
+      }
+
+      console.error('[garmin/sleep-score] Supabase auth lookup failed')
+      return res.status(502).json(normalizeSleepScoreError(date, 'Unable to validate Supabase token'))
+    }
+
+    if (!isAllowedGarminOwner(authResult.user)) {
+      return res.status(403).json(
+        normalizeSleepScoreError(date, 'You are not authorized to access Garmin sleep data')
+      )
     }
   } catch (error) {
+    console.error('[garmin/sleep-score] Auth validation error:', error)
     return res.status(502).json(
       normalizeSleepScoreError(
         date,
-        error instanceof Error ? error.message : 'Unable to validate Supabase token'
+        'Unable to validate Supabase token'
       )
     )
   }

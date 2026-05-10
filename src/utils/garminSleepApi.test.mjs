@@ -38,6 +38,8 @@ function createMockRes() {
 const originalEnv = {
   GARMIN_HEALTH_KV_REST_API_URL: process.env.GARMIN_HEALTH_KV_REST_API_URL,
   GARMIN_HEALTH_KV_REST_API_TOKEN: process.env.GARMIN_HEALTH_KV_REST_API_TOKEN,
+  GARMIN_HEALTH_ALLOWED_USER_ID: process.env.GARMIN_HEALTH_ALLOWED_USER_ID,
+  GARMIN_HEALTH_ALLOWED_EMAIL: process.env.GARMIN_HEALTH_ALLOWED_EMAIL,
   SUPABASE_URL: process.env.SUPABASE_URL,
   SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
   VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL,
@@ -134,6 +136,7 @@ test('sleep score handler returns a real 200 contract for nested Upstash Garmin 
   try {
     process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
     process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
+    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
     process.env.VITE_SUPABASE_URL = 'https://example-supabase.test'
     process.env.VITE_SUPABASE_ANON_KEY = 'anon-key'
     global.fetch = async (url, options = {}) => {
@@ -216,6 +219,7 @@ test('sleep score handler returns a normalized 401 contract when Authorization i
 test('sleep score handler returns a normalized 401 contract for an invalid Supabase token lookup', async () => {
   const originalFetch = global.fetch
   try {
+    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
     process.env.SUPABASE_URL = 'https://example-supabase.test'
     process.env.SUPABASE_ANON_KEY = 'anon-key'
     global.fetch = async (url, options = {}) => {
@@ -256,9 +260,85 @@ test('sleep score handler returns a normalized 401 contract for an invalid Supab
   }
 })
 
+test('sleep score handler returns a normalized 403 contract for an authenticated but unauthorized user', async () => {
+  const originalFetch = global.fetch
+  try {
+    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'owner-123'
+    process.env.SUPABASE_URL = 'https://example-supabase.test'
+    process.env.SUPABASE_ANON_KEY = 'anon-key'
+    global.fetch = async () => ({
+      ok: true,
+      async json() {
+        return { id: 'user-456', email: 'someone@example.com' }
+      },
+    })
+
+    const req = {
+      method: 'GET',
+      query: { date: '2026-05-09' },
+      headers: { authorization: 'Bearer valid-non-owner-token' },
+    }
+    const res = createMockRes()
+
+    await sleepScoreHandler(req, res)
+
+    assert.equal(res.statusCode, 403)
+    assert.deepEqual(res.body, {
+      status: 'error',
+      date: '2026-05-09',
+      sleepScore: null,
+      source: 'garmin',
+      error: 'You are not authorized to access Garmin sleep data',
+      lastUpdated: null,
+    })
+  } finally {
+    global.fetch = originalFetch
+    restoreKvEnv()
+  }
+})
+
+test('sleep score handler returns a normalized 502 contract when Supabase auth is rate limited', async () => {
+  const originalFetch = global.fetch
+  try {
+    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
+    process.env.SUPABASE_URL = 'https://example-supabase.test'
+    process.env.SUPABASE_ANON_KEY = 'anon-key'
+    global.fetch = async () => ({
+      ok: false,
+      status: 429,
+      async json() {
+        return { message: 'Too many requests' }
+      },
+    })
+
+    const req = {
+      method: 'GET',
+      query: { date: '2026-05-09' },
+      headers: { authorization: 'Bearer valid-token' },
+    }
+    const res = createMockRes()
+
+    await sleepScoreHandler(req, res)
+
+    assert.equal(res.statusCode, 502)
+    assert.deepEqual(res.body, {
+      status: 'error',
+      date: '2026-05-09',
+      sleepScore: null,
+      source: 'garmin',
+      error: 'Unable to validate Supabase token',
+      lastUpdated: null,
+    })
+  } finally {
+    global.fetch = originalFetch
+    restoreKvEnv()
+  }
+})
+
 test('sleep score handler returns a normalized 400 contract for invalid dates', async () => {
   const originalFetch = global.fetch
   try {
+    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
     process.env.VITE_SUPABASE_URL = 'https://example-supabase.test'
     process.env.VITE_SUPABASE_ANON_KEY = 'anon-key'
     global.fetch = async () => ({
@@ -317,6 +397,7 @@ test('sleep score handler returns a normalized 502 contract for upstream failure
   try {
     process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
     process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
+    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
     process.env.VITE_SUPABASE_URL = 'https://example-supabase.test'
     process.env.VITE_SUPABASE_ANON_KEY = 'anon-key'
     global.fetch = async (url) => {
@@ -361,6 +442,7 @@ test('sleep score handler returns 502 when the KV payload is missing or malforme
   try {
     process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
     process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
+    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
     process.env.SUPABASE_URL = 'https://example-supabase.test'
     process.env.SUPABASE_ANON_KEY = 'anon-key'
     global.fetch = async (url) => {
@@ -410,6 +492,7 @@ test('sleep score handler returns 502 when the KV payload object lacks a valid d
   try {
     process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
     process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
+    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
     process.env.VITE_SUPABASE_URL = 'https://example-supabase.test'
     process.env.VITE_SUPABASE_ANON_KEY = 'anon-key'
     global.fetch = async (url) => {
