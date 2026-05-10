@@ -254,21 +254,19 @@ export const useMorningStore = create((set, get) => ({
 
   backfillMissingSleepScores: async (loadSleepScore = fetchGarminSleepScore) => {
     const missingEntries = get().entries
-      .map((entry, index) => ({ entry, index }))
+      .map((entry, index) => ({ entry, index, identity: entryIdentity(entry) }))
       .filter(({ entry }) => entry?.date && !hasSleepScore(entry))
     let synced = 0
     let empty = 0
     let failed = 0
-    let nextEntries = get().entries
+    const patches = new Map()
 
-    for (const { entry, index } of missingEntries) {
+    for (const { entry, index, identity } of missingEntries) {
       const result = await loadSleepScore(entry.date)
 
       if (result.status === 'ok') {
         synced += 1
-        nextEntries = nextEntries.map((current, currentIndex) =>
-          currentIndex === index ? applySleepScore(current, result) : current
-        )
+        patches.set(index, { identity, result })
       } else if (result.status === 'empty') {
         empty += 1
       } else {
@@ -277,7 +275,22 @@ export const useMorningStore = create((set, get) => ({
     }
 
     if (synced > 0) {
-      set({ entries: nextEntries })
+      set((state) => ({
+        entries: state.entries.map((current, currentIndex) => {
+          const directPatch = patches.get(currentIndex)
+          if (directPatch && directPatch.identity === entryIdentity(current)) {
+            return applySleepScore(current, directPatch.result)
+          }
+
+          for (const patch of patches.values()) {
+            if (patch.identity && patch.identity === entryIdentity(current)) {
+              return applySleepScore(current, patch.result)
+            }
+          }
+
+          return current
+        }),
+      }))
       await get()._sync()
     }
 

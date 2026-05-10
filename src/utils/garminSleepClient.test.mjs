@@ -87,6 +87,50 @@ test('fetchGarminSleepScore returns a normalized auth error when no token is ava
   })
 })
 
+test('fetchGarminSleepScore falls back to supabase session lookup when auth store session is empty', async () => {
+  setSessionToken(null)
+
+  const result = await fetchGarminSleepScore(
+    '2026-05-09',
+    async (_url, options = {}) => {
+      assert.equal(options.headers.Authorization, 'Bearer fallback-token')
+
+      return {
+        ok: true,
+        json: async () => ({
+          status: 'ok',
+          date: '2026-05-09',
+          sleepScore: 86,
+          source: 'garmin',
+          lastUpdated: '2026-05-10T12:00:00.000Z',
+        }),
+      }
+    },
+    {
+      authClient: {
+        auth: {
+          getSession: async () => ({
+            data: {
+              session: {
+                access_token: 'fallback-token',
+              },
+            },
+          }),
+        },
+      },
+    }
+  )
+
+  assert.deepEqual(result, {
+    status: 'ok',
+    date: '2026-05-09',
+    sleepScore: 86,
+    source: 'garmin',
+    lastUpdated: '2026-05-10T12:00:00.000Z',
+    error: '',
+  })
+})
+
 test('fetchGarminSleepScore returns a normalized error when the request throws', async () => {
   setSessionToken('token-123')
 

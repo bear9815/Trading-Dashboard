@@ -401,3 +401,113 @@ test('backfillMissingSleepScores updates id-less legacy entries independently', 
     },
   ])
 })
+
+test('backfillMissingSleepScores applies Garmin patches onto the latest store state', async () => {
+  let resolveSleepScore
+  const sleepScoreLoaded = new Promise((resolve) => {
+    resolveSleepScore = resolve
+  })
+
+  useMorningStore.setState({
+    entries: [
+      { id: 'morning-stale', date: '2026-05-06', sleepScore: null, note: 'waiting on Garmin' },
+      { id: 'morning-fresh', date: '2026-05-05', sleepScore: 84, note: 'original note' },
+    ],
+    cloudReady: false,
+    cloudUserId: null,
+    lastSaveError: null,
+    lastSavedAt: null,
+  })
+
+  const backfillPromise = useMorningStore.getState().backfillMissingSleepScores(async (date) => {
+    await sleepScoreLoaded
+    return {
+      status: 'ok',
+      date,
+      sleepScore: 92,
+      source: 'garmin',
+      lastUpdated: '2026-05-10T12:00:00.000Z',
+      error: '',
+    }
+  })
+
+  useMorningStore.setState((state) => ({
+    entries: state.entries.map((entry) => (
+      entry.id === 'morning-fresh'
+        ? { ...entry, note: 'edited during backfill', updatedAt: '2026-05-10T12:05:00.000Z' }
+        : entry
+    )),
+  }))
+
+  resolveSleepScore()
+  const result = await backfillPromise
+
+  assert.deepEqual(result, { checked: 1, synced: 1, empty: 0, failed: 0 })
+  assert.deepEqual(useMorningStore.getState().entries, [
+    {
+      id: 'morning-stale',
+      date: '2026-05-06',
+      sleepScore: 92,
+      note: 'waiting on Garmin',
+      sleepScoreSource: 'garmin',
+      sleepScoreDate: '2026-05-06',
+      sleepScoreSyncedAt: '2026-05-10T12:00:00.000Z',
+    },
+    {
+      id: 'morning-fresh',
+      date: '2026-05-05',
+      sleepScore: 84,
+      note: 'edited during backfill',
+      updatedAt: '2026-05-10T12:05:00.000Z',
+    },
+  ])
+})
+
+test('backfillMissingSleepScores skips _sync when no Garmin scores are synced', async () => {
+  const originalSync = useMorningStore.getState()._sync
+  let syncCalls = 0
+
+  useMorningStore.setState({
+    entries: [
+      { id: 'morning-empty', date: '2026-05-04', sleepScore: null },
+      { id: 'morning-failed', date: '2026-05-03', sleepScore: null },
+    ],
+    cloudReady: false,
+    cloudUserId: null,
+    lastSaveError: null,
+    lastSavedAt: null,
+    _sync: async () => {
+      syncCalls += 1
+      return { ok: true }
+    },
+  })
+
+  try {
+    const result = await useMorningStore.getState().backfillMissingSleepScores(async (date) => {
+      if (date === '2026-05-04') {
+        return {
+          status: 'empty',
+          date,
+          sleepScore: null,
+          source: 'garmin',
+          lastUpdated: null,
+          error: '',
+        }
+      }
+
+      return {
+        status: 'error',
+        date,
+        sleepScore: null,
+        source: 'garmin',
+        lastUpdated: null,
+        error: 'timeout',
+      }
+    })
+
+    assert.deepEqual(result, { checked: 2, synced: 0, empty: 1, failed: 1 })
+    assert.equal(syncCalls, 0)
+  } finally {
+    useMorningStore.setState({ _sync: originalSync })
+  }
+})

@@ -23,17 +23,17 @@ function normalizeSleepResult(payload, requestedDate) {
   }
 }
 
-async function getAccessToken() {
+async function getAccessToken(authClient = supabase) {
   const sessionToken = useAuthStore.getState().session?.access_token
   if (sessionToken) return sessionToken
 
-  const fallbackSession = await supabase?.auth.getSession()
+  const fallbackSession = await authClient?.auth.getSession()
   return fallbackSession?.data?.session?.access_token || ''
 }
 
-export async function fetchGarminSleepScore(dateStr, fetchImpl = fetch) {
+export async function fetchGarminSleepScore(dateStr, fetchImpl = fetch, options = {}) {
   try {
-    const accessToken = await getAccessToken()
+    const accessToken = await getAccessToken(options.authClient)
     if (!accessToken) {
       return normalizeSleepResult({
         status: 'error',
