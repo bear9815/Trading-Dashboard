@@ -86,3 +86,20 @@ test('fetchGarminSleepScore returns a normalized auth error when no token is ava
     error: 'Sign in to sync Garmin sleep score',
   })
 })
+
+test('fetchGarminSleepScore returns a normalized error when the request throws', async () => {
+  setSessionToken('token-123')
+
+  const result = await fetchGarminSleepScore('2026-05-09', async () => {
+    throw new Error('network down')
+  })
+
+  assert.deepEqual(result, {
+    status: 'error',
+    date: '2026-05-09',
+    sleepScore: null,
+    source: 'garmin',
+    lastUpdated: null,
+    error: 'network down',
+  })
+})

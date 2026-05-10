@@ -32,32 +32,43 @@ async function getAccessToken() {
 }
 
 export async function fetchGarminSleepScore(dateStr, fetchImpl = fetch) {
-  const accessToken = await getAccessToken()
-  if (!accessToken) {
+  try {
+    const accessToken = await getAccessToken()
+    if (!accessToken) {
+      return normalizeSleepResult({
+        status: 'error',
+        date: dateStr,
+        sleepScore: null,
+        source: 'garmin',
+        lastUpdated: null,
+        error: 'Sign in to sync Garmin sleep score',
+      }, dateStr)
+    }
+
+    const response = await fetchImpl(`/api/garmin/sleep-score?date=${encodeURIComponent(dateStr)}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    })
+    const payload = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      return normalizeSleepResult({
+        status: 'error',
+        date: dateStr,
+        error: payload?.error || `HTTP ${response.status}`,
+      }, dateStr)
+    }
+
+    return normalizeSleepResult(payload, dateStr)
+  } catch (error) {
     return normalizeSleepResult({
       status: 'error',
       date: dateStr,
       sleepScore: null,
       source: 'garmin',
       lastUpdated: null,
-      error: 'Sign in to sync Garmin sleep score',
+      error: error instanceof Error ? error.message : 'Unable to load Garmin sleep score',
     }, dateStr)
   }
-
-  const response = await fetchImpl(`/api/garmin/sleep-score?date=${encodeURIComponent(dateStr)}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  })
-  const payload = await response.json().catch(() => ({}))
-
-  if (!response.ok) {
-    return normalizeSleepResult({
-      status: 'error',
-      date: dateStr,
-      error: payload?.error || `HTTP ${response.status}`,
-    }, dateStr)
-  }
-
-  return normalizeSleepResult(payload, dateStr)
 }

@@ -359,3 +359,45 @@ test('backfillMissingSleepScores leaves blank Garmin dates blank', async () => {
     sleepScoreSyncedAt: null,
   })
 })
+
+test('backfillMissingSleepScores updates id-less legacy entries independently', async () => {
+  useMorningStore.setState({
+    entries: [
+      { date: '2026-05-06', sleepScore: null, note: 'first legacy entry' },
+      { date: '2026-05-05', sleepScore: null, note: 'second legacy entry' },
+    ],
+    cloudReady: false,
+    cloudUserId: null,
+    lastSaveError: null,
+    lastSavedAt: null,
+  })
+
+  const result = await useMorningStore.getState().backfillMissingSleepScores(async (date) => ({
+    status: 'ok',
+    date,
+    sleepScore: date === '2026-05-06' ? 77 : 93,
+    source: 'garmin',
+    lastUpdated: '2026-05-10T12:00:00.000Z',
+    error: '',
+  }))
+
+  assert.deepEqual(result, { checked: 2, synced: 2, empty: 0, failed: 0 })
+  assert.deepEqual(useMorningStore.getState().entries, [
+    {
+      date: '2026-05-06',
+      sleepScore: 77,
+      note: 'first legacy entry',
+      sleepScoreSource: 'garmin',
+      sleepScoreDate: '2026-05-06',
+      sleepScoreSyncedAt: '2026-05-10T12:00:00.000Z',
+    },
+    {
+      date: '2026-05-05',
+      sleepScore: 93,
+      note: 'second legacy entry',
+      sleepScoreSource: 'garmin',
+      sleepScoreDate: '2026-05-05',
+      sleepScoreSyncedAt: '2026-05-10T12:00:00.000Z',
+    },
+  ])
+})

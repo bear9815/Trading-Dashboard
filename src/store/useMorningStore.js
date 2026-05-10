@@ -253,19 +253,21 @@ export const useMorningStore = create((set, get) => ({
   },
 
   backfillMissingSleepScores: async (loadSleepScore = fetchGarminSleepScore) => {
-    const missingEntries = get().entries.filter(entry => entry?.date && !hasSleepScore(entry))
+    const missingEntries = get().entries
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => entry?.date && !hasSleepScore(entry))
     let synced = 0
     let empty = 0
     let failed = 0
     let nextEntries = get().entries
 
-    for (const entry of missingEntries) {
+    for (const { entry, index } of missingEntries) {
       const result = await loadSleepScore(entry.date)
 
       if (result.status === 'ok') {
         synced += 1
-        nextEntries = nextEntries.map(current =>
-          current.id === entry.id ? applySleepScore(current, result) : current
+        nextEntries = nextEntries.map((current, currentIndex) =>
+          currentIndex === index ? applySleepScore(current, result) : current
         )
       } else if (result.status === 'empty') {
         empty += 1
