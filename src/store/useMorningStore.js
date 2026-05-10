@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { supabase } from '../lib/supabase.js'
 import { readDurableJson, writeDurableJson } from '../utils/durableLocalJson.js'
+import { fetchGarminSleepScore } from '../utils/garminSleepClient.js'
 
 const MORNING_STORAGE_KEY = 'risk-tool-morning'
 const MORNING_RESCUE_STORAGE_KEY = `${MORNING_STORAGE_KEY}:backup`
@@ -26,6 +27,22 @@ function entryTime(entry = {}) {
 function entryIdentity(entry = {}) {
   if (entry.id) return String(entry.id)
   return [entry.date, entry.createdAt, entry.gameplan, entry.priorDayNotes].filter(Boolean).join('|')
+}
+
+function hasSleepScore(entry = {}) {
+  const score = entry?.sleepScore
+  if (score === null || score === undefined || score === '') return false
+  return Number.isFinite(Number(score))
+}
+
+function applySleepScore(entry, result) {
+  return {
+    ...entry,
+    sleepScore: result.sleepScore,
+    sleepScoreSource: 'garmin',
+    sleepScoreDate: result.date,
+    sleepScoreSyncedAt: result.lastUpdated || new Date().toISOString(),
+  }
 }
 
 export function mergeMorningEntries({ localEntries = [], cloudEntries = [] } = {}) {
@@ -233,5 +250,40 @@ export const useMorningStore = create((set, get) => ({
 
   getEntryByDate(dateStr) {
     return get().entries.find(e => e.date === dateStr) ?? null
+  },
+
+  backfillMissingSleepScores: async (loadSleepScore = fetchGarminSleepScore) => {
+    const missingEntries = get().entries.filter(entry => entry?.date && !hasSleepScore(entry))
+    let synced = 0
+    let empty = 0
+    let failed = 0
+    let nextEntries = get().entries
+
+    for (const entry of missingEntries) {
+      const result = await loadSleepScore(entry.date)
+
+      if (result.status === 'ok') {
+        synced += 1
+        nextEntries = nextEntries.map(current =>
+          current.id === entry.id ? applySleepScore(current, result) : current
+        )
+      } else if (result.status === 'empty') {
+        empty += 1
+      } else {
+        failed += 1
+      }
+    }
+
+    if (synced > 0) {
+      set({ entries: nextEntries })
+      await get()._sync()
+    }
+
+    return {
+      checked: missingEntries.length,
+      synced,
+      empty,
+      failed,
+    }
   },
 }))

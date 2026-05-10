@@ -282,3 +282,66 @@ test('mergeMorningEntries preserves local-only entries and chooses the newest du
   assert.deepEqual(merged.map(entry => entry.id), ['morning-local', 'morning-shared', 'morning-cloud'])
   assert.equal(merged.find(entry => entry.id === 'morning-shared').gameplan, 'Newer local plan.')
 })
+
+test('backfillMissingSleepScores fills only entries that are missing a Garmin sleep score', async () => {
+  useMorningStore.setState({
+    entries: [
+      { id: 'morning-a', date: '2026-05-09', sleepScore: null },
+      { id: 'morning-b', date: '2026-05-08', sleepScore: 84, sleepScoreSource: 'garmin' },
+    ],
+    cloudReady: false,
+    cloudUserId: null,
+    lastSaveError: null,
+    lastSavedAt: null,
+  })
+
+  const result = await useMorningStore.getState().backfillMissingSleepScores(async (date) => {
+    if (date === '2026-05-09') {
+      return {
+        status: 'ok',
+        date,
+        sleepScore: 91,
+        source: 'garmin',
+        lastUpdated: '2026-05-10T12:00:00.000Z',
+        error: '',
+      }
+    }
+
+    return {
+      status: 'empty',
+      date,
+      sleepScore: null,
+      source: 'garmin',
+      lastUpdated: null,
+      error: '',
+    }
+  })
+
+  assert.deepEqual(result, { checked: 1, synced: 1, empty: 0, failed: 0 })
+  assert.equal(useMorningStore.getState().entries.find(entry => entry.id === 'morning-a').sleepScore, 91)
+  assert.equal(useMorningStore.getState().entries.find(entry => entry.id === 'morning-b').sleepScore, 84)
+})
+
+test('backfillMissingSleepScores leaves blank Garmin dates blank', async () => {
+  useMorningStore.setState({
+    entries: [
+      { id: 'morning-c', date: '2026-05-07', sleepScore: null },
+    ],
+    cloudReady: false,
+    cloudUserId: null,
+    lastSaveError: null,
+    lastSavedAt: null,
+  })
+
+  const result = await useMorningStore.getState().backfillMissingSleepScores(async (date) => ({
+    status: 'empty',
+    date,
+    sleepScore: null,
+    source: 'garmin',
+    lastUpdated: null,
+    error: '',
+  }))
+
+  assert.deepEqual(result, { checked: 1, synced: 0, empty: 1, failed: 0 })
+  assert.equal(useMorningStore.getState().entries[0].sleepScore, null)
+})
