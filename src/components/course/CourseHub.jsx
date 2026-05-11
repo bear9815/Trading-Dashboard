@@ -1,6 +1,12 @@
 import { useRef, useState } from 'react'
 import { Brain, FolderOpen, Search, Upload } from 'lucide-react'
 import { useCourseStore } from '../../store/useCourseStore.js'
+import {
+  buildAttachedSourceFileMap,
+  getAttachedSourceFilesSession,
+  getLessonPreviewPath,
+  setAttachedSourceFilesSession,
+} from './courseHubSession.js'
 
 const COACHING_MODES = [
   'course-faithful',
@@ -18,7 +24,7 @@ export default function CourseHub() {
     importManifest,
     setActiveCoachingMode,
   } = useCourseStore()
-  const [attachedFiles, setAttachedFiles] = useState({})
+  const [attachedFiles, setAttachedFiles] = useState(() => getAttachedSourceFilesSession())
 
   const attachedEntries = Object.entries(attachedFiles)
   const lessonCountLabel = `${lessons.length} lesson${lessons.length === 1 ? '' : 's'}`
@@ -33,12 +39,9 @@ export default function CourseHub() {
   }
 
   function handleSourceFolder(event) {
-    const files = Array.from(event.target.files || [])
-    const nextFiles = Object.fromEntries(
-      files.map(file => [file.webkitRelativePath || file.name, file])
-    )
-
-    setAttachedFiles(nextFiles)
+    const nextFiles = buildAttachedSourceFileMap(event.target.files)
+    const storedFiles = setAttachedSourceFilesSession(nextFiles)
+    setAttachedFiles(storedFiles)
     event.target.value = ''
   }
 
@@ -159,7 +162,7 @@ export default function CourseHub() {
                     </p>
                     <p className="mt-2 text-sm font-medium text-white">{lesson.title}</p>
                     <p className="mt-1 text-xs text-gray-400">
-                      {lesson.transcriptPath || lesson.videoPath || 'Transcript and source paths load from the imported manifest.'}
+                      {getLessonPreviewPath(lesson)}
                     </p>
                   </div>
                 ))}

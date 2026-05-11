@@ -22,3 +22,20 @@ test('Course Hub is routable and exposes manifest import plus source-folder atta
   assert.match(hubSource, /Attach Source Folder/)
   assert.match(hubSource, /webkitdirectory/)
 })
+
+test('Course Hub preview uses normalized lesson contract fields instead of legacy path names', () => {
+  const hubSource = fs.readFileSync(hubPath, 'utf8')
+
+  assert.doesNotMatch(hubSource, /lesson\.transcriptPath/)
+  assert.doesNotMatch(hubSource, /lesson\.videoPath/)
+  assert.match(hubSource, /assetPaths|sourceRelativePath|getLessonPreviewPath/)
+})
+
+test('Course Hub source-folder attachments are wired for session reuse rather than component-only state', () => {
+  const hubSource = fs.readFileSync(hubPath, 'utf8')
+
+  assert.match(hubSource, /useState\(\(\)\s*=>\s*getAttachedSourceFilesSession\(\)\)/)
+  assert.match(hubSource, /buildAttachedSourceFileMap/)
+  assert.match(hubSource, /getAttachedSourceFilesSession/)
+  assert.match(hubSource, /setAttachedSourceFilesSession/)
+})
