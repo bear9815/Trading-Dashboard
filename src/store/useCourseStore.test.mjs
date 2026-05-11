@@ -61,12 +61,21 @@ test('watched, reflected, and applied actions stamp lesson progress in order', (
 
   const store = useCourseStore.getState()
   store.markLessonWatched('lesson-01-state-management')
-  store.saveLessonReflection('lesson-01-state-management', 'My exits tighten when I feel urgency.')
-  store.markLessonApplied('lesson-01-state-management')
+  const watchedLesson = useCourseStore.getState().lessons[0]
+  assert.equal(typeof watchedLesson.watchedAt, 'string')
+  assert.equal(watchedLesson.reflectedAt, null)
+  assert.equal(watchedLesson.appliedAt, null)
 
-  const lesson = useCourseStore.getState().lessons[0]
-  assert.equal(typeof lesson.watchedAt, 'string')
-  assert.equal(lesson.reflectionText, 'My exits tighten when I feel urgency.')
-  assert.equal(typeof lesson.reflectedAt, 'string')
-  assert.equal(typeof lesson.appliedAt, 'string')
+  store.saveLessonReflection('lesson-01-state-management', 'My exits tighten when I feel urgency.')
+  const reflectedLesson = useCourseStore.getState().lessons[0]
+  assert.equal(reflectedLesson.watchedAt, watchedLesson.watchedAt)
+  assert.equal(typeof reflectedLesson.reflectedAt, 'string')
+  assert.equal(reflectedLesson.appliedAt, null)
+  assert.equal(reflectedLesson.reflectionText, 'My exits tighten when I feel urgency.')
+
+  store.markLessonApplied('lesson-01-state-management')
+  const appliedLesson = useCourseStore.getState().lessons[0]
+  assert.equal(appliedLesson.watchedAt, watchedLesson.watchedAt)
+  assert.equal(appliedLesson.reflectedAt, reflectedLesson.reflectedAt)
+  assert.equal(typeof appliedLesson.appliedAt, 'string')
 })
