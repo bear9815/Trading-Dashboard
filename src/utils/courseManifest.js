@@ -66,10 +66,11 @@ export function normalizeCourseManifest(rawManifest = {}) {
   const lessons = (Array.isArray(rawManifest.lessons) ? rawManifest.lessons : [])
     .map(normalizeLesson)
     .sort((a, b) => a.sequenceNumber - b.sequenceNumber)
+  const normalizedCourseId = String(rawManifest.courseId || '').trim()
   const normalizedCourseTitle = String(rawManifest.courseTitle || '').trim()
 
   return {
-    courseId: rawManifest.courseId || 'rande-howell-course',
+    courseId: normalizedCourseId || 'rande-howell-course',
     courseTitle: normalizedCourseTitle || 'Rande Howell Course',
     importedAt: new Date().toISOString(),
     lessons,
