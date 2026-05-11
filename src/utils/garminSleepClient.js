@@ -1,6 +1,3 @@
-import { supabase } from '../lib/supabase.js'
-import { useAuthStore } from '../store/useAuthStore.js'
-
 function normalizeSleepResult(payload, requestedDate) {
   const status = payload?.status === 'ok'
     ? 'ok'
@@ -23,33 +20,9 @@ function normalizeSleepResult(payload, requestedDate) {
   }
 }
 
-async function getAccessToken(authClient = supabase) {
-  const sessionToken = useAuthStore.getState().session?.access_token
-  if (sessionToken) return sessionToken
-
-  const fallbackSession = await authClient?.auth.getSession()
-  return fallbackSession?.data?.session?.access_token || ''
-}
-
-export async function fetchGarminSleepScore(dateStr, fetchImpl = fetch, options = {}) {
+export async function fetchGarminSleepScore(dateStr, fetchImpl = fetch) {
   try {
-    const accessToken = await getAccessToken(options.authClient)
-    if (!accessToken) {
-      return normalizeSleepResult({
-        status: 'error',
-        date: dateStr,
-        sleepScore: null,
-        source: 'garmin',
-        lastUpdated: null,
-        error: 'Sign in to sync Garmin sleep score',
-      }, dateStr)
-    }
-
-    const response = await fetchImpl(`/api/garmin/sleep-score?date=${encodeURIComponent(dateStr)}`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    })
+    const response = await fetchImpl(`/api/garmin/sleep-score?date=${encodeURIComponent(dateStr)}`)
     const payload = await response.json().catch(() => ({}))
 
     if (!response.ok) {

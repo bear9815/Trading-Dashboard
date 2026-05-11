@@ -1,11 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import {
-  extractSleepScoreForDate,
-  parseKvJson,
-  readHealthMetrics,
-} from '../../api/_lib/healthMetricsKv.js'
+import { extractSleepScoreForDate, parseKvJson } from '../../api/_lib/healthMetricsKv.js'
 import {
   default as sleepScoreHandler,
   normalizeSleepScoreResponse,
@@ -36,21 +32,10 @@ function createMockRes() {
 }
 
 const originalEnv = {
-  GARMIN_HEALTH_KV_REST_API_URL: process.env.GARMIN_HEALTH_KV_REST_API_URL,
-  GARMIN_HEALTH_KV_REST_API_TOKEN: process.env.GARMIN_HEALTH_KV_REST_API_TOKEN,
-  GARMIN_HEALTH_ALLOWED_USER_ID: process.env.GARMIN_HEALTH_ALLOWED_USER_ID,
-  GARMIN_HEALTH_ALLOWED_EMAIL: process.env.GARMIN_HEALTH_ALLOWED_EMAIL,
-  SUPABASE_URL: process.env.SUPABASE_URL,
-  SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
-  VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL,
-  VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY,
-  KV_REST_API_URL: process.env.KV_REST_API_URL,
-  KV_REST_API_TOKEN: process.env.KV_REST_API_TOKEN,
-  UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
-  UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
+  WHOOP_DASHBOARD_URL: process.env.WHOOP_DASHBOARD_URL,
 }
 
-function restoreKvEnv() {
+function restoreEnv() {
   for (const [key, value] of Object.entries(originalEnv)) {
     if (value === undefined) delete process.env[key]
     else process.env[key] = value
@@ -89,22 +74,6 @@ test('parseKvJson unwraps nested JSON strings from Upstash responses', () => {
   })
 })
 
-test('readHealthMetrics requires explicit Garmin KV env vars', async () => {
-  try {
-    process.env.KV_REST_API_URL = 'https://example-upstash.test'
-    process.env.KV_REST_API_TOKEN = 'generic-token'
-    delete process.env.GARMIN_HEALTH_KV_REST_API_URL
-    delete process.env.GARMIN_HEALTH_KV_REST_API_TOKEN
-
-    await assert.rejects(
-      readHealthMetrics(),
-      /Garmin health KV env vars are not configured/
-    )
-  } finally {
-    restoreKvEnv()
-  }
-})
-
 test('normalizeSleepScoreResponse emits the ok contract for Garmin data', () => {
   assert.deepEqual(
     normalizeSleepScoreResponse('2026-05-09', 91, '2026-05-10T12:00:00.000Z'),
@@ -131,56 +100,35 @@ test('normalizeSleepScoreResponse emits the empty contract for missing Garmin da
   )
 })
 
-test('sleep score handler returns a real 200 contract for nested Upstash Garmin data', async () => {
+test('sleep score handler returns a real 200 contract for Whoop dashboard daily data', async () => {
   const originalFetch = global.fetch
   try {
-    process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
-    process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
-    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
-    process.env.VITE_SUPABASE_URL = 'https://example-supabase.test'
-    process.env.VITE_SUPABASE_ANON_KEY = 'anon-key'
-    global.fetch = async (url, options = {}) => {
-      if (url === 'https://example-supabase.test/auth/v1/user') {
-        assert.equal(options.headers.Authorization, 'Bearer valid-token')
-        assert.equal(options.headers.apikey, 'anon-key')
-        return {
-          ok: true,
-          async json() {
-            return { id: 'user-123' }
-          },
-        }
+    process.env.WHOOP_DASHBOARD_URL = 'https://whoop.example.test'
+    global.fetch = async (url) => {
+      assert.equal(url, 'https://whoop.example.test/api/data')
+      return {
+        ok: true,
+        async json() {
+          return {
+            daily_data: [
+              { date: '2026-05-09', sleep_score: 91 },
+            ],
+            last_updated: '2026-05-10T12:00:00.000Z',
+          }
+        },
       }
-
-      if (url === 'https://example-garmin-kv.test/get/health_metrics') {
-        return {
-          ok: true,
-          async json() {
-            return {
-              result: JSON.stringify(JSON.stringify({
-                daily_data: [
-                  { date: '2026-05-09', sleep_score: 91 },
-                ],
-                last_updated: '2026-05-10T12:00:00.000Z',
-              })),
-            }
-          },
-        }
-      }
-
-      throw new Error(`Unexpected fetch URL: ${url}`)
     }
 
     const req = {
       method: 'GET',
       query: { date: '2026-05-09' },
-      headers: { authorization: 'Bearer valid-token' },
+      headers: {},
     }
     const res = createMockRes()
 
     await sleepScoreHandler(req, res)
 
     assert.equal(res.statusCode, 200)
-    assert.notEqual(res.headers['Access-Control-Allow-Origin'], '*')
     assert.deepEqual(res.body, {
       status: 'ok',
       date: '2026-05-09',
@@ -190,186 +138,29 @@ test('sleep score handler returns a real 200 contract for nested Upstash Garmin 
     })
   } finally {
     global.fetch = originalFetch
-    restoreKvEnv()
+    restoreEnv()
   }
 })
 
-test('sleep score handler returns a normalized 401 contract when Authorization is missing', async () => {
+test('sleep score handler returns a normalized 400 contract for invalid dates', async () => {
   const req = {
     method: 'GET',
-    query: { date: '2026-05-09' },
+    query: { date: '2026-99-99' },
     headers: {},
   }
   const res = createMockRes()
 
   await sleepScoreHandler(req, res)
 
-  assert.equal(res.statusCode, 401)
-  assert.notEqual(res.headers['Access-Control-Allow-Origin'], '*')
+  assert.equal(res.statusCode, 400)
   assert.deepEqual(res.body, {
     status: 'error',
-    date: '2026-05-09',
+    date: '2026-99-99',
     sleepScore: null,
     source: 'garmin',
-    error: 'Authorization header is required',
+    error: 'date must be YYYY-MM-DD',
     lastUpdated: null,
   })
-})
-
-test('sleep score handler returns a normalized 401 contract for an invalid Supabase token lookup', async () => {
-  const originalFetch = global.fetch
-  try {
-    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
-    process.env.SUPABASE_URL = 'https://example-supabase.test'
-    process.env.SUPABASE_ANON_KEY = 'anon-key'
-    global.fetch = async (url, options = {}) => {
-      assert.equal(url, 'https://example-supabase.test/auth/v1/user')
-      assert.equal(options.headers.Authorization, 'Bearer invalid-token')
-      assert.equal(options.headers.apikey, 'anon-key')
-      return {
-        ok: false,
-        status: 401,
-        async json() {
-          return { message: 'Invalid token' }
-        },
-      }
-    }
-
-    const req = {
-      method: 'GET',
-      query: { date: '2026-05-09' },
-      headers: { authorization: 'Bearer invalid-token' },
-    }
-    const res = createMockRes()
-
-    await sleepScoreHandler(req, res)
-
-    assert.equal(res.statusCode, 401)
-    assert.notEqual(res.headers['Access-Control-Allow-Origin'], '*')
-    assert.deepEqual(res.body, {
-      status: 'error',
-      date: '2026-05-09',
-      sleepScore: null,
-      source: 'garmin',
-      error: 'Invalid or expired token',
-      lastUpdated: null,
-    })
-  } finally {
-    global.fetch = originalFetch
-    restoreKvEnv()
-  }
-})
-
-test('sleep score handler returns a normalized 403 contract for an authenticated but unauthorized user', async () => {
-  const originalFetch = global.fetch
-  try {
-    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'owner-123'
-    process.env.SUPABASE_URL = 'https://example-supabase.test'
-    process.env.SUPABASE_ANON_KEY = 'anon-key'
-    global.fetch = async () => ({
-      ok: true,
-      async json() {
-        return { id: 'user-456', email: 'someone@example.com' }
-      },
-    })
-
-    const req = {
-      method: 'GET',
-      query: { date: '2026-05-09' },
-      headers: { authorization: 'Bearer valid-non-owner-token' },
-    }
-    const res = createMockRes()
-
-    await sleepScoreHandler(req, res)
-
-    assert.equal(res.statusCode, 403)
-    assert.deepEqual(res.body, {
-      status: 'error',
-      date: '2026-05-09',
-      sleepScore: null,
-      source: 'garmin',
-      error: 'You are not authorized to access Garmin sleep data',
-      lastUpdated: null,
-    })
-  } finally {
-    global.fetch = originalFetch
-    restoreKvEnv()
-  }
-})
-
-test('sleep score handler returns a normalized 502 contract when Supabase auth is rate limited', async () => {
-  const originalFetch = global.fetch
-  try {
-    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
-    process.env.SUPABASE_URL = 'https://example-supabase.test'
-    process.env.SUPABASE_ANON_KEY = 'anon-key'
-    global.fetch = async () => ({
-      ok: false,
-      status: 429,
-      async json() {
-        return { message: 'Too many requests' }
-      },
-    })
-
-    const req = {
-      method: 'GET',
-      query: { date: '2026-05-09' },
-      headers: { authorization: 'Bearer valid-token' },
-    }
-    const res = createMockRes()
-
-    await sleepScoreHandler(req, res)
-
-    assert.equal(res.statusCode, 502)
-    assert.deepEqual(res.body, {
-      status: 'error',
-      date: '2026-05-09',
-      sleepScore: null,
-      source: 'garmin',
-      error: 'Unable to validate Supabase token',
-      lastUpdated: null,
-    })
-  } finally {
-    global.fetch = originalFetch
-    restoreKvEnv()
-  }
-})
-
-test('sleep score handler returns a normalized 400 contract for invalid dates', async () => {
-  const originalFetch = global.fetch
-  try {
-    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
-    process.env.VITE_SUPABASE_URL = 'https://example-supabase.test'
-    process.env.VITE_SUPABASE_ANON_KEY = 'anon-key'
-    global.fetch = async () => ({
-      ok: true,
-      async json() {
-        return { id: 'user-123' }
-      },
-    })
-
-    const req = {
-      method: 'GET',
-      query: { date: '2026-99-99' },
-      headers: { authorization: 'Bearer valid-token' },
-    }
-    const res = createMockRes()
-
-    await sleepScoreHandler(req, res)
-
-    assert.equal(res.statusCode, 400)
-    assert.deepEqual(res.body, {
-      status: 'error',
-      date: '2026-99-99',
-      sleepScore: null,
-      source: 'garmin',
-      error: 'date must be YYYY-MM-DD',
-      lastUpdated: null,
-    })
-  } finally {
-    global.fetch = originalFetch
-    restoreKvEnv()
-  }
 })
 
 test('sleep score handler returns a normalized 405 contract for invalid methods', async () => {
@@ -392,31 +183,38 @@ test('sleep score handler returns a normalized 405 contract for invalid methods'
   })
 })
 
+test('sleep score handler returns 502 when the Whoop dashboard URL is not configured', async () => {
+  const req = {
+    method: 'GET',
+    query: { date: '2026-05-09' },
+  }
+  const res = createMockRes()
+
+  await sleepScoreHandler(req, res)
+
+  assert.equal(res.statusCode, 502)
+  assert.deepEqual(res.body, {
+    status: 'error',
+    date: '2026-05-09',
+    sleepScore: null,
+    source: 'garmin',
+    error: 'Whoop dashboard URL is not configured',
+    lastUpdated: null,
+  })
+})
+
 test('sleep score handler returns a normalized 502 contract for upstream failures', async () => {
   const originalFetch = global.fetch
   try {
-    process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
-    process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
-    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
-    process.env.VITE_SUPABASE_URL = 'https://example-supabase.test'
-    process.env.VITE_SUPABASE_ANON_KEY = 'anon-key'
-    global.fetch = async (url) => {
-      if (url === 'https://example-supabase.test/auth/v1/user') {
-        return {
-          ok: true,
-          async json() {
-            return { id: 'user-123' }
-          },
-        }
-      }
-
+    process.env.WHOOP_DASHBOARD_URL = 'https://whoop.example.test'
+    global.fetch = async () => {
       throw new Error('network unavailable')
     }
 
     const req = {
       method: 'GET',
       query: { date: '2026-05-09' },
-      headers: { authorization: 'Bearer valid-token' },
+      headers: {},
     }
     const res = createMockRes()
 
@@ -433,40 +231,24 @@ test('sleep score handler returns a normalized 502 contract for upstream failure
     })
   } finally {
     global.fetch = originalFetch
-    restoreKvEnv()
+    restoreEnv()
   }
 })
 
-test('sleep score handler returns 502 when the KV payload is missing or malformed', async () => {
+test('sleep score handler returns 502 when the Whoop payload is missing or malformed', async () => {
   const originalFetch = global.fetch
   try {
-    process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
-    process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
-    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
-    process.env.SUPABASE_URL = 'https://example-supabase.test'
-    process.env.SUPABASE_ANON_KEY = 'anon-key'
-    global.fetch = async (url) => {
-      if (url === 'https://example-supabase.test/auth/v1/user') {
-        return {
-          ok: true,
-          async json() {
-            return { id: 'user-123' }
-          },
-        }
-      }
-
-      return {
-        ok: true,
-        async json() {
-          return {}
-        },
-      }
-    }
+    process.env.WHOOP_DASHBOARD_URL = 'https://whoop.example.test'
+    global.fetch = async () => ({
+      ok: true,
+      async json() {
+        return {}
+      },
+    })
 
     const req = {
       method: 'GET',
       query: { date: '2026-05-09' },
-      headers: { authorization: 'Bearer valid-token' },
     }
     const res = createMockRes()
 
@@ -478,50 +260,32 @@ test('sleep score handler returns 502 when the KV payload is missing or malforme
       date: '2026-05-09',
       sleepScore: null,
       source: 'garmin',
-      error: 'Health metrics KV payload is invalid',
+      error: 'Whoop dashboard payload is invalid',
       lastUpdated: null,
     })
   } finally {
     global.fetch = originalFetch
-    restoreKvEnv()
+    restoreEnv()
   }
 })
 
-test('sleep score handler returns 502 when the KV payload object lacks a valid daily_data array', async () => {
+test('sleep score handler returns 502 when the Whoop payload object lacks a valid daily_data array', async () => {
   const originalFetch = global.fetch
   try {
-    process.env.GARMIN_HEALTH_KV_REST_API_URL = 'https://example-garmin-kv.test'
-    process.env.GARMIN_HEALTH_KV_REST_API_TOKEN = 'secret-token'
-    process.env.GARMIN_HEALTH_ALLOWED_USER_ID = 'user-123'
-    process.env.VITE_SUPABASE_URL = 'https://example-supabase.test'
-    process.env.VITE_SUPABASE_ANON_KEY = 'anon-key'
-    global.fetch = async (url) => {
-      if (url === 'https://example-supabase.test/auth/v1/user') {
+    process.env.WHOOP_DASHBOARD_URL = 'https://whoop.example.test'
+    global.fetch = async () => ({
+      ok: true,
+      async json() {
         return {
-          ok: true,
-          async json() {
-            return { id: 'user-123' }
-          },
+          last_updated: '2026-05-10T12:00:00.000Z',
+          daily_data: 'oops',
         }
-      }
-
-      return {
-        ok: true,
-        async json() {
-          return {
-            result: JSON.stringify({
-              last_updated: '2026-05-10T12:00:00.000Z',
-              daily_data: 'oops',
-            }),
-          }
-        },
-      }
-    }
+      },
+    })
 
     const req = {
       method: 'GET',
       query: { date: '2026-05-09' },
-      headers: { authorization: 'Bearer valid-token' },
     }
     const res = createMockRes()
 
@@ -533,11 +297,11 @@ test('sleep score handler returns 502 when the KV payload object lacks a valid d
       date: '2026-05-09',
       sleepScore: null,
       source: 'garmin',
-      error: 'Health metrics KV payload is invalid',
+      error: 'Whoop dashboard payload is invalid',
       lastUpdated: null,
     })
   } finally {
     global.fetch = originalFetch
-    restoreKvEnv()
+    restoreEnv()
   }
 })
