@@ -19,6 +19,7 @@ const hubPath = fileURLToPath(new URL('./CourseHub.jsx', import.meta.url))
 const renderedHubArtifactPath = fileURLToPath(new URL('./.coursehub-render-test.mjs', import.meta.url))
 const renderedHubStoreStubPath = fileURLToPath(new URL('./.coursehub-store-stub.mjs', import.meta.url))
 const renderedHubLessonViewStubPath = fileURLToPath(new URL('./.coursehub-lesson-view-stub.mjs', import.meta.url))
+const renderedHubCoachPanelStubPath = fileURLToPath(new URL('./.coursehub-coach-panel-stub.mjs', import.meta.url))
 
 function resetCourseHubState() {
   clearAttachedSourceFilesSession()
@@ -45,6 +46,7 @@ async function loadCourseHubComponent() {
     .readFileSync(hubPath, 'utf8')
     .replace('../../store/useCourseStore.js', './.coursehub-store-stub.mjs')
     .replace('./CourseLessonView.jsx', './.coursehub-lesson-view-stub.mjs')
+    .replace('./CourseCoachPanel.jsx', './.coursehub-coach-panel-stub.mjs')
 
   const transformed = await transform(hubSource, {
     sourcefile: hubPath,
@@ -60,6 +62,10 @@ async function loadCourseHubComponent() {
   fs.writeFileSync(
     renderedHubLessonViewStubPath,
     'import { createElement } from "react"\nexport default function CourseLessonView() { return createElement("section", null, "Lesson workspace") }\n'
+  )
+  fs.writeFileSync(
+    renderedHubCoachPanelStubPath,
+    'import { createElement } from "react"\nexport default function CourseCoachPanel() { return createElement("aside", null, "Course coach panel") }\n'
   )
   fs.writeFileSync(renderedHubArtifactPath, transformed.code)
 
@@ -91,6 +97,7 @@ test.after(() => {
   fs.rmSync(renderedHubArtifactPath, { force: true })
   fs.rmSync(renderedHubStoreStubPath, { force: true })
   fs.rmSync(renderedHubLessonViewStubPath, { force: true })
+  fs.rmSync(renderedHubCoachPanelStubPath, { force: true })
 })
 
 test('Course Hub renders the empty import shell when no lessons are loaded', async () => {
@@ -145,6 +152,8 @@ test('Course Hub renders normalized lesson preview content and session attachmen
   const markup = await renderCourseHubMarkup()
 
   assert.match(markup, /Imported lessons/)
+  assert.match(markup, /Course coach panel/)
+  assert.match(markup, /Lesson workspace/)
   assert.match(markup, /Tape Reading Foundations/)
   assert.match(markup, /videos\/tape-reading-foundations\.mp4/)
   assert.match(markup, /1 lesson/)
@@ -182,5 +191,6 @@ test('Course Hub routes manifest parsing failures into local inline shell feedba
   assert.match(hubSource, /parseManifestImportText/)
   assert.match(hubSource, /reconcileAttachedSourceFilesSession/)
   assert.match(hubSource, /setManifestImportError/)
+  assert.match(hubSource, /CourseCoachPanel/)
   assert.match(hubSource, /role="alert"/)
 })

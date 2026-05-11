@@ -3,6 +3,7 @@ import { Brain, FolderOpen, Search, Upload } from 'lucide-react'
 import { useCourseStore } from '../../store/useCourseStore.js'
 import { getLessonCompletionStage } from '../../utils/courseManifest.js'
 import { filterCourseLessons } from '../../utils/courseSearch.js'
+import CourseCoachPanel from './CourseCoachPanel.jsx'
 import CourseLessonView from './CourseLessonView.jsx'
 import {
   buildAttachedSourceFileMap,
@@ -188,7 +189,7 @@ export default function CourseHub() {
             </p>
           </section>
         ) : (
-          <section className="grid gap-6 xl:grid-cols-[minmax(280px,0.78fr)_minmax(0,1.22fr)]">
+          <section className="grid gap-6 xl:grid-cols-[minmax(280px,0.72fr)_minmax(0,1.08fr)_minmax(320px,0.9fr)]">
             <div className="space-y-6">
               <div className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6">
                 <div className="flex flex-col gap-4">
@@ -332,6 +333,12 @@ export default function CourseHub() {
               markLessonWatched={markLessonWatched}
               saveLessonReflection={saveLessonReflection}
               markLessonApplied={markLessonApplied}
+            />
+
+            <CourseCoachPanel
+              lessons={lessons}
+              activeLesson={activeLesson}
+              mode={coachingSettings.activeMode}
             />
           </section>
         )}
