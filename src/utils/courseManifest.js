@@ -28,8 +28,10 @@ function normalizeLesson(rawLesson = {}, index = 0) {
   const lessonPrefix = `lesson-${String(sequenceNumber).padStart(2, '0')}`
   const baseSlug = normalizedTitle ? slugify(title) : ''
   const bareLessonSlugPattern = new RegExp(`^lesson-0*${sequenceNumber}$`)
+  const bareNumericSlugPattern = new RegExp(`^0*${sequenceNumber}$`)
   const slugSuffix = (
     bareLessonSlugPattern.test(baseSlug)
+    || bareNumericSlugPattern.test(baseSlug)
   )
     ? ''
     : baseSlug.replace(/^lesson-\d+-/, '')

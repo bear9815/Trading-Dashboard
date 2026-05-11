@@ -69,13 +69,13 @@ test('normalizeCourseManifest keeps bare numbered lesson titles on the clean seq
   const manifest = normalizeCourseManifest({
     lessons: [
       {
-        title: 'Lesson 01',
+        title: '01',
         sequenceNumber: 1,
       },
     ],
   })
 
-  assert.equal(manifest.lessons[0].title, 'Lesson 01')
+  assert.equal(manifest.lessons[0].title, '01')
   assert.equal(manifest.lessons[0].id, 'lesson-01')
   assert.equal(manifest.lessons[0].slug, 'lesson-01')
 })
