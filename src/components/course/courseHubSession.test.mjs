@@ -67,6 +67,22 @@ test('reconcileAttachedSourceFilesSession preserves attachments when the importe
   assert.deepEqual(Object.keys(nextSession), ['module-a/Lesson 1.mp4'])
 })
 
+test('reconcileAttachedSourceFilesSession clears pre-import attachments before the first course is scoped', () => {
+  clearAttachedSourceFilesSession()
+
+  const staleAttachedFiles = buildAttachedSourceFileMap([
+    { name: 'Lesson 0.mp4', webkitRelativePath: 'pre-import/Lesson 0.mp4' },
+  ])
+
+  setAttachedSourceFilesSession(staleAttachedFiles)
+
+  const nextSession = reconcileAttachedSourceFilesSession('rande-pilot')
+
+  assert.equal(getAttachedSourceFilesSessionCourseId(), 'rande-pilot')
+  assert.deepEqual(nextSession, {})
+  assert.deepEqual(getAttachedSourceFilesSession(), {})
+})
+
 test('reconcileAttachedSourceFilesSession clears attachments when the imported course changes', () => {
   clearAttachedSourceFilesSession()
 

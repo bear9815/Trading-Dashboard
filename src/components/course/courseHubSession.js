@@ -32,8 +32,12 @@ export function clearAttachedSourceFilesSession() {
 
 export function reconcileAttachedSourceFilesSession(courseId = null) {
   const nextCourseId = courseId || null
+  const hasAttachedSourceFiles = Object.keys(attachedSourceFilesSession).length > 0
 
   if (!attachedSourceFilesSessionCourseId) {
+    if (hasAttachedSourceFiles && nextCourseId) {
+      attachedSourceFilesSession = {}
+    }
     attachedSourceFilesSessionCourseId = nextCourseId
     return attachedSourceFilesSession
   }

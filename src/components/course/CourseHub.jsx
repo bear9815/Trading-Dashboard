@@ -8,7 +8,7 @@ import {
   reconcileAttachedSourceFilesSession,
   setAttachedSourceFilesSession,
 } from './courseHubSession.js'
-import { parseManifestImportText } from './courseHubManifest.js'
+import { MANIFEST_IMPORT_ERROR, parseManifestImportText } from './courseHubManifest.js'
 
 const COACHING_MODES = [
   'course-faithful',
@@ -48,7 +48,7 @@ export default function CourseHub() {
       setAttachedFiles(reconcileAttachedSourceFilesSession(result.manifest.courseId))
       setManifestImportError('')
     } catch {
-      setManifestImportError('We couldn\'t import that manifest. Try again with a valid manifest.json file.')
+      setManifestImportError(MANIFEST_IMPORT_ERROR)
     } finally {
       event.target.value = ''
     }

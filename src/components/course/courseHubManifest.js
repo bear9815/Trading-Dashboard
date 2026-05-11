@@ -1,6 +1,6 @@
 import { normalizeCourseManifest } from '../../utils/courseManifest.js'
 
-const MANIFEST_IMPORT_ERROR = 'We couldn\'t import that manifest. Try again with a valid manifest.json file.'
+export const MANIFEST_IMPORT_ERROR = 'We couldn\'t import that manifest. Try again with a valid manifest.json file.'
 
 function isCourseManifestShape(value) {
   return Boolean(
