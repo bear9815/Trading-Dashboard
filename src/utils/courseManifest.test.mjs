@@ -34,9 +34,13 @@ test('normalizeCourseManifest converts raw lesson records into stable pilot less
   assert.equal(manifest.lessons[0].assetPaths.video, 'videos/Lesson 1.mp4')
 })
 
-test('normalizeCourseManifest falls back to the lesson number for whitespace-only titles', () => {
+test('normalizeCourseManifest falls back to the lesson sequence number for whitespace-only titles in unsorted input', () => {
   const manifest = normalizeCourseManifest({
     lessons: [
+      {
+        title: 'Lesson 2: Process',
+        sequenceNumber: 2,
+      },
       {
         title: '   ',
         sequenceNumber: 1,
@@ -49,6 +53,16 @@ test('normalizeCourseManifest falls back to the lesson number for whitespace-onl
   assert.equal(manifest.lessons[0].id, 'lesson-01')
   assert.equal(manifest.lessons[0].slug, 'lesson-01')
   assert.deepEqual(manifest.lessons[0].principles, ['State first'])
+  assert.equal(manifest.lessons[1].title, 'Lesson 2: Process')
+})
+
+test('normalizeCourseManifest falls back to the default course title for whitespace-only course titles', () => {
+  const manifest = normalizeCourseManifest({
+    courseTitle: '   ',
+    lessons: [],
+  })
+
+  assert.equal(manifest.courseTitle, 'Rande Howell Course')
 })
 
 test('getLessonCompletionStage reflects the watched → reflected → applied ladder', () => {

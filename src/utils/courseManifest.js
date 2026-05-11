@@ -22,7 +22,7 @@ function normalizeAssetPaths(assetPaths = {}) {
 
 function normalizeLesson(rawLesson = {}, index = 0) {
   const sequenceNumber = Number(rawLesson.sequenceNumber) || (index + 1)
-  const fallbackTitle = `Lesson ${index + 1}`
+  const fallbackTitle = `Lesson ${sequenceNumber}`
   const normalizedTitle = String(rawLesson.title || '').trim()
   const title = normalizedTitle || fallbackTitle
   const lessonPrefix = `lesson-${String(sequenceNumber).padStart(2, '0')}`
@@ -59,10 +59,11 @@ export function normalizeCourseManifest(rawManifest = {}) {
   const lessons = (Array.isArray(rawManifest.lessons) ? rawManifest.lessons : [])
     .map(normalizeLesson)
     .sort((a, b) => a.sequenceNumber - b.sequenceNumber)
+  const normalizedCourseTitle = String(rawManifest.courseTitle || '').trim()
 
   return {
     courseId: rawManifest.courseId || 'rande-howell-course',
-    courseTitle: String(rawManifest.courseTitle || 'Rande Howell Course').trim(),
+    courseTitle: normalizedCourseTitle || 'Rande Howell Course',
     importedAt: new Date().toISOString(),
     lessons,
   }
