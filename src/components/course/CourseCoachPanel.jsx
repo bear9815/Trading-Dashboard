@@ -111,11 +111,11 @@ export default function CourseCoachPanel({
       const nextAnswer = await askCourseCoach({
         question: nextQuestion,
         lessons,
-        lessonFocus: activeLesson?.title || 'All imported lessons',
+        lesson: activeLesson,
         mode,
         apiKey,
         behavior: {
-          recentJournalEntries,
+          recentJournal: recentJournalEntries,
           recentTradeLessons,
         },
       })

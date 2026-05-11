@@ -3,8 +3,16 @@ import assert from 'node:assert/strict'
 
 async function loadFilterCourseLessons() {
   try {
-    const module = await import('./courseSearch.js')
+    const module = await import(`./courseSearch.js?t=${Date.now()}`)
     return module.filterCourseLessons
+  } catch (error) {
+    assert.fail(`Expected courseSearch.js to exist: ${error.message}`)
+  }
+}
+
+async function loadCourseSearchModule() {
+  try {
+    return await import(`./courseSearch.js?t=${Date.now()}`)
   } catch (error) {
     assert.fail(`Expected courseSearch.js to exist: ${error.message}`)
   }
@@ -70,4 +78,56 @@ test('filterCourseLessons applies the selected topic filter when provided', asyn
   )
 
   assert.deepEqual(results.map(lesson => lesson.id), ['1'])
+})
+
+test('searchCourseTranscript ranks by transcript text rather than lesson metadata', async () => {
+  const { searchCourseTranscript } = await loadCourseSearchModule()
+
+  const results = await searchCourseTranscript(
+    'urgency',
+    [
+      {
+        id: '1',
+        title: 'Calm Process',
+        summary: 'Urgency everywhere',
+        topicTags: ['urgency'],
+        transcriptText: 'Breathe and wait for confirmation before acting.',
+      },
+      {
+        id: '2',
+        title: 'State Management',
+        summary: 'Neutral summary',
+        topicTags: ['discipline'],
+        transcriptText: 'Urgency makes traders cut winners before the setup matures.',
+      },
+    ],
+    '',
+    2
+  )
+
+  assert.deepEqual(results.map(result => result.lessonId), ['2'])
+})
+
+test('searchCourseTranscript returns no lexical fallback excerpts when the transcript has no match', async () => {
+  const { searchCourseTranscript } = await loadCourseSearchModule()
+
+  const results = await searchCourseTranscript(
+    'market internals',
+    [
+      {
+        id: '1',
+        title: 'State Management',
+        transcriptText: 'Breathe, slow down, and let the setup confirm itself.',
+      },
+      {
+        id: '2',
+        title: 'Exits',
+        transcriptText: 'Do not cut winners from urgency.',
+      },
+    ],
+    '',
+    3
+  )
+
+  assert.deepEqual(results, [])
 })

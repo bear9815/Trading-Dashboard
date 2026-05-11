@@ -30,15 +30,6 @@ function collectSearchFields(lesson = {}) {
   ]
 }
 
-function collectTranscriptSourceText(lesson = {}) {
-  return normalizeWhitespace([
-    lesson.transcriptText,
-    lesson.summary,
-    (lesson.principles || []).join('. '),
-    (lesson.drills || []).join('. '),
-  ].filter(Boolean).join(' '))
-}
-
 function countOccurrences(text, term) {
   if (!text || !term) return 0
   let count = 0
@@ -57,12 +48,7 @@ function scoreTranscriptChunk(entry = {}, query = '') {
   const terms = tokenizeQuery(query)
   if (!terms.length) return 0
 
-  const searchableText = normalizeValue([
-    entry.lessonTitle,
-    entry.lessonSummary,
-    entry.excerpt,
-    (entry.topicTags || []).join(' '),
-  ].join(' '))
+  const searchableText = normalizeValue(entry.excerpt)
 
   if (!searchableText) return 0
 
@@ -74,8 +60,6 @@ function scoreTranscriptChunk(entry = {}, query = '') {
     const matches = countOccurrences(searchableText, term)
     if (!matches) continue
     score += matches * 8
-    if (normalizeValue(entry.lessonTitle).includes(term)) score += 10
-    if ((entry.topicTags || []).some(topic => normalizeValue(topic).includes(term))) score += 6
   }
 
   return score
@@ -218,7 +202,7 @@ export async function searchCourseTranscript(question, lessons, apiKey, topK = 6
 
   const transcriptEntries = (Array.isArray(lessons) ? lessons : [])
     .flatMap((lesson = {}) => {
-      const sourceText = collectTranscriptSourceText(lesson)
+      const sourceText = normalizeWhitespace(lesson.transcriptText)
       const chunks = chunkCourseTranscript(sourceText)
       return chunks.map((excerpt, chunkIndex) => ({
         lessonId: lesson.id || `lesson-${chunkIndex + 1}`,
@@ -245,24 +229,21 @@ export async function searchCourseTranscript(question, lessons, apiKey, topK = 6
 
   const limit = Math.max(1, Number(topK) || 6)
   if (!apiKey) {
-    return lexicalRanked.slice(0, limit)
+    return lexicalRanked.filter(entry => entry.score > 0).slice(0, limit)
   }
-
-  const embeddingCandidates = lexicalRanked
-    .slice(0, Math.max(limit * 4, 12))
 
   try {
     const embeddingInputs = [
       normalizedQuestion,
-      ...embeddingCandidates.map(entry => entry.excerpt),
+      ...transcriptEntries.map(entry => entry.excerpt),
     ]
     const embeddings = await fetchGeminiEmbeddings(embeddingInputs, apiKey)
     const [queryEmbedding = [], ...chunkEmbeddings] = embeddings
 
     const ranked = sortByRelevance(
-      embeddingCandidates.map((entry, index) => ({
+      transcriptEntries.map((entry, index) => ({
         ...entry,
-        score: cosineSimilarity(queryEmbedding, chunkEmbeddings[index]) * 100 + entry.score,
+        score: cosineSimilarity(queryEmbedding, chunkEmbeddings[index]) * 100 + scoreTranscriptChunk(entry, normalizedQuestion),
         rankingSource: 'embedding',
       }))
     )
@@ -270,6 +251,6 @@ export async function searchCourseTranscript(question, lessons, apiKey, topK = 6
     return ranked.slice(0, limit)
   } catch (error) {
     console.warn('[courseSearch] Embedding retrieval failed, falling back to lexical ranking.', error)
-    return lexicalRanked.slice(0, limit)
+    return lexicalRanked.filter(entry => entry.score > 0).slice(0, limit)
   }
 }

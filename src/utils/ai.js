@@ -80,6 +80,10 @@ async function callAI(geminiKey, prompt, opts = {}) {
   return resp.content[0].text
 }
 
+export async function generateAiText(geminiKey, prompt, opts = {}) {
+  return callAI(geminiKey, prompt, opts)
+}
+
 async function callOpenRouterJson(apiKey, model, prompt) {
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',

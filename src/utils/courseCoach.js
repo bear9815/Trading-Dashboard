@@ -1,3 +1,4 @@
+import { generateAiText } from './ai.js'
 import { searchCourseTranscript, chunkCourseTranscript } from './courseSearch.js'
 
 function normalizeLine(value) {
@@ -19,7 +20,9 @@ export { chunkCourseTranscript }
 export function buildBehaviorContext(mode, behavior = {}) {
   if (mode === 'course-faithful') return ''
 
-  const recentJournalEntries = Array.isArray(behavior.recentJournalEntries)
+  const recentJournalEntries = Array.isArray(behavior.recentJournal)
+    ? behavior.recentJournal.map(normalizeLine).filter(Boolean)
+    : Array.isArray(behavior.recentJournalEntries)
     ? behavior.recentJournalEntries.map(normalizeLine).filter(Boolean)
     : []
   const recentTradeLessons = Array.isArray(behavior.recentTradeLessons)
@@ -65,23 +68,24 @@ function modeInstructions(mode) {
 export function buildCourseCoachPrompt({
   mode = 'course-faithful',
   question = '',
-  lessonFocus = '',
+  lesson = null,
   behaviorContext = '',
-  transcriptExcerpts = [],
+  retrievedChunks = [],
 }) {
   const normalizedQuestion = normalizeLine(question)
-  const normalizedLessonFocus = normalizeLine(lessonFocus) || 'All imported lessons'
-  const excerptsBlock = transcriptExcerpts.length
-    ? transcriptExcerpts.map((excerpt, index) => (
-      `[Excerpt ${index + 1}] Lesson ${excerpt.lessonSequenceNumber || '?'}: ${excerpt.lessonTitle}\n${normalizeLine(excerpt.excerpt)}`
+  const normalizedLessonFocus = normalizeLine(lesson?.title) || 'All imported lessons'
+  const excerptsBlock = retrievedChunks.length
+    ? retrievedChunks.map((excerpt, index) => (
+      `[Excerpt ${index + 1}] ${normalizeLine(excerpt)}`
     )).join('\n\n')
     : 'No direct transcript excerpts were retrieved for this question.'
 
   const sections = [
     'You are the Course Coach inside a private trading course workspace.',
     `Mode: ${mode}`,
+    'Use the course material as the primary source of truth.',
     modeInstructions(mode),
-    'Answer in plain text with concise, direct coaching.',
+    'Return a concise coaching response with: the core insight, one immediate drill, and one reminder for the next trading session.',
     `Question: ${normalizedQuestion}`,
     `Lesson focus: ${normalizedLessonFocus}`,
   ]
@@ -95,68 +99,42 @@ export function buildCourseCoachPrompt({
   return sections.join('\n\n')
 }
 
-async function generateGeminiCoachAnswer(apiKey, prompt) {
-  const response = await fetch(
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: prompt }],
-          },
-        ],
-      }),
-    }
-  )
-
-  if (!response.ok) {
-    let message = `Gemini coach error ${response.status}`
-    try {
-      const error = await response.json()
-      message = error?.error?.message || message
-    } catch {}
-    throw new Error(message)
-  }
-
-  const payload = await response.json()
-  const answer = (payload?.candidates || [])
-    .flatMap(candidate => candidate?.content?.parts || [])
-    .map(part => normalizeLine(part?.text))
-    .filter(Boolean)
-    .join('\n\n')
-
-  if (!answer) throw new Error('Gemini returned an empty coach response.')
+async function generateCoachAnswer(apiKey, prompt, requestText = generateAiText) {
+  const answer = String(
+    await requestText(apiKey, prompt, {
+      modelName: 'gemini-2.5-flash',
+    })
+  ).trim()
+  if (!answer) throw new Error('The course coach returned an empty response.')
   return answer
 }
 
 export async function askCourseCoach({
   question = '',
   lessons = [],
-  lessonFocus = '',
+  lesson = null,
   mode = 'course-faithful',
   apiKey = '',
   behavior = {},
   topK = 6,
+  requestText = generateAiText,
 }) {
   if (!normalizeLine(apiKey)) {
     throw new Error('Gemini API key required. Add it in Settings.')
   }
 
-  const transcriptExcerpts = await searchCourseTranscript(question, lessons, apiKey, topK)
+  const candidateLessons = lesson?.id
+    ? (Array.isArray(lessons) ? lessons : []).filter(item => item?.id === lesson.id)
+    : lessons
+  const transcriptExcerpts = await searchCourseTranscript(question, candidateLessons, apiKey, topK)
   const behaviorContext = buildBehaviorContext(mode, behavior)
   const prompt = buildCourseCoachPrompt({
     mode,
     question,
-    lessonFocus,
+    lesson,
     behaviorContext,
-    transcriptExcerpts,
+    retrievedChunks: transcriptExcerpts.map(item => `[${item.lessonTitle}] ${item.excerpt}`),
   })
 
-  return generateGeminiCoachAnswer(apiKey, prompt)
+  return generateCoachAnswer(apiKey, prompt, requestText)
 }

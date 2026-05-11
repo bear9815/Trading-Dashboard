@@ -100,6 +100,46 @@ print(json.dumps(payload))
   })
 })
 
+test('support_assets_for does not confuse adjacent numbered lesson assets', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'course-ingest-'))
+  const inputDir = path.join(tempDir, 'input')
+  const lessonDir = path.join(inputDir, 'module-a')
+  fs.mkdirSync(lessonDir, { recursive: true })
+
+  const videoPath = path.join(lessonDir, 'Lesson 1.mp4')
+  const correctSlidePath = path.join(lessonDir, 'Lesson 1 Slides.pdf')
+  const wrongSlidePath = path.join(lessonDir, 'Lesson 10.pdf')
+  fs.writeFileSync(videoPath, '')
+  fs.writeFileSync(correctSlidePath, '')
+  fs.writeFileSync(wrongSlidePath, '')
+
+  const result = runPython([
+    '-c',
+    `
+import importlib.util
+import json
+import pathlib
+
+module_path = pathlib.Path(${JSON.stringify(scriptPath)})
+spec = importlib.util.spec_from_file_location("build_rande_course", module_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+payload = module.support_assets_for(
+    pathlib.Path(${JSON.stringify(videoPath)}),
+    pathlib.Path(${JSON.stringify(inputDir)}),
+)
+print(json.dumps(payload))
+`,
+  ])
+
+  fs.rmSync(tempDir, { recursive: true, force: true })
+
+  assert.equal(result.status, 0, result.stderr)
+  const payload = JSON.parse(result.stdout)
+  assert.deepEqual(payload.slides, ['module-a/Lesson 1 Slides.pdf'])
+})
+
 test('build_manifest keeps a stable lesson id when the display title changes for the same source file', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'course-ingest-'))
   const inputDir = path.join(tempDir, 'input')

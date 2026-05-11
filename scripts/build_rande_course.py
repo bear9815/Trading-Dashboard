@@ -22,6 +22,16 @@ def derive_lesson_title(video_path: Path) -> str:
     return video_path.stem.replace("_", " ").strip()
 
 
+def stem_tokens(value: str) -> list[str]:
+    return [token for token in re.split(r"[^a-z0-9]+", value.lower()) if token]
+
+
+def support_asset_matches(video_stem: str, asset_stem: str) -> bool:
+    video_tokens = stem_tokens(video_stem)
+    asset_tokens = stem_tokens(asset_stem)
+    return bool(video_tokens) and asset_tokens[: len(video_tokens)] == video_tokens
+
+
 def build_lesson_id(video_path: Path, input_dir: Path) -> str:
     source_identity = video_path.relative_to(input_dir).with_suffix("").as_posix()
     return f"lesson-{slugify(source_identity)}"
@@ -35,12 +45,12 @@ def discover_lessons(input_dir: Path) -> list[Path]:
 
 
 def support_assets_for(video_path: Path, input_dir: Path) -> dict[str, list[str]]:
-    stem = video_path.stem.lower()
+    stem = video_path.stem
     parent = video_path.parent
     matching = [
         path
         for path in parent.iterdir()
-        if path.suffix.lower() in SUPPORT_EXTENSIONS and stem in path.stem.lower()
+        if path.suffix.lower() in SUPPORT_EXTENSIONS and support_asset_matches(stem, path.stem)
     ]
     return {
         "slides": [
