@@ -34,3 +34,6 @@ yarn-error.log*
 .vscode/cline_mcp_settings.json
 .vercel
 .worktrees
+
+# Local course ingest outputs
+local-data/course-hub/
