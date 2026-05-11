@@ -54,18 +54,22 @@ export const useCourseStore = create(
 
       importManifest: (rawManifest) => {
         const manifest = normalizeCourseManifest(rawManifest)
+        const previousActiveLessonId = get().activeLessonId
         const existingLessonsById = new Map(
           get().lessons.map(lesson => [lesson.id, lesson])
         )
         const lessons = manifest.lessons.map(lesson =>
           preserveLessonProgress(lesson, existingLessonsById.get(lesson.id))
         )
+        const activeLessonId = lessons.some(lesson => lesson.id === previousActiveLessonId)
+          ? previousActiveLessonId
+          : lessons[0]?.id || null
 
         set({
           courseId: manifest.courseId,
           courseTitle: manifest.courseTitle,
           lessons,
-          activeLessonId: lessons[0]?.id || null,
+          activeLessonId,
           importMeta: { importedAt: manifest.importedAt, lessonCount: lessons.length },
         })
       },

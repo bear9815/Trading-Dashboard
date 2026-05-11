@@ -57,6 +57,83 @@ test('importManifest seeds course metadata, importMeta, and active lesson defaul
   assert.equal(typeof state.importMeta?.importedAt, 'string')
 })
 
+test('importManifest preserves the active lesson when it still exists after re-import', () => {
+  resetCourseStore({
+    courseId: 'rande-pilot',
+    courseTitle: 'Rande Howell Course',
+    lessons: [
+      createLesson(),
+      createLesson({
+        id: 'lesson-02-process',
+        title: 'Process',
+        sequenceNumber: 2,
+      }),
+    ],
+    activeLessonId: 'lesson-02-process',
+  })
+
+  useCourseStore.getState().importManifest({
+    courseId: 'rande-pilot',
+    courseTitle: 'Rande Howell Course',
+    lessons: [
+      createLesson({
+        title: 'State Management Reloaded',
+      }),
+      createLesson({
+        id: 'lesson-02-process',
+        title: 'Process Reloaded',
+        sequenceNumber: 2,
+      }),
+      createLesson({
+        id: 'lesson-03-execution',
+        title: 'Execution',
+        sequenceNumber: 3,
+      }),
+    ],
+  })
+
+  const state = useCourseStore.getState()
+  assert.equal(state.activeLessonId, 'lesson-02-process')
+  assert.equal(state.getActiveLesson()?.title, 'Process Reloaded')
+})
+
+test('importManifest falls back to the first lesson when the active lesson disappears on re-import', () => {
+  resetCourseStore({
+    courseId: 'rande-pilot',
+    courseTitle: 'Rande Howell Course',
+    lessons: [
+      createLesson(),
+      createLesson({
+        id: 'lesson-02-process',
+        title: 'Process',
+        sequenceNumber: 2,
+      }),
+    ],
+    activeLessonId: 'lesson-02-process',
+  })
+
+  useCourseStore.getState().importManifest({
+    courseId: 'rande-pilot',
+    courseTitle: 'Rande Howell Course',
+    lessons: [
+      createLesson({
+        id: 'lesson-03-execution',
+        title: 'Execution',
+        sequenceNumber: 1,
+      }),
+      createLesson({
+        id: 'lesson-04-review',
+        title: 'Review',
+        sequenceNumber: 2,
+      }),
+    ],
+  })
+
+  const state = useCourseStore.getState()
+  assert.equal(state.activeLessonId, 'lesson-03-execution')
+  assert.equal(state.getActiveLesson()?.title, 'Execution')
+})
+
 test('watched, reflected, and applied actions stamp lesson progress in order', () => {
   resetCourseStore({
     courseId: 'rande-howell-course',
