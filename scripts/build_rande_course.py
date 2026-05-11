@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from faster_whisper import WhisperModel
-    from faster_whisper import WhisperModel
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mp3", ".m4a", ".wav"}
 SUPPORT_EXTENSIONS = {".pdf", ".ppt", ".pptx", ".doc", ".docx", ".txt", ".md"}
@@ -26,7 +25,7 @@ def discover_lessons(input_dir: Path) -> list[Path]:
     )
 
 
-def support_assets_for(video_path: Path) -> dict[str, list[str]]:
+def support_assets_for(video_path: Path, input_dir: Path) -> dict[str, list[str]]:
     stem = video_path.stem.lower()
     parent = video_path.parent
     matching = [
@@ -35,8 +34,16 @@ def support_assets_for(video_path: Path) -> dict[str, list[str]]:
         if path.suffix.lower() in SUPPORT_EXTENSIONS and stem in path.stem.lower()
     ]
     return {
-        "slides": [str(path.name) for path in matching if path.suffix.lower() in {".pdf", ".ppt", ".pptx"}],
-        "articles": [str(path.name) for path in matching if path.suffix.lower() in {".doc", ".docx", ".txt", ".md"}],
+        "slides": [
+            str(path.relative_to(input_dir))
+            for path in matching
+            if path.suffix.lower() in {".pdf", ".ppt", ".pptx"}
+        ],
+        "articles": [
+            str(path.relative_to(input_dir))
+            for path in matching
+            if path.suffix.lower() in {".doc", ".docx", ".txt", ".md"}
+        ],
         "notes": [],
     }
 
@@ -60,7 +67,7 @@ def build_manifest(input_dir: Path, output_dir: Path, model_name: str, limit: in
         transcript_name = f"{index:02d}-{slugify(title)}.txt"
         (transcript_dir / transcript_name).write_text(transcript_text, encoding="utf-8")
 
-        support_assets = support_assets_for(video_path)
+        support_assets = support_assets_for(video_path, input_dir)
         lessons.append(
             {
                 "id": f"lesson-{index:02d}-{slugify(title)}",
