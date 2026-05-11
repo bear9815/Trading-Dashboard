@@ -27,7 +27,12 @@ function normalizeLesson(rawLesson = {}, index = 0) {
   const title = normalizedTitle || fallbackTitle
   const lessonPrefix = `lesson-${String(sequenceNumber).padStart(2, '0')}`
   const baseSlug = normalizedTitle ? slugify(title) : ''
-  const slugSuffix = baseSlug.replace(/^lesson-\d+-/, '')
+  const bareLessonSlugPattern = new RegExp(`^lesson-0*${sequenceNumber}$`)
+  const slugSuffix = (
+    bareLessonSlugPattern.test(baseSlug)
+  )
+    ? ''
+    : baseSlug.replace(/^lesson-\d+-/, '')
   const slug = slugSuffix ? `${lessonPrefix}-${slugSuffix}` : lessonPrefix
   const transcriptText = String(rawLesson.transcriptText || '').trim()
   const timestamp = new Date().toISOString()
