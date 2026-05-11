@@ -5,7 +5,9 @@ import {
   buildAttachedSourceFileMap,
   clearAttachedSourceFilesSession,
   getAttachedSourceFilesSession,
+  getAttachedSourceFilesSessionCourseId,
   getLessonPreviewPath,
+  reconcileAttachedSourceFilesSession,
   setAttachedSourceFilesSession,
 } from './courseHubSession.js'
 
@@ -46,6 +48,38 @@ test('attached source file session survives replacement across helper calls with
   )
 
   clearAttachedSourceFilesSession()
+  assert.deepEqual(getAttachedSourceFilesSession(), {})
+})
+
+test('reconcileAttachedSourceFilesSession preserves attachments when the imported course stays the same', () => {
+  clearAttachedSourceFilesSession()
+
+  const attachedFiles = buildAttachedSourceFileMap([
+    { name: 'Lesson 1.mp4', webkitRelativePath: 'module-a/Lesson 1.mp4' },
+  ])
+
+  setAttachedSourceFilesSession(attachedFiles, 'rande-pilot')
+
+  const nextSession = reconcileAttachedSourceFilesSession('rande-pilot')
+
+  assert.equal(getAttachedSourceFilesSessionCourseId(), 'rande-pilot')
+  assert.equal(nextSession, getAttachedSourceFilesSession())
+  assert.deepEqual(Object.keys(nextSession), ['module-a/Lesson 1.mp4'])
+})
+
+test('reconcileAttachedSourceFilesSession clears attachments when the imported course changes', () => {
+  clearAttachedSourceFilesSession()
+
+  const attachedFiles = buildAttachedSourceFileMap([
+    { name: 'Lesson 1.mp4', webkitRelativePath: 'module-a/Lesson 1.mp4' },
+  ])
+
+  setAttachedSourceFilesSession(attachedFiles, 'rande-pilot')
+
+  const nextSession = reconcileAttachedSourceFilesSession('rande-followup')
+
+  assert.equal(getAttachedSourceFilesSessionCourseId(), 'rande-followup')
+  assert.deepEqual(nextSession, {})
   assert.deepEqual(getAttachedSourceFilesSession(), {})
 })
 

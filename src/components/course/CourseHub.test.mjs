@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { parseManifestImportText } from './courseHubManifest.js'
 
 const appPath = fileURLToPath(new URL('../../App.jsx', import.meta.url))
 const navPath = fileURLToPath(new URL('../../utils/appNavigation.js', import.meta.url))
@@ -38,4 +39,37 @@ test('Course Hub source-folder attachments are wired for session reuse rather th
   assert.match(hubSource, /buildAttachedSourceFileMap/)
   assert.match(hubSource, /getAttachedSourceFilesSession/)
   assert.match(hubSource, /setAttachedSourceFilesSession/)
+})
+
+test('parseManifestImportText returns a manifest payload for valid JSON text', () => {
+  const result = parseManifestImportText('{"courseId":"rande-pilot","lessons":[]}')
+
+  assert.equal(result.ok, true)
+  assert.equal(result.manifest.courseId, 'rande-pilot')
+  assert.equal(result.manifest.courseTitle, 'Rande Howell Course')
+  assert.deepEqual(result.manifest.lessons, [])
+  assert.equal(typeof result.manifest.importedAt, 'string')
+})
+
+test('parseManifestImportText returns a user-facing inline error contract for invalid JSON text', () => {
+  const result = parseManifestImportText('{ courseId: ')
+
+  assert.equal(result.ok, false)
+  assert.match(result.error, /couldn.t import that manifest/i)
+})
+
+test('parseManifestImportText rejects JSON that is not a course manifest object', () => {
+  const result = parseManifestImportText('{"courseId":"rande-pilot"}')
+
+  assert.equal(result.ok, false)
+  assert.match(result.error, /valid manifest\.json/i)
+})
+
+test('Course Hub routes manifest parsing failures into local inline shell feedback', () => {
+  const hubSource = fs.readFileSync(hubPath, 'utf8')
+
+  assert.match(hubSource, /parseManifestImportText/)
+  assert.match(hubSource, /reconcileAttachedSourceFilesSession/)
+  assert.match(hubSource, /setManifestImportError/)
+  assert.match(hubSource, /role="alert"/)
 })

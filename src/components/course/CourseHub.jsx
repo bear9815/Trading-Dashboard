@@ -5,8 +5,10 @@ import {
   buildAttachedSourceFileMap,
   getAttachedSourceFilesSession,
   getLessonPreviewPath,
+  reconcileAttachedSourceFilesSession,
   setAttachedSourceFilesSession,
 } from './courseHubSession.js'
+import { parseManifestImportText } from './courseHubManifest.js'
 
 const COACHING_MODES = [
   'course-faithful',
@@ -18,6 +20,7 @@ export default function CourseHub() {
   const manifestInputRef = useRef(null)
   const sourceFolderInputRef = useRef(null)
   const {
+    courseId,
     courseTitle,
     lessons,
     coachingSettings,
@@ -25,6 +28,7 @@ export default function CourseHub() {
     setActiveCoachingMode,
   } = useCourseStore()
   const [attachedFiles, setAttachedFiles] = useState(() => getAttachedSourceFilesSession())
+  const [manifestImportError, setManifestImportError] = useState('')
 
   const attachedEntries = Object.entries(attachedFiles)
   const lessonCountLabel = `${lessons.length} lesson${lessons.length === 1 ? '' : 's'}`
@@ -33,14 +37,26 @@ export default function CourseHub() {
     const file = event.target.files?.[0]
     if (!file) return
 
-    const raw = JSON.parse(await file.text())
-    importManifest(raw)
-    event.target.value = ''
+    try {
+      const result = parseManifestImportText(await file.text())
+      if (!result.ok) {
+        setManifestImportError(result.error)
+        return
+      }
+
+      importManifest(result.manifest)
+      setAttachedFiles(reconcileAttachedSourceFilesSession(result.manifest.courseId))
+      setManifestImportError('')
+    } catch {
+      setManifestImportError('We couldn\'t import that manifest. Try again with a valid manifest.json file.')
+    } finally {
+      event.target.value = ''
+    }
   }
 
   function handleSourceFolder(event) {
     const nextFiles = buildAttachedSourceFileMap(event.target.files)
-    const storedFiles = setAttachedSourceFilesSession(nextFiles)
+    const storedFiles = setAttachedSourceFilesSession(nextFiles, courseId)
     setAttachedFiles(storedFiles)
     event.target.value = ''
   }
@@ -92,6 +108,15 @@ export default function CourseHub() {
               </button>
             </div>
           </div>
+
+          {manifestImportError ? (
+            <div
+              role="alert"
+              className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100"
+            >
+              {manifestImportError}
+            </div>
+          ) : null}
         </section>
 
         <section className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6 md:py-6">
