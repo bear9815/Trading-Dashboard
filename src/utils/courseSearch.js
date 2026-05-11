@@ -65,7 +65,6 @@ export function filterCourseLessons(lessons = [], query = '', selectedTopic = 'a
       index,
       score: scoreLesson(lesson, normalizedQuery),
     }))
-    .filter(entry => entry.score > 0)
     .sort((left, right) => (
       right.score - left.score
       || (left.lesson.sequenceNumber || Number.MAX_SAFE_INTEGER) - (right.lesson.sequenceNumber || Number.MAX_SAFE_INTEGER)

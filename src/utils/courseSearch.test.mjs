@@ -38,6 +38,7 @@ test('filterCourseLessons ranks topic and transcript matches ahead of unrelated 
   )
 
   assert.equal(results[0].id, '1')
+  assert.deepEqual(results.map(lesson => lesson.id), ['1', '2'])
 })
 
 test('filterCourseLessons applies the selected topic filter when provided', async () => {
