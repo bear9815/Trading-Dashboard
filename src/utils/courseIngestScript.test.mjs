@@ -155,6 +155,70 @@ print(json.dumps({
   const payload = JSON.parse(result.stdout)
   assert.equal(payload.baseline.title, 'Lesson One')
   assert.equal(payload.reimported.title, 'Retitled Lesson')
-  assert.equal(payload.baseline.id, 'lesson-01-module-a-lesson-one')
+  assert.equal(payload.baseline.id, 'lesson-module-a-lesson-one')
   assert.equal(payload.reimported.id, payload.baseline.id)
+})
+
+test('build_manifest keeps the same lesson id for an unchanged source file when an earlier sibling is added', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'course-ingest-'))
+  const inputDir = path.join(tempDir, 'input')
+  const outputDir = path.join(tempDir, 'output')
+  const lessonDir = path.join(inputDir, 'module-a')
+  fs.mkdirSync(lessonDir, { recursive: true })
+
+  const alphaPath = path.join(lessonDir, 'Alpha Lesson.mp4')
+  const bravoPath = path.join(lessonDir, 'Bravo Lesson.mp4')
+  fs.writeFileSync(alphaPath, '')
+  fs.writeFileSync(bravoPath, '')
+
+  const result = runPython([
+    '-c',
+    `
+import importlib.util
+import json
+import pathlib
+import sys
+import types
+
+class FakeWhisperModel:
+    def __init__(self, *args, **kwargs):
+        pass
+
+sys.modules["faster_whisper"] = types.SimpleNamespace(WhisperModel=FakeWhisperModel)
+
+module_path = pathlib.Path(${JSON.stringify(scriptPath)})
+spec = importlib.util.spec_from_file_location("build_rande_course", module_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+input_dir = pathlib.Path(${JSON.stringify(inputDir)})
+output_dir = pathlib.Path(${JSON.stringify(outputDir)})
+alpha_path = pathlib.Path(${JSON.stringify(alphaPath)})
+bravo_path = pathlib.Path(${JSON.stringify(bravoPath)})
+
+module.transcribe_file = lambda _model, _video_path: "Transcript"
+module.support_assets_for = lambda _video_path, _input_dir: {"slides": [], "articles": [], "notes": []}
+
+module.discover_lessons = lambda _input_dir: [bravo_path]
+baseline = module.build_manifest(input_dir, output_dir, "stub", None)
+
+module.discover_lessons = lambda _input_dir: [alpha_path, bravo_path]
+reimported = module.build_manifest(input_dir, output_dir, "stub", None)
+
+print(json.dumps({
+    "baseline": baseline["lessons"][0],
+    "reimported": reimported["lessons"][1],
+}))
+`,
+  ])
+
+  fs.rmSync(tempDir, { recursive: true, force: true })
+
+  assert.equal(result.status, 0, result.stderr)
+  const payload = JSON.parse(result.stdout)
+  assert.equal(payload.baseline.sequenceNumber, 1)
+  assert.equal(payload.reimported.sequenceNumber, 2)
+  assert.equal(payload.baseline.sourceRelativePath, 'module-a/Bravo Lesson.mp4')
+  assert.equal(payload.reimported.sourceRelativePath, payload.baseline.sourceRelativePath)
+  assert.equal(payload.baseline.id, payload.reimported.id)
 })

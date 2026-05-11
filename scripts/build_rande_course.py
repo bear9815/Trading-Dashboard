@@ -22,9 +22,9 @@ def derive_lesson_title(video_path: Path) -> str:
     return video_path.stem.replace("_", " ").strip()
 
 
-def build_lesson_id(video_path: Path, input_dir: Path, index: int) -> str:
+def build_lesson_id(video_path: Path, input_dir: Path) -> str:
     source_identity = video_path.relative_to(input_dir).with_suffix("").as_posix()
-    return f"lesson-{index:02d}-{slugify(source_identity)}"
+    return f"lesson-{slugify(source_identity)}"
 
 
 def discover_lessons(input_dir: Path) -> list[Path]:
@@ -74,7 +74,7 @@ def build_manifest(input_dir: Path, output_dir: Path, model_name: str, limit: in
         title = derive_lesson_title(video_path)
         transcript_text = transcribe_file(model, video_path)
         transcript_name = f"{index:02d}-{slugify(title)}.txt"
-        lesson_id = build_lesson_id(video_path, input_dir, index)
+        lesson_id = build_lesson_id(video_path, input_dir)
         (transcript_dir / transcript_name).write_text(transcript_text, encoding="utf-8")
 
         support_assets = support_assets_for(video_path, input_dir)

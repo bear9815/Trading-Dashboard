@@ -212,3 +212,59 @@ test('importManifest preserves lesson progress for an existing lesson id on re-i
   assert.equal(lesson.reflectionText, preservedProgress.reflectionText)
   assert.equal(lesson.updatedAt, preservedProgress.updatedAt)
 })
+
+test('importManifest does not preserve progress or active lesson when courseId changes', () => {
+  const preservedProgress = {
+    watchedAt: '2026-05-10T14:00:00.000Z',
+    reflectedAt: '2026-05-10T14:05:00.000Z',
+    appliedAt: '2026-05-10T14:10:00.000Z',
+    reflectionText: 'This should stay with the original course only.',
+    updatedAt: '2026-05-10T14:10:00.000Z',
+  }
+
+  resetCourseStore({
+    courseId: 'rande-howell-course',
+    courseTitle: 'Rande Howell Course',
+    lessons: [
+      createLesson(preservedProgress),
+      createLesson({
+        id: 'lesson-02-process',
+        title: 'Process',
+        sequenceNumber: 2,
+      }),
+    ],
+    activeLessonId: 'lesson-02-process',
+  })
+
+  useCourseStore.getState().importManifest({
+    courseId: 'rande-followup-course',
+    courseTitle: 'Rande Follow-Up Course',
+    lessons: [
+      createLesson({
+        title: 'Fresh Start',
+        watchedAt: null,
+        reflectedAt: null,
+        appliedAt: null,
+        reflectionText: '',
+        updatedAt: null,
+      }),
+      createLesson({
+        id: 'lesson-02-process',
+        title: 'Process Reset',
+        sequenceNumber: 2,
+      }),
+    ],
+  })
+
+  const state = useCourseStore.getState()
+  const lesson = state.lessons[0]
+  assert.equal(state.courseId, 'rande-followup-course')
+  assert.equal(state.activeLessonId, 'lesson-01-state-management')
+  assert.equal(lesson.title, 'Fresh Start')
+  assert.equal(lesson.watchedAt, null)
+  assert.equal(lesson.reflectedAt, null)
+  assert.equal(lesson.appliedAt, null)
+  assert.equal(lesson.reflectionText, '')
+  assert.equal(typeof lesson.updatedAt, 'string')
+  assert.notEqual(lesson.updatedAt, preservedProgress.updatedAt)
+})
