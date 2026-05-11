@@ -47,6 +47,32 @@ function ProgressCard({ label, value }) {
   )
 }
 
+function resolveTranscriptStatus(lesson = {}) {
+  if (lesson.transcriptStatus) return lesson.transcriptStatus
+  return String(lesson.transcriptText || '').trim() ? 'ready' : 'pending'
+}
+
+function resolveEnrichmentStatus(lesson = {}) {
+  if (lesson.enrichmentStatus) return lesson.enrichmentStatus
+  return String(lesson.transcriptText || '').trim() ? 'pending' : 'not-started'
+}
+
+function StatusBadge({ label, tone = 'muted' }) {
+  const toneClassName = tone === 'good'
+    ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-200'
+    : tone === 'warn'
+      ? 'border-amber-400/20 bg-amber-500/10 text-amber-100'
+      : tone === 'danger'
+        ? 'border-rose-400/20 bg-rose-500/10 text-rose-100'
+        : 'border-white/10 bg-white/[0.04] text-gray-300'
+
+  return (
+    <span className={`rounded-full border px-3 py-1.5 text-[11px] uppercase tracking-[0.24em] ${toneClassName}`}>
+      {label}
+    </span>
+  )
+}
+
 export default function CourseLessonView({
   lesson,
   attachedFiles = {},
@@ -93,6 +119,8 @@ export default function CourseLessonView({
 
   const completionStage = getLessonCompletionStage(lesson)
   const lessonPath = getLessonPreviewPath(lesson)
+  const transcriptStatus = resolveTranscriptStatus(lesson)
+  const enrichmentStatus = resolveEnrichmentStatus(lesson)
 
   function handleSaveReflection() {
     saveLessonReflection?.(lesson.id, reflectionDraft)
@@ -262,7 +290,38 @@ export default function CourseLessonView({
         ) : null}
 
         <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-          <p className="text-sm font-semibold text-white">Transcript</p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-white">Transcript</p>
+            <div className="flex flex-wrap gap-2">
+              <StatusBadge
+                label={transcriptStatus === 'ready' ? 'Transcript Ready' : 'Transcript Pending'}
+                tone={transcriptStatus === 'ready' ? 'good' : 'warn'}
+              />
+              <StatusBadge
+                label={
+                  enrichmentStatus === 'complete'
+                    ? 'Enrichment Complete'
+                    : enrichmentStatus === 'failed'
+                      ? 'Enrichment Failed'
+                      : enrichmentStatus === 'not-started'
+                        ? 'Enrichment Waiting'
+                        : 'Enrichment Pending'
+                }
+                tone={
+                  enrichmentStatus === 'complete'
+                    ? 'good'
+                    : enrichmentStatus === 'failed'
+                      ? 'danger'
+                      : 'warn'
+                }
+              />
+            </div>
+          </div>
+          {lesson.enrichmentError ? (
+            <p className="mt-3 text-sm text-rose-200">
+              {lesson.enrichmentError}
+            </p>
+          ) : null}
           <div className="mt-3 rounded-2xl border border-white/8 bg-black/20 px-4 py-4 text-sm leading-7 text-gray-300 whitespace-pre-wrap">
             {lesson.transcriptText || 'Transcript text will appear here once the manifest includes it.'}
           </div>

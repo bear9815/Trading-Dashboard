@@ -46,8 +46,10 @@ function createDefaultImportSession() {
     hostedModeDisabled: false,
     hostedModeDisabledReason: '',
     selectedFolder: null,
+    scannedLessons: [],
     selectedPilotLessonIds: [],
     activeJob: null,
+    manifestImportedJobId: null,
     transcriptCount: 0,
     enrichmentCount: 0,
     attachedMediaLibrary: null,
@@ -161,10 +163,42 @@ export const useCourseStore = create(
           }),
         })),
 
+      setImportFolder: (selectedFolder = null) =>
+        set(state => ({
+          importSession: mergeImportSession(state, {
+            selectedFolder,
+            scannedLessons: [],
+            selectedPilotLessonIds: [],
+            manifestImportedJobId: null,
+            lastError: '',
+          }),
+        })),
+
+      setScannedLessons: ({ selectedFolder = null, lessons = [], selectedPilotLessonIds = [] } = {}) =>
+        set(state => ({
+          importSession: mergeImportSession(state, {
+            selectedFolder: selectedFolder || state.importSession.selectedFolder,
+            scannedLessons: Array.isArray(lessons) ? [...lessons] : [],
+            selectedPilotLessonIds: Array.isArray(selectedPilotLessonIds) ? [...selectedPilotLessonIds] : [],
+            manifestImportedJobId: null,
+            lastError: '',
+          }),
+        })),
+
+      setSelectedPilotLessonIds: (selectedPilotLessonIds = []) =>
+        set(state => ({
+          importSession: mergeImportSession(state, {
+            selectedPilotLessonIds: Array.isArray(selectedPilotLessonIds) ? [...selectedPilotLessonIds] : [],
+          }),
+        })),
+
       startImportJob: (jobState = {}) =>
         set(state => ({
           importSession: mergeImportSession(state, {
             selectedFolder: jobState.selectedFolder || state.importSession.selectedFolder,
+            scannedLessons: Array.isArray(jobState.scannedLessons)
+              ? [...jobState.scannedLessons]
+              : state.importSession.scannedLessons,
             selectedPilotLessonIds: Array.isArray(jobState.selectedPilotLessonIds)
               ? [...jobState.selectedPilotLessonIds]
               : state.importSession.selectedPilotLessonIds,
@@ -173,6 +207,7 @@ export const useCourseStore = create(
               ...state.importSession.activeJob,
               ...jobState,
             },
+            manifestImportedJobId: null,
             transcriptCount: Number(jobState.transcriptCount) || 0,
             enrichmentCount: Number(jobState.enrichmentCount) || 0,
             lastError: '',
@@ -183,6 +218,9 @@ export const useCourseStore = create(
         set(state => ({
           importSession: mergeImportSession(state, {
             selectedFolder: jobState.selectedFolder || state.importSession.selectedFolder,
+            scannedLessons: Array.isArray(jobState.scannedLessons)
+              ? [...jobState.scannedLessons]
+              : state.importSession.scannedLessons,
             selectedPilotLessonIds: Array.isArray(jobState.selectedPilotLessonIds)
               ? [...jobState.selectedPilotLessonIds]
               : state.importSession.selectedPilotLessonIds,
@@ -202,7 +240,7 @@ export const useCourseStore = create(
           }),
         })),
 
-      completeImportJob: (payload = {}) =>
+      applyImportManifest: (payload = {}) =>
         set(state => {
           const { courseState } = buildManifestState(state, payload.manifest || {})
 
@@ -213,7 +251,33 @@ export const useCourseStore = create(
               selectedPilotLessonIds: Array.isArray(payload.selectedPilotLessonIds)
                 ? [...payload.selectedPilotLessonIds]
                 : state.importSession.selectedPilotLessonIds,
+              manifestImportedJobId: payload.jobId || state.importSession.manifestImportedJobId,
+              transcriptCount: Number.isFinite(Number(payload.transcriptCount))
+                ? Number(payload.transcriptCount)
+                : Math.max(state.importSession.transcriptCount, courseState.lessons.length),
+              enrichmentCount: Number.isFinite(Number(payload.enrichmentCount))
+                ? Number(payload.enrichmentCount)
+                : state.importSession.enrichmentCount,
+              attachedMediaLibrary: payload.attachedMediaLibrary || state.importSession.attachedMediaLibrary,
+              lastError: '',
+            }),
+          }
+        }),
+
+      completeImportJob: (payload = {}) =>
+        set(state => {
+          const { courseState } = buildManifestState(state, payload.manifest || {})
+
+          return {
+            ...courseState,
+            importSession: mergeImportSession(state, {
+              selectedFolder: payload.selectedFolder || state.importSession.selectedFolder,
+              scannedLessons: state.importSession.scannedLessons,
+              selectedPilotLessonIds: Array.isArray(payload.selectedPilotLessonIds)
+                ? [...payload.selectedPilotLessonIds]
+                : state.importSession.selectedPilotLessonIds,
               activeJob: null,
+              manifestImportedJobId: payload.jobId || state.importSession.manifestImportedJobId,
               transcriptCount: Number(payload.transcriptCount) || courseState.lessons.length,
               enrichmentCount: Number(payload.enrichmentCount) || 0,
               attachedMediaLibrary: payload.attachedMediaLibrary || state.importSession.attachedMediaLibrary,
@@ -253,6 +317,18 @@ export const useCourseStore = create(
     {
       name: 'course-hub-v1',
       storage: createJSONStorage(() => getCourseStorage()),
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        ...(persistedState || {}),
+        coachingSettings: {
+          ...currentState.coachingSettings,
+          ...(persistedState?.coachingSettings || {}),
+        },
+        importSession: {
+          ...currentState.importSession,
+          ...(persistedState?.importSession || {}),
+        },
+      }),
     }
   )
 )

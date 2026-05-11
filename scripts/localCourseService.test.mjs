@@ -44,14 +44,15 @@ test('health reports service readiness and unsupported folder selection fallback
   })
 
   try {
-    const healthResponse = await service.dispatch({ method: 'GET', url: '/health' })
+    const healthResponse = await service.dispatch({ method: 'GET', url: '/api/local-course/health' })
     assert.equal(healthResponse.status, 200)
     const health = healthResponse.json
     assert.equal(health.ok, true)
     assert.equal(health.service, 'local-course-service')
+    assert.equal(health.localModeAvailable, true)
     assert.equal(health.supports.selectFolder, false)
 
-    const selectResponse = await service.dispatch({ method: 'POST', url: '/select-folder', body: {} })
+    const selectResponse = await service.dispatch({ method: 'POST', url: '/api/local-course/select-folder', body: {} })
     assert.equal(selectResponse.status, 501)
     const selectPayload = selectResponse.json
     assert.equal(selectPayload.ok, false)
@@ -70,7 +71,7 @@ test('scan-folder returns deterministic lesson metadata for a local source folde
   try {
     const response = await service.dispatch({
       method: 'POST',
-      url: '/scan-folder',
+      url: '/api/local-course/scan-folder',
       body: { folderPath: courseDir },
     })
 
@@ -78,6 +79,7 @@ test('scan-folder returns deterministic lesson metadata for a local source folde
     const payload = response.json
     assert.equal(payload.ok, true)
     assert.equal(payload.folderPath, courseDir)
+    assert.equal(payload.selectedFolder.lessonCount, 2)
     assert.equal(payload.lessons.length, 2)
     assert.deepEqual(payload.pilotSelection.lessonIds, [
       'lesson-module-a-lesson-01',
@@ -86,6 +88,10 @@ test('scan-folder returns deterministic lesson metadata for a local source folde
     assert.equal(payload.lessons[0].sourceRelativePath, 'module-a/Lesson 01.mp4')
     assert.deepEqual(payload.lessons[0].assetPaths.slides, ['module-a/Lesson 01.pdf'])
     assert.deepEqual(payload.lessons[1].assetPaths.articles, ['module-b/Lesson 02.md'])
+    assert.deepEqual(payload.selectedPilotLessonIds, [
+      'lesson-module-a-lesson-01',
+      'lesson-module-b-lesson-02',
+    ])
   } finally {
     await stop()
     fs.rmSync(tempDir, { recursive: true, force: true })
@@ -100,13 +106,13 @@ test('start-import validates selected lessons against the scanned folder contrac
   try {
     await service.dispatch({
       method: 'POST',
-      url: '/scan-folder',
+      url: '/api/local-course/scan-folder',
       body: { folderPath: courseDir },
     })
 
     const response = await service.dispatch({
       method: 'POST',
-      url: '/start-import',
+      url: '/api/local-course/start-import',
       body: {
         folderPath: courseDir,
         selectedLessonIds: ['lesson-missing'],
@@ -169,7 +175,7 @@ test('start-import streams progress events, writes deterministic job output, and
   try {
     const scanResponse = await service.dispatch({
       method: 'POST',
-      url: '/scan-folder',
+      url: '/api/local-course/scan-folder',
       body: { folderPath: courseDir },
     })
     const scanPayload = scanResponse.json
@@ -177,34 +183,40 @@ test('start-import streams progress events, writes deterministic job output, and
 
     const startResponse = await service.dispatch({
       method: 'POST',
-      url: '/start-import',
+      url: '/api/local-course/start-import',
       body: {
         folderPath: courseDir,
-        selectedLessonIds: [selectedLessonId],
+        selectedLessonIds: [scanPayload.lessons[0].id, selectedLessonId],
       },
     })
 
     assert.equal(startResponse.status, 202)
     const startPayload = startResponse.json
-    assert.equal(startPayload.ok, true)
     assert.ok(startPayload.jobId)
-    assert.match(startPayload.mediaBaseUrl, new RegExp(`/jobs/${startPayload.jobId}/media`))
+    assert.match(startPayload.mediaBaseUrl, new RegExp(`/api/local-course/jobs/${startPayload.jobId}/media`))
 
-    const events = await service.collectEvents(startPayload.jobId, 3)
+    const events = await service.collectEvents(startPayload.jobId, 7)
 
     assert.equal(events[0].type, 'job.created')
     assert.equal(events[1].type, 'job.progress')
-    assert.equal(events[2].type, 'job.completed')
+    assert.equal(events[2].type, 'job.transcripts-ready')
+    assert.equal(events[3].type, 'job.phase')
+    assert.equal(events[4].type, 'job.enrichment')
+    assert.equal(events[5].type, 'job.enrichment')
+    assert.equal(events[6].type, 'job.completed')
 
     const jobResponse = await service.dispatch({
       method: 'GET',
-      url: `/jobs/${startPayload.jobId}`,
+      url: `/api/local-course/jobs/${startPayload.jobId}`,
     })
     assert.equal(jobResponse.status, 200)
     const jobPayload = jobResponse.json
-    assert.equal(jobPayload.job.status, 'completed')
-    assert.equal(jobPayload.job.selectedLessonIds.length, 1)
-    assert.match(jobPayload.job.lessons[0].mediaUrl, new RegExp(`/jobs/${startPayload.jobId}/media\\?relativePath=`))
+    assert.equal(jobPayload.status, 'completed')
+    assert.equal(jobPayload.selectedPilotLessonIds.length, 2)
+    assert.match(jobPayload.lessons[0].mediaUrl, new RegExp(`/api/local-course/jobs/${startPayload.jobId}/media\\?relativePath=`))
+    assert.equal(jobPayload.transcriptCount, 2)
+    assert.equal(jobPayload.enrichmentCount, 2)
+    assert.equal(jobPayload.lessons[0].enrichmentStatus, 'complete')
 
     const manifestPath = path.join(tempDir, 'local-data', 'course-hub', startPayload.jobId, 'manifest.json')
     const progressPath = path.join(tempDir, 'local-data', 'course-hub', startPayload.jobId, 'progress.json')
@@ -217,14 +229,17 @@ test('start-import streams progress events, writes deterministic job output, and
     assert.equal(fs.existsSync(enrichmentPath), true)
 
     assert.deepEqual(importCalls, [{
-      selectedLessonIds: [selectedLessonId],
-      selectedRelativePaths: ['module-b/Lesson 02.mp4'],
+      selectedLessonIds: [scanPayload.lessons[0].id, selectedLessonId],
+      selectedRelativePaths: ['module-a/Lesson 01.mp4', 'module-b/Lesson 02.mp4'],
       jobId: startPayload.jobId,
     }])
 
+    const selectedLessonRecord = jobPayload.lessons.find(lesson => lesson.id === selectedLessonId)
+    assert.ok(selectedLessonRecord)
+
     const mediaResponse = await service.dispatch({
       method: 'GET',
-      url: jobPayload.job.lessons[0].mediaUrl,
+      url: selectedLessonRecord.mediaUrl,
     })
     assert.equal(mediaResponse.status, 200)
     assert.equal(mediaResponse.text, 'video-two')
@@ -262,17 +277,17 @@ test('cancel transitions an in-flight job to cancelled and emits a cancellation 
   try {
     const scanResponse = await service.dispatch({
       method: 'POST',
-      url: '/scan-folder',
+      url: '/api/local-course/scan-folder',
       body: { folderPath: courseDir },
     })
     const scanPayload = scanResponse.json
 
     const startResponse = await service.dispatch({
       method: 'POST',
-      url: '/start-import',
+      url: '/api/local-course/start-import',
       body: {
         folderPath: courseDir,
-        selectedLessonIds: [scanPayload.lessons[0].id],
+        selectedLessonIds: scanPayload.lessons.map(lesson => lesson.id),
       },
     })
     const startPayload = startResponse.json
@@ -281,7 +296,7 @@ test('cancel transitions an in-flight job to cancelled and emits a cancellation 
 
     const cancelResponse = await service.dispatch({
       method: 'POST',
-      url: `/jobs/${startPayload.jobId}/cancel`,
+      url: `/api/local-course/jobs/${startPayload.jobId}/cancel`,
     })
     assert.equal(cancelResponse.status, 202)
 
@@ -290,10 +305,10 @@ test('cancel transitions an in-flight job to cancelled and emits a cancellation 
 
     const jobResponse = await service.dispatch({
       method: 'GET',
-      url: `/jobs/${startPayload.jobId}`,
+      url: `/api/local-course/jobs/${startPayload.jobId}`,
     })
     const jobPayload = jobResponse.json
-    assert.equal(jobPayload.job.status, 'cancelled')
+    assert.equal(jobPayload.status, 'cancelled')
   } finally {
     await stop()
     fs.rmSync(tempDir, { recursive: true, force: true })

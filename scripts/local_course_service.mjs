@@ -153,6 +153,142 @@ function createJobRecord({ jobId, folderPath, selectedLessons, jobLayout, create
   }
 }
 
+function buildSelectedFolderSummary(folderPath, lessonCount = 0) {
+  const normalizedPath = path.resolve(folderPath)
+  return {
+    name: path.basename(normalizedPath) || 'Selected course folder',
+    path: normalizedPath,
+    lessonCount,
+  }
+}
+
+function countTranscriptReady(lessons = []) {
+  return lessons.filter(lesson => lesson?.transcriptStatus === 'ready' || String(lesson?.transcriptText || '').trim()).length
+}
+
+function countEnrichmentComplete(lessons = []) {
+  return lessons.filter(lesson => lesson?.enrichmentStatus === 'complete').length
+}
+
+function buildStageLabel(job) {
+  const totalLessons = Number(job?.progress?.totalLessons) || 0
+  const transcriptCount = countTranscriptReady(job?.lessons || [])
+  const enrichmentCount = countEnrichmentComplete(job?.lessons || [])
+
+  switch (job?.phase) {
+    case 'queued':
+      return 'Waiting to start guided import'
+    case 'transcribing':
+      return totalLessons > 0
+        ? `Transcribing ${job.progress.completedLessons}/${totalLessons} selected lessons`
+        : 'Transcribing selected lessons'
+    case 'opening-course':
+      return transcriptCount > 0
+        ? `Opening course with ${transcriptCount} transcript${transcriptCount === 1 ? '' : 's'} ready`
+        : 'Opening imported course'
+    case 'enriching':
+      return totalLessons > 0
+        ? `Enriching lessons ${enrichmentCount}/${totalLessons}`
+        : 'Enriching lessons'
+    case 'completed':
+      return totalLessons > 0
+        ? `Import complete with ${enrichmentCount}/${totalLessons} lessons enriched`
+        : 'Import complete'
+    case 'cancelled':
+      return 'Import cancelled'
+    case 'error':
+      return job?.error || 'Import failed'
+    default:
+      return job?.progress?.message || 'Guided import in progress'
+  }
+}
+
+function serializeJob(job) {
+  const transcriptCount = countTranscriptReady(job?.lessons || [])
+  const enrichmentCount = countEnrichmentComplete(job?.lessons || [])
+  const selectedFolder = buildSelectedFolderSummary(job.folderPath, Number(job?.progress?.totalLessons) || 0)
+
+  return {
+    jobId: job.id,
+    status: job.status,
+    phase: job.phase,
+    stageLabel: buildStageLabel(job),
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    completedAt: job.status === 'completed' ? job.updatedAt : null,
+    selectedFolder,
+    selectedPilotLessonIds: [...(job.selectedLessonIds || [])],
+    transcriptCount,
+    enrichmentCount,
+    progress: { ...(job.progress || {}) },
+    manifest: job.manifest || null,
+    attachedMediaLibrary: {
+      type: 'service',
+      mediaBaseUrl: `/api/local-course/jobs/${job.id}/media`,
+      folderPath: job.folderPath,
+    },
+    mediaBaseUrl: `/api/local-course/jobs/${job.id}/media`,
+    lessons: Array.isArray(job.lessons) ? job.lessons : [],
+    error: job.error || '',
+  }
+}
+
+function splitTranscriptSentences(transcriptText = '') {
+  return String(transcriptText || '')
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?])\s+/)
+    .map(sentence => sentence.trim())
+    .filter(Boolean)
+}
+
+const TOPIC_RULES = [
+  { tag: 'state regulation', terms: ['breathe', 'breath', 'calm', 'state', 'nervous system', 'regulate'] },
+  { tag: 'urgency', terms: ['urgent', 'rush', 'chase', 'fomo', 'forcing'] },
+  { tag: 'fear', terms: ['fear', 'afraid', 'scared', 'anxious'] },
+  { tag: 'discipline', terms: ['discipline', 'process', 'routine', 'consistency'] },
+  { tag: 'exits', terms: ['exit', 'stops', 'stop loss', 'take profit', 'cut winners'] },
+  { tag: 'patience', terms: ['patience', 'wait', 'waiting'] },
+  { tag: 'self-worth', terms: ['self-worth', 'identity', 'prove', 'validation'] },
+]
+
+function inferTopicTags(lesson) {
+  const sourceText = `${lesson.title} ${lesson.transcriptText}`.toLowerCase()
+  const tags = TOPIC_RULES
+    .filter(rule => rule.terms.some(term => sourceText.includes(term)))
+    .map(rule => rule.tag)
+
+  return tags.slice(0, 4)
+}
+
+function buildLessonEnrichment(lesson) {
+  const sentences = splitTranscriptSentences(lesson.transcriptText)
+  const summary = sentences.slice(0, 2).join(' ').trim()
+  const topicTags = inferTopicTags(lesson)
+  const primaryTopic = topicTags[0] || 'process discipline'
+  const principles = [
+    summary || `Slow the decision loop so ${lesson.title.toLowerCase()} becomes deliberate instead of reactive.`,
+    `Notice when ${primaryTopic} begins to drive your behavior before you change the trade.`,
+  ].filter(Boolean)
+  const drills = [
+    `Pause for one breath cycle before acting when ${primaryTopic} shows up intraday.`,
+    `After the close, journal one moment from ${lesson.title.toLowerCase()} where process held or slipped.`,
+  ]
+  const applicationNotes = [
+    `Use this lesson during the 30-minute and lunch check-ins when you feel ${primaryTopic}.`,
+  ]
+
+  return {
+    summary: summary || `Transcript imported for ${lesson.title}; enrichment is still catching up.`,
+    principles,
+    drills,
+    applicationNotes,
+    topicTags,
+    transcriptStatus: 'ready',
+    enrichmentStatus: 'complete',
+    enrichmentError: '',
+  }
+}
+
 export function createLocalCourseService(options = {}) {
   const workspaceRoot = path.resolve(options.workspaceRoot || process.cwd())
   const stateRoot = path.resolve(options.stateRoot || workspaceRoot)
@@ -174,10 +310,22 @@ export function createLocalCourseService(options = {}) {
       id: job.id,
       status: job.status,
       phase: job.phase,
+      stageLabel: buildStageLabel(job),
       updatedAt: job.updatedAt,
       progress: job.progress,
       selectedLessonIds: job.selectedLessonIds,
+      transcriptCount: countTranscriptReady(job.lessons),
+      enrichmentCount: countEnrichmentComplete(job.lessons),
     })
+  }
+
+  function persistManifestArtifacts(job) {
+    if (!job.manifest) return
+
+    writeJson(path.join(job.outputDir, 'manifest.json'), job.manifest)
+    for (const lesson of job.manifest.lessons || []) {
+      writeJson(path.join(job.outputDir, 'lessons', `${lesson.id}.json`), lesson)
+    }
   }
 
   function emitJobEvent(jobId, event) {
@@ -218,32 +366,151 @@ export function createLocalCourseService(options = {}) {
     const lessons = Array.isArray(manifest.lessons) ? manifest.lessons : []
     const hydratedLessons = lessons.map(lesson => ({
       ...lesson,
+      transcriptStatus: 'ready',
+      enrichmentStatus: lesson.enrichmentStatus || 'pending',
+      enrichmentError: lesson.enrichmentError || '',
       mediaUrl: buildJobMediaUrl(job.id, lesson.sourceRelativePath || lesson.assetPaths?.video || ''),
     }))
 
     job.lessons = hydratedLessons
-    job.updatedAt = now()
-
-    writeJson(path.join(job.outputDir, 'manifest.json'), {
+    job.manifest = {
       ...manifest,
       lessons: hydratedLessons,
-    })
+    }
+    job.updatedAt = now()
+    persistManifestArtifacts(job)
 
     for (const lesson of hydratedLessons) {
-      writeJson(path.join(job.outputDir, 'lessons', `${lesson.id}.json`), lesson)
       writeJson(path.join(job.outputDir, 'enrichment', `${lesson.id}.json`), {
         lessonId: lesson.id,
         status: 'pending',
         generatedAt: job.updatedAt,
-        summaryStatus: 'placeholder',
-        embeddingStatus: 'placeholder',
+        transcriptStatus: 'ready',
+        summaryStatus: 'pending',
+        embeddingStatus: 'pending',
       })
     }
+  }
+
+  async function runEnrichmentJob(job) {
+    if (!job.manifest?.lessons?.length) {
+      job.status = 'completed'
+      job.phase = 'completed'
+      job.updatedAt = now()
+      persistJob(job)
+      emitJobEvent(job.id, {
+        type: 'job.completed',
+        jobId: job.id,
+        status: job.status,
+        phase: job.phase,
+        progress: job.progress,
+        stageLabel: buildStageLabel(job),
+        at: job.updatedAt,
+      })
+      return
+    }
+
+    job.phase = 'enriching'
+    job.updatedAt = now()
+    persistJob(job)
+    emitJobEvent(job.id, {
+      type: 'job.phase',
+      jobId: job.id,
+      status: job.status,
+      phase: job.phase,
+      progress: job.progress,
+      stageLabel: buildStageLabel(job),
+      at: job.updatedAt,
+    })
+
+    for (let index = 0; index < job.manifest.lessons.length; index += 1) {
+      const lesson = job.manifest.lessons[index]
+      if (lesson.enrichmentStatus === 'complete' && (lesson.summary || lesson.principles?.length || lesson.drills?.length)) {
+        continue
+      }
+
+      try {
+        const enrichment = buildLessonEnrichment(lesson)
+        const nextLesson = {
+          ...lesson,
+          ...enrichment,
+          updatedAt: now(),
+        }
+
+        job.manifest.lessons[index] = nextLesson
+        job.lessons[index] = nextLesson
+        job.updatedAt = nextLesson.updatedAt
+        persistManifestArtifacts(job)
+        writeJson(path.join(job.outputDir, 'enrichment', `${lesson.id}.json`), {
+          lessonId: lesson.id,
+          status: 'complete',
+          generatedAt: job.updatedAt,
+          transcriptStatus: 'ready',
+          summaryStatus: 'complete',
+          embeddingStatus: 'deferred',
+          topicTags: nextLesson.topicTags,
+        })
+      } catch (error) {
+        const nextLesson = {
+          ...lesson,
+          transcriptStatus: 'ready',
+          enrichmentStatus: 'failed',
+          enrichmentError: String(error?.message || error),
+          updatedAt: now(),
+        }
+        job.manifest.lessons[index] = nextLesson
+        job.lessons[index] = nextLesson
+        job.updatedAt = nextLesson.updatedAt
+        persistManifestArtifacts(job)
+        writeJson(path.join(job.outputDir, 'enrichment', `${lesson.id}.json`), {
+          lessonId: lesson.id,
+          status: 'failed',
+          generatedAt: job.updatedAt,
+          transcriptStatus: 'ready',
+          error: nextLesson.enrichmentError,
+        })
+      }
+
+      persistJob(job)
+      emitJobEvent(job.id, {
+        type: 'job.enrichment',
+        jobId: job.id,
+        status: job.status,
+        phase: job.phase,
+        progress: {
+          ...job.progress,
+          completedLessons: countEnrichmentComplete(job.lessons),
+          totalLessons: job.progress.totalLessons,
+          message: buildStageLabel(job),
+        },
+        stageLabel: buildStageLabel(job),
+        transcriptCount: countTranscriptReady(job.lessons),
+        enrichmentCount: countEnrichmentComplete(job.lessons),
+        manifest: job.manifest,
+        at: job.updatedAt,
+      })
+    }
+
+    job.status = 'completed'
+    job.phase = 'completed'
+    job.updatedAt = now()
+    persistJob(job)
+    emitJobEvent(job.id, {
+      type: 'job.completed',
+      jobId: job.id,
+      status: job.status,
+      phase: job.phase,
+      progress: job.progress,
+      stageLabel: buildStageLabel(job),
+      manifest: job.manifest,
+      at: job.updatedAt,
+    })
   }
 
   async function runImportJob(job, selectedLessons) {
     const signalController = new AbortController()
     job.abortController = signalController
+    job.phase = 'queued'
     jobs.set(job.id, job)
     persistJob(job)
     emitJobEvent(job.id, {
@@ -252,10 +519,14 @@ export function createLocalCourseService(options = {}) {
       status: job.status,
       phase: job.phase,
       progress: job.progress,
+      stageLabel: buildStageLabel(job),
       at: job.createdAt,
     })
 
     try {
+      job.phase = 'transcribing'
+      job.updatedAt = now()
+      persistJob(job)
       const result = await importRunner({
         jobId: job.id,
         folderPath: job.folderPath,
@@ -272,22 +543,45 @@ export function createLocalCourseService(options = {}) {
       }
 
       await finalizeJobArtifacts(job, result.manifest)
-      job.status = 'completed'
-      job.phase = 'completed'
+      job.phase = 'opening-course'
       job.progress = {
         completedLessons: selectedLessons.length,
         totalLessons: selectedLessons.length,
-        message: 'Import completed',
+        message: 'Transcript import complete',
       }
       job.updatedAt = now()
       persistJob(job)
       emitJobEvent(job.id, {
-        type: 'job.completed',
+        type: 'job.transcripts-ready',
         jobId: job.id,
         status: job.status,
         phase: job.phase,
         progress: job.progress,
+        transcriptCount: countTranscriptReady(job.lessons),
+        enrichmentCount: countEnrichmentComplete(job.lessons),
+        stageLabel: buildStageLabel(job),
+        manifest: job.manifest,
         at: job.updatedAt,
+      })
+
+      queueMicrotask(() => {
+        runEnrichmentJob(job).catch(error => {
+          job.status = 'error'
+          job.phase = 'error'
+          job.updatedAt = now()
+          job.error = String(error?.message || error)
+          persistJob(job)
+          emitJobEvent(job.id, {
+            type: 'job.error',
+            jobId: job.id,
+            status: job.status,
+            phase: job.phase,
+            progress: job.progress,
+            error: job.error,
+            stageLabel: buildStageLabel(job),
+            at: job.updatedAt,
+          })
+        })
       })
     } catch (error) {
       if (signalController.signal.aborted || error?.message === 'aborted') {
@@ -305,6 +599,7 @@ export function createLocalCourseService(options = {}) {
           status: job.status,
           phase: job.phase,
           progress: job.progress,
+          stageLabel: buildStageLabel(job),
           at: job.updatedAt,
         })
         return
@@ -326,6 +621,7 @@ export function createLocalCourseService(options = {}) {
         phase: job.phase,
         progress: job.progress,
         error: job.error,
+        stageLabel: buildStageLabel(job),
         at: job.updatedAt,
       })
     } finally {
@@ -337,6 +633,9 @@ export function createLocalCourseService(options = {}) {
     jsonResponse(response, 200, {
       ok: true,
       service: 'local-course-service',
+      localModeAvailable: true,
+      hostedModeDisabled: false,
+      hostedModeDisabledReason: '',
       supports: {
         selectFolder: supportsSelectFolder,
       },
@@ -360,7 +659,7 @@ export function createLocalCourseService(options = {}) {
     selectedFolderPath = path.resolve(result.folderPath)
     jsonResponse(response, 200, {
       ok: true,
-      folderPath: selectedFolderPath,
+      selectedFolder: buildSelectedFolderSummary(selectedFolderPath, 0),
     })
   }
 
@@ -389,7 +688,11 @@ export function createLocalCourseService(options = {}) {
     const scan = scanCourseFolder(resolvedFolderPath)
     scans.set(resolvedFolderPath, scan)
     selectedFolderPath = resolvedFolderPath
-    jsonResponse(response, 200, scan)
+    jsonResponse(response, 200, {
+      ...scan,
+      selectedFolder: buildSelectedFolderSummary(resolvedFolderPath, scan.lessons.length),
+      selectedPilotLessonIds: [...scan.pilotSelection.lessonIds],
+    })
   }
 
   function resolveSelectedLessons(scan, body) {
@@ -416,6 +719,24 @@ export function createLocalCourseService(options = {}) {
       selectedLessons = scan.lessons.slice(0, 5)
     }
 
+    const minimumSelection = Math.min(3, scan.lessons.length || 0)
+    const maximumSelection = Math.min(5, scan.lessons.length || 0)
+
+    if (
+      selectedLessons.length > 0
+      && (
+        selectedLessons.length < minimumSelection
+        || (maximumSelection > 0 && selectedLessons.length > maximumSelection)
+      )
+    ) {
+      return {
+        error: 'invalid_selected_lesson_count',
+        message: minimumSelection === maximumSelection
+          ? `Select exactly ${minimumSelection} pilot lesson${minimumSelection === 1 ? '' : 's'}.`
+          : `Select between ${minimumSelection} and ${maximumSelection} pilot lessons.`,
+      }
+    }
+
     return { selectedLessons }
   }
 
@@ -440,7 +761,7 @@ export function createLocalCourseService(options = {}) {
       jsonResponse(response, 400, {
         ok: false,
         code: selection.error || 'invalid_selected_lessons',
-        message: 'Selected lessons must match the latest scan result.',
+        message: selection.message || 'Selected lessons must match the latest scan result.',
       })
       return
     }
@@ -460,11 +781,7 @@ export function createLocalCourseService(options = {}) {
     runImportJob(job, selection.selectedLessons)
 
     jsonResponse(response, 202, {
-      ok: true,
-      jobId,
-      status: job.status,
-      mediaBaseUrl: `/jobs/${jobId}/media`,
-      selectedLessonIds: job.selectedLessonIds,
+      ...serializeJob(job),
     })
   }
 
@@ -478,10 +795,7 @@ export function createLocalCourseService(options = {}) {
       return
     }
 
-    jsonResponse(response, 200, {
-      ok: true,
-      job,
-    })
+    jsonResponse(response, 200, serializeJob(job))
   }
 
   async function handleEvents(_request, response, jobId) {
@@ -543,6 +857,7 @@ export function createLocalCourseService(options = {}) {
       ok: true,
       jobId,
       status: 'cancelling',
+      stageLabel: 'Cancelling guided import',
     })
   }
 
@@ -575,46 +890,49 @@ export function createLocalCourseService(options = {}) {
 
   async function route(request, response) {
     const requestUrl = new URL(request.url, 'http://127.0.0.1')
+    const pathname = requestUrl.pathname.startsWith('/api/local-course')
+      ? requestUrl.pathname.slice('/api/local-course'.length) || '/'
+      : requestUrl.pathname
 
-    if (request.method === 'GET' && requestUrl.pathname === '/health') {
+    if (request.method === 'GET' && pathname === '/health') {
       await handleHealth(request, response)
       return
     }
 
-    if (request.method === 'POST' && requestUrl.pathname === '/select-folder') {
+    if (request.method === 'POST' && pathname === '/select-folder') {
       await handleSelectFolder(request, response)
       return
     }
 
-    if (request.method === 'POST' && requestUrl.pathname === '/scan-folder') {
+    if (request.method === 'POST' && pathname === '/scan-folder') {
       await handleScanFolder(request, response)
       return
     }
 
-    if (request.method === 'POST' && requestUrl.pathname === '/start-import') {
+    if (request.method === 'POST' && pathname === '/start-import') {
       await handleStartImport(request, response)
       return
     }
 
-    const jobMatch = requestUrl.pathname.match(/^\/jobs\/([^/]+)$/)
+    const jobMatch = pathname.match(/^\/jobs\/([^/]+)$/)
     if (request.method === 'GET' && jobMatch) {
       await handleGetJob(request, response, jobMatch[1])
       return
     }
 
-    const eventsMatch = requestUrl.pathname.match(/^\/jobs\/([^/]+)\/events$/)
+    const eventsMatch = pathname.match(/^\/jobs\/([^/]+)\/events$/)
     if (request.method === 'GET' && eventsMatch) {
       await handleEvents(request, response, eventsMatch[1])
       return
     }
 
-    const cancelMatch = requestUrl.pathname.match(/^\/jobs\/([^/]+)\/cancel$/)
+    const cancelMatch = pathname.match(/^\/jobs\/([^/]+)\/cancel$/)
     if (request.method === 'POST' && cancelMatch) {
       await handleCancel(request, response, cancelMatch[1])
       return
     }
 
-    const mediaMatch = requestUrl.pathname.match(/^\/jobs\/([^/]+)\/media$/)
+    const mediaMatch = pathname.match(/^\/jobs\/([^/]+)\/media$/)
     if (request.method === 'GET' && mediaMatch) {
       await handleMedia(request, response, mediaMatch[1])
       return
@@ -627,7 +945,7 @@ export function createLocalCourseService(options = {}) {
   }
 
   return {
-    async start({ port = 4545 } = {}) {
+    async start({ port = 4315 } = {}) {
       if (server) {
         const address = server.address()
         return { port: address.port }
@@ -750,7 +1068,7 @@ export function createLocalCourseService(options = {}) {
 
 if (process.argv[1] === __filename) {
   const service = createLocalCourseService()
-  service.start({ port: Number(process.env.LOCAL_COURSE_SERVICE_PORT || 4545) }).then(({ port }) => {
+  service.start({ port: Number(process.env.LOCAL_COURSE_SERVICE_PORT || 4315) }).then(({ port }) => {
     console.log(`Local course service listening on http://127.0.0.1:${port}`)
   })
 }

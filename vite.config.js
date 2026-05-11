@@ -134,6 +134,10 @@ export default defineConfig({
         },
         timeout: 10000,
       },
+      '/api/local-course': {
+        target: `http://127.0.0.1:${process.env.LOCAL_COURSE_SERVICE_PORT || 4315}`,
+        changeOrigin: true,
+      },
     },
   },
 })

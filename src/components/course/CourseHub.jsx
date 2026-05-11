@@ -53,8 +53,12 @@ export default function CourseHub() {
     markLessonApplied,
     importSession,
     setImportServiceState,
+    setImportFolder,
+    setScannedLessons,
+    setSelectedPilotLessonIds,
     startImportJob,
     updateImportJob,
+    applyImportManifest,
     completeImportJob,
     failImportJob,
     clearImportError,
@@ -78,8 +82,14 @@ export default function CourseHub() {
   const filteredLessons = filterCourseLessons(lessons, lessonQuery, selectedTopic)
   const activeLesson = filteredLessons.find(lesson => lesson.id === activeLessonId) || filteredLessons[0] || null
   const filteredCountLabel = `${filteredLessons.length} match${filteredLessons.length === 1 ? '' : 'es'}`
+  const scannedLessonCount = importSession.scannedLessons.length
+  const minimumPilotSelection = scannedLessonCount > 0 ? Math.min(3, scannedLessonCount) : 0
+  const maximumPilotSelection = scannedLessonCount > 0 ? Math.min(5, scannedLessonCount) : 0
   const selectedPilotCount = importSession.selectedPilotLessonIds.length
   const selectedPilotLabel = `${selectedPilotCount} pilot lesson${selectedPilotCount === 1 ? '' : 's'} selected`
+  const hasValidPilotSelection = scannedLessonCount > 0
+    && selectedPilotCount >= minimumPilotSelection
+    && selectedPilotCount <= maximumPilotSelection
   const transcriptReadyCount = lessons.filter(lesson => String(lesson.transcriptText || '').trim()).length
   const transcriptProgressCount = Math.max(transcriptReadyCount, importSession.transcriptCount)
   const hasEnrichmentPending = transcriptProgressCount > 0
@@ -124,8 +134,23 @@ export default function CourseHub() {
         const job = await getLocalCourseImportJob(importSession.activeJob.jobId)
         if (cancelled) return
 
-        if (job?.manifest) {
+        if (job?.manifest && importSession.manifestImportedJobId !== job.jobId && job.status !== 'completed') {
+          applyImportManifest({
+            jobId: job.jobId || importSession.activeJob.jobId,
+            manifest: job.manifest,
+            selectedFolder: job.selectedFolder || importSession.selectedFolder,
+            selectedPilotLessonIds: job.selectedPilotLessonIds || importSession.selectedPilotLessonIds,
+            transcriptCount: job.transcriptCount,
+            enrichmentCount: job.enrichmentCount,
+            attachedMediaLibrary: job.attachedMediaLibrary || null,
+          })
+          updateImportJob(job)
+          return
+        }
+
+        if (job?.manifest && job.status === 'completed') {
           completeImportJob({
+            jobId: job.jobId || importSession.activeJob.jobId,
             manifest: job.manifest,
             selectedFolder: job.selectedFolder || importSession.selectedFolder,
             selectedPilotLessonIds: job.selectedPilotLessonIds || importSession.selectedPilotLessonIds,
@@ -149,10 +174,12 @@ export default function CourseHub() {
           return
         }
 
-        if (job?.status === 'error') {
+        if (job?.status === 'error' || job?.status === 'cancelled') {
           failImportJob({
-            message: job.error || 'The local course import stopped before it finished.',
-            status: 'error',
+            message: job.error || (job.status === 'cancelled'
+              ? 'The local course import was cancelled before it finished.'
+              : 'The local course import stopped before it finished.'),
+            status: job.status,
             stageLabel: job.stageLabel || importSession.activeJob.stageLabel,
           })
           return
@@ -176,9 +203,11 @@ export default function CourseHub() {
       window.clearInterval(intervalId)
     }
   }, [
+    applyImportManifest,
     completeImportJob,
     failImportJob,
     importSession.activeJob,
+    importSession.manifestImportedJobId,
     importSession.selectedFolder,
     importSession.selectedPilotLessonIds,
     updateImportJob,
@@ -221,14 +250,7 @@ export default function CourseHub() {
 
     try {
       const folder = await chooseLocalCourseFolder()
-      startImportJob({
-        status: 'folder-selected',
-        stageLabel: 'Folder selected',
-        selectedFolder: folder.selectedFolder || folder,
-        selectedPilotLessonIds: folder.selectedPilotLessonIds || [],
-        transcriptCount: 0,
-        enrichmentCount: 0,
-      })
+      setImportFolder(folder.selectedFolder || folder)
     } catch (error) {
       setGuidedImportError(error?.message || 'Could not select a local course folder yet.')
     } finally {
@@ -248,10 +270,9 @@ export default function CourseHub() {
         folderPath: importSession.selectedFolder.path,
       })
 
-      updateImportJob({
-        status: 'scanned',
-        stageLabel: 'Folder scanned',
+      setScannedLessons({
         selectedFolder: scanResult.selectedFolder || importSession.selectedFolder,
+        lessons: scanResult.lessons || [],
         selectedPilotLessonIds: scanResult.selectedPilotLessonIds || [],
       })
     } catch (error) {
@@ -275,14 +296,16 @@ export default function CourseHub() {
     try {
       const job = await startLocalCourseImport({
         folderPath: importSession.selectedFolder.path,
-        lessonIds: importSession.selectedPilotLessonIds,
+        selectedLessonIds: importSession.selectedPilotLessonIds,
       })
 
       startImportJob({
         jobId: job.jobId,
-        status: job.status || 'transcribing',
+        status: job.status || 'queued',
+        phase: job.phase || 'queued',
         stageLabel: job.stageLabel || 'Transcribing selected lessons',
         selectedFolder: job.selectedFolder || importSession.selectedFolder,
+        scannedLessons: importSession.scannedLessons,
         selectedPilotLessonIds: job.selectedPilotLessonIds || importSession.selectedPilotLessonIds,
         transcriptCount: job.transcriptCount || 0,
         enrichmentCount: job.enrichmentCount || 0,
@@ -295,6 +318,16 @@ export default function CourseHub() {
     } finally {
       setIsStartingImport(false)
     }
+  }
+
+  function handleTogglePilotLesson(lessonId) {
+    if (importJobBusy) return
+
+    const nextIds = importSession.selectedPilotLessonIds.includes(lessonId)
+      ? importSession.selectedPilotLessonIds.filter(candidateId => candidateId !== lessonId)
+      : [...importSession.selectedPilotLessonIds, lessonId]
+
+    setSelectedPilotLessonIds(nextIds)
   }
 
   return (
@@ -403,9 +436,9 @@ export default function CourseHub() {
                 <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gray-500">Pilot Lessons</p>
                   <p className="mt-2 text-sm text-gray-200">{selectedPilotLabel}</p>
-                  {importSession.selectedFolder?.lessonCount ? (
+                  {scannedLessonCount ? (
                     <p className="mt-1 text-xs text-gray-500">
-                      {importSession.selectedFolder.lessonCount} lessons detected in folder
+                      Choose {minimumPilotSelection === maximumPilotSelection ? minimumPilotSelection : `${minimumPilotSelection}-${maximumPilotSelection}`} lessons from {scannedLessonCount} detected
                     </p>
                   ) : null}
                 </div>
@@ -433,13 +466,71 @@ export default function CourseHub() {
                 <button
                   type="button"
                   onClick={handleGuidedImport}
-                  disabled={!importSession.localModeAvailable || !importSession.selectedFolder?.path || isStartingImport || importJobBusy}
+                  disabled={!importSession.localModeAvailable || !importSession.selectedFolder?.path || !hasValidPilotSelection || isStartingImport || importJobBusy}
                   className="inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-blue/25 bg-accent-blue/15 px-4 py-3 text-sm font-medium text-accent-blue transition-colors hover:bg-accent-blue/20 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-gray-500"
                 >
                   {isStartingImport ? <LoaderCircle size={16} className="animate-spin" /> : <Upload size={16} />}
                   Start Transcript Import
                 </button>
               </div>
+
+              {importSession.scannedLessons.length ? (
+                <div className="mt-4 rounded-[24px] border border-white/10 bg-black/20 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Pilot lesson selection</p>
+                      <p className="mt-1 text-sm text-gray-400">
+                        Pick the first {minimumPilotSelection === maximumPilotSelection ? minimumPilotSelection : `${minimumPilotSelection}-${maximumPilotSelection}`} lessons to bring online now. The full rollout can follow once this pilot feels right.
+                      </p>
+                    </div>
+                    <span className={`rounded-full border px-3 py-1.5 text-[11px] uppercase tracking-[0.24em] ${
+                      hasValidPilotSelection
+                        ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-200'
+                        : 'border-amber-400/20 bg-amber-500/10 text-amber-100'
+                    }`}>
+                      {hasValidPilotSelection
+                        ? 'Selection ready'
+                        : `Pick ${minimumPilotSelection === maximumPilotSelection ? minimumPilotSelection : `${minimumPilotSelection}-${maximumPilotSelection}`} lessons`}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                    {importSession.scannedLessons.map(lesson => {
+                      const selected = importSession.selectedPilotLessonIds.includes(lesson.id)
+                      const supportCount = (lesson.assetPaths?.slides?.length || 0) + (lesson.assetPaths?.articles?.length || 0)
+
+                      return (
+                        <button
+                          key={lesson.id}
+                          type="button"
+                          onClick={() => handleTogglePilotLesson(lesson.id)}
+                          className={`rounded-2xl border px-4 py-3 text-left transition-colors ${
+                            selected
+                              ? 'border-accent-blue/30 bg-accent-blue/10'
+                              : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06]'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">
+                                Lesson {lesson.sequenceNumber}
+                              </p>
+                              <p className="mt-2 text-sm font-medium text-white">{lesson.title}</p>
+                            </div>
+                            <span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-gray-300">
+                              {selected ? 'Selected' : 'Available'}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-xs text-gray-400">{lesson.sourceRelativePath}</p>
+                          <p className="mt-2 text-xs text-gray-500">
+                            {supportCount} support asset{supportCount === 1 ? '' : 's'}
+                          </p>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
 
               {importSession.activeJob ? (
                 <div className="mt-4 rounded-2xl border border-accent-blue/20 bg-accent-blue/10 px-4 py-3 text-sm text-accent-blue">
@@ -504,10 +595,10 @@ export default function CourseHub() {
         {lessons.length === 0 ? (
           <section className="luxury-panel rounded-[28px] border border-dashed border-white/10 px-5 py-12 text-center md:px-6">
             <Search size={24} className="mx-auto mb-4 text-gray-500" />
-            <p className="text-base font-medium text-white">Import a pilot course manifest to begin</p>
+            <p className="text-base font-medium text-white">Import a pilot course folder to begin</p>
             <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-400">
-              Run the local ingest helper, then import the generated `manifest.json` file here to
-              unlock lesson browsing, attached source lookup, and coaching workflows.
+              Start with Guided Local Import to scan the source folder, choose a 3-5 lesson pilot,
+              auto-load transcripts, and keep coaching usable while enrichment catches up in the background.
             </p>
           </section>
         ) : (

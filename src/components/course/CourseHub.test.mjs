@@ -37,8 +37,10 @@ function resetCourseHubState() {
       hostedModeDisabled: false,
       hostedModeDisabledReason: '',
       selectedFolder: null,
+      scannedLessons: [],
       selectedPilotLessonIds: [],
       activeJob: null,
+      manifestImportedJobId: null,
       transcriptCount: 0,
       enrichmentCount: 0,
       attachedMediaLibrary: null,
@@ -52,8 +54,12 @@ function resetCourseHubState() {
     saveLessonReflection: () => {},
     markLessonApplied: () => {},
     setImportServiceState: () => {},
+    setImportFolder: () => {},
+    setScannedLessons: () => {},
+    setSelectedPilotLessonIds: () => {},
     startImportJob: () => {},
     updateImportJob: () => {},
+    applyImportManifest: () => {},
     completeImportJob: () => {},
     failImportJob: () => {},
     clearImportError: () => {},
@@ -160,6 +166,29 @@ test('Course Hub renders the localhost-ready guided import state and selected fo
         path: '/Users/calebearden/Courses/Rande Pilot',
         lessonCount: 3,
       },
+      scannedLessons: [
+        {
+          id: 'lesson-01-state-management',
+          title: 'State Management',
+          sequenceNumber: 1,
+          sourceRelativePath: 'module-a/Lesson 01.mp4',
+          assetPaths: { video: 'module-a/Lesson 01.mp4', slides: [], articles: [], notes: [] },
+        },
+        {
+          id: 'lesson-02-process',
+          title: 'Process',
+          sequenceNumber: 2,
+          sourceRelativePath: 'module-a/Lesson 02.mp4',
+          assetPaths: { video: 'module-a/Lesson 02.mp4', slides: [], articles: [], notes: [] },
+        },
+        {
+          id: 'lesson-03-exits',
+          title: 'Exits',
+          sequenceNumber: 3,
+          sourceRelativePath: 'module-a/Lesson 03.mp4',
+          assetPaths: { video: 'module-a/Lesson 03.mp4', slides: [], articles: [], notes: [] },
+        },
+      ],
       selectedPilotLessonIds: ['lesson-01-state-management', 'lesson-02-process'],
     },
   }
@@ -171,6 +200,7 @@ test('Course Hub renders the localhost-ready guided import state and selected fo
   assert.match(markup, /2 pilot lessons selected/i)
   assert.match(markup, /Scan Folder/i)
   assert.match(markup, /Start Transcript Import/i)
+  assert.match(markup, /Pilot lesson selection/i)
 })
 
 test('Course Hub renders normalized lesson preview content and session attachment counts', async () => {
@@ -217,7 +247,7 @@ test('Course Hub renders normalized lesson preview content and session attachmen
       enrichmentCount: 0,
       attachedMediaLibrary: {
         type: 'service',
-        mediaBaseUrl: 'http://127.0.0.1:4315/media',
+        mediaBaseUrl: '/api/local-course/jobs/job-42/media',
         folderPath: '/Users/calebearden/Courses/Rande Pilot',
       },
       lastImport: {

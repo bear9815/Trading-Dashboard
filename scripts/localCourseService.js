@@ -145,7 +145,7 @@ export function ensureJobLayout(stateRoot, jobId) {
 }
 
 export function buildJobMediaUrl(jobId, relativePath) {
-  return `/jobs/${jobId}/media?relativePath=${encodeURIComponent(relativePath)}`
+  return `/api/local-course/jobs/${jobId}/media?relativePath=${encodeURIComponent(relativePath)}`
 }
 
 export function writeJson(filePath, value) {
