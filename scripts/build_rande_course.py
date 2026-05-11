@@ -18,6 +18,15 @@ def slugify(value: str) -> str:
     return value or "lesson"
 
 
+def derive_lesson_title(video_path: Path) -> str:
+    return video_path.stem.replace("_", " ").strip()
+
+
+def build_lesson_id(video_path: Path, input_dir: Path, index: int) -> str:
+    source_identity = video_path.relative_to(input_dir).with_suffix("").as_posix()
+    return f"lesson-{index:02d}-{slugify(source_identity)}"
+
+
 def discover_lessons(input_dir: Path) -> list[Path]:
     return sorted(
         [path for path in input_dir.rglob("*") if path.suffix.lower() in VIDEO_EXTENSIONS],
@@ -62,15 +71,16 @@ def build_manifest(input_dir: Path, output_dir: Path, model_name: str, limit: in
     transcript_dir.mkdir(parents=True, exist_ok=True)
 
     for index, video_path in enumerate(discover_lessons(input_dir)[: limit or None], start=1):
-        title = video_path.stem.replace("_", " ").strip()
+        title = derive_lesson_title(video_path)
         transcript_text = transcribe_file(model, video_path)
         transcript_name = f"{index:02d}-{slugify(title)}.txt"
+        lesson_id = build_lesson_id(video_path, input_dir, index)
         (transcript_dir / transcript_name).write_text(transcript_text, encoding="utf-8")
 
         support_assets = support_assets_for(video_path, input_dir)
         lessons.append(
             {
-                "id": f"lesson-{index:02d}-{slugify(title)}",
+                "id": lesson_id,
                 "title": title,
                 "sequenceNumber": index,
                 "summary": "",

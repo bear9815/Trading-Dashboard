@@ -99,3 +99,62 @@ print(json.dumps(payload))
     notes: [],
   })
 })
+
+test('build_manifest keeps a stable lesson id when the display title changes for the same source file', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'course-ingest-'))
+  const inputDir = path.join(tempDir, 'input')
+  const outputDir = path.join(tempDir, 'output')
+  const lessonDir = path.join(inputDir, 'module-a')
+  fs.mkdirSync(lessonDir, { recursive: true })
+
+  const videoPath = path.join(lessonDir, 'Lesson One.mp4')
+  fs.writeFileSync(videoPath, '')
+
+  const result = runPython([
+    '-c',
+    `
+import importlib.util
+import json
+import pathlib
+import sys
+import types
+
+class FakeWhisperModel:
+    def __init__(self, *args, **kwargs):
+        pass
+
+sys.modules["faster_whisper"] = types.SimpleNamespace(WhisperModel=FakeWhisperModel)
+
+module_path = pathlib.Path(${JSON.stringify(scriptPath)})
+spec = importlib.util.spec_from_file_location("build_rande_course", module_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+input_dir = pathlib.Path(${JSON.stringify(inputDir)})
+output_dir = pathlib.Path(${JSON.stringify(outputDir)})
+video_path = pathlib.Path(${JSON.stringify(videoPath)})
+
+module.discover_lessons = lambda _input_dir: [video_path]
+module.transcribe_file = lambda _model, _video_path: "Transcript"
+module.support_assets_for = lambda _video_path, _input_dir: {"slides": [], "articles": [], "notes": []}
+
+baseline = module.build_manifest(input_dir, output_dir, "stub", None)
+module.derive_lesson_title = lambda _video_path: "Retitled Lesson"
+reimported = module.build_manifest(input_dir, output_dir, "stub", None)
+
+print(json.dumps({
+    "baseline": baseline["lessons"][0],
+    "reimported": reimported["lessons"][0],
+}))
+`,
+  ])
+
+  fs.rmSync(tempDir, { recursive: true, force: true })
+
+  assert.equal(result.status, 0, result.stderr)
+  const payload = JSON.parse(result.stdout)
+  assert.equal(payload.baseline.title, 'Lesson One')
+  assert.equal(payload.reimported.title, 'Retitled Lesson')
+  assert.equal(payload.baseline.id, 'lesson-01-module-a-lesson-one')
+  assert.equal(payload.reimported.id, payload.baseline.id)
+})

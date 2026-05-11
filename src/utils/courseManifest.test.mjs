@@ -89,6 +89,21 @@ test('normalizeCourseManifest keeps bare numbered lesson titles on the clean seq
   assert.equal(manifest.lessons[0].slug, 'lesson-01')
 })
 
+test('normalizeCourseManifest preserves ingest-provided stable ids while still deriving a title slug', () => {
+  const manifest = normalizeCourseManifest({
+    lessons: [
+      {
+        id: 'lesson-01-module-a-lesson-one',
+        title: 'Lesson One',
+        sequenceNumber: 1,
+      },
+    ],
+  })
+
+  assert.equal(manifest.lessons[0].id, 'lesson-01-module-a-lesson-one')
+  assert.equal(manifest.lessons[0].slug, 'lesson-01-lesson-one')
+})
+
 test('getLessonCompletionStage reflects the watched → reflected → applied ladder', () => {
   assert.equal(getLessonCompletionStage({ watchedAt: null, reflectedAt: null, appliedAt: null }), 'not-started')
   assert.equal(getLessonCompletionStage({ watchedAt: '2026-05-10T12:00:00.000Z', reflectedAt: null, appliedAt: null }), 'watched')
