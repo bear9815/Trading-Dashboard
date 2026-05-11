@@ -7,6 +7,7 @@ export const APP_PAGES = [
   'charts',
   'watchlist',
   'morning',
+  'course',
   'journal',
   'ai',
   'regime',

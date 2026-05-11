@@ -13,6 +13,7 @@ const NAV = [
   { id: 'charts',      label: 'Charts',         icon: CandlestickChart },
   { id: 'watchlist',   label: 'Watchlist',      icon: Bookmark },
   { id: 'morning',     label: 'Morning',        icon: Sun      },
+  { id: 'course',      label: 'Course Hub',     icon: BookOpen },
   { id: 'rrg',         label: 'Rotation',       icon: GitCompare },
   { id: 'journal',     label: 'Journal',        icon: BookOpen },
   { id: 'ai',          label: 'AI Analysis',    icon: Sparkles },

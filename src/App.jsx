@@ -35,6 +35,7 @@ const TradeReview        = lazy(() => import('./components/chartreview/TradeRevi
 const Charts             = lazy(() => import('./components/charts/Charts.jsx'))
 const Watchlist          = lazy(() => import('./components/watchlist/Watchlist.jsx'))
 const Morning            = lazy(() => import('./components/morning/Morning.jsx'))
+const CourseHub          = lazy(() => import('./components/course/CourseHub.jsx'))
 const RRGPage            = lazy(() => import('./components/rrg/RRGPage.jsx'))
 const FactorRegime       = lazy(() => import('./components/regime/FactorRegime.jsx'))
 const ThematicResearch    = lazy(() => import('./components/thematic/ThematicResearch.jsx'))
@@ -302,6 +303,7 @@ export default function App() {
               {page === 'charts'      && <Charts />}
               {page === 'watchlist'   && <Watchlist />}
               {page === 'morning'     && <Morning />}
+              {page === 'course'      && <CourseHub />}
               {page === 'journal'     && <Journal {...pageProps} selectedSection={journalSection} onSectionChange={setJournalSection} />}
               {page === 'ai'          && <AIFeedback    {...pageProps} />}
               {page === 'regime'      && <FactorRegime />}
