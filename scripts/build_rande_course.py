@@ -44,6 +44,45 @@ def discover_lessons(input_dir: Path) -> list[Path]:
     )
 
 
+def normalize_selected_lessons(
+    input_dir: Path,
+    selected_lessons: list[str] | None,
+) -> set[str] | None:
+    if not selected_lessons:
+        return None
+
+    normalized: set[str] = set()
+    for lesson in selected_lessons:
+        relative_path = str(lesson or "").strip().replace("\\", "/")
+        if not relative_path:
+            continue
+
+        if relative_path.startswith("/"):
+            relative_path = str(Path(relative_path).resolve().relative_to(input_dir)).replace("\\", "/")
+
+        normalized.add(relative_path)
+
+    return normalized or None
+
+
+def select_lessons(
+    input_dir: Path,
+    limit: int | None,
+    selected_lessons: list[str] | None,
+) -> list[Path]:
+    discovered_lessons = discover_lessons(input_dir)
+    normalized_selected_lessons = normalize_selected_lessons(input_dir, selected_lessons)
+
+    if normalized_selected_lessons is not None:
+        discovered_lessons = [
+            lesson
+            for lesson in discovered_lessons
+            if lesson.relative_to(input_dir).as_posix() in normalized_selected_lessons
+        ]
+
+    return discovered_lessons[: limit or None]
+
+
 def support_assets_for(video_path: Path, input_dir: Path) -> dict[str, list[str]]:
     stem = video_path.stem
     parent = video_path.parent
@@ -72,7 +111,13 @@ def transcribe_file(model: "WhisperModel", media_path: Path) -> str:
     return "\n".join(segment.text.strip() for segment in segments if segment.text.strip())
 
 
-def build_manifest(input_dir: Path, output_dir: Path, model_name: str, limit: int | None) -> dict:
+def build_manifest(
+    input_dir: Path,
+    output_dir: Path,
+    model_name: str,
+    limit: int | None,
+    selected_lessons: list[str] | None = None,
+) -> dict:
     from faster_whisper import WhisperModel
 
     model = WhisperModel(model_name, device="cpu", compute_type="int8")
@@ -80,7 +125,10 @@ def build_manifest(input_dir: Path, output_dir: Path, model_name: str, limit: in
     transcript_dir = output_dir / "transcripts"
     transcript_dir.mkdir(parents=True, exist_ok=True)
 
-    for index, video_path in enumerate(discover_lessons(input_dir)[: limit or None], start=1):
+    for index, video_path in enumerate(
+        select_lessons(input_dir, limit, selected_lessons),
+        start=1,
+    ):
         title = derive_lesson_title(video_path)
         transcript_text = transcribe_file(model, video_path)
         transcript_name = f"{index:02d}-{slugify(title)}.txt"
@@ -127,13 +175,27 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True, help="Path to the ignored output folder")
     parser.add_argument("--model", default="small.en", help="faster-whisper model name")
     parser.add_argument("--limit", type=int, default=None, help="Optional lesson limit for pilot imports")
+    parser.add_argument(
+        "--selected-lessons-file",
+        default=None,
+        help="Optional JSON file containing source-relative lesson paths to import.",
+    )
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir).expanduser().resolve()
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    selected_lessons = None
 
-    manifest = build_manifest(input_dir, output_dir, args.model, args.limit)
+    if args.selected_lessons_file:
+        selected_lessons_payload = json.loads(
+            Path(args.selected_lessons_file).expanduser().resolve().read_text(encoding="utf-8")
+        )
+        if not isinstance(selected_lessons_payload, list):
+            raise ValueError("--selected-lessons-file must contain a JSON array of source-relative paths")
+        selected_lessons = [str(item) for item in selected_lessons_payload]
+
+    manifest = build_manifest(input_dir, output_dir, args.model, args.limit, selected_lessons)
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"Wrote {len(manifest['lessons'])} lessons to {output_dir / 'manifest.json'}")
 

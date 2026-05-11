@@ -24,6 +24,7 @@ test('build_rande_course exposes the faster-whisper CLI contract', () => {
   assert.match(source, /from faster_whisper import WhisperModel/)
   assert.match(source, /--input-dir/)
   assert.match(source, /--output-dir/)
+  assert.match(source, /--selected-lessons-file/)
   assert.match(source, /small\.en/)
   assert.match(source, /manifest\.json/)
   assert.match(source, /"transcriptText"/)
@@ -35,6 +36,7 @@ test('build_rande_course help succeeds without importing faster_whisper', () => 
   assert.match(result.stdout, /--input-dir/)
   assert.match(result.stdout, /--output-dir/)
   assert.match(result.stdout, /--model/)
+  assert.match(result.stdout, /--selected-lessons-file/)
 })
 
 test('build_rande_course module can be imported without faster_whisper installed at import time', () => {
@@ -300,4 +302,66 @@ print(json.dumps([str(path.relative_to(pathlib.Path(${JSON.stringify(inputDir)})
     'alpha-module/Lesson 01.mp4',
     'zeta-module/Lesson 01.mp4',
   ])
+})
+
+test('build_manifest can import an explicit selected subset of source-relative lessons', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'course-ingest-'))
+  const inputDir = path.join(tempDir, 'input')
+  const outputDir = path.join(tempDir, 'output')
+  const lessonDir = path.join(inputDir, 'module-a')
+  fs.mkdirSync(lessonDir, { recursive: true })
+
+  const alphaPath = path.join(lessonDir, 'Alpha Lesson.mp4')
+  const bravoPath = path.join(lessonDir, 'Bravo Lesson.mp4')
+  fs.writeFileSync(alphaPath, '')
+  fs.writeFileSync(bravoPath, '')
+
+  const result = runPython([
+    '-c',
+    `
+import importlib.util
+import json
+import pathlib
+import sys
+import types
+
+class FakeWhisperModel:
+    def __init__(self, *args, **kwargs):
+        pass
+
+sys.modules["faster_whisper"] = types.SimpleNamespace(WhisperModel=FakeWhisperModel)
+
+module_path = pathlib.Path(${JSON.stringify(scriptPath)})
+spec = importlib.util.spec_from_file_location("build_rande_course", module_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+input_dir = pathlib.Path(${JSON.stringify(inputDir)})
+output_dir = pathlib.Path(${JSON.stringify(outputDir)})
+alpha_path = pathlib.Path(${JSON.stringify(alphaPath)})
+bravo_path = pathlib.Path(${JSON.stringify(bravoPath)})
+
+module.discover_lessons = lambda _input_dir: [alpha_path, bravo_path]
+module.transcribe_file = lambda _model, _video_path: f"Transcript for {_video_path.stem}"
+module.support_assets_for = lambda _video_path, _input_dir: {"slides": [], "articles": [], "notes": []}
+
+manifest = module.build_manifest(
+    input_dir,
+    output_dir,
+    "stub",
+    None,
+    ["module-a/Bravo Lesson.mp4"],
+)
+
+print(json.dumps(manifest))
+`,
+  ])
+
+  fs.rmSync(tempDir, { recursive: true, force: true })
+
+  assert.equal(result.status, 0, result.stderr)
+  const manifest = JSON.parse(result.stdout)
+  assert.equal(manifest.lessons.length, 1)
+  assert.equal(manifest.lessons[0].sourceRelativePath, 'module-a/Bravo Lesson.mp4')
+  assert.equal(manifest.lessons[0].sequenceNumber, 1)
 })
