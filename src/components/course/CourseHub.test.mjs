@@ -18,6 +18,7 @@ const sidebarPath = fileURLToPath(new URL('../layout/Sidebar.jsx', import.meta.u
 const hubPath = fileURLToPath(new URL('./CourseHub.jsx', import.meta.url))
 const renderedHubArtifactPath = fileURLToPath(new URL('./.coursehub-render-test.mjs', import.meta.url))
 const renderedHubStoreStubPath = fileURLToPath(new URL('./.coursehub-store-stub.mjs', import.meta.url))
+const renderedHubLessonViewStubPath = fileURLToPath(new URL('./.coursehub-lesson-view-stub.mjs', import.meta.url))
 
 function resetCourseHubState() {
   clearAttachedSourceFilesSession()
@@ -31,7 +32,11 @@ function resetCourseHubState() {
       activeMode: 'behavior-aware',
     },
     importManifest: () => {},
+    setActiveLesson: () => {},
     setActiveCoachingMode: () => {},
+    markLessonWatched: () => {},
+    saveLessonReflection: () => {},
+    markLessonApplied: () => {},
   }
 }
 
@@ -39,6 +44,7 @@ async function loadCourseHubComponent() {
   const hubSource = fs
     .readFileSync(hubPath, 'utf8')
     .replace('../../store/useCourseStore.js', './.coursehub-store-stub.mjs')
+    .replace('./CourseLessonView.jsx', './.coursehub-lesson-view-stub.mjs')
 
   const transformed = await transform(hubSource, {
     sourcefile: hubPath,
@@ -50,6 +56,10 @@ async function loadCourseHubComponent() {
   fs.writeFileSync(
     renderedHubStoreStubPath,
     'export function useCourseStore() { return globalThis.__courseHubTestStoreState }\n'
+  )
+  fs.writeFileSync(
+    renderedHubLessonViewStubPath,
+    'import { createElement } from "react"\nexport default function CourseLessonView() { return createElement("section", null, "Lesson workspace") }\n'
   )
   fs.writeFileSync(renderedHubArtifactPath, transformed.code)
 
@@ -80,6 +90,7 @@ test.after(() => {
   resetCourseHubState()
   fs.rmSync(renderedHubArtifactPath, { force: true })
   fs.rmSync(renderedHubStoreStubPath, { force: true })
+  fs.rmSync(renderedHubLessonViewStubPath, { force: true })
 })
 
 test('Course Hub renders the empty import shell when no lessons are loaded', async () => {
