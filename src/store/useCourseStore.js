@@ -27,6 +27,19 @@ function stampLesson(lesson, updates) {
   }
 }
 
+function preserveLessonProgress(lesson, existingLesson) {
+  if (!existingLesson) return lesson
+
+  return {
+    ...lesson,
+    watchedAt: existingLesson.watchedAt || lesson.watchedAt,
+    reflectedAt: existingLesson.reflectedAt || lesson.reflectedAt,
+    appliedAt: existingLesson.appliedAt || lesson.appliedAt,
+    reflectionText: existingLesson.reflectionText || lesson.reflectionText,
+    updatedAt: existingLesson.updatedAt || lesson.updatedAt,
+  }
+}
+
 export const useCourseStore = create(
   persist(
     (set, get) => ({
@@ -41,12 +54,19 @@ export const useCourseStore = create(
 
       importManifest: (rawManifest) => {
         const manifest = normalizeCourseManifest(rawManifest)
+        const existingLessonsById = new Map(
+          get().lessons.map(lesson => [lesson.id, lesson])
+        )
+        const lessons = manifest.lessons.map(lesson =>
+          preserveLessonProgress(lesson, existingLessonsById.get(lesson.id))
+        )
+
         set({
           courseId: manifest.courseId,
           courseTitle: manifest.courseTitle,
-          lessons: manifest.lessons,
-          activeLessonId: manifest.lessons[0]?.id || null,
-          importMeta: { importedAt: manifest.importedAt, lessonCount: manifest.lessons.length },
+          lessons,
+          activeLessonId: lessons[0]?.id || null,
+          importMeta: { importedAt: manifest.importedAt, lessonCount: lessons.length },
         })
       },
 

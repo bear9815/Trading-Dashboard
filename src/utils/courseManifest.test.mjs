@@ -65,6 +65,15 @@ test('normalizeCourseManifest falls back to the default course title for whitesp
   assert.equal(manifest.courseTitle, 'Rande Howell Course')
 })
 
+test('normalizeCourseManifest falls back to the default course id for whitespace-only course ids', () => {
+  const manifest = normalizeCourseManifest({
+    courseId: '   ',
+    lessons: [],
+  })
+
+  assert.equal(manifest.courseId, 'rande-howell-course')
+})
+
 test('normalizeCourseManifest keeps bare numbered lesson titles on the clean sequence slug', () => {
   const manifest = normalizeCourseManifest({
     lessons: [
