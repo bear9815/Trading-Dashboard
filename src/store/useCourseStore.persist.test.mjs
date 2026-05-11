@@ -86,6 +86,19 @@ function createEmptyCourseState() {
     coachingSettings: {
       activeMode: 'behavior-aware',
     },
+    importSession: {
+      localModeAvailable: false,
+      hostedModeDisabled: false,
+      hostedModeDisabledReason: '',
+      selectedFolder: null,
+      selectedPilotLessonIds: [],
+      activeJob: null,
+      transcriptCount: 0,
+      enrichmentCount: 0,
+      attachedMediaLibrary: null,
+      lastImport: null,
+      lastError: '',
+    },
   }
 }
 
@@ -135,6 +148,31 @@ test('course store rehydrates persisted lessons from the course-hub-v1 durable s
           importedAt: '2026-05-10T14:00:00.000Z',
           lessonCount: 1,
         },
+        importSession: {
+          localModeAvailable: true,
+          hostedModeDisabled: false,
+          hostedModeDisabledReason: '',
+          selectedFolder: {
+            name: 'Rande Pilot',
+            path: '/Users/calebearden/Courses/Rande Pilot',
+            lessonCount: 1,
+          },
+          selectedPilotLessonIds: ['lesson-01-state-management'],
+          activeJob: null,
+          transcriptCount: 1,
+          enrichmentCount: 0,
+          attachedMediaLibrary: {
+            type: 'service',
+            mediaBaseUrl: 'http://127.0.0.1:4315/media',
+            folderPath: '/Users/calebearden/Courses/Rande Pilot',
+          },
+          lastImport: {
+            jobId: 'job-42',
+            completedAt: '2026-05-10T14:00:00.000Z',
+            mode: 'guided-local',
+          },
+          lastError: '',
+        },
       },
       version: 0,
     })
@@ -158,6 +196,10 @@ test('course store rehydrates persisted lessons from the course-hub-v1 durable s
     assert.equal(state.lessons.length, 1)
     assert.equal(state.lessons[0].reflectionText, 'Persisted reflection')
     assert.equal(state.getActiveLesson()?.id, 'lesson-01-state-management')
+    assert.equal(state.importSession.localModeAvailable, true)
+    assert.equal(state.importSession.transcriptCount, 1)
+    assert.equal(state.importSession.attachedMediaLibrary?.type, 'service')
+    assert.equal(state.importSession.lastImport?.mode, 'guided-local')
   } finally {
     useCourseStore.persist.setOptions({ storage: noopStorage })
     useCourseStore.setState(createEmptyCourseState())

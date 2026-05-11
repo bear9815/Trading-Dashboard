@@ -1,8 +1,15 @@
-import { useRef, useState } from 'react'
-import { Brain, FolderOpen, Search, Upload } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Brain, FolderOpen, LoaderCircle, Search, Upload, WandSparkles } from 'lucide-react'
 import { useCourseStore } from '../../store/useCourseStore.js'
 import { getLessonCompletionStage } from '../../utils/courseManifest.js'
 import { filterCourseLessons } from '../../utils/courseSearch.js'
+import {
+  chooseLocalCourseFolder,
+  getLocalCourseImportJob,
+  getLocalCourseServiceState,
+  scanLocalCourseFolder,
+  startLocalCourseImport,
+} from '../../utils/localCourseClient.js'
 import CourseCoachPanel from './CourseCoachPanel.jsx'
 import CourseLessonView from './CourseLessonView.jsx'
 import {
@@ -44,11 +51,22 @@ export default function CourseHub() {
     markLessonWatched,
     saveLessonReflection,
     markLessonApplied,
+    importSession,
+    setImportServiceState,
+    startImportJob,
+    updateImportJob,
+    completeImportJob,
+    failImportJob,
+    clearImportError,
   } = useCourseStore()
   const [attachedFiles, setAttachedFiles] = useState(() => getAttachedSourceFilesSession())
   const [manifestImportError, setManifestImportError] = useState('')
+  const [guidedImportError, setGuidedImportError] = useState('')
   const [lessonQuery, setLessonQuery] = useState('')
   const [selectedTopic, setSelectedTopic] = useState(TOPIC_FILTER_ALL)
+  const [isLaunchingFolderPicker, setIsLaunchingFolderPicker] = useState(false)
+  const [isScanningFolder, setIsScanningFolder] = useState(false)
+  const [isStartingImport, setIsStartingImport] = useState(false)
 
   const attachedEntries = Object.entries(attachedFiles)
   const lessonCountLabel = `${lessons.length} lesson${lessons.length === 1 ? '' : 's'}`
@@ -60,6 +78,111 @@ export default function CourseHub() {
   const filteredLessons = filterCourseLessons(lessons, lessonQuery, selectedTopic)
   const activeLesson = filteredLessons.find(lesson => lesson.id === activeLessonId) || filteredLessons[0] || null
   const filteredCountLabel = `${filteredLessons.length} match${filteredLessons.length === 1 ? '' : 'es'}`
+  const selectedPilotCount = importSession.selectedPilotLessonIds.length
+  const selectedPilotLabel = `${selectedPilotCount} pilot lesson${selectedPilotCount === 1 ? '' : 's'} selected`
+  const transcriptReadyCount = lessons.filter(lesson => String(lesson.transcriptText || '').trim()).length
+  const transcriptProgressCount = Math.max(transcriptReadyCount, importSession.transcriptCount)
+  const hasEnrichmentPending = transcriptProgressCount > 0
+    && importSession.enrichmentCount < transcriptProgressCount
+  const importJobBusy = Boolean(importSession.activeJob?.jobId)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadLocalServiceState() {
+      try {
+        const serviceState = await getLocalCourseServiceState()
+        if (cancelled) return
+        setImportServiceState(serviceState)
+        setGuidedImportError('')
+      } catch (error) {
+        if (cancelled) return
+        setImportServiceState({
+          localModeAvailable: false,
+          hostedModeDisabled: true,
+          hostedModeDisabledReason: 'Guided local import only runs from localhost in the desktop app.',
+        })
+        setGuidedImportError(error?.message || '')
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      loadLocalServiceState()
+    }
+
+    return () => {
+      cancelled = true
+    }
+  }, [setImportServiceState])
+
+  useEffect(() => {
+    if (!importSession.activeJob?.jobId || typeof window === 'undefined') return undefined
+
+    let cancelled = false
+    const intervalId = window.setInterval(async () => {
+      try {
+        const job = await getLocalCourseImportJob(importSession.activeJob.jobId)
+        if (cancelled) return
+
+        if (job?.manifest) {
+          completeImportJob({
+            manifest: job.manifest,
+            selectedFolder: job.selectedFolder || importSession.selectedFolder,
+            selectedPilotLessonIds: job.selectedPilotLessonIds || importSession.selectedPilotLessonIds,
+            transcriptCount: job.transcriptCount,
+            enrichmentCount: job.enrichmentCount,
+            attachedMediaLibrary: job.attachedMediaLibrary || (
+              job.mediaBaseUrl
+                ? {
+                  type: 'service',
+                  mediaBaseUrl: job.mediaBaseUrl,
+                  folderPath: job.selectedFolder?.path || importSession.selectedFolder?.path || '',
+                }
+                : null
+            ),
+            importMeta: {
+              jobId: job.jobId || importSession.activeJob.jobId,
+              completedAt: job.completedAt || new Date().toISOString(),
+              mode: 'guided-local',
+            },
+          })
+          return
+        }
+
+        if (job?.status === 'error') {
+          failImportJob({
+            message: job.error || 'The local course import stopped before it finished.',
+            status: 'error',
+            stageLabel: job.stageLabel || importSession.activeJob.stageLabel,
+          })
+          return
+        }
+
+        updateImportJob({
+          ...job,
+          transcriptCount: job?.transcriptCount,
+          enrichmentCount: job?.enrichmentCount,
+        })
+      } catch (error) {
+        if (cancelled) return
+        failImportJob({
+          message: error?.message || 'The local course import status check failed.',
+        })
+      }
+    }, 3000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [
+    completeImportJob,
+    failImportJob,
+    importSession.activeJob,
+    importSession.selectedFolder,
+    importSession.selectedPilotLessonIds,
+    updateImportJob,
+  ])
 
   async function handleManifestPick(event) {
     const file = event.target.files?.[0]
@@ -89,6 +212,91 @@ export default function CourseHub() {
     event.target.value = ''
   }
 
+  async function handleGuidedSelectFolder() {
+    if (isLaunchingFolderPicker) return
+
+    setIsLaunchingFolderPicker(true)
+    setGuidedImportError('')
+    clearImportError()
+
+    try {
+      const folder = await chooseLocalCourseFolder()
+      startImportJob({
+        status: 'folder-selected',
+        stageLabel: 'Folder selected',
+        selectedFolder: folder.selectedFolder || folder,
+        selectedPilotLessonIds: folder.selectedPilotLessonIds || [],
+        transcriptCount: 0,
+        enrichmentCount: 0,
+      })
+    } catch (error) {
+      setGuidedImportError(error?.message || 'Could not select a local course folder yet.')
+    } finally {
+      setIsLaunchingFolderPicker(false)
+    }
+  }
+
+  async function handleGuidedScan() {
+    if (!importSession.selectedFolder?.path || isScanningFolder) return
+
+    setIsScanningFolder(true)
+    setGuidedImportError('')
+    clearImportError()
+
+    try {
+      const scanResult = await scanLocalCourseFolder({
+        folderPath: importSession.selectedFolder.path,
+      })
+
+      updateImportJob({
+        status: 'scanned',
+        stageLabel: 'Folder scanned',
+        selectedFolder: scanResult.selectedFolder || importSession.selectedFolder,
+        selectedPilotLessonIds: scanResult.selectedPilotLessonIds || [],
+      })
+    } catch (error) {
+      failImportJob({
+        message: error?.message || 'The local course folder scan failed.',
+        status: 'error',
+      })
+      setGuidedImportError(error?.message || 'The local course folder scan failed.')
+    } finally {
+      setIsScanningFolder(false)
+    }
+  }
+
+  async function handleGuidedImport() {
+    if (!importSession.selectedFolder?.path || isStartingImport) return
+
+    setIsStartingImport(true)
+    setGuidedImportError('')
+    clearImportError()
+
+    try {
+      const job = await startLocalCourseImport({
+        folderPath: importSession.selectedFolder.path,
+        lessonIds: importSession.selectedPilotLessonIds,
+      })
+
+      startImportJob({
+        jobId: job.jobId,
+        status: job.status || 'transcribing',
+        stageLabel: job.stageLabel || 'Transcribing selected lessons',
+        selectedFolder: job.selectedFolder || importSession.selectedFolder,
+        selectedPilotLessonIds: job.selectedPilotLessonIds || importSession.selectedPilotLessonIds,
+        transcriptCount: job.transcriptCount || 0,
+        enrichmentCount: job.enrichmentCount || 0,
+      })
+    } catch (error) {
+      failImportJob({
+        message: error?.message || 'The guided local import could not start yet.',
+      })
+      setGuidedImportError(error?.message || 'The guided local import could not start yet.')
+    } finally {
+      setIsStartingImport(false)
+    }
+  }
+
   return (
     <div className="h-full overflow-y-auto p-5 md:p-6">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
@@ -103,8 +311,8 @@ export default function CourseHub() {
                   {courseTitle || 'Course Hub'}
                 </h1>
                 <p className="mt-1 text-sm text-gray-400">
-                  Import a private manifest, attach the original source folder for this session,
-                  and pick how tightly the coach should stay aligned to the course material.
+                  Guided local import handles scan, transcript, manifest handoff, and service-backed playback on localhost.
+                  Manual manifest import stays available as an advanced fallback.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
@@ -118,6 +326,15 @@ export default function CourseHub() {
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={handleGuidedSelectFolder}
+                disabled={isLaunchingFolderPicker || importJobBusy}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-200 transition-colors hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-gray-500"
+              >
+                {isLaunchingFolderPicker ? <LoaderCircle size={16} className="animate-spin" /> : <WandSparkles size={16} />}
+                Guided Local Import
+              </button>
               <button
                 type="button"
                 onClick={() => manifestInputRef.current?.click()}
@@ -145,6 +362,111 @@ export default function CourseHub() {
               {manifestImportError}
             </div>
           ) : null}
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+            <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">Guided local import</p>
+                  <p className="mt-1 text-sm text-gray-400">
+                    Use the localhost helper to scan a course folder, import transcripts, auto-load the manifest,
+                    and attach service-backed media URLs without relying on browser file objects.
+                  </p>
+                </div>
+                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.24em] text-gray-300">
+                  {importSession.localModeAvailable ? 'Local course service connected' : 'Waiting for localhost helper'}
+                </span>
+              </div>
+
+              {importSession.hostedModeDisabled ? (
+                <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                  {importSession.hostedModeDisabledReason || 'Guided local import only runs from localhost in the desktop app.'}
+                </div>
+              ) : null}
+
+              {guidedImportError || importSession.lastError ? (
+                <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                  {guidedImportError || importSession.lastError}
+                </div>
+              ) : null}
+
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gray-500">Selected Folder</p>
+                  <p className="mt-2 text-sm text-gray-200">
+                    {importSession.selectedFolder?.name || 'No local folder selected yet'}
+                  </p>
+                  {importSession.selectedFolder?.path ? (
+                    <p className="mt-1 text-xs text-gray-500">{importSession.selectedFolder.path}</p>
+                  ) : null}
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gray-500">Pilot Lessons</p>
+                  <p className="mt-2 text-sm text-gray-200">{selectedPilotLabel}</p>
+                  {importSession.selectedFolder?.lessonCount ? (
+                    <p className="mt-1 text-xs text-gray-500">
+                      {importSession.selectedFolder.lessonCount} lessons detected in folder
+                    </p>
+                  ) : null}
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gray-500">Progress</p>
+                  <p className="mt-2 text-sm text-gray-200">
+                    {importSession.activeJob?.stageLabel || 'Ready to scan and import'}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {importSession.transcriptCount} transcripts, {importSession.enrichmentCount} enriched
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleGuidedScan}
+                  disabled={!importSession.localModeAvailable || !importSession.selectedFolder?.path || isScanningFolder || importJobBusy}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-gray-200 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:text-gray-500"
+                >
+                  {isScanningFolder ? <LoaderCircle size={16} className="animate-spin" /> : <Search size={16} />}
+                  Scan Folder
+                </button>
+                <button
+                  type="button"
+                  onClick={handleGuidedImport}
+                  disabled={!importSession.localModeAvailable || !importSession.selectedFolder?.path || isStartingImport || importJobBusy}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-blue/25 bg-accent-blue/15 px-4 py-3 text-sm font-medium text-accent-blue transition-colors hover:bg-accent-blue/20 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-gray-500"
+                >
+                  {isStartingImport ? <LoaderCircle size={16} className="animate-spin" /> : <Upload size={16} />}
+                  Start Transcript Import
+                </button>
+              </div>
+
+              {importSession.activeJob ? (
+                <div className="mt-4 rounded-2xl border border-accent-blue/20 bg-accent-blue/10 px-4 py-3 text-sm text-accent-blue">
+                  {importSession.activeJob.stageLabel || 'Import in progress'}
+                </div>
+              ) : null}
+
+              {hasEnrichmentPending ? (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-gray-200">
+                  Transcript ready for {transcriptProgressCount} lesson{transcriptProgressCount === 1 ? '' : 's'} while enrichment catches up.
+                  The course coach stays usable as soon as transcript text exists.
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-sm font-semibold text-white">Advanced fallback</p>
+              <p className="mt-1 text-sm text-gray-400">
+                Manual manifest import and manual source-folder attach remain available if the localhost helper is offline or you want to inspect a custom manifest.
+              </p>
+              {importSession.lastImport?.completedAt ? (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-gray-200">
+                  Last guided import completed at {new Date(importSession.lastImport.completedAt).toLocaleString()}.
+                </div>
+              ) : null}
+            </div>
+          </div>
         </section>
 
         <section className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6 md:py-6">
@@ -330,6 +652,7 @@ export default function CourseHub() {
             <CourseLessonView
               lesson={activeLesson}
               attachedFiles={attachedFiles}
+              attachedMediaLibrary={importSession.attachedMediaLibrary}
               markLessonWatched={markLessonWatched}
               saveLessonReflection={saveLessonReflection}
               markLessonApplied={markLessonApplied}

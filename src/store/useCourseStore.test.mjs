@@ -26,6 +26,19 @@ function resetCourseStore(overrides = {}) {
     activeLessonId: null,
     importMeta: null,
     coachingSettings: { activeMode: 'behavior-aware' },
+    importSession: {
+      localModeAvailable: false,
+      hostedModeDisabled: false,
+      hostedModeDisabledReason: '',
+      selectedFolder: null,
+      selectedPilotLessonIds: [],
+      activeJob: null,
+      transcriptCount: 0,
+      enrichmentCount: 0,
+      attachedMediaLibrary: null,
+      lastImport: null,
+      lastError: '',
+    },
     ...overrides,
   })
 }
@@ -267,4 +280,137 @@ test('importManifest does not preserve progress or active lesson when courseId c
   assert.equal(lesson.reflectionText, '')
   assert.equal(typeof lesson.updatedAt, 'string')
   assert.notEqual(lesson.updatedAt, preservedProgress.updatedAt)
+})
+
+test('import session tracks local availability and hosted-mode disabled messaging', () => {
+  resetCourseStore()
+
+  useCourseStore.getState().setImportServiceState({
+    localModeAvailable: true,
+    hostedModeDisabled: true,
+    hostedModeDisabledReason: 'Course import only runs from the desktop on localhost.',
+  })
+
+  const session = useCourseStore.getState().importSession
+  assert.equal(session.localModeAvailable, true)
+  assert.equal(session.hostedModeDisabled, true)
+  assert.match(session.hostedModeDisabledReason, /localhost/i)
+  assert.equal(session.lastError, '')
+})
+
+test('import session tracks active job metadata, transcript progress, and selected pilot lessons', () => {
+  resetCourseStore()
+
+  useCourseStore.getState().startImportJob({
+    jobId: 'job-42',
+    status: 'scanning',
+    stageLabel: 'Scanning folder',
+    selectedFolder: {
+      name: 'Rande Pilot',
+      path: '/Users/calebearden/Courses/Rande Pilot',
+      lessonCount: 3,
+    },
+    selectedPilotLessonIds: ['lesson-01-state-management', 'lesson-02-process'],
+  })
+
+  useCourseStore.getState().updateImportJob({
+    status: 'transcribing',
+    stageLabel: 'Transcribing selected lessons',
+    transcriptCount: 2,
+    enrichmentCount: 0,
+  })
+
+  const session = useCourseStore.getState().importSession
+  assert.deepEqual(session.selectedPilotLessonIds, ['lesson-01-state-management', 'lesson-02-process'])
+  assert.equal(session.selectedFolder?.lessonCount, 3)
+  assert.equal(session.activeJob?.jobId, 'job-42')
+  assert.equal(session.activeJob?.status, 'transcribing')
+  assert.equal(session.activeJob?.stageLabel, 'Transcribing selected lessons')
+  assert.equal(session.transcriptCount, 2)
+  assert.equal(session.enrichmentCount, 0)
+})
+
+test('completeImportJob auto-imports the manifest, attaches service-backed media, and records last import metadata', () => {
+  resetCourseStore()
+
+  useCourseStore.getState().completeImportJob({
+    manifest: {
+      courseId: 'rande-pilot',
+      courseTitle: 'Rande Pilot',
+      lessons: [
+        createLesson({
+          assetPaths: {
+            video: 'media/module-a/Lesson 1.mp4',
+            slides: [],
+            articles: [],
+            notes: [],
+          },
+        }),
+      ],
+    },
+    selectedFolder: {
+      name: 'Rande Pilot',
+      path: '/Users/calebearden/Courses/Rande Pilot',
+      lessonCount: 1,
+    },
+    selectedPilotLessonIds: ['lesson-01-state-management'],
+    transcriptCount: 1,
+    enrichmentCount: 0,
+    attachedMediaLibrary: {
+      type: 'service',
+      mediaBaseUrl: 'http://127.0.0.1:4315/media',
+      folderPath: '/Users/calebearden/Courses/Rande Pilot',
+    },
+    importMeta: {
+      jobId: 'job-42',
+      completedAt: '2026-05-11T10:00:00.000Z',
+      mode: 'guided-local',
+    },
+  })
+
+  const state = useCourseStore.getState()
+  assert.equal(state.courseId, 'rande-pilot')
+  assert.equal(state.lessons.length, 1)
+  assert.equal(state.getActiveLesson()?.id, 'lesson-01-state-management')
+  assert.equal(state.importMeta?.lessonCount, 1)
+  assert.equal(state.importSession.activeJob, null)
+  assert.equal(state.importSession.transcriptCount, 1)
+  assert.equal(state.importSession.enrichmentCount, 0)
+  assert.equal(state.importSession.attachedMediaLibrary?.type, 'service')
+  assert.match(state.importSession.attachedMediaLibrary?.mediaBaseUrl || '', /127\.0\.0\.1/)
+  assert.equal(state.importSession.lastImport?.jobId, 'job-42')
+  assert.equal(state.importSession.lastImport?.mode, 'guided-local')
+  assert.equal(state.importSession.lastError, '')
+})
+
+test('failImportJob preserves recovery context and clearImportError resets the inline error state', () => {
+  resetCourseStore()
+
+  useCourseStore.getState().startImportJob({
+    jobId: 'job-43',
+    status: 'transcribing',
+    stageLabel: 'Transcribing selected lessons',
+    selectedFolder: {
+      name: 'Rande Pilot',
+      path: '/Users/calebearden/Courses/Rande Pilot',
+      lessonCount: 2,
+    },
+    selectedPilotLessonIds: ['lesson-01-state-management'],
+  })
+
+  useCourseStore.getState().failImportJob({
+    message: 'Local course service stopped responding while transcribing.',
+    status: 'error',
+  })
+
+  let session = useCourseStore.getState().importSession
+  assert.equal(session.activeJob?.status, 'error')
+  assert.match(session.lastError, /stopped responding/i)
+  assert.equal(session.selectedFolder?.name, 'Rande Pilot')
+  assert.deepEqual(session.selectedPilotLessonIds, ['lesson-01-state-management'])
+
+  useCourseStore.getState().clearImportError()
+  session = useCourseStore.getState().importSession
+  assert.equal(session.lastError, '')
+  assert.equal(session.activeJob?.status, 'error')
 })

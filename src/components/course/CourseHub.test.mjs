@@ -32,12 +32,31 @@ function resetCourseHubState() {
     coachingSettings: {
       activeMode: 'behavior-aware',
     },
+    importSession: {
+      localModeAvailable: false,
+      hostedModeDisabled: false,
+      hostedModeDisabledReason: '',
+      selectedFolder: null,
+      selectedPilotLessonIds: [],
+      activeJob: null,
+      transcriptCount: 0,
+      enrichmentCount: 0,
+      attachedMediaLibrary: null,
+      lastImport: null,
+      lastError: '',
+    },
     importManifest: () => {},
     setActiveLesson: () => {},
     setActiveCoachingMode: () => {},
     markLessonWatched: () => {},
     saveLessonReflection: () => {},
     markLessonApplied: () => {},
+    setImportServiceState: () => {},
+    startImportJob: () => {},
+    updateImportJob: () => {},
+    completeImportJob: () => {},
+    failImportJob: () => {},
+    clearImportError: () => {},
   }
 }
 
@@ -87,6 +106,7 @@ test('Course Hub is routable and exposes manifest import plus source-folder atta
   assert.match(navSource, /'course'/)
   assert.match(sidebarSource, /id:\s*'course'/)
   assert.match(sidebarSource, /label:\s*'Course Hub'/)
+  assert.match(hubSource, /Guided local import/i)
   assert.match(hubSource, /Import Manifest/)
   assert.match(hubSource, /Attach Source Folder/)
   assert.match(hubSource, /webkitdirectory/)
@@ -105,9 +125,52 @@ test('Course Hub renders the empty import shell when no lessons are loaded', asy
 
   const markup = await renderCourseHubMarkup()
 
-  assert.match(markup, /Import a pilot course manifest to begin/)
+  assert.match(markup, /Guided local import/i)
+  assert.match(markup, /manual manifest import stays available as an advanced fallback/i)
   assert.match(markup, /0 lessons/)
   assert.match(markup, /0 attached files/)
+})
+
+test('Course Hub renders the hosted-mode disabled state when localhost import is unavailable', async () => {
+  resetCourseHubState()
+  globalThis.__courseHubTestStoreState = {
+    ...globalThis.__courseHubTestStoreState,
+    importSession: {
+      ...globalThis.__courseHubTestStoreState.importSession,
+      hostedModeDisabled: true,
+      hostedModeDisabledReason: 'Guided local import only runs from localhost in the desktop app.',
+    },
+  }
+
+  const markup = await renderCourseHubMarkup()
+
+  assert.match(markup, /Guided local import only runs from localhost in the desktop app/i)
+  assert.match(markup, /Manual manifest import/)
+})
+
+test('Course Hub renders the localhost-ready guided import state and selected folder summary', async () => {
+  resetCourseHubState()
+  globalThis.__courseHubTestStoreState = {
+    ...globalThis.__courseHubTestStoreState,
+    importSession: {
+      ...globalThis.__courseHubTestStoreState.importSession,
+      localModeAvailable: true,
+      selectedFolder: {
+        name: 'Rande Pilot',
+        path: '/Users/calebearden/Courses/Rande Pilot',
+        lessonCount: 3,
+      },
+      selectedPilotLessonIds: ['lesson-01-state-management', 'lesson-02-process'],
+    },
+  }
+
+  const markup = await renderCourseHubMarkup()
+
+  assert.match(markup, /Local course service connected/i)
+  assert.match(markup, /Rande Pilot/)
+  assert.match(markup, /2 pilot lessons selected/i)
+  assert.match(markup, /Scan Folder/i)
+  assert.match(markup, /Start Transcript Import/i)
 })
 
 test('Course Hub renders normalized lesson preview content and session attachment counts', async () => {
@@ -147,6 +210,21 @@ test('Course Hub renders normalized lesson preview content and session attachmen
       importedAt: normalizedManifest.importedAt,
       lessonCount: normalizedManifest.lessons.length,
     },
+    importSession: {
+      ...globalThis.__courseHubTestStoreState.importSession,
+      localModeAvailable: true,
+      transcriptCount: 1,
+      enrichmentCount: 0,
+      attachedMediaLibrary: {
+        type: 'service',
+        mediaBaseUrl: 'http://127.0.0.1:4315/media',
+        folderPath: '/Users/calebearden/Courses/Rande Pilot',
+      },
+      lastImport: {
+        mode: 'guided-local',
+        completedAt: normalizedManifest.importedAt,
+      },
+    },
   }
 
   const markup = await renderCourseHubMarkup()
@@ -159,6 +237,8 @@ test('Course Hub renders normalized lesson preview content and session attachmen
   assert.match(markup, /1 lesson/)
   assert.match(markup, /1 attached file/)
   assert.match(markup, /module-a\/Tape Reading Foundations\.mp4/)
+  assert.match(markup, /Transcript ready for 1 lesson while enrichment catches up/i)
+  assert.match(markup, /Course coach panel/)
 })
 
 test('parseManifestImportText returns a manifest payload for valid JSON text', () => {

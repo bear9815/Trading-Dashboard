@@ -40,6 +40,55 @@ function preserveLessonProgress(lesson, existingLesson) {
   }
 }
 
+function createDefaultImportSession() {
+  return {
+    localModeAvailable: false,
+    hostedModeDisabled: false,
+    hostedModeDisabledReason: '',
+    selectedFolder: null,
+    selectedPilotLessonIds: [],
+    activeJob: null,
+    transcriptCount: 0,
+    enrichmentCount: 0,
+    attachedMediaLibrary: null,
+    lastImport: null,
+    lastError: '',
+  }
+}
+
+function mergeImportSession(state, updates = {}) {
+  return {
+    ...state.importSession,
+    ...updates,
+  }
+}
+
+function buildManifestState(state, rawManifest) {
+  const manifest = normalizeCourseManifest(rawManifest)
+  const isSameCourse = manifest.courseId === state.courseId
+  const previousActiveLessonId = state.activeLessonId
+  const existingLessonsById = isSameCourse
+    ? new Map(state.lessons.map(lesson => [lesson.id, lesson]))
+    : new Map()
+  const lessons = manifest.lessons.map(lesson =>
+    preserveLessonProgress(lesson, existingLessonsById.get(lesson.id))
+  )
+  const activeLessonId = isSameCourse && lessons.some(lesson => lesson.id === previousActiveLessonId)
+    ? previousActiveLessonId
+    : lessons[0]?.id || null
+
+  return {
+    manifest,
+    courseState: {
+      courseId: manifest.courseId,
+      courseTitle: manifest.courseTitle,
+      lessons,
+      activeLessonId,
+      importMeta: { importedAt: manifest.importedAt, lessonCount: lessons.length },
+    },
+  }
+}
+
 export const useCourseStore = create(
   persist(
     (set, get) => ({
@@ -51,28 +100,10 @@ export const useCourseStore = create(
       coachingSettings: {
         activeMode: 'behavior-aware',
       },
+      importSession: createDefaultImportSession(),
 
       importManifest: (rawManifest) => {
-        const manifest = normalizeCourseManifest(rawManifest)
-        const isSameCourse = manifest.courseId === get().courseId
-        const previousActiveLessonId = get().activeLessonId
-        const existingLessonsById = isSameCourse
-          ? new Map(get().lessons.map(lesson => [lesson.id, lesson]))
-          : new Map()
-        const lessons = manifest.lessons.map(lesson =>
-          preserveLessonProgress(lesson, existingLessonsById.get(lesson.id))
-        )
-        const activeLessonId = isSameCourse && lessons.some(lesson => lesson.id === previousActiveLessonId)
-          ? previousActiveLessonId
-          : lessons[0]?.id || null
-
-        set({
-          courseId: manifest.courseId,
-          courseTitle: manifest.courseTitle,
-          lessons,
-          activeLessonId,
-          importMeta: { importedAt: manifest.importedAt, lessonCount: lessons.length },
-        })
+        set(state => buildManifestState(state, rawManifest).courseState)
       },
 
       setActiveLesson: (lessonId) => set({ activeLessonId: lessonId }),
@@ -118,6 +149,103 @@ export const useCourseStore = create(
               })
               : lesson
           ),
+        })),
+
+      setImportServiceState: (serviceState = {}) =>
+        set(state => ({
+          importSession: mergeImportSession(state, {
+            localModeAvailable: Boolean(serviceState.localModeAvailable),
+            hostedModeDisabled: Boolean(serviceState.hostedModeDisabled),
+            hostedModeDisabledReason: String(serviceState.hostedModeDisabledReason || '').trim(),
+            lastError: '',
+          }),
+        })),
+
+      startImportJob: (jobState = {}) =>
+        set(state => ({
+          importSession: mergeImportSession(state, {
+            selectedFolder: jobState.selectedFolder || state.importSession.selectedFolder,
+            selectedPilotLessonIds: Array.isArray(jobState.selectedPilotLessonIds)
+              ? [...jobState.selectedPilotLessonIds]
+              : state.importSession.selectedPilotLessonIds,
+            activeJob: {
+              startedAt: new Date().toISOString(),
+              ...state.importSession.activeJob,
+              ...jobState,
+            },
+            transcriptCount: Number(jobState.transcriptCount) || 0,
+            enrichmentCount: Number(jobState.enrichmentCount) || 0,
+            lastError: '',
+          }),
+        })),
+
+      updateImportJob: (jobState = {}) =>
+        set(state => ({
+          importSession: mergeImportSession(state, {
+            selectedFolder: jobState.selectedFolder || state.importSession.selectedFolder,
+            selectedPilotLessonIds: Array.isArray(jobState.selectedPilotLessonIds)
+              ? [...jobState.selectedPilotLessonIds]
+              : state.importSession.selectedPilotLessonIds,
+            activeJob: state.importSession.activeJob
+              ? {
+                ...state.importSession.activeJob,
+                ...jobState,
+              }
+              : (Object.keys(jobState).length ? { ...jobState } : null),
+            transcriptCount: Number.isFinite(Number(jobState.transcriptCount))
+              ? Number(jobState.transcriptCount)
+              : state.importSession.transcriptCount,
+            enrichmentCount: Number.isFinite(Number(jobState.enrichmentCount))
+              ? Number(jobState.enrichmentCount)
+              : state.importSession.enrichmentCount,
+            lastError: '',
+          }),
+        })),
+
+      completeImportJob: (payload = {}) =>
+        set(state => {
+          const { courseState } = buildManifestState(state, payload.manifest || {})
+
+          return {
+            ...courseState,
+            importSession: mergeImportSession(state, {
+              selectedFolder: payload.selectedFolder || state.importSession.selectedFolder,
+              selectedPilotLessonIds: Array.isArray(payload.selectedPilotLessonIds)
+                ? [...payload.selectedPilotLessonIds]
+                : state.importSession.selectedPilotLessonIds,
+              activeJob: null,
+              transcriptCount: Number(payload.transcriptCount) || courseState.lessons.length,
+              enrichmentCount: Number(payload.enrichmentCount) || 0,
+              attachedMediaLibrary: payload.attachedMediaLibrary || state.importSession.attachedMediaLibrary,
+              lastImport: payload.importMeta ? { ...payload.importMeta } : {
+                completedAt: new Date().toISOString(),
+                mode: 'guided-local',
+              },
+              lastError: '',
+            }),
+          }
+        }),
+
+      failImportJob: ({ message = '', ...jobState } = {}) =>
+        set(state => ({
+          importSession: mergeImportSession(state, {
+            activeJob: state.importSession.activeJob
+              ? {
+                ...state.importSession.activeJob,
+                ...jobState,
+                status: jobState.status || 'error',
+              }
+              : {
+                ...jobState,
+                status: jobState.status || 'error',
+              },
+            lastError: String(message || '').trim(),
+          }),
+        })),
+
+      clearImportError: () =>
+        set(state => ({
+          importSession: mergeImportSession(state, { lastError: '' }),
         })),
 
       getActiveLesson: () => get().lessons.find(lesson => lesson.id === get().activeLessonId) || null,

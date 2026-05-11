@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getLessonCompletionStage } from '../../utils/courseManifest.js'
+import { buildServiceBackedMediaUrl } from '../../utils/localCourseClient.js'
 import { getLessonPreviewPath } from './courseHubSession.js'
 
 const COMPLETION_COPY = {
@@ -49,6 +50,7 @@ function ProgressCard({ label, value }) {
 export default function CourseLessonView({
   lesson,
   attachedFiles = {},
+  attachedMediaLibrary = null,
   markLessonWatched,
   saveLessonReflection,
   markLessonApplied,
@@ -61,10 +63,11 @@ export default function CourseLessonView({
   }, [lesson?.id, lesson?.reflectionText])
 
   const attachedVideoFile = resolveLessonVideoFile(lesson, attachedFiles)
+  const serviceBackedVideoUrl = buildServiceBackedMediaUrl(attachedMediaLibrary, lesson)
 
   useEffect(() => {
     if (!attachedVideoFile || typeof URL?.createObjectURL !== 'function') {
-      setVideoUrl('')
+      setVideoUrl(serviceBackedVideoUrl)
       return undefined
     }
 
@@ -74,7 +77,7 @@ export default function CourseLessonView({
     return () => {
       URL.revokeObjectURL(nextVideoUrl)
     }
-  }, [attachedVideoFile])
+  }, [attachedVideoFile, serviceBackedVideoUrl])
 
   if (!lesson) {
     return (
@@ -164,7 +167,11 @@ export default function CourseLessonView({
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-semibold text-white">Lesson media</p>
             <span className="text-xs text-gray-500">
-              {attachedVideoFile ? 'Local source attached' : 'Attach the source folder for playback'}
+              {attachedVideoFile
+                ? 'Manual source folder attached'
+                : serviceBackedVideoUrl
+                  ? 'Local course service attached'
+                  : 'Attach the source folder for playback'}
             </span>
           </div>
           {videoUrl ? (
@@ -176,7 +183,7 @@ export default function CourseLessonView({
             />
           ) : (
             <div className="mt-4 rounded-2xl border border-dashed border-white/10 px-4 py-5 text-sm text-gray-400">
-              Local playback becomes available when the attached source folder includes this lesson&apos;s video file.
+              Local playback becomes available when guided import attaches the local course service or the manual source folder includes this lesson&apos;s video file.
             </div>
           )}
         </div>
