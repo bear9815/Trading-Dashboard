@@ -30,7 +30,7 @@ def build_lesson_id(video_path: Path, input_dir: Path) -> str:
 def discover_lessons(input_dir: Path) -> list[Path]:
     return sorted(
         [path for path in input_dir.rglob("*") if path.suffix.lower() in VIDEO_EXTENSIONS],
-        key=lambda path: path.name.lower(),
+        key=lambda path: path.relative_to(input_dir).as_posix().lower(),
     )
 
 

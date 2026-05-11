@@ -222,3 +222,42 @@ print(json.dumps({
   assert.equal(payload.reimported.sourceRelativePath, payload.baseline.sourceRelativePath)
   assert.equal(payload.baseline.id, payload.reimported.id)
 })
+
+test('discover_lessons sorts duplicate basenames by input-relative path', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'course-ingest-'))
+  const inputDir = path.join(tempDir, 'input')
+  const alphaDir = path.join(inputDir, 'alpha-module')
+  const zetaDir = path.join(inputDir, 'zeta-module')
+  fs.mkdirSync(alphaDir, { recursive: true })
+  fs.mkdirSync(zetaDir, { recursive: true })
+
+  const alphaLessonPath = path.join(alphaDir, 'Lesson 01.mp4')
+  const zetaLessonPath = path.join(zetaDir, 'Lesson 01.mp4')
+  fs.writeFileSync(alphaLessonPath, '')
+  fs.writeFileSync(zetaLessonPath, '')
+
+  const result = runPython([
+    '-c',
+    `
+import importlib.util
+import json
+import pathlib
+
+module_path = pathlib.Path(${JSON.stringify(scriptPath)})
+spec = importlib.util.spec_from_file_location("build_rande_course", module_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+paths = module.discover_lessons(pathlib.Path(${JSON.stringify(inputDir)}))
+print(json.dumps([str(path.relative_to(pathlib.Path(${JSON.stringify(inputDir)}))) for path in paths]))
+`,
+  ])
+
+  fs.rmSync(tempDir, { recursive: true, force: true })
+
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(JSON.parse(result.stdout), [
+    'alpha-module/Lesson 01.mp4',
+    'zeta-module/Lesson 01.mp4',
+  ])
+})
