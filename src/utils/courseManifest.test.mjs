@@ -29,8 +29,26 @@ test('normalizeCourseManifest converts raw lesson records into stable pilot less
   assert.equal(manifest.lessons.length, 1)
   assert.equal(manifest.lessons[0].id, 'lesson-01-state-management')
   assert.equal(manifest.lessons[0].slug, 'lesson-01-state-management')
+  assert.deepEqual(manifest.lessons[0].principles, ['State first'])
   assert.deepEqual(manifest.lessons[0].topicTags, ['state regulation', 'urgency'])
   assert.equal(manifest.lessons[0].assetPaths.video, 'videos/Lesson 1.mp4')
+})
+
+test('normalizeCourseManifest falls back to the lesson number for whitespace-only titles', () => {
+  const manifest = normalizeCourseManifest({
+    lessons: [
+      {
+        title: '   ',
+        sequenceNumber: 1,
+        principles: ['  State first  ', 'State first', ''],
+      },
+    ],
+  })
+
+  assert.equal(manifest.lessons[0].title, 'Lesson 1')
+  assert.equal(manifest.lessons[0].id, 'lesson-01')
+  assert.equal(manifest.lessons[0].slug, 'lesson-01')
+  assert.deepEqual(manifest.lessons[0].principles, ['State first'])
 })
 
 test('getLessonCompletionStage reflects the watched → reflected → applied ladder', () => {

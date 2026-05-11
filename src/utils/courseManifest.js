@@ -21,10 +21,14 @@ function normalizeAssetPaths(assetPaths = {}) {
 }
 
 function normalizeLesson(rawLesson = {}, index = 0) {
-  const title = String(rawLesson.title || `Lesson ${index + 1}`).trim()
   const sequenceNumber = Number(rawLesson.sequenceNumber) || (index + 1)
-  const baseSlug = slugify(title) || `lesson-${String(sequenceNumber).padStart(2, '0')}`
-  const slug = `lesson-${String(sequenceNumber).padStart(2, '0')}-${baseSlug.replace(/^lesson-\d+-/, '')}`
+  const fallbackTitle = `Lesson ${index + 1}`
+  const normalizedTitle = String(rawLesson.title || '').trim()
+  const title = normalizedTitle || fallbackTitle
+  const lessonPrefix = `lesson-${String(sequenceNumber).padStart(2, '0')}`
+  const baseSlug = normalizedTitle ? slugify(title) : ''
+  const slugSuffix = baseSlug.replace(/^lesson-\d+-/, '')
+  const slug = slugSuffix ? `${lessonPrefix}-${slugSuffix}` : lessonPrefix
   const transcriptText = String(rawLesson.transcriptText || '').trim()
   const timestamp = new Date().toISOString()
 
