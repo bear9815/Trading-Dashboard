@@ -33,6 +33,8 @@ function createMockRes() {
 
 const originalEnv = {
   WHOOP_DASHBOARD_URL: process.env.WHOOP_DASHBOARD_URL,
+  WHOOP_VERCEL_BYPASS_SECRET: process.env.WHOOP_VERCEL_BYPASS_SECRET,
+  WHOOP_SLEEP_SYNC_SECRET: process.env.WHOOP_SLEEP_SYNC_SECRET,
 }
 
 function restoreEnv() {
@@ -104,16 +106,23 @@ test('sleep score handler returns a real 200 contract for Whoop dashboard daily 
   const originalFetch = global.fetch
   try {
     process.env.WHOOP_DASHBOARD_URL = 'https://whoop.example.test'
-    global.fetch = async (url) => {
-      assert.equal(url, 'https://whoop.example.test/api/data')
+    process.env.WHOOP_VERCEL_BYPASS_SECRET = 'bypass-secret'
+    process.env.WHOOP_SLEEP_SYNC_SECRET = 'sleep-secret'
+    global.fetch = async (url, options = {}) => {
+      assert.equal(url, 'https://whoop.example.test/api/trading-sleep?date=2026-05-09')
+      assert.deepEqual(options.headers, {
+        Accept: 'application/json',
+        'x-vercel-protection-bypass': 'bypass-secret',
+        'x-vercel-set-bypass-cookie': 'true',
+        'x-trading-sleep-secret': 'sleep-secret',
+      })
       return {
         ok: true,
         async json() {
           return {
-            daily_data: [
-              { date: '2026-05-09', sleep_score: 91 },
-            ],
-            last_updated: '2026-05-10T12:00:00.000Z',
+            date: '2026-05-09',
+            sleepScore: 91,
+            lastUpdated: '2026-05-10T12:00:00.000Z',
           }
         },
       }
@@ -277,8 +286,8 @@ test('sleep score handler returns 502 when the Whoop payload object lacks a vali
       ok: true,
       async json() {
         return {
-          last_updated: '2026-05-10T12:00:00.000Z',
-          daily_data: 'oops',
+          date: '2026-05-08',
+          sleepScore: 91,
         }
       },
     })

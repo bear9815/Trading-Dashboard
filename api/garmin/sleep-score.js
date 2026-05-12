@@ -7,6 +7,18 @@ function getWhoopDashboardUrl() {
   return baseUrl ? baseUrl.replace(/\/+$/, '') : ''
 }
 
+function getWhoopBypassSecret() {
+  return (
+    process.env.WHOOP_VERCEL_BYPASS_SECRET ||
+    process.env.VERCEL_AUTOMATION_BYPASS_SECRET ||
+    ''
+  ).trim()
+}
+
+function getWhoopSleepSyncSecret() {
+  return (process.env.WHOOP_SLEEP_SYNC_SECRET || '').trim()
+}
+
 function isDateKey(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
 
@@ -35,14 +47,29 @@ function normalizeSleepScoreError(date, error) {
   }
 }
 
-async function readWhoopHealthMetrics(fetchImpl = fetch) {
+async function readWhoopSleepScore(date, fetchImpl = fetch) {
   const baseUrl = getWhoopDashboardUrl()
   if (!baseUrl) {
     throw new Error('Whoop dashboard URL is not configured')
   }
 
-  const response = await fetchImpl(`${baseUrl}/api/data`, {
-    headers: { Accept: 'application/json' },
+  const headers = {
+    Accept: 'application/json',
+  }
+  const bypassSecret = getWhoopBypassSecret()
+  const sleepSyncSecret = getWhoopSleepSyncSecret()
+
+  if (bypassSecret) {
+    headers['x-vercel-protection-bypass'] = bypassSecret
+    headers['x-vercel-set-bypass-cookie'] = 'true'
+  }
+
+  if (sleepSyncSecret) {
+    headers['x-trading-sleep-secret'] = sleepSyncSecret
+  }
+
+  const response = await fetchImpl(`${baseUrl}/api/trading-sleep?date=${encodeURIComponent(date)}`, {
+    headers,
   })
 
   if (!response.ok) {
@@ -53,7 +80,7 @@ async function readWhoopHealthMetrics(fetchImpl = fetch) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Whoop dashboard payload is invalid')
   }
-  if (!Array.isArray(payload.daily_data)) {
+  if (payload.date !== date) {
     throw new Error('Whoop dashboard payload is invalid')
   }
 
@@ -76,10 +103,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    const payload = await readWhoopHealthMetrics()
-    const sleepScore = extractSleepScoreForDate(payload, date)
+    const payload = await readWhoopSleepScore(date)
+    const sleepScore = Number.isFinite(payload?.sleepScore)
+      ? Number(payload.sleepScore)
+      : extractSleepScoreForDate({
+          daily_data: [{ date, sleep_score: payload?.sleepScore ?? null }],
+        }, date)
     return res.status(200).json(
-      normalizeSleepScoreResponse(date, sleepScore, payload?.last_updated ?? payload?.payload_updated_at ?? null)
+      normalizeSleepScoreResponse(date, sleepScore, payload?.lastUpdated ?? payload?.last_updated ?? null)
     )
   } catch (error) {
     return res.status(502).json(
