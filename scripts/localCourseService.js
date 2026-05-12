@@ -4,6 +4,13 @@ import path from 'node:path'
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.mp3', '.m4a', '.wav'])
 const SLIDE_EXTENSIONS = new Set(['.pdf', '.ppt', '.pptx'])
 const ARTICLE_EXTENSIONS = new Set(['.doc', '.docx', '.txt', '.md'])
+const IGNORED_NAMES = new Set(['.ds_store', 'thumbs.db', 'desktop.ini'])
+const LESSON_PREFIX_PATTERNS = [
+  /^\s*(?:module|part|section|session|chapter)\s*\d+\s*[-_:.)]?\s*/i,
+  /^\s*(?:lesson|video)\s*\d+\s*[-_:.)]?\s*/i,
+  /^\s*\d{1,3}\s*[-_:.)]\s*/i,
+  /^\s*\d{1,3}\s+/i,
+]
 const MIME_TYPES = new Map([
   ['.mp4', 'video/mp4'],
   ['.mov', 'video/quicktime'],
@@ -23,8 +30,55 @@ export function slugify(value = '') {
     .replace(/^-+|-+$/g, '') || 'lesson'
 }
 
+function isIgnoredName(name = '') {
+  const normalized = String(name || '').trim().toLowerCase()
+  return !normalized || normalized.startsWith('.') || normalized === '__macosx' || IGNORED_NAMES.has(normalized)
+}
+
+function tokenizeNumbers(value = '') {
+  return Array.from(String(value || '').matchAll(/\d+/g), match => Number(match[0]))
+}
+
+function compareNumberLists(left = [], right = []) {
+  const length = Math.max(left.length, right.length)
+  for (let index = 0; index < length; index += 1) {
+    const leftValue = left[index]
+    const rightValue = right[index]
+    if (leftValue === undefined) return 1
+    if (rightValue === undefined) return -1
+    if (leftValue !== rightValue) return leftValue - rightValue
+  }
+  return 0
+}
+
+function naturalPathCompare(rootPath, left, right) {
+  const leftRelative = path.relative(rootPath, left).replaceAll(path.sep, '/')
+  const rightRelative = path.relative(rootPath, right).replaceAll(path.sep, '/')
+  const numberComparison = compareNumberLists(tokenizeNumbers(leftRelative), tokenizeNumbers(rightRelative))
+  if (numberComparison !== 0) return numberComparison
+  return leftRelative.localeCompare(rightRelative, undefined, { sensitivity: 'base' })
+}
+
+export function cleanLessonTitle(rawTitle = '') {
+  let normalized = String(rawTitle || '')
+    .replaceAll('_', ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  for (const pattern of LESSON_PREFIX_PATTERNS) {
+    normalized = normalized.replace(pattern, '')
+  }
+
+  normalized = normalized
+    .replace(/^\s*[-:.)]+\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return normalized || String(rawTitle || '').replaceAll('_', ' ').trim() || 'Lesson'
+}
+
 export function deriveLessonTitle(videoPath) {
-  return path.parse(videoPath).name.replaceAll('_', ' ').trim()
+  return cleanLessonTitle(path.parse(videoPath).name)
 }
 
 function stemTokens(value = '') {
@@ -32,6 +86,23 @@ function stemTokens(value = '') {
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean)
+}
+
+function probableLessonNumber(stem = '') {
+  const tokens = stemTokens(stem)
+  if (tokens[0] === 'lesson' || tokens[0] === 'video') {
+    return tokens[1] || ''
+  }
+  if (/^\d+$/.test(tokens[0] || '')) {
+    return tokens[0]
+  }
+  return ''
+}
+
+function looksLikeDifferentLessonAsset(videoStem, assetStem) {
+  const videoNumber = probableLessonNumber(videoStem)
+  const assetNumber = probableLessonNumber(assetStem)
+  return Boolean(videoNumber && assetNumber && videoNumber !== assetNumber)
 }
 
 function supportAssetMatches(videoStem, assetStem) {
@@ -49,6 +120,8 @@ export function discoverLessons(folderPath) {
 
   function walk(currentPath) {
     for (const entry of fs.readdirSync(currentPath, { withFileTypes: true })) {
+      if (isIgnoredName(entry.name)) continue
+
       const entryPath = path.join(currentPath, entry.name)
       if (entry.isDirectory()) {
         walk(entryPath)
@@ -62,23 +135,29 @@ export function discoverLessons(folderPath) {
   }
 
   walk(folderPath)
-  return discovered.sort((left, right) =>
-    path.relative(folderPath, left).localeCompare(path.relative(folderPath, right))
-  )
+  return discovered.sort((left, right) => naturalPathCompare(folderPath, left, right))
 }
 
 export function supportAssetsFor(videoPath, folderPath) {
   const parentPath = path.dirname(videoPath)
   const videoStem = path.parse(videoPath).name
+  const lessonVideosInFolder = fs.readdirSync(parentPath, { withFileTypes: true })
+    .filter(entry => entry.isFile() && !isIgnoredName(entry.name))
+    .filter(entry => VIDEO_EXTENSIONS.has(path.extname(entry.name).toLowerCase()))
   const slides = []
   const articles = []
 
   for (const entry of fs.readdirSync(parentPath, { withFileTypes: true })) {
     if (!entry.isFile()) continue
+    if (isIgnoredName(entry.name)) continue
 
     const ext = path.extname(entry.name).toLowerCase()
     if (!SLIDE_EXTENSIONS.has(ext) && !ARTICLE_EXTENSIONS.has(ext)) continue
-    if (!supportAssetMatches(videoStem, path.parse(entry.name).name)) continue
+
+    const assetStem = path.parse(entry.name).name
+    const matchesByStem = supportAssetMatches(videoStem, assetStem)
+    const matchesBySingleLessonFolder = lessonVideosInFolder.length === 1 && !looksLikeDifferentLessonAsset(videoStem, assetStem)
+    if (!matchesByStem && !matchesBySingleLessonFolder) continue
 
     const relativePath = path.relative(folderPath, path.join(parentPath, entry.name)).replaceAll(path.sep, '/')
 

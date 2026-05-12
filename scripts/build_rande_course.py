@@ -11,6 +11,13 @@ if TYPE_CHECKING:
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mp3", ".m4a", ".wav"}
 SUPPORT_EXTENSIONS = {".pdf", ".ppt", ".pptx", ".doc", ".docx", ".txt", ".md"}
+IGNORED_NAMES = {".ds_store", "thumbs.db", "desktop.ini", "__macosx"}
+LESSON_PREFIX_PATTERNS = [
+    re.compile(r"^\s*(?:module|part|section|session|chapter)\s*\d+\s*[-_:.)]?\s*", re.IGNORECASE),
+    re.compile(r"^\s*(?:lesson|video)\s*\d+\s*[-_:.)]?\s*", re.IGNORECASE),
+    re.compile(r"^\s*\d{1,3}\s*[-_:.)]\s*"),
+    re.compile(r"^\s*\d{1,3}\s+"),
+]
 
 
 def slugify(value: str) -> str:
@@ -19,11 +26,40 @@ def slugify(value: str) -> str:
 
 
 def derive_lesson_title(video_path: Path) -> str:
-    return video_path.stem.replace("_", " ").strip()
+    return clean_lesson_title(video_path.stem)
+
+
+def clean_lesson_title(raw_title: str) -> str:
+    normalized = re.sub(r"\s+", " ", str(raw_title or "").replace("_", " ")).strip()
+
+    for pattern in LESSON_PREFIX_PATTERNS:
+        normalized = pattern.sub("", normalized)
+
+    normalized = re.sub(r"^\s*[-:.)]+\s*", "", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    fallback = str(raw_title or "").replace("_", " ").strip()
+    return normalized or fallback or "Lesson"
 
 
 def stem_tokens(value: str) -> list[str]:
     return [token for token in re.split(r"[^a-z0-9]+", value.lower()) if token]
+
+
+def probable_lesson_number(stem: str) -> str:
+    tokens = stem_tokens(stem)
+    if not tokens:
+        return ""
+    if tokens[0] in {"lesson", "video"}:
+        return tokens[1] if len(tokens) > 1 else ""
+    if re.fullmatch(r"\d+", tokens[0]):
+        return tokens[0]
+    return ""
+
+
+def looks_like_different_lesson_asset(video_stem: str, asset_stem: str) -> bool:
+    video_number = probable_lesson_number(video_stem)
+    asset_number = probable_lesson_number(asset_stem)
+    return bool(video_number and asset_number and video_number != asset_number)
 
 
 def support_asset_matches(video_stem: str, asset_stem: str) -> bool:
@@ -37,11 +73,33 @@ def build_lesson_id(video_path: Path, input_dir: Path) -> str:
     return f"lesson-{slugify(source_identity)}"
 
 
+def is_ignored_name(name: str) -> bool:
+    normalized = str(name or "").strip().lower()
+    return not normalized or normalized.startswith(".") or normalized in IGNORED_NAMES
+
+
+def number_tokens(value: str) -> list[int]:
+    return [int(match) for match in re.findall(r"\d+", str(value or ""))]
+
+
+def natural_path_key(input_dir: Path, value: Path) -> tuple[list[int], str]:
+    relative_value = value.relative_to(input_dir).as_posix().lower()
+    return (number_tokens(relative_value), relative_value)
+
+
 def discover_lessons(input_dir: Path) -> list[Path]:
-    return sorted(
-        [path for path in input_dir.rglob("*") if path.suffix.lower() in VIDEO_EXTENSIONS],
-        key=lambda path: path.relative_to(input_dir).as_posix().lower(),
-    )
+    discovered: list[Path] = []
+
+    for path in input_dir.rglob("*"):
+        relative_parts = path.relative_to(input_dir).parts
+        if any(is_ignored_name(part) for part in relative_parts):
+            continue
+        if path.name and is_ignored_name(path.name):
+            continue
+        if path.suffix.lower() in VIDEO_EXTENSIONS:
+            discovered.append(path)
+
+    return sorted(discovered, key=lambda path: natural_path_key(input_dir, path))
 
 
 def normalize_selected_lessons(
@@ -86,10 +144,26 @@ def select_lessons(
 def support_assets_for(video_path: Path, input_dir: Path) -> dict[str, list[str]]:
     stem = video_path.stem
     parent = video_path.parent
+    lesson_videos_in_folder = [
+        path
+        for path in parent.iterdir()
+        if path.is_file() and not is_ignored_name(path.name) and path.suffix.lower() in VIDEO_EXTENSIONS
+    ]
     matching = [
         path
         for path in parent.iterdir()
-        if path.suffix.lower() in SUPPORT_EXTENSIONS and support_asset_matches(stem, path.stem)
+        if (
+            path.is_file()
+            and not is_ignored_name(path.name)
+            and path.suffix.lower() in SUPPORT_EXTENSIONS
+            and (
+                support_asset_matches(stem, path.stem)
+                or (
+                    len(lesson_videos_in_folder) == 1
+                    and not looks_like_different_lesson_asset(stem, path.stem)
+                )
+            )
+        )
     ]
     return {
         "slides": [

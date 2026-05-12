@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { createLocalCourseService } from './local_course_service.mjs'
+import { cleanLessonTitle, discoverLessons, supportAssetsFor } from './localCourseService.js'
 
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'local-course-service-'))
@@ -96,6 +97,54 @@ test('scan-folder returns deterministic lesson metadata for a local source folde
     await stop()
     fs.rmSync(tempDir, { recursive: true, force: true })
   }
+})
+
+test('cleanLessonTitle strips lesson-number prefixes and preserves the real lesson name', () => {
+  assert.equal(cleanLessonTitle('Lesson 01 - State_Management'), 'State Management')
+  assert.equal(cleanLessonTitle('03 Momentum Exits'), 'Momentum Exits')
+  assert.equal(cleanLessonTitle('Module 2 - Fear and Urgency'), 'Fear and Urgency')
+})
+
+test('discoverLessons ignores hidden system clutter and sorts numbered lessons naturally', () => {
+  const tempDir = makeTempDir()
+  const courseDir = path.join(tempDir, 'course-source')
+  fs.mkdirSync(path.join(courseDir, '__MACOSX'), { recursive: true })
+  fs.mkdirSync(path.join(courseDir, 'module-a'), { recursive: true })
+  fs.writeFileSync(path.join(courseDir, '.DS_Store'), '')
+  fs.writeFileSync(path.join(courseDir, '__MACOSX', 'Lesson 99.mp4'), 'ignored')
+  fs.writeFileSync(path.join(courseDir, 'module-a', 'Lesson 10.mp4'), 'ten')
+  fs.writeFileSync(path.join(courseDir, 'module-a', 'Lesson 2.mp4'), 'two')
+
+  const discovered = discoverLessons(courseDir)
+    .map(filePath => path.relative(courseDir, filePath).replaceAll(path.sep, '/'))
+
+  fs.rmSync(tempDir, { recursive: true, force: true })
+
+  assert.deepEqual(discovered, [
+    'module-a/Lesson 2.mp4',
+    'module-a/Lesson 10.mp4',
+  ])
+})
+
+test('supportAssetsFor falls back to generic support docs when a folder contains only one lesson video', () => {
+  const tempDir = makeTempDir()
+  const courseDir = path.join(tempDir, 'course-source')
+  const lessonDir = path.join(courseDir, 'lesson-one')
+  fs.mkdirSync(lessonDir, { recursive: true })
+  const videoPath = path.join(lessonDir, 'My Great Lesson.mp4')
+  fs.writeFileSync(videoPath, 'video')
+  fs.writeFileSync(path.join(lessonDir, 'Slides.pdf'), 'slides')
+  fs.writeFileSync(path.join(lessonDir, 'Notes.txt'), 'notes')
+
+  const assets = supportAssetsFor(videoPath, courseDir)
+
+  fs.rmSync(tempDir, { recursive: true, force: true })
+
+  assert.deepEqual(assets, {
+    slides: ['lesson-one/Slides.pdf'],
+    articles: ['lesson-one/Notes.txt'],
+    notes: [],
+  })
 })
 
 test('start-import validates selected lessons against the scanned folder contract', async () => {

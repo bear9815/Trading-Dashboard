@@ -142,6 +142,111 @@ print(json.dumps(payload))
   assert.deepEqual(payload.slides, ['module-a/Lesson 1 Slides.pdf'])
 })
 
+test('derive_lesson_title cleans lesson numbering and separators from filenames', () => {
+  const result = runPython([
+    '-c',
+    `
+import importlib.util
+import pathlib
+
+module_path = pathlib.Path(${JSON.stringify(scriptPath)})
+spec = importlib.util.spec_from_file_location("build_rande_course", module_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+print(module.derive_lesson_title(pathlib.Path("Lesson 03 - State_Management.mp4")))
+print(module.derive_lesson_title(pathlib.Path("04 Momentum Exits.mov")))
+`,
+  ])
+
+  assert.equal(result.status, 0, result.stderr)
+  const lines = result.stdout.trim().split('\n')
+  assert.equal(lines[0], 'State Management')
+  assert.equal(lines[1], 'Momentum Exits')
+})
+
+test('discover_lessons ignores hidden system clutter and sorts lessons naturally', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'course-ingest-'))
+  const inputDir = path.join(tempDir, 'input')
+  fs.mkdirSync(path.join(inputDir, '__MACOSX'), { recursive: true })
+  fs.mkdirSync(path.join(inputDir, 'module-a'), { recursive: true })
+  fs.writeFileSync(path.join(inputDir, '.DS_Store'), '')
+  fs.writeFileSync(path.join(inputDir, '__MACOSX', 'Lesson 99.mp4'), '')
+  fs.writeFileSync(path.join(inputDir, 'module-a', 'Lesson 10.mp4'), '')
+  fs.writeFileSync(path.join(inputDir, 'module-a', 'Lesson 2.mp4'), '')
+
+  const result = runPython([
+    '-c',
+    `
+import importlib.util
+import json
+import pathlib
+
+module_path = pathlib.Path(${JSON.stringify(scriptPath)})
+spec = importlib.util.spec_from_file_location("build_rande_course", module_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+paths = [
+    path.relative_to(pathlib.Path(${JSON.stringify(inputDir)})).as_posix()
+    for path in module.discover_lessons(pathlib.Path(${JSON.stringify(inputDir)}))
+]
+print(json.dumps(paths))
+`,
+  ])
+
+  fs.rmSync(tempDir, { recursive: true, force: true })
+
+  assert.equal(result.status, 0, result.stderr)
+  const payload = JSON.parse(result.stdout)
+  assert.deepEqual(payload, [
+    'module-a/Lesson 2.mp4',
+    'module-a/Lesson 10.mp4',
+  ])
+})
+
+test('support_assets_for falls back to generic support docs when only one lesson video exists in the folder', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'course-ingest-'))
+  const inputDir = path.join(tempDir, 'input')
+  const lessonDir = path.join(inputDir, 'module-a')
+  fs.mkdirSync(lessonDir, { recursive: true })
+
+  const videoPath = path.join(lessonDir, 'State Management.mp4')
+  fs.writeFileSync(videoPath, '')
+  fs.writeFileSync(path.join(lessonDir, 'Slides.pdf'), '')
+  fs.writeFileSync(path.join(lessonDir, 'Notes.txt'), '')
+
+  const result = runPython([
+    '-c',
+    `
+import importlib.util
+import json
+import pathlib
+
+module_path = pathlib.Path(${JSON.stringify(scriptPath)})
+spec = importlib.util.spec_from_file_location("build_rande_course", module_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+payload = module.support_assets_for(
+    pathlib.Path(${JSON.stringify(videoPath)}),
+    pathlib.Path(${JSON.stringify(inputDir)}),
+)
+print(json.dumps(payload))
+`,
+  ])
+
+  fs.rmSync(tempDir, { recursive: true, force: true })
+
+  assert.equal(result.status, 0, result.stderr)
+  const payload = JSON.parse(result.stdout)
+  assert.deepEqual(payload, {
+    slides: ['module-a/Slides.pdf'],
+    articles: ['module-a/Notes.txt'],
+    notes: [],
+  })
+})
+
 test('build_manifest keeps a stable lesson id when the display title changes for the same source file', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'course-ingest-'))
   const inputDir = path.join(tempDir, 'input')
