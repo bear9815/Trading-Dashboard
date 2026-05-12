@@ -104,13 +104,13 @@ export default function CourseHub() {
         const serviceState = await getLocalCourseServiceState()
         if (cancelled) return
         setImportServiceState(serviceState)
-        setGuidedImportError('')
+        setGuidedImportError(serviceState?.requestError || '')
       } catch (error) {
         if (cancelled) return
         setImportServiceState({
           localModeAvailable: false,
-          hostedModeDisabled: true,
-          hostedModeDisabledReason: 'Guided local import only runs from localhost in the desktop app.',
+          hostedModeDisabled: false,
+          hostedModeDisabledReason: '',
         })
         setGuidedImportError(error?.message || '')
       }

@@ -1,5 +1,10 @@
 const DEFAULT_LOCAL_COURSE_SERVICE_URL = 'http://127.0.0.1:4315/api/local-course'
 
+function isLocalHostname(hostname = '') {
+  const normalized = String(hostname || '').trim().toLowerCase()
+  return normalized === 'localhost' || normalized === '127.0.0.1'
+}
+
 function resolveBaseUrl() {
   const configuredBaseUrl = typeof import.meta !== 'undefined' && import.meta.env?.VITE_LOCAL_COURSE_SERVICE_URL
     ? String(import.meta.env.VITE_LOCAL_COURSE_SERVICE_URL).trim()
@@ -41,12 +46,50 @@ async function requestJson(pathname, options = {}) {
 }
 
 export async function getLocalCourseServiceState() {
-  const payload = await requestJson('/health')
-  return {
-    ...payload,
-    localModeAvailable: Boolean(payload?.localModeAvailable ?? payload?.ok),
-    hostedModeDisabled: false,
-    hostedModeDisabledReason: '',
+  const onWindow = typeof window !== 'undefined'
+  const hostname = onWindow ? window.location.hostname : ''
+  const onLocalhost = isLocalHostname(hostname)
+
+  if (onWindow && !onLocalhost) {
+    return {
+      localModeAvailable: false,
+      hostedModeDisabled: true,
+      hostedModeDisabledReason: 'Guided local import only runs from localhost.',
+    }
+  }
+
+  try {
+    const payload = await requestJson('/health')
+    return {
+      ...payload,
+      localModeAvailable: Boolean(payload?.localModeAvailable ?? payload?.ok),
+      hostedModeDisabled: false,
+      hostedModeDisabledReason: '',
+    }
+  } catch (proxyError) {
+    if (!onLocalhost) throw proxyError
+
+    const fallbackResponse = await fetch(new URL('/health', `${DEFAULT_LOCAL_COURSE_SERVICE_URL}/`).toString(), {
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+    const fallbackData = await fallbackResponse.json().catch(() => ({}))
+    if (!fallbackResponse.ok) {
+      throw new Error(
+        fallbackData?.message
+        || fallbackData?.error
+        || proxyError?.message
+        || 'The local course service request failed.'
+      )
+    }
+
+    return {
+      ...fallbackData,
+      localModeAvailable: Boolean(fallbackData?.localModeAvailable ?? fallbackData?.ok),
+      hostedModeDisabled: false,
+      hostedModeDisabledReason: '',
+    }
   }
 }
 
