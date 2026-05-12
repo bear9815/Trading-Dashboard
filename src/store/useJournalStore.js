@@ -406,15 +406,28 @@ export const useJournalStore = create((set, get) => ({
   // ── Trading Thoughts ───────────────────────────────────────────────────────
 
   addThought: (text, tag = 'note') => {
+    const trimmed = String(text || '').trim()
+    if (!trimmed) return null
+
+    const entryTimestamp = new Date().toISOString()
     const thought = {
       id:        uuidv4(),
-      text:      text.trim(),
+      text:      trimmed,
       tag,
-      timestamp: Date.now(),
+      timestamp: new Date(entryTimestamp).getTime(),
+      source: 'dashboard-thought',
     }
-    set(s => ({ tradingThoughts: [thought, ...s.tradingThoughts] }))
+    const entry = {
+      ...buildDashboardJournalEntry(trimmed, entryTimestamp),
+      id: uuidv4(),
+      source: 'dashboard-thought',
+    }
+    set(s => ({
+      tradingThoughts: [thought, ...s.tradingThoughts],
+      entries: [entry, ...s.entries],
+    }))
     const saved = get()._sync()
-    return { thought, saved }
+    return { thought, entry, saved }
   },
 
   addReminderThought: (text, tag = 'note', timestamp = new Date().toISOString()) => {

@@ -662,6 +662,71 @@ test('trading reminder thoughts persist into both dashboard thoughts and journal
   }
 })
 
+test('dashboard thoughts persist into both trading thoughts and journal entries', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
+
+  try {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+
+    const result = useJournalStore.getState().addThought('Wait for confirmation before sizing up.', 'discipline')
+    await result.saved
+
+    const stateAfterSave = useJournalStore.getState()
+    assert.equal(stateAfterSave.tradingThoughts.length, 1)
+    assert.equal(stateAfterSave.tradingThoughts[0].text, 'Wait for confirmation before sizing up.')
+    assert.equal(stateAfterSave.tradingThoughts[0].tag, 'discipline')
+    assert.equal(stateAfterSave.entries.length, 1)
+    assert.equal(isDashboardJournalEntry(stateAfterSave.entries[0]), true)
+    assert.equal(stateAfterSave.entries[0].noteText, 'Wait for confirmation before sizing up.')
+
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+    await useJournalStore.getState().loadFromLocal()
+
+    const restoredState = useJournalStore.getState()
+    assert.equal(restoredState.tradingThoughts.length, 1)
+    assert.equal(restoredState.tradingThoughts[0].text, 'Wait for confirmation before sizing up.')
+    assert.equal(restoredState.entries.length, 1)
+    assert.equal(isDashboardJournalEntry(restoredState.entries[0]), true)
+    assert.equal(restoredState.entries[0].noteText, 'Wait for confirmation before sizing up.')
+  } finally {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+  }
+})
+
 test('mergeJournalState preserves local-only notes and chooses the newest duplicate records', () => {
   assert.equal(typeof journalStoreModule.mergeJournalState, 'function')
 
