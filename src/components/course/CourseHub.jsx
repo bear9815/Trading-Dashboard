@@ -98,6 +98,7 @@ export default function CourseHub() {
 
   useEffect(() => {
     let cancelled = false
+    let retryTimeoutId = null
 
     async function loadLocalServiceState() {
       try {
@@ -113,15 +114,24 @@ export default function CourseHub() {
           hostedModeDisabledReason: '',
         })
         setGuidedImportError(error?.message || '')
+
+        if (typeof window !== 'undefined' && /localhost|127\.0\.0\.1/.test(window.location.hostname)) {
+          retryTimeoutId = window.setTimeout(() => {
+            loadLocalServiceState().catch(() => {})
+          }, 2000)
+        }
       }
     }
 
     if (typeof window !== 'undefined') {
-      loadLocalServiceState()
+      loadLocalServiceState().catch(() => {})
     }
 
     return () => {
       cancelled = true
+      if (retryTimeoutId) {
+        window.clearTimeout(retryTimeoutId)
+      }
     }
   }, [setImportServiceState])
 
