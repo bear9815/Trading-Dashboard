@@ -244,12 +244,24 @@ export default function CourseHub() {
     }
   }
 
-  function handleSourceFolder(event) {
+function handleSourceFolder(event) {
     const nextFiles = buildAttachedSourceFileMap(event.target.files)
     const storedFiles = setAttachedSourceFilesSession(nextFiles, courseId)
     setAttachedFiles(storedFiles)
-    event.target.value = ''
+  event.target.value = ''
+}
+
+function buildManualFolderSummary(folderPath = '') {
+  const normalizedPath = String(folderPath || '').trim()
+  if (!normalizedPath) return null
+
+  const segments = normalizedPath.split(/[\\/]/).filter(Boolean)
+  return {
+    name: segments.at(-1) || 'Selected course folder',
+    path: normalizedPath,
+    lessonCount: 0,
   }
+}
 
   async function handleGuidedSelectFolder() {
     if (isLaunchingFolderPicker) return
@@ -262,6 +274,24 @@ export default function CourseHub() {
       const folder = await chooseLocalCourseFolder()
       setImportFolder(folder.selectedFolder || folder)
     } catch (error) {
+      const canPromptForPath = typeof window !== 'undefined'
+        && /localhost|127\.0\.0\.1/.test(window.location.hostname)
+        && typeof window.prompt === 'function'
+
+      if (canPromptForPath) {
+        const manualPath = window.prompt(
+          'The native folder picker did not open. Paste the full path to your local course folder:',
+          importSession.selectedFolder?.path || ''
+        )
+
+        const manualFolder = buildManualFolderSummary(manualPath)
+        if (manualFolder) {
+          setImportFolder(manualFolder)
+          setGuidedImportError('')
+          return
+        }
+      }
+
       setGuidedImportError(error?.message || 'Could not select a local course folder yet.')
     } finally {
       setIsLaunchingFolderPicker(false)
