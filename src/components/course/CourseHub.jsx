@@ -36,6 +36,27 @@ const COMPLETION_LABELS = {
   applied: 'Applied',
 }
 
+function truncatePreview(value, maxLength = 110) {
+  const normalized = String(value || '').replace(/\s+/g, ' ').trim()
+  if (!normalized) return ''
+  if (normalized.length <= maxLength) return normalized
+  return `${normalized.slice(0, maxLength - 1).trim()}…`
+}
+
+function MetricCard({ label, value, detail }) {
+  return (
+    <div className="rounded-[24px] border border-white/10 bg-black/20 px-4 py-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">
+        {label}
+      </p>
+      <p className="mt-3 text-2xl font-semibold text-white">{value}</p>
+      {detail ? (
+        <p className="mt-1 text-xs text-gray-500">{detail}</p>
+      ) : null}
+    </div>
+  )
+}
+
 export default function CourseHub() {
   const manifestInputRef = useRef(null)
   const sourceFolderInputRef = useRef(null)
@@ -95,6 +116,32 @@ export default function CourseHub() {
   const hasEnrichmentPending = transcriptProgressCount > 0
     && importSession.enrichmentCount < transcriptProgressCount
   const importJobBusy = Boolean(importSession.activeJob?.jobId)
+  const activeJobProgress = importSession.activeJob?.progress || {}
+  const activeCompletedLessons = Number.isFinite(Number(activeJobProgress.completedLessons))
+    ? Number(activeJobProgress.completedLessons)
+    : 0
+  const activeTotalLessons = Number.isFinite(Number(activeJobProgress.totalLessons))
+    ? Number(activeJobProgress.totalLessons)
+    : selectedPilotCount
+  const activeProgressMessage = String(activeJobProgress.message || '').trim()
+  const transientImportError = guidedImportError || importSession.lastError || ''
+  const shouldSuppressTransientImportError = Boolean(
+    importSession.localModeAvailable
+      && (importJobBusy || importSession.selectedFolder?.path || importSession.scannedLessons.length)
+      && /failed to fetch|request failed/i.test(transientImportError)
+  )
+  const visibleImportError = shouldSuppressTransientImportError ? '' : transientImportError
+  const watchedCount = lessons.filter(lesson => Boolean(lesson.watchedAt)).length
+  const reflectedCount = lessons.filter(lesson => Boolean(lesson.reflectedAt)).length
+  const appliedCount = lessons.filter(lesson => Boolean(lesson.appliedAt)).length
+  const nextLesson = lessons.find(lesson => getLessonCompletionStage(lesson) !== 'applied') || lessons[0] || null
+  const executiveLesson = activeLesson || nextLesson
+  const executiveLessonSummary = truncatePreview(
+    executiveLesson?.summary
+      || executiveLesson?.transcriptText
+      || executiveLesson?.sourceRelativePath,
+    150
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -143,6 +190,7 @@ export default function CourseHub() {
       try {
         const job = await getLocalCourseImportJob(importSession.activeJob.jobId)
         if (cancelled) return
+        setGuidedImportError('')
 
         if (job?.manifest && importSession.manifestImportedJobId !== job.jobId && job.status !== 'completed') {
           applyImportManifest({
@@ -244,24 +292,24 @@ export default function CourseHub() {
     }
   }
 
-function handleSourceFolder(event) {
+  function handleSourceFolder(event) {
     const nextFiles = buildAttachedSourceFileMap(event.target.files)
     const storedFiles = setAttachedSourceFilesSession(nextFiles, courseId)
     setAttachedFiles(storedFiles)
-  event.target.value = ''
-}
-
-function buildManualFolderSummary(folderPath = '') {
-  const normalizedPath = String(folderPath || '').trim()
-  if (!normalizedPath) return null
-
-  const segments = normalizedPath.split(/[\\/]/).filter(Boolean)
-  return {
-    name: segments.at(-1) || 'Selected course folder',
-    path: normalizedPath,
-    lessonCount: 0,
+    event.target.value = ''
   }
-}
+
+  function buildManualFolderSummary(folderPath = '') {
+    const normalizedPath = String(folderPath || '').trim()
+    if (!normalizedPath) return null
+
+    const segments = normalizedPath.split(/[\\/]/).filter(Boolean)
+    return {
+      name: segments.at(-1) || 'Selected course folder',
+      path: normalizedPath,
+      lessonCount: 0,
+    }
+  }
 
   async function handleGuidedSelectFolder() {
     if (isLaunchingFolderPicker) return
@@ -338,6 +386,7 @@ function buildManualFolderSummary(folderPath = '') {
         folderPath: importSession.selectedFolder.path,
         selectedLessonIds: importSession.selectedPilotLessonIds,
       })
+      setGuidedImportError('')
 
       startImportJob({
         jobId: job.jobId,
@@ -373,428 +422,714 @@ function buildManualFolderSummary(folderPath = '') {
   return (
     <div className="h-full overflow-y-auto p-5 md:p-6">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <section className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6 md:py-6">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-gray-500">
-                Local Course Workspace
-              </p>
-              <div>
-                <h1 className="text-2xl font-semibold text-white">
-                  {courseTitle || 'Course Hub'}
-                </h1>
-                <p className="mt-1 text-sm text-gray-400">
-                  Guided local import handles scan, transcript, manifest handoff, and service-backed playback on localhost.
-                  Manual manifest import stays available as an advanced fallback.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5">
-                  {lessonCountLabel}
-                </span>
-                <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5">
-                  {attachedEntries.length} attached file{attachedEntries.length === 1 ? '' : 's'}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <button
-                type="button"
-                onClick={handleGuidedSelectFolder}
-                disabled={isLaunchingFolderPicker || importJobBusy}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-200 transition-colors hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-gray-500"
-              >
-                {isLaunchingFolderPicker ? <LoaderCircle size={16} className="animate-spin" /> : <WandSparkles size={16} />}
-                Guided Local Import
-              </button>
-              <button
-                type="button"
-                onClick={() => manifestInputRef.current?.click()}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-blue/25 bg-accent-blue/15 px-4 py-3 text-sm font-medium text-accent-blue transition-colors hover:bg-accent-blue/20"
-              >
-                <Upload size={16} />
-                Import Manifest
-              </button>
-              <button
-                type="button"
-                onClick={() => sourceFolderInputRef.current?.click()}
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-gray-200 transition-colors hover:bg-white/[0.08]"
-              >
-                <FolderOpen size={16} />
-                Attach Source Folder
-              </button>
-            </div>
-          </div>
-
-          {manifestImportError ? (
-            <div
-              role="alert"
-              className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100"
-            >
-              {manifestImportError}
-            </div>
-          ) : null}
-
-          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
-            <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-white">Guided local import</p>
-                  <p className="mt-1 text-sm text-gray-400">
-                    Use the localhost helper to scan a course folder, import transcripts, auto-load the manifest,
-                    and attach service-backed media URLs without relying on browser file objects.
+        {lessons.length === 0 ? (
+          <>
+            <section className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6 md:py-6">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-gray-500">
+                    Local Course Workspace
                   </p>
-                </div>
-                <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.24em] text-gray-300">
-                  {importSession.localModeAvailable ? 'Local course service connected' : 'Waiting for localhost helper'}
-                </span>
-              </div>
-
-              {importSession.hostedModeDisabled ? (
-                <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                  {importSession.hostedModeDisabledReason || 'Guided local import only runs from localhost in the desktop app.'}
-                </div>
-              ) : null}
-
-              {guidedImportError || importSession.lastError ? (
-                <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-                  {guidedImportError || importSession.lastError}
-                </div>
-              ) : null}
-
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gray-500">Selected Folder</p>
-                  <p className="mt-2 text-sm text-gray-200">
-                    {importSession.selectedFolder?.name || 'No local folder selected yet'}
-                  </p>
-                  {importSession.selectedFolder?.path ? (
-                    <p className="mt-1 text-xs text-gray-500">{importSession.selectedFolder.path}</p>
-                  ) : null}
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gray-500">Pilot Lessons</p>
-                  <p className="mt-2 text-sm text-gray-200">{selectedPilotLabel}</p>
-                  {scannedLessonCount ? (
-                    <p className="mt-1 text-xs text-gray-500">
-                      Choose {minimumPilotSelection === maximumPilotSelection ? minimumPilotSelection : `${minimumPilotSelection}-${maximumPilotSelection}`} lessons from {scannedLessonCount} detected
+                  <div>
+                    <h1 className="text-2xl font-semibold text-white">
+                      {courseTitle || 'Course Hub'}
+                    </h1>
+                    <p className="mt-1 text-sm text-gray-400">
+                      Guided local import handles scan, transcript, manifest handoff, and service-backed playback on localhost.
+                      Manual manifest import stays available as an advanced fallback.
                     </p>
-                  ) : null}
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gray-500">Progress</p>
-                  <p className="mt-2 text-sm text-gray-200">
-                    {importSession.activeJob?.stageLabel || 'Ready to scan and import'}
-                  </p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {importSession.transcriptCount} transcripts, {importSession.enrichmentCount} enriched
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={handleGuidedScan}
-                  disabled={!importSession.localModeAvailable || !importSession.selectedFolder?.path || isScanningFolder || importJobBusy}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-gray-200 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:text-gray-500"
-                >
-                  {isScanningFolder ? <LoaderCircle size={16} className="animate-spin" /> : <Search size={16} />}
-                  Scan Folder
-                </button>
-                <button
-                  type="button"
-                  onClick={handleGuidedImport}
-                  disabled={!importSession.localModeAvailable || !importSession.selectedFolder?.path || !hasValidPilotSelection || isStartingImport || importJobBusy}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-blue/25 bg-accent-blue/15 px-4 py-3 text-sm font-medium text-accent-blue transition-colors hover:bg-accent-blue/20 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-gray-500"
-                >
-                  {isStartingImport ? <LoaderCircle size={16} className="animate-spin" /> : <Upload size={16} />}
-                  Start Transcript Import
-                </button>
-              </div>
-
-              {importSession.scannedLessons.length ? (
-                <div className="mt-4 rounded-[24px] border border-white/10 bg-black/20 p-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Pilot lesson selection</p>
-                      <p className="mt-1 text-sm text-gray-400">
-                        Pick the first {minimumPilotSelection === maximumPilotSelection ? minimumPilotSelection : `${minimumPilotSelection}-${maximumPilotSelection}`} lessons to bring online now. The full rollout can follow once this pilot feels right.
-                      </p>
-                    </div>
-                    <span className={`rounded-full border px-3 py-1.5 text-[11px] uppercase tracking-[0.24em] ${
-                      hasValidPilotSelection
-                        ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-200'
-                        : 'border-amber-400/20 bg-amber-500/10 text-amber-100'
-                    }`}>
-                      {hasValidPilotSelection
-                        ? 'Selection ready'
-                        : `Pick ${minimumPilotSelection === maximumPilotSelection ? minimumPilotSelection : `${minimumPilotSelection}-${maximumPilotSelection}`} lessons`}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5">
+                      {lessonCountLabel}
+                    </span>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5">
+                      {attachedEntries.length} attached file{attachedEntries.length === 1 ? '' : 's'}
                     </span>
                   </div>
-
-                  <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                    {importSession.scannedLessons.map(lesson => {
-                      const selected = importSession.selectedPilotLessonIds.includes(lesson.id)
-                      const supportCount = (lesson.assetPaths?.slides?.length || 0) + (lesson.assetPaths?.articles?.length || 0)
-
-                      return (
-                        <button
-                          key={lesson.id}
-                          type="button"
-                          onClick={() => handleTogglePilotLesson(lesson.id)}
-                          className={`rounded-2xl border px-4 py-3 text-left transition-colors ${
-                            selected
-                              ? 'border-accent-blue/30 bg-accent-blue/10'
-                              : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06]'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">
-                                Lesson {lesson.sequenceNumber}
-                              </p>
-                              <p className="mt-2 text-sm font-medium text-white">{lesson.title}</p>
-                            </div>
-                            <span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-gray-300">
-                              {selected ? 'Selected' : 'Available'}
-                            </span>
-                          </div>
-                          <p className="mt-2 text-xs text-gray-400">{lesson.sourceRelativePath}</p>
-                          <p className="mt-2 text-xs text-gray-500">
-                            {supportCount} support asset{supportCount === 1 ? '' : 's'}
-                          </p>
-                        </button>
-                      )
-                    })}
-                  </div>
                 </div>
-              ) : null}
 
-              {importSession.activeJob ? (
-                <div className="mt-4 rounded-2xl border border-accent-blue/20 bg-accent-blue/10 px-4 py-3 text-sm text-accent-blue">
-                  {importSession.activeJob.stageLabel || 'Import in progress'}
-                </div>
-              ) : null}
-
-              {hasEnrichmentPending ? (
-                <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-gray-200">
-                  Transcript ready for {transcriptProgressCount} lesson{transcriptProgressCount === 1 ? '' : 's'} while enrichment catches up.
-                  The course coach stays usable as soon as transcript text exists.
-                </div>
-              ) : null}
-            </div>
-
-            <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-              <p className="text-sm font-semibold text-white">Advanced fallback</p>
-              <p className="mt-1 text-sm text-gray-400">
-                Manual manifest import and manual source-folder attach remain available if the localhost helper is offline or you want to inspect a custom manifest.
-              </p>
-              {importSession.lastImport?.completedAt ? (
-                <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-gray-200">
-                  Last guided import completed at {new Date(importSession.lastImport.completedAt).toLocaleString()}.
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </section>
-
-        <section className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6 md:py-6">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-white">Coaching mode</p>
-              <p className="mt-1 text-sm text-gray-400">
-                Switch the coach from strict transcript fidelity to progressively more adaptive guidance.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {COACHING_MODES.map(mode => {
-                const active = coachingSettings.activeMode === mode
-                return (
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <button
-                    key={mode}
                     type="button"
-                    onClick={() => setActiveCoachingMode(mode)}
-                    className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-medium capitalize transition-colors ${
-                      active
-                        ? 'border-accent-blue/30 bg-accent-blue/15 text-accent-blue'
-                        : 'border-white/10 bg-white/[0.03] text-gray-300 hover:bg-white/[0.07]'
-                    }`}
+                    onClick={handleGuidedSelectFolder}
+                    disabled={isLaunchingFolderPicker || importJobBusy}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-200 transition-colors hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-gray-500"
                   >
-                    <Brain size={13} />
-                    {mode}
+                    {isLaunchingFolderPicker ? <LoaderCircle size={16} className="animate-spin" /> : <WandSparkles size={16} />}
+                    Guided Local Import
                   </button>
-                )
-              })}
-            </div>
-          </div>
-        </section>
+                  <button
+                    type="button"
+                    onClick={() => manifestInputRef.current?.click()}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-blue/25 bg-accent-blue/15 px-4 py-3 text-sm font-medium text-accent-blue transition-colors hover:bg-accent-blue/20"
+                  >
+                    <Upload size={16} />
+                    Import Manifest
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => sourceFolderInputRef.current?.click()}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-gray-200 transition-colors hover:bg-white/[0.08]"
+                  >
+                    <FolderOpen size={16} />
+                    Attach Source Folder
+                  </button>
+                </div>
+              </div>
 
-        {lessons.length === 0 ? (
-          <section className="luxury-panel rounded-[28px] border border-dashed border-white/10 px-5 py-12 text-center md:px-6">
-            <Search size={24} className="mx-auto mb-4 text-gray-500" />
-            <p className="text-base font-medium text-white">Import a pilot course folder to begin</p>
-            <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-400">
-              Start with Guided Local Import to scan the source folder, choose a 3-5 lesson pilot,
-              auto-load transcripts, and keep coaching usable while enrichment catches up in the background.
-            </p>
-          </section>
-        ) : (
-          <section className="grid gap-6 xl:grid-cols-[minmax(280px,0.72fr)_minmax(0,1.08fr)_minmax(320px,0.9fr)]">
-            <div className="space-y-6">
-              <div className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6">
-                <div className="flex flex-col gap-4">
+              {manifestImportError ? (
+                <div
+                  role="alert"
+                  className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100"
+                >
+                  {manifestImportError}
+                </div>
+              ) : null}
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+                <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-white">Imported lessons</p>
+                      <p className="text-sm font-semibold text-white">Guided local import</p>
                       <p className="mt-1 text-sm text-gray-400">
-                        Search across titles, transcripts, principles, and drills to find the exact lesson you need.
+                        Use the localhost helper to scan a course folder, import transcripts, auto-load the manifest,
+                        and attach service-backed media URLs without relying on browser file objects.
                       </p>
                     </div>
-                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-gray-300">
-                      {filteredCountLabel}
+                    <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-[11px] uppercase tracking-[0.24em] text-gray-300">
+                      {importSession.localModeAvailable ? 'Local course service connected' : 'Waiting for localhost helper'}
                     </span>
                   </div>
 
-                  <label className="relative block">
-                    <Search
-                      size={16}
-                      className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
-                    />
-                    <input
-                      type="search"
-                      value={lessonQuery}
-                      onChange={event => setLessonQuery(event.target.value)}
-                      placeholder="Search lessons, transcript text, principles, drills, or topics"
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-4 text-sm text-gray-100 outline-none transition-colors placeholder:text-gray-500 focus:border-accent-blue/35"
-                    />
-                  </label>
+                  {importSession.hostedModeDisabled ? (
+                    <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                      {importSession.hostedModeDisabledReason || 'Guided local import only runs from localhost in the desktop app.'}
+                    </div>
+                  ) : null}
 
-                  <div className="flex flex-wrap gap-2">
-                    {topicFilters.map(topic => {
-                      const active = selectedTopic === topic
-                      return (
-                        <button
-                          key={topic}
-                          type="button"
-                          onClick={() => setSelectedTopic(topic)}
-                          className={`rounded-full border px-3.5 py-2 text-xs font-medium transition-colors ${
-                            active
-                              ? 'border-accent-blue/30 bg-accent-blue/15 text-accent-blue'
-                              : 'border-white/10 bg-white/[0.03] text-gray-300 hover:bg-white/[0.07]'
-                          }`}
-                        >
-                          {topic === TOPIC_FILTER_ALL ? 'All Topics' : topic}
-                        </button>
-                      )
-                    })}
+                  {visibleImportError ? (
+                    <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                      {visibleImportError}
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gray-500">Selected Folder</p>
+                      <p className="mt-2 text-sm text-gray-200">
+                        {importSession.selectedFolder?.name || 'No local folder selected yet'}
+                      </p>
+                      {importSession.selectedFolder?.path ? (
+                        <p className="mt-1 text-xs text-gray-500">{importSession.selectedFolder.path}</p>
+                      ) : null}
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gray-500">Pilot Lessons</p>
+                      <p className="mt-2 text-sm text-gray-200">{selectedPilotLabel}</p>
+                      {scannedLessonCount ? (
+                        <p className="mt-1 text-xs text-gray-500">
+                          Choose {minimumPilotSelection === maximumPilotSelection ? minimumPilotSelection : `${minimumPilotSelection}-${maximumPilotSelection}`} lessons from {scannedLessonCount} detected
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gray-500">Progress</p>
+                      <p className="mt-2 text-sm text-gray-200">
+                        {importSession.activeJob?.stageLabel || 'Ready to scan and import'}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {importJobBusy && activeTotalLessons
+                          ? `${activeCompletedLessons} of ${activeTotalLessons} selected lessons finished`
+                          : `${importSession.transcriptCount} transcripts, ${importSession.enrichmentCount} enriched`}
+                      </p>
+                      {activeProgressMessage ? (
+                        <p className="mt-2 text-xs text-accent-blue">Currently: {activeProgressMessage}</p>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleGuidedScan}
+                      disabled={!importSession.localModeAvailable || !importSession.selectedFolder?.path || isScanningFolder || importJobBusy}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-gray-200 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:text-gray-500"
+                    >
+                      {isScanningFolder ? <LoaderCircle size={16} className="animate-spin" /> : <Search size={16} />}
+                      Scan Folder
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleGuidedImport}
+                      disabled={!importSession.localModeAvailable || !importSession.selectedFolder?.path || !hasValidPilotSelection || isStartingImport || importJobBusy}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-blue/25 bg-accent-blue/15 px-4 py-3 text-sm font-medium text-accent-blue transition-colors hover:bg-accent-blue/20 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-gray-500"
+                    >
+                      {isStartingImport ? <LoaderCircle size={16} className="animate-spin" /> : <Upload size={16} />}
+                      Start Transcript Import
+                    </button>
+                  </div>
+
+                  {importSession.scannedLessons.length ? (
+                    <div className="mt-4 rounded-[24px] border border-white/10 bg-black/20 p-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-white">Pilot lesson selection</p>
+                          <p className="mt-1 text-sm text-gray-400">
+                            Pick the first {minimumPilotSelection === maximumPilotSelection ? minimumPilotSelection : `${minimumPilotSelection}-${maximumPilotSelection}`} lessons to bring online now. The full rollout can follow once this pilot feels right.
+                          </p>
+                        </div>
+                        <span className={`rounded-full border px-3 py-1.5 text-[11px] uppercase tracking-[0.24em] ${
+                          hasValidPilotSelection
+                            ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-200'
+                            : 'border-amber-400/20 bg-amber-500/10 text-amber-100'
+                        }`}>
+                          {hasValidPilotSelection
+                            ? 'Selection ready'
+                            : `Pick ${minimumPilotSelection === maximumPilotSelection ? minimumPilotSelection : `${minimumPilotSelection}-${maximumPilotSelection}`} lessons`}
+                        </span>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                        {importSession.scannedLessons.map(lesson => {
+                          const selected = importSession.selectedPilotLessonIds.includes(lesson.id)
+                          const supportCount = (lesson.assetPaths?.slides?.length || 0) + (lesson.assetPaths?.articles?.length || 0)
+
+                          return (
+                            <button
+                              key={lesson.id}
+                              type="button"
+                              onClick={() => handleTogglePilotLesson(lesson.id)}
+                              className={`rounded-2xl border px-4 py-3 text-left transition-colors ${
+                                selected
+                                  ? 'border-accent-blue/30 bg-accent-blue/10'
+                                  : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06]'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">
+                                    Lesson {lesson.sequenceNumber}
+                                  </p>
+                                  <p className="mt-2 text-sm font-medium text-white">{lesson.title}</p>
+                                </div>
+                                <span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-gray-300">
+                                  {selected ? 'Selected' : 'Available'}
+                                </span>
+                              </div>
+                              <p className="mt-2 text-xs text-gray-400">{lesson.sourceRelativePath}</p>
+                              <p className="mt-2 text-xs text-gray-500">
+                                {supportCount} support asset{supportCount === 1 ? '' : 's'}
+                              </p>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {importSession.activeJob ? (
+                    <div className="mt-4 rounded-2xl border border-accent-blue/20 bg-accent-blue/10 px-4 py-3 text-sm text-accent-blue">
+                      <p>{importSession.activeJob.stageLabel || 'Import in progress'}</p>
+                      {activeProgressMessage ? (
+                        <p className="mt-1 text-xs text-accent-blue/80">Currently: {activeProgressMessage}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {hasEnrichmentPending ? (
+                    <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-gray-200">
+                      Transcript ready for {transcriptProgressCount} lesson{transcriptProgressCount === 1 ? '' : 's'} while enrichment catches up.
+                      The course coach stays usable as soon as transcript text exists.
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
+                  <p className="text-sm font-semibold text-white">Advanced fallback</p>
+                  <p className="mt-1 text-sm text-gray-400">
+                    Manual manifest import and manual source-folder attach remain available if the localhost helper is offline or you want to inspect a custom manifest.
+                  </p>
+                  {importSession.lastImport?.completedAt ? (
+                    <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-gray-200">
+                      Last guided import completed at {new Date(importSession.lastImport.completedAt).toLocaleString()}.
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </section>
+
+            <section className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6 md:py-6">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-white">Coaching mode</p>
+                  <p className="mt-1 text-sm text-gray-400">
+                    Switch the coach from strict transcript fidelity to progressively more adaptive guidance.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {COACHING_MODES.map(mode => {
+                    const active = coachingSettings.activeMode === mode
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setActiveCoachingMode(mode)}
+                        className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-medium capitalize transition-colors ${
+                          active
+                            ? 'border-accent-blue/30 bg-accent-blue/15 text-accent-blue'
+                            : 'border-white/10 bg-white/[0.03] text-gray-300 hover:bg-white/[0.07]'
+                        }`}
+                      >
+                        <Brain size={13} />
+                        {mode}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            </section>
+
+            <section className="luxury-panel rounded-[28px] border border-dashed border-white/10 px-5 py-12 text-center md:px-6">
+              <Search size={24} className="mx-auto mb-4 text-gray-500" />
+              <p className="text-base font-medium text-white">Import a pilot course folder to begin</p>
+              <p className="mx-auto mt-2 max-w-2xl text-sm text-gray-400">
+                Start with Guided Local Import to scan the source folder, choose a 3-5 lesson pilot,
+                auto-load transcripts, and keep coaching usable while enrichment catches up in the background.
+              </p>
+            </section>
+          </>
+        ) : (
+          <>
+            <section className="luxury-panel relative overflow-hidden rounded-[28px] border border-white/10 px-5 py-5 md:px-6 md:py-6">
+              <div className="absolute inset-y-0 right-0 hidden w-1/3 bg-gradient-to-l from-accent-blue/10 via-transparent to-transparent xl:block" />
+              <div className="relative flex flex-col gap-6">
+                <div className="flex flex-col gap-5 2xl:flex-row 2xl:items-start 2xl:justify-between">
+                  <div className="space-y-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-gray-500">
+                      Course overview
+                    </p>
+                    <div>
+                      <h1 className="text-3xl font-semibold text-white">
+                        {courseTitle || 'Course Hub'}
+                      </h1>
+                      <p className="mt-2 max-w-3xl text-sm leading-7 text-gray-400">
+                        A polished executive workspace for moving from lesson consumption into applied trading behavior with clearer priorities, metrics, and coaching context.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-gray-300">
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5">
+                        {lessons.length} lesson{lessons.length === 1 ? ' in workspace' : 's in workspace'}
+                      </span>
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5">
+                        {attachedEntries.length} attached source file{attachedEntries.length === 1 ? '' : 's'}
+                      </span>
+                      <span className="rounded-full border border-accent-blue/20 bg-accent-blue/10 px-3 py-1.5 text-accent-blue">
+                        {coachingSettings.activeMode}
+                      </span>
+                      {importSession.activeJob ? (
+                        <span className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-3 py-1.5 text-emerald-200">
+                          {importSession.activeJob.stageLabel || 'Import running'}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="rounded-[24px] border border-white/10 bg-black/20 p-4 2xl:max-w-[360px]">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">
+                      Current lesson
+                    </p>
+                    <p className="mt-3 text-lg font-semibold text-white">
+                      {executiveLesson?.title || 'Choose a lesson'}
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-gray-400">
+                      {executiveLessonSummary || 'Select a lesson from the navigator to review the brief, reflect, and inspect the transcript.'}
+                    </p>
+                    {executiveLesson ? (
+                      <button
+                        type="button"
+                        onClick={() => setActiveLesson(executiveLesson.id)}
+                        className="mt-4 inline-flex items-center justify-center rounded-2xl border border-accent-blue/25 bg-accent-blue/15 px-4 py-3 text-sm font-medium text-accent-blue transition-colors hover:bg-accent-blue/20"
+                      >
+                        Open Lesson Workspace
+                      </button>
+                    ) : null}
                   </div>
                 </div>
 
-                {filteredLessons.length === 0 ? (
-                  <div className="mt-5 rounded-2xl border border-dashed border-white/10 px-4 py-5 text-sm text-gray-400">
-                    No lessons match this search yet. Clear the query or switch back to all topics.
-                  </div>
-                ) : (
-                  <div className="mt-5 space-y-3">
-                    {filteredLessons.map(lesson => {
-                      const completionStage = getLessonCompletionStage(lesson)
-                      const isActive = activeLesson?.id === lesson.id
+                <div className="grid gap-3 xl:grid-cols-4">
+                  <MetricCard
+                    label="Progress Snapshot"
+                    value={`${lessons.length}`}
+                    detail="Total lessons"
+                  />
+                  <MetricCard
+                    label="Watched"
+                    value={`${watchedCount}`}
+                    detail={`${Math.max(lessons.length - watchedCount, 0)} remaining`}
+                  />
+                  <MetricCard
+                    label="Reflected"
+                    value={`${reflectedCount}`}
+                    detail={`${Math.max(lessons.length - reflectedCount, 0)} waiting for notes`}
+                  />
+                  <MetricCard
+                    label="Applied"
+                    value={`${appliedCount}`}
+                    detail={`${Math.max(lessons.length - appliedCount, 0)} not yet operationalized`}
+                  />
+                </div>
+              </div>
+            </section>
 
-                      return (
-                        <button
-                          key={lesson.id}
-                          type="button"
-                          onClick={() => setActiveLesson(lesson.id)}
-                          className={`w-full rounded-2xl border px-4 py-3 text-left transition-colors ${
-                            isActive
-                              ? 'border-accent-blue/30 bg-accent-blue/10'
-                              : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06]'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">
-                                Lesson {lesson.sequenceNumber}
-                              </p>
-                              <p className="mt-2 text-sm font-medium text-white">{lesson.title}</p>
-                            </div>
-                            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-gray-300">
-                              {COMPLETION_LABELS[completionStage]}
-                            </span>
-                          </div>
-                          {lesson.summary ? (
-                            <p className="mt-2 text-sm text-gray-300">{lesson.summary}</p>
-                          ) : null}
-                          <p className="mt-2 text-xs text-gray-400">
-                            {getLessonPreviewPath(lesson)}
-                          </p>
-                          {lesson.topicTags?.length ? (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {lesson.topicTags.map(topic => (
-                                <span
-                                  key={topic}
-                                  className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-gray-400"
-                                >
-                                  {topic}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                        </button>
-                      )
-                    })}
+            <section className="grid gap-6 xl:grid-cols-[minmax(280px,320px)_minmax(0,1fr)_minmax(320px,360px)] 2xl:grid-cols-[minmax(300px,340px)_minmax(0,1fr)_minmax(340px,360px)]">
+              <div className="space-y-6">
+                <div className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6">
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-white">Lesson navigator</p>
+                        <p className="mt-1 text-sm text-gray-400">
+                          Scan the course quickly, keep filters close, and promote the active lesson with cleaner signals.
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-gray-300">
+                        {filteredCountLabel}
+                      </span>
+                    </div>
+
+                    <label className="relative block">
+                      <Search
+                        size={16}
+                        className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
+                      />
+                      <input
+                        type="search"
+                        value={lessonQuery}
+                        onChange={event => setLessonQuery(event.target.value)}
+                        placeholder="Search lessons, transcript text, principles, drills, or topics"
+                        className="w-full rounded-2xl border border-white/10 bg-black/20 py-3 pl-11 pr-4 text-sm text-gray-100 outline-none transition-colors placeholder:text-gray-500 focus:border-accent-blue/35"
+                      />
+                    </label>
+
+                    <div className="flex flex-wrap gap-2">
+                      {topicFilters.map(topic => {
+                        const active = selectedTopic === topic
+                        return (
+                          <button
+                            key={topic}
+                            type="button"
+                            onClick={() => setSelectedTopic(topic)}
+                            className={`rounded-full border px-3.5 py-2 text-xs font-medium transition-colors ${
+                              active
+                                ? 'border-accent-blue/30 bg-accent-blue/15 text-accent-blue'
+                                : 'border-white/10 bg-white/[0.03] text-gray-300 hover:bg-white/[0.07]'
+                            }`}
+                          >
+                            {topic === TOPIC_FILTER_ALL ? 'All Topics' : topic}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
-                )}
+
+                  {filteredLessons.length === 0 ? (
+                    <div className="mt-5 rounded-2xl border border-dashed border-white/10 px-4 py-5 text-sm text-gray-400">
+                      No lessons match this search yet. Clear the query or switch back to all topics.
+                    </div>
+                  ) : (
+                    <div className="mt-5 space-y-3">
+                      {filteredLessons.map(lesson => {
+                        const completionStage = getLessonCompletionStage(lesson)
+                        const isActive = executiveLesson?.id === lesson.id
+                        const lessonPreview = truncatePreview(
+                          lesson.summary || lesson.transcriptText || getLessonPreviewPath(lesson),
+                          108
+                        )
+
+                        return (
+                          <button
+                            key={lesson.id}
+                            type="button"
+                            onClick={() => setActiveLesson(lesson.id)}
+                            className={`w-full rounded-[24px] border px-4 py-4 text-left transition-all ${
+                              isActive
+                                ? 'border-accent-blue/35 bg-accent-blue/12 shadow-lg shadow-accent-blue/5'
+                                : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06]'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">
+                                  Lesson {lesson.sequenceNumber}
+                                </p>
+                                <p className="mt-2 text-sm font-medium text-white">{lesson.title}</p>
+                              </div>
+                              <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] ${
+                                isActive
+                                  ? 'border-accent-blue/25 bg-accent-blue/10 text-accent-blue'
+                                  : 'border-white/10 bg-white/[0.04] text-gray-300'
+                              }`}>
+                                {COMPLETION_LABELS[completionStage]}
+                              </span>
+                            </div>
+                            <p className="mt-3 text-sm leading-6 text-gray-300">{lessonPreview}</p>
+                            <p className="mt-2 text-xs text-gray-500">{getLessonPreviewPath(lesson)}</p>
+                            {lesson.topicTags?.length ? (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {lesson.topicTags.slice(0, 3).map(topic => (
+                                  <span
+                                    key={topic}
+                                    className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-gray-400"
+                                  >
+                                    {topic}
+                                  </span>
+                                ))}
+                                {lesson.topicTags.length > 3 ? (
+                                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-gray-500">
+                                    +{lesson.topicTags.length - 3}
+                                  </span>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6">
-                <p className="text-sm font-semibold text-white">Attached source folder</p>
-                <p className="mt-1 text-sm text-gray-400">
-                  Files attached from your machine stay in local session memory only and are keyed by their relative folder path.
-                </p>
+              <CourseLessonView
+                lesson={executiveLesson}
+                attachedFiles={attachedFiles}
+                attachedMediaLibrary={importSession.attachedMediaLibrary}
+                markLessonWatched={markLessonWatched}
+                saveLessonReflection={saveLessonReflection}
+                markLessonApplied={markLessonApplied}
+              />
 
-                {attachedEntries.length === 0 ? (
-                  <div className="mt-5 rounded-2xl border border-dashed border-white/10 px-4 py-5 text-sm text-gray-400">
-                    Attach the original course folder when you want this browser session to resolve local media and companion files.
-                  </div>
-                ) : (
-                  <div className="mt-5 space-y-2">
-                    {attachedEntries.slice(0, 6).map(([relativePath]) => (
-                      <div
-                        key={relativePath}
-                        className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-gray-200"
-                      >
-                        {relativePath}
-                      </div>
-                    ))}
-                    {attachedEntries.length > 6 ? (
-                      <p className="text-xs text-gray-500">
-                        Showing 6 of {attachedEntries.length} attached files.
+              <div className="space-y-6">
+                <div className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6">
+                  <div className="flex flex-col gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Course setup</p>
+                      <p className="mt-1 text-sm text-gray-400">
+                        Keep import and attachment tools available without letting setup dominate the study workspace.
                       </p>
+                    </div>
+
+                    {manifestImportError ? (
+                      <div
+                        role="alert"
+                        className="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100"
+                      >
+                        {manifestImportError}
+                      </div>
+                    ) : null}
+
+                    {visibleImportError ? (
+                      <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                        {visibleImportError}
+                      </div>
+                    ) : null}
+
+                    {importSession.hostedModeDisabled ? (
+                      <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                        {importSession.hostedModeDisabledReason || 'Guided local import only runs from localhost in the desktop app.'}
+                      </div>
+                    ) : null}
+
+                    <div className="grid gap-3">
+                      <div className="rounded-[24px] border border-white/10 bg-black/20 px-4 py-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">Service</p>
+                        <p className="mt-2 text-sm font-medium text-white">
+                          {importSession.localModeAvailable ? 'Local course service connected' : 'Waiting for localhost helper'}
+                        </p>
+                      </div>
+                      <div className="rounded-[24px] border border-white/10 bg-black/20 px-4 py-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">Selected Folder</p>
+                        <p className="mt-2 text-sm font-medium text-white">
+                          {importSession.selectedFolder?.name || 'No local folder selected yet'}
+                        </p>
+                        {importSession.selectedFolder?.path ? (
+                          <p className="mt-1 text-xs text-gray-500">{importSession.selectedFolder.path}</p>
+                        ) : null}
+                      </div>
+                      <div className="rounded-[24px] border border-white/10 bg-black/20 px-4 py-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">Attached Source Files</p>
+                        <p className="mt-2 text-sm font-medium text-white">
+                          {attachedEntries.length} attached source file{attachedEntries.length === 1 ? '' : 's'}
+                        </p>
+                        {attachedEntries.length > 0 ? (
+                          <p className="mt-1 text-xs text-gray-500">{attachedEntries[0][0]}</p>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={handleGuidedSelectFolder}
+                        disabled={isLaunchingFolderPicker || importJobBusy}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-200 transition-colors hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-gray-500"
+                      >
+                        {isLaunchingFolderPicker ? <LoaderCircle size={16} className="animate-spin" /> : <WandSparkles size={16} />}
+                        Guided Local Import
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleGuidedScan}
+                        disabled={!importSession.localModeAvailable || !importSession.selectedFolder?.path || isScanningFolder || importJobBusy}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-gray-200 transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:text-gray-500"
+                      >
+                        {isScanningFolder ? <LoaderCircle size={16} className="animate-spin" /> : <Search size={16} />}
+                        Scan Folder
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleGuidedImport}
+                        disabled={!importSession.localModeAvailable || !importSession.selectedFolder?.path || !hasValidPilotSelection || isStartingImport || importJobBusy}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-blue/25 bg-accent-blue/15 px-4 py-3 text-sm font-medium text-accent-blue transition-colors hover:bg-accent-blue/20 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/[0.03] disabled:text-gray-500"
+                      >
+                        {isStartingImport ? <LoaderCircle size={16} className="animate-spin" /> : <Upload size={16} />}
+                        Start Transcript Import
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => manifestInputRef.current?.click()}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-accent-blue/25 bg-accent-blue/15 px-4 py-3 text-sm font-medium text-accent-blue transition-colors hover:bg-accent-blue/20"
+                      >
+                        <Upload size={16} />
+                        Import Manifest
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => sourceFolderInputRef.current?.click()}
+                        className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-gray-200 transition-colors hover:bg-white/[0.08]"
+                      >
+                        <FolderOpen size={16} />
+                        Attach Source Folder
+                      </button>
+                    </div>
+
+                    {importSession.activeJob ? (
+                      <div className="rounded-[24px] border border-accent-blue/20 bg-accent-blue/10 px-4 py-4 text-sm text-accent-blue">
+                        <p className="font-medium">{importSession.activeJob.stageLabel || 'Import in progress'}</p>
+                        <p className="mt-1 text-xs text-accent-blue/80">
+                          {activeCompletedLessons} of {activeTotalLessons || selectedPilotCount || 0} selected lessons finished
+                        </p>
+                        {activeProgressMessage ? (
+                          <p className="mt-2 text-xs text-accent-blue/80">Currently: {activeProgressMessage}</p>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {importSession.scannedLessons.length ? (
+                      <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-white">Pilot lesson selection</p>
+                            <p className="mt-1 text-sm text-gray-400">
+                              Pick the first {minimumPilotSelection === maximumPilotSelection ? minimumPilotSelection : `${minimumPilotSelection}-${maximumPilotSelection}`} lessons to bring online now.
+                            </p>
+                          </div>
+                          <span className={`rounded-full border px-3 py-1.5 text-[11px] uppercase tracking-[0.24em] ${
+                            hasValidPilotSelection
+                              ? 'border-emerald-400/25 bg-emerald-500/10 text-emerald-200'
+                              : 'border-amber-400/20 bg-amber-500/10 text-amber-100'
+                          }`}>
+                            {hasValidPilotSelection ? 'Selection ready' : 'Selection pending'}
+                          </span>
+                        </div>
+                        <div className="mt-4 space-y-3">
+                          {importSession.scannedLessons.map(lesson => {
+                            const selected = importSession.selectedPilotLessonIds.includes(lesson.id)
+                            return (
+                              <button
+                                key={lesson.id}
+                                type="button"
+                                onClick={() => handleTogglePilotLesson(lesson.id)}
+                                className={`w-full rounded-2xl border px-4 py-3 text-left transition-colors ${
+                                  selected
+                                    ? 'border-accent-blue/30 bg-accent-blue/10'
+                                    : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.06]'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">
+                                      Lesson {lesson.sequenceNumber}
+                                    </p>
+                                    <p className="mt-2 text-sm font-medium text-white">{lesson.title}</p>
+                                  </div>
+                                  <span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-gray-300">
+                                    {selected ? 'Selected' : 'Available'}
+                                  </span>
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {hasEnrichmentPending ? (
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-gray-200">
+                        Transcript ready for {transcriptProgressCount} lesson{transcriptProgressCount === 1 ? '' : 's'} while enrichment catches up.
+                        The course coach stays usable as soon as transcript text exists.
+                      </div>
+                    ) : null}
+
+                    {importSession.lastImport?.completedAt ? (
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-gray-300">
+                        Last guided import completed at {new Date(importSession.lastImport.completedAt).toLocaleString()}.
+                      </div>
                     ) : null}
                   </div>
-                )}
+                </div>
+
+                <div className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6">
+                  <div className="flex flex-col gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Coaching mode</p>
+                      <p className="mt-1 text-sm text-gray-400">
+                        Keep the coach strategic by choosing how closely it stays tied to the course versus your recent behavior.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {COACHING_MODES.map(mode => {
+                        const active = coachingSettings.activeMode === mode
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setActiveCoachingMode(mode)}
+                            className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-medium capitalize transition-colors ${
+                              active
+                                ? 'border-accent-blue/30 bg-accent-blue/15 text-accent-blue'
+                                : 'border-white/10 bg-white/[0.03] text-gray-300 hover:bg-white/[0.07]'
+                            }`}
+                          >
+                            <Brain size={13} />
+                            {mode}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <CourseCoachPanel
+                  lessons={lessons}
+                  activeLesson={executiveLesson}
+                  mode={coachingSettings.activeMode}
+                />
               </div>
-            </div>
-
-            <CourseLessonView
-              lesson={activeLesson}
-              attachedFiles={attachedFiles}
-              attachedMediaLibrary={importSession.attachedMediaLibrary}
-              markLessonWatched={markLessonWatched}
-              saveLessonReflection={saveLessonReflection}
-              markLessonApplied={markLessonApplied}
-            />
-
-            <CourseCoachPanel
-              lessons={lessons}
-              activeLesson={activeLesson}
-              mode={coachingSettings.activeMode}
-            />
-          </section>
+            </section>
+          </>
         )}
 
         <input

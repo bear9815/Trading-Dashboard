@@ -203,6 +203,51 @@ test('Course Hub renders the localhost-ready guided import state and selected fo
   assert.match(markup, /Pilot lesson selection/i)
 })
 
+test('Course Hub renders live guided import progress from the active job and suppresses stale fetch errors', async () => {
+  resetCourseHubState()
+  globalThis.__courseHubTestStoreState = {
+    ...globalThis.__courseHubTestStoreState,
+    importSession: {
+      ...globalThis.__courseHubTestStoreState.importSession,
+      localModeAvailable: true,
+      lastError: 'Failed to fetch',
+      selectedFolder: {
+        name: 'Rande Pilot',
+        path: '/Users/calebearden/Courses/Rande Pilot',
+        lessonCount: 4,
+      },
+      scannedLessons: [
+        {
+          id: 'lesson-01',
+          title: 'Breathing Part 1a',
+          sequenceNumber: 1,
+          sourceRelativePath: 'Breathing Part 1a.mp4',
+          assetPaths: { video: 'Breathing Part 1a.mp4', slides: [], articles: [], notes: [] },
+        },
+      ],
+      selectedPilotLessonIds: ['lesson-01'],
+      activeJob: {
+        jobId: 'job-99',
+        stageLabel: 'Transcribing 2/4 selected lessons',
+        progress: {
+          completedLessons: 2,
+          totalLessons: 4,
+          message: 'Transcribing SafePlace part 2',
+        },
+      },
+      transcriptCount: 0,
+      enrichmentCount: 0,
+    },
+  }
+
+  const markup = await renderCourseHubMarkup()
+
+  assert.doesNotMatch(markup, /Failed to fetch/)
+  assert.match(markup, /Transcribing 2\/4 selected lessons/)
+  assert.match(markup, /Currently: Transcribing SafePlace part 2/i)
+  assert.match(markup, /2 of 4 selected lessons finished/i)
+})
+
 test('Course Hub renders normalized lesson preview content and session attachment counts', async () => {
   resetCourseHubState()
 
@@ -259,13 +304,17 @@ test('Course Hub renders normalized lesson preview content and session attachmen
 
   const markup = await renderCourseHubMarkup()
 
-  assert.match(markup, /Imported lessons/)
+  assert.match(markup, /Course overview/i)
+  assert.match(markup, /Progress snapshot/i)
+  assert.match(markup, /Current lesson/i)
+  assert.match(markup, /Lesson navigator/i)
+  assert.match(markup, /Course setup/i)
   assert.match(markup, /Course coach panel/)
   assert.match(markup, /Lesson workspace/)
   assert.match(markup, /Tape Reading Foundations/)
   assert.match(markup, /videos\/tape-reading-foundations\.mp4/)
-  assert.match(markup, /1 lesson/)
-  assert.match(markup, /1 attached file/)
+  assert.match(markup, /1 lesson in workspace/i)
+  assert.match(markup, /1 attached source file/i)
   assert.match(markup, /module-a\/Tape Reading Foundations\.mp4/)
   assert.match(markup, /Transcript ready for 1 lesson while enrichment catches up/i)
   assert.match(markup, /Course coach panel/)

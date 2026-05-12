@@ -130,15 +130,15 @@ export default function CourseCoachPanel({
 
   return (
     <aside className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6">
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
               <Brain size={16} className="text-accent-blue" />
               <p className="text-sm font-semibold text-white">Course coach</p>
             </div>
-            <p className="mt-2 text-sm text-gray-400">
-              Ask a question about the active lesson and get a transcript-grounded answer tuned to your current coaching mode.
+            <p className="mt-2 text-sm leading-6 text-gray-400">
+              Ask for a transcript-grounded answer without letting the coach overpower the lesson workspace.
             </p>
           </div>
           <span className="rounded-full border border-accent-blue/20 bg-accent-blue/10 px-3 py-1.5 text-[11px] uppercase tracking-[0.2em] text-accent-blue">
@@ -158,15 +158,19 @@ export default function CourseCoachPanel({
           </p>
         </div>
 
-        <label className="block">
-          <span className="text-sm font-medium text-white">Your question</span>
-          <textarea
-            value={question}
-            onChange={event => setQuestion(event.target.value)}
-            placeholder="What does this course say about urgency, hesitation, forcing entries, or managing state?"
-            className="mt-3 min-h-[132px] w-full rounded-[24px] border border-white/10 bg-black/20 px-4 py-3 text-sm text-gray-100 outline-none transition-colors placeholder:text-gray-500 focus:border-accent-blue/35"
-          />
-        </label>
+        <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gray-500">
+            Behavior context
+          </p>
+          <p className="mt-2 text-sm font-medium text-white">
+            {hasBehaviorContext ? 'Recent journal and trade context is available.' : 'The coach is still mostly course-grounded.'}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-gray-400">
+            {hasBehaviorContext
+              ? 'Adaptive coaching can pull from your latest journal entries and recent trade-review lessons.'
+              : 'Add more journal or trade-review context to let adaptive modes sharpen their behavioral read.'}
+          </p>
+        </div>
 
         {!apiKey ? (
           <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
@@ -179,6 +183,16 @@ export default function CourseCoachPanel({
             Adaptive modes are on, but there is not much recent journal or trade context yet. The coach will stay mostly course-grounded until more behavior data exists.
           </div>
         ) : null}
+
+        <label className="block">
+          <span className="text-sm font-medium text-white">Your question</span>
+          <textarea
+            value={question}
+            onChange={event => setQuestion(event.target.value)}
+            placeholder="What does this course say about urgency, hesitation, forcing entries, or managing state?"
+            className="mt-3 min-h-[124px] w-full rounded-[24px] border border-white/10 bg-black/20 px-4 py-3 text-sm text-gray-100 outline-none transition-colors placeholder:text-gray-500 focus:border-accent-blue/35"
+          />
+        </label>
 
         <button
           type="button"
@@ -198,7 +212,7 @@ export default function CourseCoachPanel({
 
         <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
           <p className="text-sm font-semibold text-white">Answer</p>
-          <div className="mt-3 text-sm leading-7 text-gray-200 whitespace-pre-wrap">
+          <div className="mt-3 max-h-[320px] overflow-y-auto text-sm leading-7 text-gray-200 whitespace-pre-wrap">
             {answer || 'Your answer will appear here after you ask the coach a question.'}
           </div>
         </div>

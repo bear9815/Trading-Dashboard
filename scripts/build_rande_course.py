@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -185,6 +186,11 @@ def transcribe_file(model: "WhisperModel", media_path: Path) -> str:
     return "\n".join(segment.text.strip() for segment in segments if segment.text.strip())
 
 
+def emit_progress(event: str, **payload: object) -> None:
+    message = {"event": event, **payload}
+    print(f"__COURSE_PROGRESS__{json.dumps(message)}", file=sys.stderr, flush=True)
+
+
 def build_manifest(
     input_dir: Path,
     output_dir: Path,
@@ -194,16 +200,23 @@ def build_manifest(
 ) -> dict:
     from faster_whisper import WhisperModel
 
+    emit_progress("model-loading", model=model_name)
     model = WhisperModel(model_name, device="cpu", compute_type="int8")
     lessons = []
     transcript_dir = output_dir / "transcripts"
     transcript_dir.mkdir(parents=True, exist_ok=True)
+    selected_video_paths = select_lessons(input_dir, limit, selected_lessons)
+    total_lessons = len(selected_video_paths)
 
-    for index, video_path in enumerate(
-        select_lessons(input_dir, limit, selected_lessons),
-        start=1,
-    ):
+    for index, video_path in enumerate(selected_video_paths, start=1):
         title = derive_lesson_title(video_path)
+        emit_progress(
+            "lesson-started",
+            completed=index - 1,
+            total=total_lessons,
+            lessonTitle=title,
+            lessonPath=str(video_path.relative_to(input_dir)),
+        )
         transcript_text = transcribe_file(model, video_path)
         transcript_name = f"{index:02d}-{slugify(title)}.txt"
         lesson_id = build_lesson_id(video_path, input_dir)
@@ -230,6 +243,13 @@ def build_manifest(
                 "sourceRelativePath": str(video_path.relative_to(input_dir)),
                 "durationSeconds": None,
             }
+        )
+        emit_progress(
+            "lesson-completed",
+            completed=index,
+            total=total_lessons,
+            lessonTitle=title,
+            lessonId=lesson_id,
         )
 
     return {

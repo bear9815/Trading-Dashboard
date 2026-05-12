@@ -29,20 +29,43 @@ function joinUrl(pathname) {
 }
 
 async function requestJson(pathname, options = {}) {
-  const response = await fetch(joinUrl(pathname), {
+  const requestOptions = {
     headers: {
       Accept: 'application/json',
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       ...(options.headers || {}),
     },
     ...options,
-  })
-
-  const data = await response.json().catch(() => ({}))
-  if (!response.ok) {
-    throw new Error(data?.message || data?.error || 'The local course service request failed.')
   }
-  return data
+
+  try {
+    const response = await fetch(joinUrl(pathname), requestOptions)
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(data?.message || data?.error || 'The local course service request failed.')
+    }
+    return data
+  } catch (error) {
+    const onWindow = typeof window !== 'undefined'
+    const onLocalhost = onWindow && isLocalHostname(window.location.hostname)
+    const absoluteFallbackUrl = new URL(pathname, `${DEFAULT_LOCAL_COURSE_SERVICE_URL}/`).toString()
+
+    if (!onLocalhost || joinUrl(pathname) === absoluteFallbackUrl) {
+      throw error
+    }
+
+    const fallbackResponse = await fetch(absoluteFallbackUrl, requestOptions)
+    const fallbackData = await fallbackResponse.json().catch(() => ({}))
+    if (!fallbackResponse.ok) {
+      throw new Error(
+        fallbackData?.message
+        || fallbackData?.error
+        || error?.message
+        || 'The local course service request failed.'
+      )
+    }
+    return fallbackData
+  }
 }
 
 export async function getLocalCourseServiceState() {
@@ -58,38 +81,12 @@ export async function getLocalCourseServiceState() {
     }
   }
 
-  try {
-    const payload = await requestJson('/health')
-    return {
-      ...payload,
-      localModeAvailable: Boolean(payload?.localModeAvailable ?? payload?.ok),
-      hostedModeDisabled: false,
-      hostedModeDisabledReason: '',
-    }
-  } catch (proxyError) {
-    if (!onLocalhost) throw proxyError
-
-    const fallbackResponse = await fetch(new URL('/health', `${DEFAULT_LOCAL_COURSE_SERVICE_URL}/`).toString(), {
-      headers: {
-        Accept: 'application/json',
-      },
-    })
-    const fallbackData = await fallbackResponse.json().catch(() => ({}))
-    if (!fallbackResponse.ok) {
-      throw new Error(
-        fallbackData?.message
-        || fallbackData?.error
-        || proxyError?.message
-        || 'The local course service request failed.'
-      )
-    }
-
-    return {
-      ...fallbackData,
-      localModeAvailable: Boolean(fallbackData?.localModeAvailable ?? fallbackData?.ok),
-      hostedModeDisabled: false,
-      hostedModeDisabledReason: '',
-    }
+  const payload = await requestJson('/health')
+  return {
+    ...payload,
+    localModeAvailable: Boolean(payload?.localModeAvailable ?? payload?.ok),
+    hostedModeDisabled: false,
+    hostedModeDisabledReason: '',
   }
 }
 

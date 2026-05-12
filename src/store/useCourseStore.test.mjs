@@ -485,7 +485,7 @@ test('failImportJob preserves recovery context and clearImportError resets the i
   })
 
   let session = useCourseStore.getState().importSession
-  assert.equal(session.activeJob?.status, 'error')
+  assert.equal(session.activeJob, null)
   assert.match(session.lastError, /stopped responding/i)
   assert.equal(session.selectedFolder?.name, 'Rande Pilot')
   assert.deepEqual(session.selectedPilotLessonIds, ['lesson-01-state-management'])
@@ -493,5 +493,5 @@ test('failImportJob preserves recovery context and clearImportError resets the i
   useCourseStore.getState().clearImportError()
   session = useCourseStore.getState().importSession
   assert.equal(session.lastError, '')
-  assert.equal(session.activeJob?.status, 'error')
+  assert.equal(session.activeJob, null)
 })

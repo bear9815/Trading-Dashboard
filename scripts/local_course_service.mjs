@@ -18,7 +18,12 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 function jsonResponse(response, status, payload) {
-  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
+  response.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET,POST,OPTIONS',
+    'access-control-allow-headers': 'Content-Type, Accept',
+  })
   response.end(JSON.stringify(payload))
 }
 
@@ -58,6 +63,7 @@ function createMacFolderSelector() {
 
       let stdout = ''
       let stderr = ''
+      let stderrBuffer = ''
       child.stdout.on('data', chunk => {
         stdout += chunk
       })
@@ -106,8 +112,62 @@ function defaultImportRunnerFactory(workspaceRoot) {
       })
 
       let stderr = ''
+      let stderrBuffer = ''
+
+      function handleProgressLine(trimmedLine) {
+        if (!trimmedLine.startsWith('__COURSE_PROGRESS__')) return false
+
+        try {
+          const payload = JSON.parse(trimmedLine.slice('__COURSE_PROGRESS__'.length))
+          if (payload.event === 'model-loading') {
+            context.reportProgress({
+              phase: 'transcribing',
+              completedLessons: 0,
+              totalLessons: context.selectedLessons.length,
+              message: `Loading transcription model (${payload.model || 'small.en'})`,
+            })
+            return true
+          }
+
+          if (payload.event === 'lesson-started') {
+            context.reportProgress({
+              phase: 'transcribing',
+              completedLessons: Number(payload.completed) || 0,
+              totalLessons: Number(payload.total) || context.selectedLessons.length,
+              message: `Transcribing ${payload.lessonTitle || 'selected lesson'}`,
+            })
+            return true
+          }
+
+          if (payload.event === 'lesson-completed') {
+            context.reportProgress({
+              phase: 'transcribing',
+              completedLessons: Number(payload.completed) || 0,
+              totalLessons: Number(payload.total) || context.selectedLessons.length,
+              message: `Finished ${payload.lessonTitle || 'lesson transcript'}`,
+            })
+            return true
+          }
+        } catch {
+          return true
+        }
+
+        return true
+      }
+
+      child.stdout.on('data', () => {})
       child.stderr.on('data', chunk => {
-        stderr += chunk
+        stderrBuffer += String(chunk)
+        const lines = stderrBuffer.split(/\r?\n/)
+        stderrBuffer = lines.pop() || ''
+
+        for (const line of lines) {
+          const trimmedLine = line.trim()
+          if (!trimmedLine) continue
+          if (!handleProgressLine(trimmedLine)) {
+            stderr += `${line}\n`
+          }
+        }
       })
 
       context.signal.addEventListener('abort', () => {
@@ -115,6 +175,10 @@ function defaultImportRunnerFactory(workspaceRoot) {
       }, { once: true })
 
       child.on('close', code => {
+        if (stderrBuffer.trim() && !handleProgressLine(stderrBuffer.trim())) {
+          stderr += stderrBuffer
+        }
+
         if (context.signal.aborted) {
           reject(new Error('aborted'))
           return
@@ -812,6 +876,7 @@ export function createLocalCourseService(options = {}) {
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache',
       connection: 'keep-alive',
+      'access-control-allow-origin': '*',
     })
 
     const state = jobStreams.get(jobId) || { events: [], clients: new Set(), listeners: new Set() }
@@ -884,6 +949,7 @@ export function createLocalCourseService(options = {}) {
 
     response.writeHead(200, {
       'content-type': toMediaType(mediaPath),
+      'access-control-allow-origin': '*',
     })
     fs.createReadStream(mediaPath).pipe(response)
   }
@@ -893,6 +959,16 @@ export function createLocalCourseService(options = {}) {
     const pathname = requestUrl.pathname.startsWith('/api/local-course')
       ? requestUrl.pathname.slice('/api/local-course'.length) || '/'
       : requestUrl.pathname
+
+    if (request.method === 'OPTIONS') {
+      response.writeHead(204, {
+        'access-control-allow-origin': '*',
+        'access-control-allow-methods': 'GET,POST,OPTIONS',
+        'access-control-allow-headers': 'Content-Type, Accept',
+      })
+      response.end()
+      return
+    }
 
     if (request.method === 'GET' && pathname === '/health') {
       await handleHealth(request, response)

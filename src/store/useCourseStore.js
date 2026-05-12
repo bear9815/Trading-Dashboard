@@ -291,21 +291,28 @@ export const useCourseStore = create(
         }),
 
       failImportJob: ({ message = '', ...jobState } = {}) =>
-        set(state => ({
-          importSession: mergeImportSession(state, {
-            activeJob: state.importSession.activeJob
-              ? {
-                ...state.importSession.activeJob,
-                ...jobState,
-                status: jobState.status || 'error',
-              }
-              : {
-                ...jobState,
-                status: jobState.status || 'error',
-              },
-            lastError: String(message || '').trim(),
-          }),
-        })),
+        set(state => {
+          const nextStatus = jobState.status || 'error'
+          const shouldReleaseActiveJob = nextStatus === 'error' || nextStatus === 'cancelled'
+
+          return {
+            importSession: mergeImportSession(state, {
+              activeJob: shouldReleaseActiveJob
+                ? null
+                : state.importSession.activeJob
+                  ? {
+                    ...state.importSession.activeJob,
+                    ...jobState,
+                    status: nextStatus,
+                  }
+                  : {
+                    ...jobState,
+                    status: nextStatus,
+                  },
+              lastError: String(message || '').trim(),
+            }),
+          }
+        }),
 
       clearImportError: () =>
         set(state => ({
