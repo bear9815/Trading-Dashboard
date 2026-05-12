@@ -6,6 +6,7 @@ import { useTradeStore } from '../../store/useTradeStore.js'
 import { analyzeTradingMindset, cleanDashboardVoiceNote } from '../../utils/ai.js'
 import { extractJournalEntryText, isDashboardJournalEntry, normalizeVoiceNoteFallback } from '../../utils/dashboardThoughts.js'
 import { DASHBOARD_VOICE_MODEL_OPTIONS, resolveDashboardVoiceModel } from '../../utils/dashboardVoiceModels.js'
+import { getStoredTradingThoughtsView, setStoredTradingThoughtsView } from '../../utils/tradingThoughtsPrefs.js'
 
 const TAGS = [
   { id: 'discipline', label: 'Discipline', emoji: '💪', colorCls: 'text-accent-green bg-accent-green/10 border-accent-green/20' },
@@ -178,7 +179,7 @@ export default function TradingThoughts() {
   } = useSettingsStore()
   const { trades } = useTradeStore()
 
-  const [entryType, setEntryType] = useState('thought')
+  const [entryType, setEntryType] = useState(() => getStoredTradingThoughtsView())
   const [text, setText] = useState('')
   const [selectedTag, setTag] = useState('note')
   const [tagOpen, setTagOpen] = useState(false)
@@ -227,6 +228,10 @@ export default function TradingThoughts() {
     setTagOpen(false)
     setVoiceTranscript('')
     setVoiceError('')
+  }, [entryType])
+
+  useEffect(() => {
+    setStoredTradingThoughtsView(entryType)
   }, [entryType])
 
   function saveText(nextText) {

@@ -421,7 +421,7 @@ export default function CourseHub() {
 
   return (
     <div className="h-full overflow-y-auto p-5 md:p-6">
-      <div className="mx-auto flex max-w-7xl flex-col gap-6">
+      <div className="flex w-full flex-col gap-6">
         {lessons.length === 0 ? (
           <>
             <section className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6 md:py-6">
@@ -736,7 +736,7 @@ export default function CourseHub() {
                     </div>
                   </div>
 
-                  <div className="rounded-[24px] border border-white/10 bg-black/20 p-4 2xl:max-w-[360px]">
+                  <div className="rounded-[24px] border border-white/10 bg-black/20 p-4 2xl:max-w-[440px]">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-gray-500">
                       Current lesson
                     </p>
@@ -783,7 +783,7 @@ export default function CourseHub() {
               </div>
             </section>
 
-            <section className="grid gap-6 xl:grid-cols-[minmax(280px,320px)_minmax(0,1fr)_minmax(320px,360px)] 2xl:grid-cols-[minmax(300px,340px)_minmax(0,1fr)_minmax(340px,360px)]">
+            <section className="grid gap-6 xl:grid-cols-[minmax(320px,360px)_minmax(0,1.35fr)_minmax(340px,380px)] 2xl:grid-cols-[minmax(340px,400px)_minmax(0,1.6fr)_minmax(360px,420px)]">
               <div className="space-y-6">
                 <div className="luxury-panel rounded-[28px] border border-white/10 px-5 py-5 md:px-6">
                   <div className="flex flex-col gap-4">

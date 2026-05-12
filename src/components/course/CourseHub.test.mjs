@@ -118,6 +118,13 @@ test('Course Hub is routable and exposes manifest import plus source-folder atta
   assert.match(hubSource, /webkitdirectory/)
 })
 
+test('Course Hub uses the full content canvas for the populated dashboard layout', () => {
+  const hubSource = fs.readFileSync(hubPath, 'utf8')
+
+  assert.doesNotMatch(hubSource, /max-w-7xl/)
+  assert.match(hubSource, /2xl:grid-cols-\[minmax\(340px,400px\)_minmax\(0,1\.6fr\)_minmax\(360px,420px\)\]/)
+})
+
 test.after(() => {
   resetCourseHubState()
   fs.rmSync(renderedHubArtifactPath, { force: true })

@@ -444,10 +444,24 @@ export const useJournalStore = create((set, get) => ({
   },
 
   addJournalThought: (text, timestamp = new Date().toISOString()) => {
-    const entry = { ...buildDashboardJournalEntry(text, timestamp), id: uuidv4() }
-    set(s => ({ entries: [entry, ...s.entries] }))
+    const trimmed = String(text || '').trim()
+    if (!trimmed) return null
+
+    const entryTimestamp = new Date(timestamp).toISOString()
+    const entry = { ...buildDashboardJournalEntry(trimmed, entryTimestamp), id: uuidv4() }
+    const thought = {
+      id: uuidv4(),
+      text: trimmed,
+      tag: 'note',
+      timestamp: new Date(entryTimestamp).getTime(),
+      source: 'dashboard-journal',
+    }
+    set(s => ({
+      entries: [entry, ...s.entries],
+      tradingThoughts: [thought, ...s.tradingThoughts],
+    }))
     const saved = get()._sync()
-    return { entry, saved }
+    return { entry, thought, saved }
   },
 
   moveThoughtToJournal: (id) => {

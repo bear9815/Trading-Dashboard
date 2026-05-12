@@ -535,6 +535,68 @@ test('dashboard journal thoughts persist into journal entries across local reloa
   }
 })
 
+test('dashboard journal thoughts also appear in trading thoughts across local reload', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
+
+  try {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+
+    const result = useJournalStore.getState().addJournalThought('Remember: wait for confirmation.')
+    await result.saved
+
+    const stateAfterSave = useJournalStore.getState()
+    assert.equal(stateAfterSave.entries.length, 1)
+    assert.equal(stateAfterSave.tradingThoughts.length, 1)
+    assert.equal(stateAfterSave.tradingThoughts[0].text, 'Remember: wait for confirmation.')
+    assert.equal(stateAfterSave.tradingThoughts[0].tag, 'note')
+
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+    await useJournalStore.getState().loadFromLocal()
+
+    const restoredState = useJournalStore.getState()
+    assert.equal(restoredState.entries.length, 1)
+    assert.equal(restoredState.tradingThoughts.length, 1)
+    assert.equal(restoredState.tradingThoughts[0].text, 'Remember: wait for confirmation.')
+    assert.equal(restoredState.tradingThoughts[0].tag, 'note')
+  } finally {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+  }
+})
+
 test('trading reminder thoughts persist into both dashboard thoughts and journal entries', async () => {
   const previousLocalStorage = globalThis.localStorage
   const localStorageMock = createLocalStorageMock()
