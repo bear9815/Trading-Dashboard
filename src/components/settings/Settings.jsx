@@ -1,12 +1,13 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Plus, Trash2, Eye, EyeOff, Save, X, Wifi, WifiOff, RefreshCw, ExternalLink, CheckCircle, AlertCircle, Clock } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Plus, Trash2, Eye, EyeOff, Save, X, Wifi, WifiOff, RefreshCw, ExternalLink, CheckCircle, AlertCircle, ShieldCheck, Upload } from 'lucide-react'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useTradeStore } from '../../store/useTradeStore.js'
 import { useJournalStore } from '../../store/useJournalStore.js'
 import { useMorningStore } from '../../store/useMorningStore.js'
 import { useHabitsStore } from '../../store/useHabitsStore.js'
 import { useSchwabStore } from '../../store/useSchwabStore.js'
-import { buildLocalBackupPayload } from '../../utils/localBackup.js'
+import { buildLocalBackupPayload, buildRestorableStoreStates, summarizeLocalBackupPayload, validateLocalBackupPayload } from '../../utils/localBackup.js'
+import { writeDurableJson } from '../../utils/durableLocalJson.js'
 
 const IS_LOCALHOST = typeof window !== 'undefined' &&
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
@@ -61,10 +62,8 @@ export default function Settings() {
     compressAllScreenshots,
     lastSaveError,
     lastSavedAt,
-    lastCloudSaveError,
-    lastCloudSyncedAt,
-    pendingCloudWriteCount,
-    flushPendingCloudOps,
+    lastSnapshotAt,
+    lastSnapshotError,
   } = useTradeStore()
   const { entries } = useJournalStore()
   const {
@@ -158,9 +157,14 @@ export default function Settings() {
 
   // Screenshot compression
   const [compressing, setCompressing] = useState(false)
+  const backupInputRef = useRef(null)
+  const [restorePreview, setRestorePreview] = useState(null)
+  const [restoreError, setRestoreError] = useState('')
+  const [restoreSuccess, setRestoreSuccess] = useState('')
 
   // Storage bar — uses Storage Quota API (reflects IndexedDB)
   const [storageInfo, setStorageInfo] = useState(null)
+  const [storagePersisted, setStoragePersisted] = useState(null)
 
   const refreshStorage = useCallback(async () => {
     try {
@@ -178,6 +182,9 @@ export default function Settings() {
         const pct     = Math.min(100, Math.round(raw / (5 * 1024 * 1024) * 100))
         const color   = pct >= 85 ? '#ff4757' : pct >= 50 ? '#ffa502' : '#00d084'
         setStorageInfo({ usedMB, quotaMB: 5, pct, color })
+      }
+      if (navigator.storage?.persisted) {
+        setStoragePersisted(await navigator.storage.persisted())
       }
     } catch { /* ignore */ }
   }, [])
@@ -215,18 +222,22 @@ export default function Settings() {
     setTimeout(() => setOpenRouterSaved(false), 2000)
   }
 
-  function handleExportLocalBackup() {
+  function createCurrentBackupPayload() {
     const stripActions = (state) => Object.fromEntries(
       Object.entries(state).filter(([, value]) => typeof value !== 'function')
     )
 
-    const payload = buildLocalBackupPayload({
+    return buildLocalBackupPayload({
       settings: stripActions(useSettingsStore.getState()),
       trades: stripActions(useTradeStore.getState()),
       journal: stripActions(useJournalStore.getState()),
       morning: stripActions(useMorningStore.getState()),
       habits: stripActions(useHabitsStore.getState()),
     })
+  }
+
+  function handleExportLocalBackup() {
+    const payload = createCurrentBackupPayload()
 
     try {
       localStorage.setItem('risk-tool-local-backup-last', JSON.stringify(payload))
@@ -242,6 +253,80 @@ export default function Settings() {
     anchor.download = `trading-dashboard-local-backup-${stamp}.json`
     anchor.click()
     URL.revokeObjectURL(url)
+  }
+
+  async function requestPersistentStorage() {
+    if (!navigator.storage?.persist) return
+    const persisted = await navigator.storage.persist()
+    setStoragePersisted(persisted)
+    await refreshStorage()
+  }
+
+  async function persistRestoredStores(states) {
+    useSettingsStore.setState(states.settings)
+    useJournalStore.setState(states.journal)
+    useMorningStore.setState(states.morning)
+    useHabitsStore.setState(states.habits)
+
+    try { localStorage.setItem('risk-tool-settings', JSON.stringify({ state: states.settings, version: 0 })) } catch { /* best effort */ }
+    try { localStorage.setItem('risk-tool-journal:backup', JSON.stringify({ state: states.journal, savedAt: new Date().toISOString() })) } catch { /* best effort */ }
+    try { localStorage.setItem('risk-tool-morning:backup', JSON.stringify({ state: { entries: states.morning.entries || [] }, savedAt: new Date().toISOString() })) } catch { /* best effort */ }
+    try { localStorage.setItem('risk-tool-habits', JSON.stringify({ state: states.habits })) } catch { /* best effort */ }
+
+    await Promise.all([
+      writeDurableJson('risk-tool-journal', { state: states.journal }),
+      writeDurableJson('risk-tool-morning', { state: { entries: states.morning.entries || [] } }),
+      useTradeStore.getState().restoreFromBackup(states.trades).saved,
+    ])
+  }
+
+  async function handleBackupFileSelected(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setRestoreError('')
+    setRestoreSuccess('')
+
+    try {
+      const payload = JSON.parse(await file.text())
+      const validation = validateLocalBackupPayload(payload)
+      if (!validation.ok) {
+        setRestorePreview(null)
+        setRestoreError(validation.message)
+        return
+      }
+
+      setRestorePreview({
+        fileName: file.name,
+        payload,
+        summary: summarizeLocalBackupPayload(payload),
+      })
+    } catch (error) {
+      setRestorePreview(null)
+      setRestoreError(error?.message || 'Backup file could not be read.')
+    } finally {
+      event.target.value = ''
+    }
+  }
+
+  async function applyRestorePreview() {
+    if (!restorePreview?.payload) return
+    const ok = confirm('Restore this backup? Your current local data will be saved as a pre-restore backup first.')
+    if (!ok) return
+
+    setRestoreError('')
+    setRestoreSuccess('')
+
+    try {
+      localStorage.setItem('risk-tool-local-backup-pre-restore', JSON.stringify(createCurrentBackupPayload()))
+      const states = buildRestorableStoreStates(restorePreview.payload)
+      await persistRestoredStores(states)
+      setRestoreSuccess(`Restored ${restorePreview.fileName}.`)
+      setRestorePreview(null)
+      await refreshStorage()
+    } catch (error) {
+      setRestoreError(error?.message || 'Restore failed.')
+    }
   }
 
   function handleAddAccount() {
@@ -1056,38 +1141,49 @@ export default function Settings() {
             <div className="flex items-center gap-2">
               {lastSaveError ? (
                 <AlertCircle size={14} className="text-accent-red" />
-              ) : pendingCloudWriteCount > 0 || lastCloudSaveError ? (
-                <Clock size={14} className="text-accent-yellow" />
+              ) : lastSnapshotError ? (
+                <AlertCircle size={14} className="text-accent-yellow" />
               ) : (
                 <CheckCircle size={14} className="text-accent-green" />
               )}
               <div>
                 <p className="font-medium text-gray-300">Trade Save Integrity</p>
-                <p className="text-gray-500">Local save: {formatTimestamp(lastSavedAt)} · Cloud sync: {formatTimestamp(lastCloudSyncedAt)}</p>
+                <p className="text-gray-500">Local save: {formatTimestamp(lastSavedAt)} · Recovery snapshot: {formatTimestamp(lastSnapshotAt)}</p>
               </div>
             </div>
             <button
               type="button"
-              onClick={() => flushPendingCloudOps()}
-              disabled={pendingCloudWriteCount === 0}
+              onClick={requestPersistentStorage}
+              disabled={typeof navigator === 'undefined' || !navigator.storage?.persist || storagePersisted === true}
               className="btn-ghost text-xs disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Retry Cloud
+              <ShieldCheck size={13} />
+              {storagePersisted ? 'Protected' : 'Protect Storage'}
             </button>
           </div>
           {lastSaveError && (
             <p className="mt-2 text-accent-red">Local save warning: {lastSaveError}. Export a backup before clearing browser data.</p>
           )}
-          {!lastSaveError && pendingCloudWriteCount > 0 && (
-            <p className="mt-2 text-accent-yellow">{pendingCloudWriteCount} cloud backup write{pendingCloudWriteCount === 1 ? '' : 's'} pending retry.</p>
+          {!lastSaveError && lastSnapshotError && (
+            <p className="mt-2 text-accent-yellow">Recovery snapshot warning: {lastSnapshotError}</p>
           )}
-          {!lastSaveError && lastCloudSaveError && (
-            <p className="mt-2 text-accent-yellow">Cloud backup retrying: {lastCloudSaveError}</p>
+          {!lastSaveError && !lastSnapshotError && storagePersisted === false && (
+            <p className="mt-2 text-gray-500">Browser storage is working. Use Protect Storage to ask the browser not to evict local trade data automatically.</p>
           )}
         </div>
 
         <div className="flex flex-wrap gap-2">
           <button onClick={handleExportLocalBackup} className="btn-ghost text-xs">Export Backup (JSON)</button>
+          <input
+            ref={backupInputRef}
+            type="file"
+            accept="application/json"
+            onChange={handleBackupFileSelected}
+            className="hidden"
+          />
+          <button onClick={() => backupInputRef.current?.click()} className="btn-ghost text-xs flex items-center gap-1.5">
+            <Upload size={13} /> Import Backup
+          </button>
           <button
             disabled={compressing}
             onClick={async () => {
@@ -1131,6 +1227,27 @@ export default function Settings() {
             Clear All Trades
           </button>
         </div>
+
+        {(restorePreview || restoreError || restoreSuccess) && (
+          <div className="rounded-lg border border-white/10 bg-surface-200/40 p-3 text-xs space-y-2">
+            {restoreError && <p className="text-accent-red">{restoreError}</p>}
+            {restoreSuccess && <p className="text-accent-green">{restoreSuccess}</p>}
+            {restorePreview && (
+              <>
+                <div>
+                  <p className="font-medium text-gray-300">{restorePreview.fileName}</p>
+                  <p className="text-gray-500">
+                    {restorePreview.summary.trades} trades · {restorePreview.summary.journalEntries} journal entries · {restorePreview.summary.morningEntries} morning entries · {restorePreview.summary.habits} habits
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={applyRestorePreview} className="btn-ghost text-xs">Restore Backup</button>
+                  <button onClick={() => setRestorePreview(null)} className="btn-ghost text-xs">Cancel</button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="card flex items-center justify-between gap-3">

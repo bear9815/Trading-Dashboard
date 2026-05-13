@@ -237,8 +237,6 @@ export default function ManualEntryForm({ onClose }) {
     getAccounts,
     getAccountBalance,
     trades,
-    lastCloudSaveError,
-    pendingCloudWriteCount,
   } = useTradeStore()
   const { accounts: settingsAccounts, edges, tpMultiplier = 2 } = useSettingsStore()
   const [form, setForm]                   = useState(BLANK)
@@ -1003,7 +1001,7 @@ export default function ManualEntryForm({ onClose }) {
         <textarea className="input min-h-[70px] resize-y text-sm rounded-2xl bg-surface-200/70" value={form.exitNotes} onChange={e => set('exitNotes', e.target.value)} placeholder="Why did you exit?" />
       </div>
 
-      {(saveStatus || saveError || lastCloudSaveError || pendingCloudWriteCount > 0) && (
+      {(saveStatus || saveError) && (
         <div className={`rounded-xl border px-3 py-2 text-xs ${
           saveError
             ? 'border-accent-red/30 bg-accent-red/10 text-accent-red'
@@ -1012,12 +1010,6 @@ export default function ManualEntryForm({ onClose }) {
           {saveError
             ? `Local save failed: ${saveError}. Keep this form open and export a backup before clearing browser data.`
             : saveStatus || 'Saved locally'}
-          {!saveError && pendingCloudWriteCount > 0 && (
-            <span className="ml-2 text-accent-yellow">Cloud backup pending: {pendingCloudWriteCount}</span>
-          )}
-          {!saveError && lastCloudSaveError && (
-            <span className="ml-2 text-accent-yellow">Cloud retrying: {lastCloudSaveError}</span>
-          )}
         </div>
       )}
 

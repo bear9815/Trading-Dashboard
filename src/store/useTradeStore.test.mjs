@@ -1,8 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { useTradeStore, __setTradeStoreCloudClientForTests } from './useTradeStore.js'
-import { useAuthStore } from './useAuthStore.js'
+import { useTradeStore } from './useTradeStore.js'
 
 function createLocalStorageMock() {
   const store = new Map()
@@ -87,12 +86,11 @@ function resetTradeStore() {
     deletedTradeIds: [],
     deletedActivityIds: [],
     deletedBatchIds: [],
-    pendingCloudOps: [],
+    recoverySnapshots: [],
     lastSaveError: null,
     lastSavedAt: null,
-    lastCloudSaveError: null,
-    lastCloudSyncedAt: null,
-    pendingCloudWriteCount: 0,
+    lastSnapshotAt: null,
+    lastSnapshotError: null,
     cloudLoading: false,
     cloudReady: false,
   })
@@ -199,6 +197,12 @@ test('addTrade writes a rescue backup synchronously and resolves after durable l
     assert.equal(saved.ok, true)
     assert.equal(useTradeStore.getState().lastSaveError, null)
     assert.ok(useTradeStore.getState().lastSavedAt)
+
+    const recovery = JSON.parse(localStorageMock.getItem('risk-tool-trades-snapshots-ls'))
+    assert.equal(recovery.snapshots.length, 1)
+    assert.equal(recovery.snapshots[0].snapshotKind, 'after-save')
+    assert.equal(recovery.snapshots[0].tradeCount, 1)
+    assert.equal(recovery.snapshots[0].data.trades[0].id, 'trade-1')
   } finally {
     resetTradeStore()
     if (previousLocalStorage === undefined) delete globalThis.localStorage
@@ -237,188 +241,27 @@ test('addTrade reports local durability failure when rescue and IndexedDB writes
   }
 })
 
-test('failed cloud upsert leaves a pending outbox operation for replay', async () => {
+test('deleteTrade creates a pre-destructive recovery snapshot before removing the trade', async () => {
   const previousLocalStorage = globalThis.localStorage
   const previousIndexedDB = globalThis.indexedDB
-  globalThis.localStorage = createLocalStorageMock()
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
   globalThis.indexedDB = createIndexedDBMock()
 
-  const failingCloud = {
-    from() {
-      return {
-        upsert: async () => ({ error: { message: 'network down' } }),
-      }
-    },
-  }
-
   try {
     resetTradeStore()
-    useAuthStore.setState({ user: { id: 'user-1' }, session: null, loading: false })
-    __setTradeStoreCloudClientForTests(failingCloud)
-
-    const result = useTradeStore.getState().addTrade(createTrade())
-    await result.saved
-    await useTradeStore.getState().flushPendingCloudOps()
-
-    const state = useTradeStore.getState()
-    assert.equal(state.pendingCloudOps.length, 1)
-    assert.equal(state.pendingCloudWriteCount, 1)
-    assert.match(state.lastCloudSaveError, /network down/)
-  } finally {
-    __setTradeStoreCloudClientForTests(null)
-    useAuthStore.setState({ user: null, session: null, loading: false })
-    resetTradeStore()
-    if (previousLocalStorage === undefined) delete globalThis.localStorage
-    else globalThis.localStorage = previousLocalStorage
-    if (previousIndexedDB === undefined) delete globalThis.indexedDB
-    else globalThis.indexedDB = previousIndexedDB
-  }
-})
-
-test('successful cloud replay removes pending outbox operations', async () => {
-  const previousLocalStorage = globalThis.localStorage
-  const previousIndexedDB = globalThis.indexedDB
-  globalThis.localStorage = createLocalStorageMock()
-  globalThis.indexedDB = createIndexedDBMock()
-  const writes = []
-
-  const cloud = {
-    from(table) {
-      return {
-        upsert: async (row) => {
-          writes.push({ table, row })
-          return { error: null }
-        },
-        insert: async (row) => {
-          writes.push({ table, row })
-          return { error: null }
-        },
-      }
-    },
-  }
-
-  try {
-    resetTradeStore()
-    useAuthStore.setState({ user: { id: 'user-1' }, session: null, loading: false })
-    __setTradeStoreCloudClientForTests(cloud)
-    useTradeStore.setState({
-      pendingCloudOps: [{
-        id: 'op-1',
-        entity: 'trade',
-        action: 'upsert',
-        recordId: 'trade-1',
-        payload: createTrade(),
-        createdAt: '2026-05-13T12:00:00.000Z',
-        attempts: 0,
-      }],
-      pendingCloudWriteCount: 1,
-    })
-
-    const result = await useTradeStore.getState().flushPendingCloudOps()
-
-    assert.equal(result.ok, true)
-    assert.equal(useTradeStore.getState().pendingCloudOps.length, 0)
-    assert.equal(useTradeStore.getState().pendingCloudWriteCount, 0)
-    assert.equal(useTradeStore.getState().lastCloudSaveError, null)
-    assert.ok(writes.some(write => write.table === 'trades'))
-    assert.ok(writes.some(write => write.table === 'trade_state_snapshots'))
-  } finally {
-    __setTradeStoreCloudClientForTests(null)
-    useAuthStore.setState({ user: null, session: null, loading: false })
-    resetTradeStore()
-    if (previousLocalStorage === undefined) delete globalThis.localStorage
-    else globalThis.localStorage = previousLocalStorage
-    if (previousIndexedDB === undefined) delete globalThis.indexedDB
-    else globalThis.indexedDB = previousIndexedDB
-  }
-})
-
-test('mergeLocalSnapshot keeps a newer local trade over a stale cloud copy', async () => {
-  const upserts = []
-  const cloud = {
-    from(table) {
-      return {
-        upsert: async (rows) => {
-          upserts.push({ table, rows })
-          return { error: null }
-        },
-      }
-    },
-  }
-
-  try {
-    resetTradeStore()
-    __setTradeStoreCloudClientForTests(cloud)
-
-    const cloudTrade = {
-      ...createTrade({ symbol: 'OLD' }),
-      _revision: 1,
-      _updatedAt: '2026-05-12T12:00:00.000Z',
-    }
-    const localTrade = {
-      ...createTrade({ symbol: 'NEW' }),
-      _revision: 2,
-      _updatedAt: '2026-05-13T12:00:00.000Z',
-    }
-
-    const merged = await useTradeStore.getState().mergeLocalSnapshot(
-      'user-1',
-      { trades: [cloudTrade], accountActivities: [], importBatches: [] },
-      {
-        trades: [localTrade],
-        accountActivities: [],
-        importBatches: [],
-        deletedTradeIds: [],
-        deletedActivityIds: [],
-        deletedBatchIds: [],
-      }
-    )
-
-    assert.equal(merged.trades.length, 1)
-    assert.equal(merged.trades[0].symbol, 'NEW')
-    assert.equal(upserts[0].table, 'trades')
-  } finally {
-    __setTradeStoreCloudClientForTests(null)
-    resetTradeStore()
-  }
-})
-
-test('deleteTrade queues a recovery snapshot before the destructive cloud delete', async () => {
-  const previousLocalStorage = globalThis.localStorage
-  const previousIndexedDB = globalThis.indexedDB
-  globalThis.localStorage = createLocalStorageMock()
-  globalThis.indexedDB = createIndexedDBMock()
-
-  const idleCloud = {
-    from() {
-      return {
-        upsert: async () => ({ error: { message: 'hold outbox for inspection' } }),
-        insert: async () => ({ error: { message: 'hold outbox for inspection' } }),
-        delete() { return this },
-        eq() { return Promise.resolve({ error: { message: 'hold outbox for inspection' } }) },
-      }
-    },
-  }
-
-  try {
-    resetTradeStore()
-    useAuthStore.setState({ user: { id: 'user-1' }, session: null, loading: false })
-    __setTradeStoreCloudClientForTests(null)
     await useTradeStore.getState().addTrade(createTrade()).saved
-    __setTradeStoreCloudClientForTests(idleCloud)
 
     const result = useTradeStore.getState().deleteTrade('trade-1')
     await result.saved
 
-    const pending = useTradeStore.getState().pendingCloudOps
-    const snapshotIndex = pending.findIndex(op => op.entity === 'snapshot' && op.snapshotKind === 'before-delete-trade')
-    const deleteIndex = pending.findIndex(op => op.entity === 'trade' && op.action === 'delete')
-    assert.ok(snapshotIndex >= 0)
-    assert.ok(deleteIndex >= 0)
-    assert.ok(snapshotIndex < deleteIndex)
+    const recovery = JSON.parse(localStorageMock.getItem('risk-tool-trades-snapshots-ls'))
+    const beforeDelete = recovery.snapshots.find(snapshot => snapshot.snapshotKind === 'before-delete-trade')
+    assert.ok(beforeDelete)
+    assert.equal(beforeDelete.tradeCount, 1)
+    assert.equal(beforeDelete.data.trades[0].id, 'trade-1')
+    assert.equal(useTradeStore.getState().trades.length, 0)
   } finally {
-    __setTradeStoreCloudClientForTests(null)
-    useAuthStore.setState({ user: null, session: null, loading: false })
     resetTradeStore()
     if (previousLocalStorage === undefined) delete globalThis.localStorage
     else globalThis.localStorage = previousLocalStorage

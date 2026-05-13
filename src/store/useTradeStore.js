@@ -6,27 +6,8 @@ import { REVIEW_CONTEXTS, getReviewQuestionById, normalizeReviewAnswer } from '.
 import { buildActivityDedupKey, buildTradeDedupKey } from '../utils/tradeDedup.js'
 import { resolveTradeIdeaId } from '../utils/tradeIdeas.js'
 import { normalizeTradeAlignmentReview } from '../utils/tradeReviewAlignment.js'
-import { supabase } from '../lib/supabase.js'
-import { LOCAL_ONLY_MODE } from '../lib/appMode.js'
 import { idbStorage } from '../utils/idbStorage.js'
 import { writeDurableJson } from '../utils/durableLocalJson.js'
-import { useAuthStore } from './useAuthStore.js'
-
-let cloudClientOverride = null
-
-export function __setTradeStoreCloudClientForTests(client) {
-  cloudClientOverride = client
-}
-
-function getCloudClient() {
-  return cloudClientOverride || supabase
-}
-
-// ─── Supabase helpers (fire-and-forget — won't block UI) ─────────────────────
-
-async function getUid() {
-  return useAuthStore.getState().user?.id
-}
 
 function stableStringify(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
@@ -57,23 +38,6 @@ function withTradeChecksum(trade) {
   return { ...trade, _checksum: tradeChecksum(trade) }
 }
 
-function versionTime(value) {
-  const parsed = value ? new Date(value).getTime() : 0
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
-function compareTradeVersions(localTrade, cloudTrade) {
-  const localRevision = Number(localTrade?._revision || 0)
-  const cloudRevision = Number(cloudTrade?._revision || 0)
-  if (localRevision !== cloudRevision) return localRevision - cloudRevision
-
-  const localTime = versionTime(localTrade?._updatedAt || localTrade?.updatedAt || localTrade?.entryDate)
-  const cloudTime = versionTime(cloudTrade?._updatedAt || cloudTrade?.updatedAt || cloudTrade?.entryDate)
-  if (localTime !== cloudTime) return localTime - cloudTime
-
-  return 1
-}
-
 function prepareTradeForWrite(trade, previousTrade = null, now = new Date().toISOString()) {
   const previousRevision = Number(previousTrade?._revision ?? trade?._revision ?? 0)
   return normalizeTradeForStore({
@@ -89,86 +53,25 @@ function stripTradeBlobs(trade = {}) {
   return lightTrade
 }
 
-export function createTradeCloudRow(trade, userId) {
-  const normalizedTrade = normalizeTradeForStore(trade)
-
-  return {
-    id: normalizedTrade.id,
-    user_id: userId,
-    data: normalizedTrade,
-  }
-}
-
-async function syncTrade(trade) {
-  const cloud = getCloudClient()
-  if (!cloud) return
-  const uid = await getUid(); if (!uid) return
-  const row = createTradeCloudRow(trade, uid)
-  const { error } = await cloud.from('trades')
-    .upsert(row, { onConflict: 'id' })
-  if (error) console.error('[cloud] syncTrade:', error.message)
-}
-
-async function cloudDeleteTrade(id) {
-  const cloud = getCloudClient()
-  if (!cloud) return
-  const uid = await getUid(); if (!uid) return
-  await cloud.from('trades').delete().eq('id', id).eq('user_id', uid)
-}
-
-async function syncActivity(activity) {
-  const cloud = getCloudClient()
-  if (!cloud) return
-  const uid = await getUid(); if (!uid) return
-  const { error } = await cloud.from('account_activities')
-    .upsert({ id: activity.id, user_id: uid, data: activity }, { onConflict: 'id' })
-  if (error) console.error('[cloud] syncActivity:', error.message)
-}
-
-async function cloudDeleteActivity(id) {
-  const cloud = getCloudClient()
-  if (!cloud) return
-  const uid = await getUid(); if (!uid) return
-  await cloud.from('account_activities').delete().eq('id', id).eq('user_id', uid)
-}
-
-async function syncBatch(batch) {
-  const cloud = getCloudClient()
-  if (!cloud) return
-  const uid = await getUid(); if (!uid) return
-  await cloud.from('import_batches')
-    .upsert({ id: batch.id, user_id: uid, data: batch }, { onConflict: 'id' })
-}
-
-async function cloudDeleteBatch(id) {
-  const cloud = getCloudClient()
-  if (!cloud) return
-  const uid = await getUid(); if (!uid) return
-  await cloud.from('import_batches').delete().eq('id', id).eq('user_id', uid)
-}
-
 // ─── Local IDB snapshot ───────────────────────────────────────────────────────
-// Written after every mutation so trades survive page reloads even if Supabase
-// sync failed silently. loadFromCloud overwrites this with the authoritative
-// cloud copy; migrateFromLocal pushes any orphaned local trades up to Supabase.
+// Written after every mutation so trades survive page reloads. A second ring of
+// recovery snapshots keeps older known-good states available before destructive
+// edits and after successful saves.
 
 const IDB_KEY = 'risk-tool-trades'
 const LS_BACKUP_KEY = 'risk-tool-trades-ls'
-
-function getSnapshotOwnerId() {
-  return useAuthStore.getState().user?.id ?? null
-}
+const RECOVERY_RING_KEY = 'risk-tool-trades-snapshots'
+const RECOVERY_RING_LS_KEY = 'risk-tool-trades-snapshots-ls'
+const MAX_RECOVERY_SNAPSHOTS = 25
 
 function normalizeSnapshotData(parsed) {
   return {
-    ownerId: parsed?.meta?.userId ?? null,
     trades: parsed?.state?.trades || [],
     accountActivities: parsed?.state?.accountActivities || [],
     importBatches: parsed?.state?.importBatches || [],
     deletedTradeIds: parsed?.state?.deletedTradeIds || [],
     deletedActivityIds: parsed?.state?.deletedActivityIds || [],
     deletedBatchIds: parsed?.state?.deletedBatchIds || [],
-    pendingCloudOps: parsed?.state?.pendingCloudOps || [],
     durability: parsed?.state?.durability || {},
   }
 }
@@ -180,7 +83,6 @@ function saveLocalBackup({
   deletedTradeIds = [],
   deletedActivityIds = [],
   deletedBatchIds = [],
-  pendingCloudOps = [],
   durability = {},
 }) {
   if (typeof localStorage === 'undefined') {
@@ -190,7 +92,7 @@ function saveLocalBackup({
     // Strip screenshots so we stay well within localStorage quota
     const light = trades.map(stripTradeBlobs)
     localStorage.setItem(LS_BACKUP_KEY, JSON.stringify({
-      meta: { userId: getSnapshotOwnerId() },
+      meta: { storageMode: 'local-only' },
       state: {
         trades: light,
         accountActivities,
@@ -198,7 +100,6 @@ function saveLocalBackup({
         deletedTradeIds,
         deletedActivityIds,
         deletedBatchIds,
-        pendingCloudOps,
         durability,
       },
     }))
@@ -217,19 +118,15 @@ async function saveSnapshot(state) {
     deletedTradeIds = [],
     deletedActivityIds = [],
     deletedBatchIds = [],
-    pendingCloudOps = [],
     lastSavedAt = null,
-    lastCloudSyncedAt = null,
   } = state
 
   const durability = {
     lastSavedAt,
-    lastCloudSyncedAt,
-    pendingCloudWriteCount: pendingCloudOps.length,
   }
 
   const payload = {
-    meta: { userId: getSnapshotOwnerId() },
+    meta: { storageMode: 'local-only' },
     state: {
       trades,
       accountActivities,
@@ -237,7 +134,6 @@ async function saveSnapshot(state) {
       deletedTradeIds,
       deletedActivityIds,
       deletedBatchIds,
-      pendingCloudOps,
       durability,
     },
   }
@@ -249,7 +145,6 @@ async function saveSnapshot(state) {
     deletedTradeIds,
     deletedActivityIds,
     deletedBatchIds,
-    pendingCloudOps,
     durability,
   })
   const durable = await writeDurableJson(IDB_KEY, payload)
@@ -262,7 +157,7 @@ async function saveSnapshot(state) {
   }
 }
 
-async function readLocalSnapshot(userId = null) {
+async function readLocalSnapshot() {
   try {
     let raw = await idbStorage.getItem(IDB_KEY)
     if (!raw) {
@@ -272,22 +167,94 @@ async function readLocalSnapshot(userId = null) {
     if (!raw) return null
 
     const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
-    const snapshot = normalizeSnapshotData(parsed)
-
-    if (!LOCAL_ONLY_MODE && snapshot.ownerId && userId && snapshot.ownerId !== userId) {
-      console.warn('[trades] Ignoring local snapshot owned by a different user')
-      return null
-    }
-
-    return snapshot
+    return normalizeSnapshotData(parsed)
   } catch (err) {
     console.error('[local] readLocalSnapshot failed:', err)
     return null
   }
 }
 
-function chunk(arr, size) {
-  return Array.from({ length: Math.ceil(arr.length / size) }, (_, i) => arr.slice(i * size, i * size + size))
+function buildRecoverySnapshot(snapshotKind, state) {
+  const payload = {
+    version: 1,
+    snapshotId: uuidv4(),
+    snapshotKind,
+    createdAt: new Date().toISOString(),
+    tradeCount: (state.trades || []).length,
+    data: {
+      trades: (state.trades || []).map(stripTradeBlobs),
+      accountActivities: state.accountActivities || [],
+      importBatches: state.importBatches || [],
+      deletedTradeIds: state.deletedTradeIds || [],
+      deletedActivityIds: state.deletedActivityIds || [],
+      deletedBatchIds: state.deletedBatchIds || [],
+    },
+  }
+
+  return {
+    ...payload,
+    checksum: checksumFor(payload),
+  }
+}
+
+function normalizeRecoveryRing(raw) {
+  const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+  const snapshots = Array.isArray(parsed?.snapshots)
+    ? parsed.snapshots
+    : Array.isArray(parsed)
+      ? parsed
+      : []
+  return snapshots.filter(snapshot => snapshot && typeof snapshot === 'object')
+}
+
+async function readRecoveryRing() {
+  try {
+    const raw = await idbStorage.getItem(RECOVERY_RING_KEY)
+    if (raw) return normalizeRecoveryRing(raw)
+    if (typeof localStorage === 'undefined') return []
+    const rescue = localStorage.getItem(RECOVERY_RING_LS_KEY)
+    return rescue ? normalizeRecoveryRing(rescue) : []
+  } catch (err) {
+    console.warn('[local] read recovery snapshots failed:', err)
+    return []
+  }
+}
+
+function writeRecoveryRingBackup(snapshots) {
+  if (typeof localStorage === 'undefined') return { ok: false, message: 'localStorage is not available' }
+  try {
+    localStorage.setItem(RECOVERY_RING_LS_KEY, JSON.stringify({
+      version: 1,
+      snapshots,
+      updatedAt: new Date().toISOString(),
+    }))
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, message: err?.message || String(err) }
+  }
+}
+
+async function appendRecoverySnapshot(snapshotKind, state) {
+  const snapshot = buildRecoverySnapshot(snapshotKind, state)
+  const current = await readRecoveryRing()
+  const snapshots = [...current, snapshot].slice(-MAX_RECOVERY_SNAPSHOTS)
+  const rescue = writeRecoveryRingBackup(snapshots)
+  const durable = await writeDurableJson(RECOVERY_RING_KEY, {
+    version: 1,
+    snapshots,
+    updatedAt: new Date().toISOString(),
+  })
+
+  if (durable.ok || rescue.ok) {
+    return { ok: true, snapshot, snapshots, warning: durable.ok ? null : durable.message }
+  }
+
+  return {
+    ok: false,
+    snapshot,
+    snapshots,
+    message: [durable.message, rescue.message].filter(Boolean).join('; ') || 'Recovery snapshot save failed.',
+  }
 }
 
 export function normalizeTradeForStore(trade) {
@@ -320,71 +287,18 @@ function assignTradeIdeaMetadata(trade, existingTrades = []) {
   }
 }
 
-async function upsertRows(table, userId, rows, size = 200) {
-  const cloud = getCloudClient()
-  if (!cloud || !userId || rows.length === 0) return
-  for (const batch of chunk(rows, size)) {
-    const { error } = await cloud.from(table).upsert(batch, { onConflict: 'id' })
-    if (error) throw error
-  }
-}
-
-function makeCloudOp(entity, action, recordId, payload = null, extra = {}) {
-  return {
-    id: uuidv4(),
-    entity,
-    action,
-    recordId,
-    payload,
-    createdAt: new Date().toISOString(),
-    attempts: 0,
-    ...extra,
-  }
-}
-
-function shouldQueueCloudOps() {
-  return Boolean(getCloudClient())
-}
-
-function buildRecoverySnapshot(kind, state) {
-  const payload = {
-    version: 1,
-    snapshotKind: kind,
-    createdAt: new Date().toISOString(),
-    trades: (state.trades || []).map(stripTradeBlobs),
-    accountActivities: state.accountActivities || [],
-    importBatches: state.importBatches || [],
-    deletedTradeIds: state.deletedTradeIds || [],
-    deletedActivityIds: state.deletedActivityIds || [],
-    deletedBatchIds: state.deletedBatchIds || [],
-  }
-  return {
-    ...payload,
-    checksum: checksumFor(payload),
-  }
-}
-
-function snapshotCloudOp(kind, state) {
-  const snapshot = buildRecoverySnapshot(kind, state)
-  return makeCloudOp('snapshot', 'insert', snapshot.checksum, snapshot, { snapshotKind: kind })
-}
-
-function withQueuedOps(state, ops = [], baseState = state) {
-  if (!ops.length) return state
-  const pendingCloudOps = [...(baseState.pendingCloudOps || []), ...ops]
-  return {
-    ...state,
-    pendingCloudOps,
-    pendingCloudWriteCount: pendingCloudOps.length,
-  }
-}
-
-async function persistAfterMutation(get, set, { flushCloud = true } = {}) {
+async function persistAfterMutation(get, set, { snapshotKind = 'after-save' } = {}) {
   const result = await saveSnapshot(get())
   if (result.ok) {
+    const recovery = await appendRecoverySnapshot(snapshotKind, get())
     const savedAt = new Date().toISOString()
-    set({ lastSaveError: null, lastSavedAt: savedAt })
-    if (flushCloud) queueMicrotask(() => get().flushPendingCloudOps?.())
+    set({
+      lastSaveError: null,
+      lastSavedAt: savedAt,
+      lastSnapshotAt: recovery.ok ? recovery.snapshot.createdAt : get().lastSnapshotAt,
+      lastSnapshotError: recovery.ok ? null : recovery.message,
+      recoverySnapshots: recovery.ok ? recovery.snapshots : get().recoverySnapshots,
+    })
   } else {
     set({ lastSaveError: result.message || 'Local trade save failed.', lastSavedAt: null })
   }
@@ -407,62 +321,6 @@ function failedMutationResult(message) {
   }
 }
 
-async function runCloudOp(op) {
-  const cloud = getCloudClient()
-  if (!cloud) return { ok: false, skipped: true, message: 'Cloud sync is not configured.' }
-
-  const uid = await getUid()
-  if (!uid) return { ok: false, skipped: true, message: 'Cloud user is not signed in.' }
-
-  if (op.entity === 'trade' && op.action === 'upsert') {
-    const row = createTradeCloudRow(op.payload, uid)
-    const { error } = await cloud.from('trades').upsert(row, { onConflict: 'id' })
-    if (error) return { ok: false, message: error.message }
-    return { ok: true }
-  }
-
-  if (op.entity === 'activity' && op.action === 'upsert') {
-    const { error } = await cloud.from('account_activities')
-      .upsert({ id: op.recordId, user_id: uid, data: op.payload }, { onConflict: 'id' })
-    if (error) return { ok: false, message: error.message }
-    return { ok: true }
-  }
-
-  if (op.entity === 'batch' && op.action === 'upsert') {
-    const { error } = await cloud.from('import_batches')
-      .upsert({ id: op.recordId, user_id: uid, data: op.payload }, { onConflict: 'id' })
-    if (error) return { ok: false, message: error.message }
-    return { ok: true }
-  }
-
-  if (op.action === 'delete') {
-    const table = op.entity === 'trade'
-      ? 'trades'
-      : op.entity === 'activity'
-        ? 'account_activities'
-        : 'import_batches'
-    const { error } = await cloud.from(table).delete().eq('id', op.recordId).eq('user_id', uid)
-    if (error) return { ok: false, message: error.message }
-    return { ok: true }
-  }
-
-  if (op.entity === 'snapshot' && op.action === 'insert') {
-    const snapshot = op.payload || {}
-    const { error } = await cloud.from('trade_state_snapshots').insert({
-      user_id: uid,
-      created_at: snapshot.createdAt || new Date().toISOString(),
-      snapshot_kind: snapshot.snapshotKind || op.snapshotKind || 'manual',
-      trade_count: Array.isArray(snapshot.trades) ? snapshot.trades.length : 0,
-      checksum: snapshot.checksum || checksumFor(snapshot),
-      data: snapshot,
-    })
-    if (error) return { ok: false, message: error.message }
-    return { ok: true }
-  }
-
-  return { ok: false, message: `Unknown cloud operation: ${op.entity}:${op.action}` }
-}
-
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 export const useTradeStore = create((set, get) => ({
@@ -472,24 +330,22 @@ export const useTradeStore = create((set, get) => ({
   deletedTradeIds:    [],
   deletedActivityIds: [],
   deletedBatchIds:    [],
-  pendingCloudOps:    [],
-  pendingCloudWriteCount: 0,
+  recoverySnapshots:  [],
   lastSaveError:      null,
   lastSavedAt:        null,
-  lastCloudSaveError: null,
-  lastCloudSyncedAt:  null,
+  lastSnapshotAt:     null,
+  lastSnapshotError:  null,
   cloudLoading:      false,
   cloudReady:        false,
 
-  // ── Cloud ────────────────────────────────────────────────────────────────
+  // ── Local durability ─────────────────────────────────────────────────────
 
   /** Load trades from IndexedDB, falling back to localStorage backup if IDB is empty */
   loadFromLocal: async () => {
     try {
-      const currentUid = getSnapshotOwnerId()
-      const snapshot = await readLocalSnapshot(currentUid)
+      const snapshot = await readLocalSnapshot()
+      const recoverySnapshots = await readRecoveryRing()
       if (!snapshot) { set({ cloudReady: true }); return }
-      if (!LOCAL_ONLY_MODE && snapshot.ownerId && !currentUid) { set({ cloudReady: true }); return }
 
       const {
         trades = [],
@@ -498,7 +354,6 @@ export const useTradeStore = create((set, get) => ({
         deletedTradeIds = [],
         deletedActivityIds = [],
         deletedBatchIds = [],
-        pendingCloudOps = [],
         durability = {},
       } = snapshot
       set({
@@ -508,265 +363,42 @@ export const useTradeStore = create((set, get) => ({
         deletedTradeIds,
         deletedActivityIds,
         deletedBatchIds,
-        pendingCloudOps,
-        pendingCloudWriteCount: pendingCloudOps.length,
+        recoverySnapshots,
         lastSavedAt: durability.lastSavedAt || null,
-        lastCloudSyncedAt: durability.lastCloudSyncedAt || null,
+        lastSnapshotAt: recoverySnapshots.at(-1)?.createdAt || null,
         cloudReady: true,
       })
-      if (pendingCloudOps.length) queueMicrotask(() => get().flushPendingCloudOps())
     } catch (err) {
       console.error('[local] loadTrades failed:', err)
       set({ cloudReady: true })
     }
   },
 
-  /** Fetch all data from Supabase — called after login */
-  loadFromCloud: async (userId) => {
-    const cloud = getCloudClient()
-    if (!cloud) return
-    set({ cloudLoading: true })
-
-    const localSnapshot = await readLocalSnapshot(userId)
-
-    const [tRes, aRes, bRes] = await Promise.all([
-      cloud.from('trades').select('data').eq('user_id', userId),
-      cloud.from('account_activities').select('data').eq('user_id', userId),
-      cloud.from('import_batches').select('data').eq('user_id', userId),
-    ])
-
-    if (tRes.error || aRes.error || bRes.error) {
-      console.error('[cloud] loadFromCloud failed:', {
-        trades: tRes.error?.message,
-        activities: aRes.error?.message,
-        batches: bRes.error?.message,
-      })
-
-      if (localSnapshot) {
-        set({
-          trades:            localSnapshot.trades.map(normalizeTradeForStore),
-          accountActivities: localSnapshot.accountActivities,
-          importBatches:     localSnapshot.importBatches,
-          deletedTradeIds:    localSnapshot.deletedTradeIds || [],
-          deletedActivityIds: localSnapshot.deletedActivityIds || [],
-          deletedBatchIds:    localSnapshot.deletedBatchIds || [],
-          pendingCloudOps:    localSnapshot.pendingCloudOps || [],
-          pendingCloudWriteCount: (localSnapshot.pendingCloudOps || []).length,
-          cloudLoading:      false,
-          cloudReady:        true,
-        })
-      } else {
-        set({ cloudLoading: false, cloudReady: true })
-      }
-      return
-    }
-
-    const deletedTradeIds = new Set(localSnapshot?.deletedTradeIds || [])
-    const deletedActivityIds = new Set(localSnapshot?.deletedActivityIds || [])
-    const deletedBatchIds = new Set(localSnapshot?.deletedBatchIds || [])
-
-    const cloudSnapshot = {
-      trades:            (tRes.data || []).map(r => r.data).filter(t => !deletedTradeIds.has(t.id)),
-      accountActivities: (aRes.data || []).map(r => r.data).filter(a => !deletedActivityIds.has(a.id)),
-      importBatches:     (bRes.data || []).map(r => r.data).filter(b => !deletedBatchIds.has(b.id)),
-    }
-
-    deletedTradeIds.forEach(id => cloudDeleteTrade(id))
-    deletedActivityIds.forEach(id => cloudDeleteActivity(id))
-    deletedBatchIds.forEach(id => cloudDeleteBatch(id))
-
-    const mergedSnapshot = await get().mergeLocalSnapshot(userId, cloudSnapshot, localSnapshot)
-    const nextState = {
-      trades:            mergedSnapshot.trades.map(normalizeTradeForStore),
-      accountActivities: mergedSnapshot.accountActivities,
-      importBatches:     mergedSnapshot.importBatches,
-      deletedTradeIds:    [...deletedTradeIds],
-      deletedActivityIds: [...deletedActivityIds],
-      deletedBatchIds:    [...deletedBatchIds],
-      pendingCloudOps:    localSnapshot?.pendingCloudOps || [],
-    }
-    nextState.pendingCloudWriteCount = nextState.pendingCloudOps.length
-
-    set({ ...nextState, cloudLoading: false, cloudReady: true })
-    await saveSnapshot(nextState)
-    if (nextState.pendingCloudOps.length) queueMicrotask(() => get().flushPendingCloudOps())
+  /** Kept for older hydration callers; trade data is local-only now. */
+  loadFromCloud: async () => {
+    await get().loadFromLocal()
   },
 
   /** Clear in-memory state on sign-out */
   clearLocalState: () => set({
     trades: [], accountActivities: [], importBatches: [],
-    deletedTradeIds: [], deletedActivityIds: [], deletedBatchIds: [], pendingCloudOps: [],
-    pendingCloudWriteCount: 0, lastSaveError: null, lastSavedAt: null,
-    lastCloudSaveError: null, lastCloudSyncedAt: null,
+    deletedTradeIds: [], deletedActivityIds: [], deletedBatchIds: [], recoverySnapshots: [],
+    lastSaveError: null, lastSavedAt: null, lastSnapshotAt: null, lastSnapshotError: null,
     cloudReady: false, cloudLoading: false,
   }),
 
-  /**
-   * On every login: find trades in the local IDB snapshot that are NOT in
-   * Supabase (added while offline or during a sync failure) and push them up.
-   */
-  mergeLocalSnapshot: async (userId, cloudSnapshot, localSnapshot = null) => {
-    if (!getCloudClient() || !userId) return cloudSnapshot
-    try {
-      const snapshot = localSnapshot || await readLocalSnapshot(userId)
-      if (!snapshot) return cloudSnapshot
-
-      const cloudTradeIds = new Set(cloudSnapshot.trades.map(t => t.id))
-      const cloudTradeKeys = new Set(cloudSnapshot.trades.map(buildTradeDedupKey))
-      const deletedTradeIds = new Set(snapshot.deletedTradeIds || [])
-      const mergedTradeMap = new Map(cloudSnapshot.trades.map(t => [t.id, normalizeTradeForStore(t)]))
-      const localWinnerTrades = []
-      const missingTrades = []
-
-      for (const localTrade of snapshot.trades || []) {
-        if (deletedTradeIds.has(localTrade.id)) continue
-        const normalizedLocal = normalizeTradeForStore(localTrade)
-        const cloudTrade = mergedTradeMap.get(normalizedLocal.id)
-
-        if (cloudTrade) {
-          if (compareTradeVersions(normalizedLocal, cloudTrade) >= 0 && normalizedLocal._checksum !== cloudTrade._checksum) {
-            mergedTradeMap.set(normalizedLocal.id, normalizedLocal)
-            localWinnerTrades.push(normalizedLocal)
-          }
-          continue
-        }
-
-        if (cloudTradeIds.has(normalizedLocal.id) || cloudTradeKeys.has(buildTradeDedupKey(normalizedLocal))) continue
-        mergedTradeMap.set(normalizedLocal.id, normalizedLocal)
-        missingTrades.push(normalizedLocal)
-      }
-
-      const cloudActivityIds = new Set(cloudSnapshot.accountActivities.map(a => a.id))
-      const cloudActivityKeys = new Set(cloudSnapshot.accountActivities.map(buildActivityDedupKey))
-      const deletedActivityIds = new Set(snapshot.deletedActivityIds || [])
-      const missingActivities = snapshot.accountActivities.filter(a => !deletedActivityIds.has(a.id) && !cloudActivityIds.has(a.id) && !cloudActivityKeys.has(buildActivityDedupKey(a)))
-
-      const cloudBatchIds = new Set(cloudSnapshot.importBatches.map(b => b.id))
-      const deletedBatchIds = new Set(snapshot.deletedBatchIds || [])
-      const missingBatches = snapshot.importBatches.filter(b => !deletedBatchIds.has(b.id) && !cloudBatchIds.has(b.id))
-
-      if (!missingTrades.length && !localWinnerTrades.length && !missingActivities.length && !missingBatches.length) {
-        return {
-          ...cloudSnapshot,
-          trades: [...mergedTradeMap.values()],
-        }
-      }
-
-      console.info(
-        `[cloud] Recovering local snapshot deltas: ${missingTrades.length + localWinnerTrades.length} trade(s), ${missingActivities.length} activit${missingActivities.length === 1 ? 'y' : 'ies'}, ${missingBatches.length} batch(es)…`
-      )
-
-      const normalizedMissingTrades = missingTrades.map(normalizeTradeForStore)
-      const tradesToUpsert = [...normalizedMissingTrades, ...localWinnerTrades]
-
-      await upsertRows('trades', userId, tradesToUpsert.map(trade => createTradeCloudRow(trade, userId)))
-      await upsertRows('account_activities', userId, missingActivities.map(a => ({ id: a.id, user_id: userId, data: a })))
-      await upsertRows('import_batches', userId, missingBatches.map(b => ({ id: b.id, user_id: userId, data: b })), 50)
-
-      console.info('[cloud] Local snapshot recovery complete')
-
-      return {
-        trades: [...mergedTradeMap.values()],
-        accountActivities: [...cloudSnapshot.accountActivities, ...missingActivities],
-        importBatches: [...cloudSnapshot.importBatches, ...missingBatches]
-          .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
-          .slice(0, 20),
-      }
-    } catch (err) {
-      console.warn('[cloud] mergeLocalSnapshot failed:', err)
-      return {
-        trades: [
-          ...cloudSnapshot.trades,
-          ...((localSnapshot?.trades || []).filter(t => !cloudSnapshot.trades.some(c => c.id === t.id))),
-        ],
-        accountActivities: [
-          ...cloudSnapshot.accountActivities,
-          ...((localSnapshot?.accountActivities || []).filter(a => !cloudSnapshot.accountActivities.some(c => c.id === a.id))),
-        ],
-        importBatches: cloudSnapshot.importBatches,
-      }
+  restoreFromBackup: (tradeState = {}) => {
+    const nextState = {
+      trades: (tradeState.trades || []).map(normalizeTradeForStore),
+      accountActivities: tradeState.accountActivities || [],
+      importBatches: tradeState.importBatches || [],
+      deletedTradeIds: tradeState.deletedTradeIds || [],
+      deletedActivityIds: tradeState.deletedActivityIds || [],
+      deletedBatchIds: tradeState.deletedBatchIds || [],
     }
-  },
-
-  /**
-   * One-time migration: read IndexedDB → upload to Supabase.
-   * Only runs automatically when the cloud is empty on first login.
-   */
-  migrateFromLocal: async (userId) => {
-    const cloud = getCloudClient()
-    if (!cloud || !userId) return
-    try {
-      const raw = await idbStorage.getItem('risk-tool-trades')
-      if (!raw) return
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
-      const { trades = [], accountActivities = [], importBatches = [] } = parsed?.state || {}
-      if (!trades.length && !accountActivities.length) return
-
-      console.info(`[cloud] Migrating ${trades.length} trades from local storage…`)
-
-      const chunk = (arr, n) =>
-        Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n))
-      const normalizedTrades = trades.map(normalizeTradeForStore)
-
-      for (const batch of chunk(normalizedTrades, 200))
-        await cloud.from('trades').upsert(batch.map(trade => createTradeCloudRow(trade, userId)))
-      for (const batch of chunk(accountActivities, 200))
-        await cloud.from('account_activities').upsert(batch.map(a => ({ id: a.id, user_id: userId, data: a })))
-      for (const batch of chunk(importBatches, 50))
-        await cloud.from('import_batches').upsert(batch.map(b => ({ id: b.id, user_id: userId, data: b })))
-
-      await idbStorage.removeItem('risk-tool-trades')
-      try { localStorage.removeItem(LS_BACKUP_KEY) } catch { /* ignore */ }
-      await get().loadFromCloud(userId)
-      console.info('[cloud] Migration complete ✓')
-    } catch (err) {
-      console.error('[cloud] Migration failed:', err)
-    }
-  },
-
-  flushPendingCloudOps: async () => {
-    const pending = get().pendingCloudOps || []
-    if (!pending.length) {
-      set({ pendingCloudWriteCount: 0 })
-      return { ok: true, flushed: 0 }
-    }
-
-    const remaining = []
-    let flushed = 0
-    let lastError = null
-
-    for (const op of pending) {
-      const result = await runCloudOp(op)
-      if (result.ok) {
-        flushed += 1
-      } else {
-        lastError = result.message || 'Cloud backup failed.'
-        remaining.push({
-          ...op,
-          attempts: (op.attempts || 0) + 1,
-          lastError,
-          lastAttemptAt: new Date().toISOString(),
-        })
-      }
-    }
-
-    const syncedAt = flushed > 0 && remaining.length === 0 ? new Date().toISOString() : get().lastCloudSyncedAt
-    set({
-      pendingCloudOps: remaining,
-      pendingCloudWriteCount: remaining.length,
-      lastCloudSaveError: remaining.length ? lastError : null,
-      lastCloudSyncedAt: syncedAt,
-    })
-    await saveSnapshot(get())
-
-    if (flushed > 0 && remaining.length === 0) {
-      const snapshotResult = await runCloudOp(snapshotCloudOp('post-sync', get()))
-      if (!snapshotResult.ok && !snapshotResult.skipped) {
-        set({ lastCloudSaveError: snapshotResult.message || 'Cloud recovery snapshot failed.' })
-      }
-    }
-
-    return { ok: remaining.length === 0, flushed, remaining: remaining.length, message: lastError }
+    set(nextState)
+    const saved = persistAfterMutation(get, set, { snapshotKind: 'restore-backup' })
+    return mutationResult({ restored: true, count: nextState.trades.length }, saved)
   },
 
   // ── Trades ────────────────────────────────────────────────────────────────
@@ -774,11 +406,10 @@ export const useTradeStore = create((set, get) => ({
   addTrade: (trade) => {
     const seededTrade = assignTradeIdeaMetadata({ ...trade, id: trade.id || uuidv4() }, get().trades)
     const t = prepareTradeForWrite(seededTrade)
-    const ops = shouldQueueCloudOps() ? [makeCloudOp('trade', 'upsert', t.id, t)] : []
-    set(s => withQueuedOps({
+    set(s => ({
       trades: [...s.trades, t],
       deletedTradeIds: s.deletedTradeIds.filter(id => id !== t.id),
-    }, ops, s))
+    }))
     const saved = persistAfterMutation(get, set)
     return mutationResult({ tradeId: t.id, trade: t }, saved)
   },
@@ -803,8 +434,7 @@ export const useTradeStore = create((set, get) => ({
         trades: [...s.trades, ...added],
         deletedTradeIds: s.deletedTradeIds.filter(id => !addedIds.has(id)),
       }
-      const ops = shouldQueueCloudOps() ? added.map(trade => makeCloudOp('trade', 'upsert', trade.id, trade)) : []
-      return withQueuedOps(next, ops, s)
+      return next
     })
     const saved = persistAfterMutation(get, set)
     return mutationResult({ count: added.length, trades: added }, saved)
@@ -860,14 +490,7 @@ export const useTradeStore = create((set, get) => ({
         deletedActivityIds: s.deletedActivityIds.filter(id => !addedActivityIds.has(id)),
         deletedBatchIds:    s.deletedBatchIds.filter(id => id !== batchId),
       }
-      const ops = shouldQueueCloudOps()
-        ? [
-            ...toAdd.map(trade => makeCloudOp('trade', 'upsert', trade.id, trade)),
-            ...actToAdd.map(activity => makeCloudOp('activity', 'upsert', activity.id, activity)),
-            ...(batch ? [makeCloudOp('batch', 'upsert', batch.id, batch)] : []),
-          ]
-        : []
-      return withQueuedOps(next, ops, s)
+      return next
     })
     const saved = persistAfterMutation(get, set)
     return mutationResult({ count: toAdd.length, trades: toAdd, activities: actToAdd, batch }, saved)
@@ -875,6 +498,7 @@ export const useTradeStore = create((set, get) => ({
 
   rollbackBatch: (batchId) => {
     const before = get()
+    const beforeSnapshot = appendRecoverySnapshot('before-rollback-import', before)
     let tradeIds = new Set(), actIds = new Set()
     set(s => {
       const batch = s.importBatches.find(b => b.id === batchId)
@@ -889,17 +513,9 @@ export const useTradeStore = create((set, get) => ({
         deletedActivityIds: [...new Set([...s.deletedActivityIds, ...actIds])].slice(-1000),
         deletedBatchIds:    [...new Set([...s.deletedBatchIds, batchId])].slice(-1000),
       }
-      const ops = shouldQueueCloudOps()
-        ? [
-            snapshotCloudOp('before-rollback-import', before),
-            ...[...tradeIds].map(id => makeCloudOp('trade', 'delete', id)),
-            ...[...actIds].map(id => makeCloudOp('activity', 'delete', id)),
-            makeCloudOp('batch', 'delete', batchId),
-          ]
-        : []
-      return withQueuedOps(next, ops, s)
+      return next
     })
-    const saved = persistAfterMutation(get, set)
+    const saved = beforeSnapshot.then(() => persistAfterMutation(get, set, { snapshotKind: 'after-rollback-import' }))
     return mutationResult({ batchId, rolledBack: true }, saved)
   },
 
@@ -921,8 +537,7 @@ export const useTradeStore = create((set, get) => ({
         return updated
       })
       const next = { trades }
-      const ops = shouldQueueCloudOps() && updated ? [makeCloudOp('trade', 'upsert', updated.id, updated)] : []
-      return withQueuedOps(next, ops, s)
+      return next
     })
     if (!updated) return failedMutationResult(`Trade ${id} not found`)
     const saved = persistAfterMutation(get, set)
@@ -944,8 +559,7 @@ export const useTradeStore = create((set, get) => ({
         return updated
       })
       const next = { trades }
-      const ops = shouldQueueCloudOps() && updated ? [makeCloudOp('trade', 'upsert', updated.id, updated)] : []
-      return withQueuedOps(next, ops, s)
+      return next
     })
     if (!updated) return false
     persistAfterMutation(get, set)
@@ -967,8 +581,7 @@ export const useTradeStore = create((set, get) => ({
         return updated
       })
       const next = { trades }
-      const ops = shouldQueueCloudOps() && updated ? [makeCloudOp('trade', 'upsert', updated.id, updated)] : []
-      return withQueuedOps(next, ops, s)
+      return next
     })
     if (!updated) return false
     persistAfterMutation(get, set)
@@ -1010,8 +623,7 @@ export const useTradeStore = create((set, get) => ({
       })
 
       const next = { trades }
-      const ops = shouldQueueCloudOps() && updated ? [makeCloudOp('trade', 'upsert', updated.id, updated)] : []
-      return withQueuedOps(next, ops, s)
+      return next
     })
 
     if (!updated) return false
@@ -1064,8 +676,7 @@ export const useTradeStore = create((set, get) => ({
       })
 
       const next = { trades }
-      const ops = shouldQueueCloudOps() && updated ? [makeCloudOp('trade', 'upsert', updated.id, updated)] : []
-      return withQueuedOps(next, ops, s)
+      return next
     })
 
     if (!updated) return false
@@ -1113,8 +724,7 @@ export const useTradeStore = create((set, get) => ({
       })
 
       const next = { trades }
-      const ops = shouldQueueCloudOps() && updated ? [makeCloudOp('trade', 'upsert', updated.id, updated)] : []
-      return withQueuedOps(next, ops, s)
+      return next
     })
 
     if (!updated) return false
@@ -1147,8 +757,7 @@ export const useTradeStore = create((set, get) => ({
       })
 
       const next = { trades }
-      const ops = shouldQueueCloudOps() && updated ? [makeCloudOp('trade', 'upsert', updated.id, updated)] : []
-      return withQueuedOps(next, ops, s)
+      return next
     })
 
     if (!updated) return false
@@ -1159,33 +768,25 @@ export const useTradeStore = create((set, get) => ({
 
   deleteTrade: (id) => {
     const before = get()
-    const ops = shouldQueueCloudOps()
-      ? [snapshotCloudOp('before-delete-trade', before), makeCloudOp('trade', 'delete', id)]
-      : []
-    set(s => withQueuedOps({
+    const beforeSnapshot = appendRecoverySnapshot('before-delete-trade', before)
+    set(s => ({
       trades: s.trades.filter(t => t.id !== id),
       deletedTradeIds: [...new Set([...s.deletedTradeIds, id])].slice(-1000),
-    }, ops, s))
-    const saved = persistAfterMutation(get, set)
+    }))
+    const saved = beforeSnapshot.then(() => persistAfterMutation(get, set, { snapshotKind: 'after-delete-trade' }))
     return mutationResult({ tradeId: id, deleted: true }, saved)
   },
 
   clearTrades: async () => {
     const before = get()
-    const ops = shouldQueueCloudOps()
-      ? [
-          snapshotCloudOp('before-clear-trades', before),
-          ...(before.trades || []).map(trade => makeCloudOp('trade', 'delete', trade.id)),
-          ...(before.importBatches || []).map(batch => makeCloudOp('batch', 'delete', batch.id)),
-        ]
-      : []
-    set(s => withQueuedOps({
+    const beforeSnapshot = appendRecoverySnapshot('before-clear-trades', before)
+    set(s => ({
       trades: [],
       importBatches: [],
       deletedTradeIds: [...new Set([...s.deletedTradeIds, ...s.trades.map(t => t.id)])].slice(-1000),
       deletedBatchIds: [...new Set([...s.deletedBatchIds, ...s.importBatches.map(b => b.id)])].slice(-1000),
-    }, ops, s))
-    const saved = persistAfterMutation(get, set)
+    }))
+    const saved = beforeSnapshot.then(() => persistAfterMutation(get, set, { snapshotKind: 'after-clear-trades' }))
     return mutationResult({ cleared: true }, saved)
   },
 
@@ -1193,9 +794,7 @@ export const useTradeStore = create((set, get) => ({
     let recalced = []
     set(s => {
       recalced = s.trades.map(t => prepareTradeForWrite({ ...t, rMultiple: null, rMultipleATR: null, riskReward: null }, t))
-      const next = { trades: recalced }
-      const ops = shouldQueueCloudOps() ? recalced.map(trade => makeCloudOp('trade', 'upsert', trade.id, trade)) : []
-      return withQueuedOps(next, ops, s)
+      return { trades: recalced }
     })
     const saved = persistAfterMutation(get, set)
     return mutationResult({ count: recalced.length }, saved)
@@ -1234,9 +833,7 @@ export const useTradeStore = create((set, get) => ({
       const compressed = prepareTradeForWrite({ ...trade, screenshotEntry: entry, screenshotExit: exit, screenshotsAdditional: additional }, trade)
       updated.push(compressed); count++
     }
-    const changed = updated.filter(t => t.screenshotEntry || t.screenshotExit)
-    const ops = shouldQueueCloudOps() ? changed.map(trade => makeCloudOp('trade', 'upsert', trade.id, trade)) : []
-    set(s => withQueuedOps({ trades: updated }, ops, s))
+    set({ trades: updated })
     await persistAfterMutation(get, set)
     return count
   },
@@ -1245,11 +842,10 @@ export const useTradeStore = create((set, get) => ({
 
   addActivity: (activity) => {
     const a = { ...activity, id: activity.id || uuidv4() }
-    const ops = shouldQueueCloudOps() ? [makeCloudOp('activity', 'upsert', a.id, a)] : []
-    set(s => withQueuedOps({
+    set(s => ({
       accountActivities: [...s.accountActivities, a],
       deletedActivityIds: s.deletedActivityIds.filter(id => id !== a.id),
-    }, ops, s))
+    }))
     const saved = persistAfterMutation(get, set)
     return mutationResult({ activityId: a.id, activity: a }, saved)
   },
@@ -1272,32 +868,26 @@ export const useTradeStore = create((set, get) => ({
         accountActivities: [...s.accountActivities, ...toAdd],
         deletedActivityIds: s.deletedActivityIds.filter(id => !addedIds.has(id)),
       }
-      const ops = shouldQueueCloudOps() ? toAdd.map(activity => makeCloudOp('activity', 'upsert', activity.id, activity)) : []
-      return withQueuedOps(next, ops, s)
+      return next
     })
     const saved = persistAfterMutation(get, set)
     return mutationResult({ count: toAdd.length, activities: toAdd }, saved)
   },
 
   deleteActivity: (id) => {
-    const ops = shouldQueueCloudOps() ? [makeCloudOp('activity', 'delete', id)] : []
-    set(s => withQueuedOps({
+    set(s => ({
       accountActivities: s.accountActivities.filter(a => a.id !== id),
       deletedActivityIds: [...new Set([...s.deletedActivityIds, id])].slice(-1000),
-    }, ops, s))
+    }))
     const saved = persistAfterMutation(get, set)
     return mutationResult({ activityId: id, deleted: true }, saved)
   },
 
   clearActivities: async () => {
-    const before = get()
-    const ops = shouldQueueCloudOps()
-      ? (before.accountActivities || []).map(activity => makeCloudOp('activity', 'delete', activity.id))
-      : []
-    set(s => withQueuedOps({
+    set(s => ({
       accountActivities: [],
       deletedActivityIds: [...new Set([...s.deletedActivityIds, ...s.accountActivities.map(a => a.id)])].slice(-1000),
-    }, ops, s))
+    }))
     const saved = persistAfterMutation(get, set)
     return mutationResult({ cleared: true }, saved)
   },

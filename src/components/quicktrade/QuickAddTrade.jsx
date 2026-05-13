@@ -31,7 +31,7 @@ export default function QuickAddTrade() {
   const stopUserEdited = useRef(false)
   const tpUserEdited = useRef(false)
 
-  const { addTrade, getAccounts, getAccountBalance, pendingCloudWriteCount, lastCloudSaveError } = useTradeStore()
+  const { addTrade, getAccounts, getAccountBalance } = useTradeStore()
   const { tpMultiplier = 2 } = useSettingsStore()
 
   const accounts = useMemo(() => {
@@ -178,9 +178,6 @@ export default function QuickAddTrade() {
                   <Check size={20} className="text-accent-green" />
                 </div>
                 <p className="text-sm text-accent-green font-medium">Trade saved locally!</p>
-                {pendingCloudWriteCount > 0 && (
-                  <p className="text-xs text-accent-yellow">Cloud backup pending: {pendingCloudWriteCount}</p>
-                )}
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-3">
@@ -336,9 +333,6 @@ export default function QuickAddTrade() {
                   <p className="text-[11px] text-accent-red -mt-1">
                     Local save failed: {saveError}. Keep this open and export a backup before clearing browser data.
                   </p>
-                )}
-                {!saveError && lastCloudSaveError && (
-                  <p className="text-[11px] text-accent-yellow -mt-1">Cloud backup retrying: {lastCloudSaveError}</p>
                 )}
 
                 {/* Live risk preview */}
