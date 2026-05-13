@@ -231,7 +231,15 @@ function StrengthIndicator({ symbol, entryPrice }) {
 
 // ── Main form ──────────────────────────────────────────────────────────────────
 export default function ManualEntryForm({ onClose }) {
-  const { addTrade, updateTrade, getAccounts, getAccountBalance, trades } = useTradeStore()
+  const {
+    addTrade,
+    updateTrade,
+    getAccounts,
+    getAccountBalance,
+    trades,
+    lastCloudSaveError,
+    pendingCloudWriteCount,
+  } = useTradeStore()
   const { accounts: settingsAccounts, edges, tpMultiplier = 2 } = useSettingsStore()
   const [form, setForm]                   = useState(BLANK)
   const [customAccount, setCustomAccount] = useState('')
@@ -239,6 +247,9 @@ export default function ManualEntryForm({ onClose }) {
   const [selectedOpenId, setSelectedOpenId] = useState('')
   const [atrLoading, setAtrLoading]       = useState(false)
   const [atrError, setAtrError]           = useState(null)
+  const [saving, setSaving]               = useState(false)
+  const [saveError, setSaveError]         = useState(null)
+  const [saveStatus, setSaveStatus]       = useState(null)
   const atrAutoFetchKey = useRef('')
   const stopUserEdited = useRef(false)
   const tpUserEdited = useRef(false)
@@ -395,10 +406,14 @@ export default function ManualEntryForm({ onClose }) {
     return ps > 0 ? ep * ps : 0
   }, [form.entryPrice, form.positionSize, exits])
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.symbol.trim()) return alert('Symbol is required')
 
     try {
+    setSaving(true)
+    setSaveError(null)
+    setSaveStatus(null)
+    let mutation = null
 
     const ep = parseFloat(form.entryPrice)   || null
     const sl = parseFloat(form.stopLoss)     || null
@@ -458,7 +473,7 @@ export default function ManualEntryForm({ onClose }) {
           ? form.status
           : totalPL > 0.01 ? 'Win' : totalPL < -0.01 ? 'Loss' : 'Scratch'
 
-        updateTrade(selectedOpenId, {
+        mutation = updateTrade(selectedOpenId, {
           status:    newStatus,
           pl:        parseFloat(totalPL.toFixed(4)),
           sellAmount: allGross - allComm,
@@ -478,7 +493,7 @@ export default function ManualEntryForm({ onClose }) {
         // Partial close — reduce remaining shares, keep status Open
         const proportionalBuy = origShares > 0 ? origBuyAmount * (remaining / origShares) : 0
 
-        updateTrade(selectedOpenId, {
+        mutation = updateTrade(selectedOpenId, {
           positionSize: remaining,
           _originalPositionSize: orig._originalPositionSize ?? origShares,
           _originalBuyAmount:    orig._originalBuyAmount ?? origBuyAmount,
@@ -525,7 +540,7 @@ export default function ManualEntryForm({ onClose }) {
       ? (atrRiskDollar / accountEquityAtEntry) * 100
       : null
 
-    addTrade({
+    mutation = addTrade({
       id:           uuidv4(),
       symbol:       form.symbol.toUpperCase().trim(),
       account:      form.account,
@@ -558,6 +573,10 @@ export default function ManualEntryForm({ onClose }) {
     })
     } // end else (new trade)
 
+    const saved = await mutation?.saved
+    if (saved && !saved.ok) throw new Error(saved.message || 'Local trade save failed.')
+    setSaveStatus('Saved locally')
+
     // Reset form and close — runs for both paths on success
     setForm(BLANK)
     setExits([])
@@ -569,7 +588,9 @@ export default function ManualEntryForm({ onClose }) {
 
     } catch (err) {
       console.error('[ManualEntry] save failed:', err)
-      alert(`Save failed: ${err?.message || String(err)}\n\nCheck the browser console for details.`)
+      setSaveError(err?.message || String(err))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -982,9 +1003,27 @@ export default function ManualEntryForm({ onClose }) {
         <textarea className="input min-h-[70px] resize-y text-sm rounded-2xl bg-surface-200/70" value={form.exitNotes} onChange={e => set('exitNotes', e.target.value)} placeholder="Why did you exit?" />
       </div>
 
+      {(saveStatus || saveError || lastCloudSaveError || pendingCloudWriteCount > 0) && (
+        <div className={`rounded-xl border px-3 py-2 text-xs ${
+          saveError
+            ? 'border-accent-red/30 bg-accent-red/10 text-accent-red'
+            : 'border-accent-green/25 bg-accent-green/10 text-accent-green'
+        }`}>
+          {saveError
+            ? `Local save failed: ${saveError}. Keep this form open and export a backup before clearing browser data.`
+            : saveStatus || 'Saved locally'}
+          {!saveError && pendingCloudWriteCount > 0 && (
+            <span className="ml-2 text-accent-yellow">Cloud backup pending: {pendingCloudWriteCount}</span>
+          )}
+          {!saveError && lastCloudSaveError && (
+            <span className="ml-2 text-accent-yellow">Cloud retrying: {lastCloudSaveError}</span>
+          )}
+        </div>
+      )}
+
       <div className="sticky bottom-0 flex gap-2 pt-3 pb-1 bg-gradient-to-t from-[#121a2a] via-[#121a2a]/95 to-transparent">
-        <button type="button" onClick={handleSave} className="btn-primary rounded-xl px-5">
-          {selectedOpenId ? 'Save Close' : 'Add Trade'}
+        <button type="button" onClick={handleSave} disabled={saving} className="btn-primary rounded-xl px-5 disabled:opacity-60 disabled:cursor-wait">
+          {saving ? 'Saving locally...' : selectedOpenId ? 'Save Close' : 'Add Trade'}
         </button>
         <button type="button" onClick={onClose} className="btn-ghost rounded-xl">Cancel</button>
       </div>

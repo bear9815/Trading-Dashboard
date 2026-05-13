@@ -26,10 +26,12 @@ export default function QuickAddTrade() {
   const [success, setSuccess] = useState(false)
   const [atrLoading, setAtrLoading] = useState(false)
   const [atrError, setAtrError] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState(null)
   const stopUserEdited = useRef(false)
   const tpUserEdited = useRef(false)
 
-  const { addTrade, getAccounts, getAccountBalance } = useTradeStore()
+  const { addTrade, getAccounts, getAccountBalance, pendingCloudWriteCount, lastCloudSaveError } = useTradeStore()
   const { tpMultiplier = 2 } = useSettingsStore()
 
   const accounts = useMemo(() => {
@@ -88,42 +90,54 @@ export default function QuickAddTrade() {
     }
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
-    const actualAtrRiskPct = atrRiskDollar != null && accountBalance > 0
-      ? (atrRiskDollar / accountBalance) * 100
-      : null
-    const trade = enrichTrade({
-      id:           uuidv4(),
-      symbol:       form.symbol.trim().toUpperCase(),
-      account:      form.account,
-      position:     form.position,
-      entryDate:    form.entryDate ? new Date(form.entryDate).toISOString() : new Date().toISOString(),
-      entryPrice:   parseFloat(form.entryPrice),
-      stopLoss:     parseFloat(form.stopLoss) || null,
-      takeProfit:   parseFloat(form.takeProfit) || null,
-      atrValue:     parseFloat(form.atrValue)  || null,
-      positionSize: parseFloat(form.positionSize) || null,
-      accountEquityAtEntry: accountBalance > 0 ? accountBalance : null,
-      riskTierPct:  actualAtrRiskPct != null ? nearestAtrRiskTier(actualAtrRiskPct) : null,
-      status:       'Open',
-      market:       'Stock',
-    })
-    addTrade(trade)
-    setSuccess(true)
-    setTimeout(() => {
-      setOpen(false)
-      setSuccess(false)
-      setAtrError(null)
-      stopUserEdited.current = false
-      tpUserEdited.current = false
-      setForm({ ...BLANK, entryDate: new Date().toISOString().slice(0, 16) })
-    }, 1200)
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const actualAtrRiskPct = atrRiskDollar != null && accountBalance > 0
+        ? (atrRiskDollar / accountBalance) * 100
+        : null
+      const trade = enrichTrade({
+        id:           uuidv4(),
+        symbol:       form.symbol.trim().toUpperCase(),
+        account:      form.account,
+        position:     form.position,
+        entryDate:    form.entryDate ? new Date(form.entryDate).toISOString() : new Date().toISOString(),
+        entryPrice:   parseFloat(form.entryPrice),
+        stopLoss:     parseFloat(form.stopLoss) || null,
+        takeProfit:   parseFloat(form.takeProfit) || null,
+        atrValue:     parseFloat(form.atrValue)  || null,
+        positionSize: parseFloat(form.positionSize) || null,
+        accountEquityAtEntry: accountBalance > 0 ? accountBalance : null,
+        riskTierPct:  actualAtrRiskPct != null ? nearestAtrRiskTier(actualAtrRiskPct) : null,
+        status:       'Open',
+        market:       'Stock',
+      })
+      const result = addTrade(trade)
+      const saved = await result.saved
+      if (!saved.ok) throw new Error(saved.message || 'Local trade save failed.')
+      setSuccess(true)
+      setTimeout(() => {
+        setOpen(false)
+        setSuccess(false)
+        setAtrError(null)
+        setSaveError(null)
+        stopUserEdited.current = false
+        tpUserEdited.current = false
+        setForm({ ...BLANK, entryDate: new Date().toISOString().slice(0, 16) })
+      }, 1200)
+    } catch (err) {
+      setSaveError(err?.message || String(err))
+    } finally {
+      setSaving(false)
+    }
   }
 
   function handleClose() {
     setOpen(false)
     setAtrError(null)
+    setSaveError(null)
     stopUserEdited.current = false
     tpUserEdited.current = false
     setForm({ ...BLANK, entryDate: new Date().toISOString().slice(0, 16) })
@@ -163,7 +177,10 @@ export default function QuickAddTrade() {
                 <div className="w-10 h-10 rounded-full bg-accent-green/20 flex items-center justify-center">
                   <Check size={20} className="text-accent-green" />
                 </div>
-                <p className="text-sm text-accent-green font-medium">Trade added!</p>
+                <p className="text-sm text-accent-green font-medium">Trade saved locally!</p>
+                {pendingCloudWriteCount > 0 && (
+                  <p className="text-xs text-accent-yellow">Cloud backup pending: {pendingCloudWriteCount}</p>
+                )}
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-3">
@@ -315,6 +332,14 @@ export default function QuickAddTrade() {
                   </p>
                 )}
                 {atrError && <p className="text-[11px] text-accent-red -mt-1">{atrError}</p>}
+                {saveError && (
+                  <p className="text-[11px] text-accent-red -mt-1">
+                    Local save failed: {saveError}. Keep this open and export a backup before clearing browser data.
+                  </p>
+                )}
+                {!saveError && lastCloudSaveError && (
+                  <p className="text-[11px] text-accent-yellow -mt-1">Cloud backup retrying: {lastCloudSaveError}</p>
+                )}
 
                 {/* Live risk preview */}
                 {(riskDollar != null || atrRiskDollar != null) && (
@@ -345,8 +370,8 @@ export default function QuickAddTrade() {
                 )}
 
                 {/* Submit */}
-                <button type="submit" className="btn btn-primary w-full mt-1">
-                  Add Trade
+                <button type="submit" disabled={saving} className="btn btn-primary w-full mt-1 disabled:opacity-60 disabled:cursor-wait">
+                  {saving ? 'Saving locally...' : 'Add Trade'}
                 </button>
 
               </form>

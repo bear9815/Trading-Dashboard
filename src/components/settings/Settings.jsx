@@ -23,6 +23,13 @@ function SectionTitle({ children }) {
   return <h3 className="text-sm font-semibold text-gray-300 mb-3 pb-2 border-b border-white/10">{children}</h3>
 }
 
+function formatTimestamp(value) {
+  if (!value) return 'Not yet'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Not yet'
+  return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
 export default function Settings() {
   const {
     apiKey, setApiKey,
@@ -43,7 +50,22 @@ export default function Settings() {
     edges, addEdge, removeEdge,
   } = useSettingsStore()
 
-  const { trades, accountActivities, clearTrades, clearActivities, recalcAllTrades, addActivity, deleteActivity, compressAllScreenshots } = useTradeStore()
+  const {
+    trades,
+    accountActivities,
+    clearTrades,
+    clearActivities,
+    recalcAllTrades,
+    addActivity,
+    deleteActivity,
+    compressAllScreenshots,
+    lastSaveError,
+    lastSavedAt,
+    lastCloudSaveError,
+    lastCloudSyncedAt,
+    pendingCloudWriteCount,
+    flushPendingCloudOps,
+  } = useTradeStore()
   const { entries } = useJournalStore()
   const {
     connected: schwabConnected,
@@ -1029,6 +1051,41 @@ export default function Settings() {
           </div>
         )}
 
+        <div className="rounded-lg border border-white/10 bg-surface-200/50 p-3 text-xs">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {lastSaveError ? (
+                <AlertCircle size={14} className="text-accent-red" />
+              ) : pendingCloudWriteCount > 0 || lastCloudSaveError ? (
+                <Clock size={14} className="text-accent-yellow" />
+              ) : (
+                <CheckCircle size={14} className="text-accent-green" />
+              )}
+              <div>
+                <p className="font-medium text-gray-300">Trade Save Integrity</p>
+                <p className="text-gray-500">Local save: {formatTimestamp(lastSavedAt)} · Cloud sync: {formatTimestamp(lastCloudSyncedAt)}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => flushPendingCloudOps()}
+              disabled={pendingCloudWriteCount === 0}
+              className="btn-ghost text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Retry Cloud
+            </button>
+          </div>
+          {lastSaveError && (
+            <p className="mt-2 text-accent-red">Local save warning: {lastSaveError}. Export a backup before clearing browser data.</p>
+          )}
+          {!lastSaveError && pendingCloudWriteCount > 0 && (
+            <p className="mt-2 text-accent-yellow">{pendingCloudWriteCount} cloud backup write{pendingCloudWriteCount === 1 ? '' : 's'} pending retry.</p>
+          )}
+          {!lastSaveError && lastCloudSaveError && (
+            <p className="mt-2 text-accent-yellow">Cloud backup retrying: {lastCloudSaveError}</p>
+          )}
+        </div>
+
         <div className="flex flex-wrap gap-2">
           <button onClick={handleExportLocalBackup} className="btn-ghost text-xs">Export Backup (JSON)</button>
           <button
@@ -1051,14 +1108,24 @@ export default function Settings() {
             {compressing ? '⏳ Compressing…' : '🗜 Compress Screenshots'}
           </button>
           <button
-            onClick={() => { recalcAllTrades(); alert(`Recalculated R-multiples, 2R targets, and fixed any Win/Loss status mismatches for ${trades.length} trades.`) }}
+            onClick={async () => {
+              const result = recalcAllTrades()
+              await result?.saved
+              alert(`Recalculated R-multiples, 2R targets, and fixed any Win/Loss status mismatches for ${trades.length} trades.`)
+            }}
             className="btn-ghost text-xs"
             title="Re-derives R-multiples, fills missing 2R targets, and corrects Win/Loss status that contradicts actual P&L"
           >
             Recalculate &amp; Fix Status
           </button>
           <button
-            onClick={() => { if (confirm('Delete ALL trades? This cannot be undone.')) { clearTrades(); clearActivities() } }}
+            onClick={async () => {
+              if (confirm('Delete ALL trades? This cannot be undone.')) {
+                const tradeResult = await clearTrades()
+                const activityResult = await clearActivities()
+                await Promise.all([tradeResult?.saved, activityResult?.saved].filter(Boolean))
+              }
+            }}
             className="btn-danger text-xs"
           >
             Clear All Trades
@@ -1082,7 +1149,7 @@ export default function Settings() {
 
       {/* About */}
       <div className="card text-xs text-gray-500 space-y-1">
-        <p className="font-medium text-gray-400">Trading Dashboard v0.1.0</p>
+        <p className="font-medium text-gray-400">Trading Dashboard v{__APP_VERSION__}</p>
         <p>Core trading data stays local in your browser. Schwab live tokens stay in secure server-side KV when connected.</p>
         <p>Supports ThinkorSwim, Interactive Brokers, and Fidelity CSV imports.</p>
       </div>
