@@ -20,6 +20,7 @@ import {
   buildTradingViewEntriesBySymbol,
   isTradingViewWatchlistUrl,
 } from '../../utils/tradingViewWatchlist.js'
+import { buildTradingViewExportFile } from '../../utils/tradingViewExport.js'
 import {
   buildAnchoredRsSnapshot,
   buildAvwapOverlays,
@@ -199,6 +200,16 @@ function exportCsv(rows) {
   const a = document.createElement('a')
   a.href = url
   a.download = 'growth-watchlist-map.csv'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function downloadTextFile(content, filename) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -2222,6 +2233,20 @@ export default function ThemeWatchlist({
     setStatus(`Saved view: ${name}`)
   }
 
+  function handleExportTradingView() {
+    const exportFile = buildTradingViewExportFile({
+      listName: `${activeList?.name || 'Watchlist'} Table`,
+      symbols: filteredRows.map(row => row.symbol),
+    })
+    if (!exportFile.content) {
+      setError('No filtered symbols to export.')
+      return
+    }
+    setError('')
+    downloadTextFile(exportFile.content, exportFile.filename)
+    setStatus(`Exported ${filteredRows.length} filtered symbol${filteredRows.length === 1 ? '' : 's'} for TradingView.`)
+  }
+
   function applyView(view) {
     setQuery(view.query || '')
     setSortKey(view.sortKey || 'momentum')
@@ -2781,6 +2806,16 @@ export default function ThemeWatchlist({
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={handleExportTradingView}
+              disabled={!filteredRows.length}
+              className="flex items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-gray-400 transition-all hover:border-white/20 hover:text-gray-200 disabled:opacity-40"
+              title="Download the currently filtered symbols for TradingView"
+            >
+              <Download size={12} />
+              Export TV
+            </button>
           </div>
 
           <CollapsibleSection
