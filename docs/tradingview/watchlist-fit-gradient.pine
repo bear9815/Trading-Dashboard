@@ -1,0 +1,160 @@
+//@version=5
+indicator("Watchlist Fit Gradient", overlay=true, max_labels_count=50)
+
+benchmarkSymbol = input.symbol("SPY", "Benchmark Symbol")
+anchorTime1 = input.time(timestamp("2026-01-01T00:00:00"), "Anchor Date 1")
+anchorTime2 = input.time(timestamp("2026-04-02T00:00:00"), "Anchor Date 2")
+anchorTime3 = input.time(timestamp("2026-07-01T00:00:00"), "Anchor Date 3")
+anchorTime4 = input.time(timestamp("2026-08-15T00:00:00"), "Anchor Date 4")
+anchorTime5 = input.time(timestamp("2026-10-01T00:00:00"), "Anchor Date 5")
+rollingWindow = input.int(63, "Rolling RS Window", minval=1)
+anchoredLookback = input.int(50, "Anchored RS StdDev Lookback", minval=2)
+rollingLookback = input.int(50, "Rolling RS StdDev Lookback", minval=2)
+signalLength = input.int(9, "Signal EMA Length", minval=1)
+showDebugTable = input.bool(true, "Show Debug Table")
+showFitPlot = input.bool(false, "Show Fit Score Plot")
+neutralTransparency = input.int(92, "Neutral Transparency", minval=0, maxval=100)
+extremeTransparency = input.int(72, "Extreme Transparency", minval=0, maxval=100)
+
+greenThreshold = 28.0
+redThreshold = -18.0
+fitScoreCeiling = 52.0
+
+benchmarkClose = request.security(benchmarkSymbol, timeframe.period, close, barmerge.gaps_off, barmerge.lookahead_off)
+rsRatio = not na(benchmarkClose) and benchmarkClose != 0 ? close / benchmarkClose : na
+
+clampValue(value, minValue, maxValue) =>
+    math.min(math.max(value, minValue), maxValue)
+
+mixColor(colorA, colorB, weight) =>
+    blended = clampValue(weight, 0.0, 1.0)
+    red = math.round(color.r(colorA) + (color.r(colorB) - color.r(colorA)) * blended)
+    green = math.round(color.g(colorA) + (color.g(colorB) - color.g(colorA)) * blended)
+    blue = math.round(color.b(colorA) + (color.b(colorB) - color.b(colorA)) * blended)
+    color.rgb(int(red), int(green), int(blue))
+
+scoreZ(zScore) =>
+    na(zScore) ? 0.0 : clampValue(zScore * 12.0, -36.0, 36.0)
+
+scoreVsSignal(zScore, signalLine) =>
+    na(zScore) or na(signalLine) ? 0.0 : zScore >= signalLine ? 8.0 : -8.0
+
+momentumLabel(zScore, previousZ) =>
+    na(zScore) or na(previousZ) ? "neutral" : zScore >= 0 ? (zScore > previousZ ? "strengthening" : "pulling_back") : (zScore > previousZ ? "bouncing" : "weakening")
+
+scoreMomentum(momentum) =>
+    momentum == "strengthening" ? 8.0 : momentum == "pulling_back" ? 1.0 : momentum == "bouncing" ? 2.0 : momentum == "weakening" ? -8.0 : 0.0
+
+fitReason(anchoredReady, rollingReady, anchoredZ, anchoredSignal, rollingZ, rollingSignal) =>
+    anchoredConstructive = anchoredReady and anchoredZ >= 0 and anchoredZ >= anchoredSignal
+    rollingConstructive = rollingReady and rollingZ >= 0 and rollingZ >= rollingSignal
+    not anchoredReady and not rollingReady ? "Anchored and rolling RS data are missing." :
+     not anchoredReady ? "Rolling RS is available, but anchored RS is missing." :
+     not rollingReady ? "Anchored RS is available, but rolling RS is missing." :
+     rollingConstructive and anchoredConstructive ? "Rolling strong, anchored confirmed." :
+     rollingConstructive and not anchoredConstructive ? "Rolling strong, anchored lagging." :
+     not rollingConstructive and anchoredConstructive ? "Anchored constructive, rolling still weak." :
+     "Both RS regimes weak."
+
+formatDate(ts) =>
+    na(ts) ? "n/a" : str.tostring(year(ts)) + "-" + str.tostring(month(ts)) + "-" + str.tostring(dayofmonth(ts))
+
+rollingRawPerformance = not na(rsRatio) and not na(rsRatio[rollingWindow]) ? rsRatio - rsRatio[rollingWindow] : na
+rollingStdDev = ta.stdev(rsRatio, rollingLookback)
+rollingZ = not na(rollingRawPerformance) and not na(rollingStdDev) and rollingStdDev != 0 ? rollingRawPerformance / rollingStdDev : na
+rollingSignal = ta.ema(rollingZ, signalLength)
+rollingMomentum = momentumLabel(rollingZ, rollingZ[1])
+rollingHasData = not na(rollingZ)
+rollingRawScore = rollingHasData ? scoreZ(rollingZ) + scoreVsSignal(rollingZ, rollingSignal) + scoreMomentum(rollingMomentum) : 0.0
+rollingWeighted = rollingRawScore * 0.6
+
+activeAnchorTime = time >= anchorTime1 ? anchorTime1 : na
+activeAnchorIndex = time >= anchorTime1 ? 1 : na
+
+if time >= anchorTime2 and (na(activeAnchorTime) or anchorTime2 > activeAnchorTime)
+    activeAnchorTime := anchorTime2
+    activeAnchorIndex := 2
+if time >= anchorTime3 and (na(activeAnchorTime) or anchorTime3 > activeAnchorTime)
+    activeAnchorTime := anchorTime3
+    activeAnchorIndex := 3
+if time >= anchorTime4 and (na(activeAnchorTime) or anchorTime4 > activeAnchorTime)
+    activeAnchorTime := anchorTime4
+    activeAnchorIndex := 4
+if time >= anchorTime5 and (na(activeAnchorTime) or anchorTime5 > activeAnchorTime)
+    activeAnchorTime := anchorTime5
+    activeAnchorIndex := 5
+
+anchorChanged = not na(activeAnchorTime) and (na(activeAnchorTime[1]) or activeAnchorTime != activeAnchorTime[1])
+
+var float anchoredBaseRatio = na
+if na(activeAnchorTime)
+    anchoredBaseRatio := na
+else
+    if anchorChanged
+        anchoredBaseRatio := na
+    if na(anchoredBaseRatio) and not na(rsRatio)
+        anchoredBaseRatio := rsRatio
+
+anchoredStdDev = ta.stdev(rsRatio, anchoredLookback)
+anchoredZ = not na(anchoredBaseRatio) and not na(anchoredStdDev) and anchoredStdDev != 0 ? (rsRatio - anchoredBaseRatio) / anchoredStdDev : na
+anchoredSignal = ta.ema(anchoredZ, signalLength)
+anchoredMomentum = momentumLabel(anchoredZ, anchoredZ[1])
+anchoredHasData = not na(anchoredZ)
+anchoredRawScore = anchoredHasData ? scoreZ(anchoredZ) + scoreVsSignal(anchoredZ, anchoredSignal) + scoreMomentum(anchoredMomentum) : 0.0
+anchoredWeighted = anchoredRawScore * 0.4
+
+fitReady = anchoredHasData and rollingHasData
+hasAnyData = anchoredHasData or rollingHasData
+fitScore = hasAnyData ? anchoredWeighted + rollingWeighted : na
+fitLabel = not hasAnyData ? "Needs Data" : fitReady and fitScore >= greenThreshold ? "Strong Fit" : fitReady and fitScore <= redThreshold ? "Avoid" : "Mixed"
+fitBucket = not hasAnyData ? "neutral" : fitReady and fitScore >= greenThreshold ? "green" : fitReady and fitScore <= redThreshold ? "red" : "orange"
+reasonText = fitReason(anchoredHasData, rollingHasData, anchoredZ, anchoredSignal, rollingZ, rollingSignal)
+activeAnchorLabel = na(activeAnchorTime) ? "n/a" : "A" + str.tostring(activeAnchorIndex) + " · " + formatDate(activeAnchorTime)
+
+redColor = color.rgb(239, 68, 68)
+orangeColor = color.rgb(245, 158, 11)
+greenColor = color.rgb(34, 197, 94)
+neutralColor = color.rgb(148, 163, 184)
+
+scoreClamped = clampValue(nz(fitScore, 0.0), -fitScoreCeiling, fitScoreCeiling)
+gradientBase = not hasAnyData ? neutralColor : scoreClamped < 0 ? mixColor(redColor, orangeColor, (scoreClamped + fitScoreCeiling) / fitScoreCeiling) : mixColor(orangeColor, greenColor, scoreClamped / fitScoreCeiling)
+gradientStrength = not hasAnyData ? 0.15 : math.abs(scoreClamped) / fitScoreCeiling
+dynamicTransparency = math.round(neutralTransparency + (extremeTransparency - neutralTransparency) * gradientStrength)
+backgroundColor = color.new(gradientBase, int(clampValue(dynamicTransparency, 0, 100)))
+fallbackColor = color.new(hasAnyData ? orangeColor : neutralColor, hasAnyData ? 90 : 94)
+
+bgcolor(fitReady ? backgroundColor : fallbackColor, title="Watchlist Fit Gradient")
+
+plot(showFitPlot ? fitScore : na, title="Fit Score", color=gradientBase, linewidth=2, style=plot.style_line)
+plot(showFitPlot ? greenThreshold : na, title="Green Threshold", color=color.new(greenColor, 55), linewidth=1, style=plot.style_line)
+plot(showFitPlot ? redThreshold : na, title="Red Threshold", color=color.new(redColor, 55), linewidth=1, style=plot.style_line)
+plot(showFitPlot ? 0 : na, title="Neutral", color=color.new(orangeColor, 65), linewidth=1, style=plot.style_line)
+
+fmt(value) =>
+    na(value) ? "n/a" : str.tostring(value, "#.##")
+
+var table debugTable = table.new(position.top_right, 2, 10, border_width=1)
+if showDebugTable and barstate.islast
+    table.cell(debugTable, 0, 0, "Metric", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(debugTable, 1, 0, "Value", text_color=color.white, bgcolor=color.new(color.black, 0))
+    table.cell(debugTable, 0, 1, "Fit", text_color=color.white)
+    table.cell(debugTable, 1, 1, fitLabel + " (" + fitBucket + ")", text_color=gradientBase)
+    table.cell(debugTable, 0, 2, "Fit Score", text_color=color.white)
+    table.cell(debugTable, 1, 2, fmt(fitScore), text_color=color.white)
+    table.cell(debugTable, 0, 3, "Rolling", text_color=color.white)
+    table.cell(debugTable, 1, 3, "z " + fmt(rollingZ) + " | sig " + fmt(rollingSignal), text_color=color.white)
+    table.cell(debugTable, 0, 4, "Rolling Score", text_color=color.white)
+    table.cell(debugTable, 1, 4, rollingMomentum + " | " + fmt(rollingWeighted), text_color=color.white)
+    table.cell(debugTable, 0, 5, "Anchored", text_color=color.white)
+    table.cell(debugTable, 1, 5, "z " + fmt(anchoredZ) + " | sig " + fmt(anchoredSignal), text_color=color.white)
+    table.cell(debugTable, 0, 6, "Anchored Score", text_color=color.white)
+    table.cell(debugTable, 1, 6, anchoredMomentum + " | " + fmt(anchoredWeighted), text_color=color.white)
+    table.cell(debugTable, 0, 7, "Active Anchor", text_color=color.white)
+    table.cell(debugTable, 1, 7, activeAnchorLabel, text_color=color.white)
+    table.cell(debugTable, 0, 8, "Anchor Switch", text_color=color.white)
+    table.cell(debugTable, 1, 8, anchorChanged ? "yes" : "no", text_color=color.white)
+    table.cell(debugTable, 0, 9, "Reason", text_color=color.white)
+    table.cell(debugTable, 1, 9, reasonText, text_color=color.white)
+
+if not showDebugTable and barstate.islast
+    table.clear(debugTable, 0, 0, 1, 9)
