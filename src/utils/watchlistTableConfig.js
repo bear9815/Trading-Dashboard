@@ -7,6 +7,7 @@ export const DEFAULT_WATCHLIST_COLUMN_ORDER = [
   'majorCustomers',
   'dependencies',
   'relatedDriver',
+  'characterChange',
   'anchoredRs',
   'rollingRs',
   'ytdAvwap',
@@ -24,6 +25,7 @@ export const DEFAULT_WATCHLIST_COLUMN_ORDER = [
 
 export const WATCHLIST_SYMBOL_SORT_OPTIONS = [
   { key: 'symbol', label: 'Symbol', chartsSupported: true },
+  { key: 'characterChange', label: 'Character', chartsSupported: true },
   { key: 'rollingRs', label: 'Rolling Z', chartsSupported: true },
   { key: 'anchoredRs', label: 'Anchored Z', chartsSupported: true },
   { key: 'ytdAvwap', label: 'YTD AVWAP', chartsSupported: true },
@@ -47,6 +49,12 @@ export const WATCHLIST_COLUMN_PRESETS = [
     label: 'RS Focus',
     description: 'Best for stock selection off your winning-characteristics analytics.',
     columns: ['symbol', 'companyName', 'anchoredRs', 'rollingRs', 'ytdAvwap', 'relatedDriver', 'themeLinks', 'actions'],
+  },
+  {
+    key: 'character_change',
+    label: 'Character Change',
+    description: 'Adaptive scan for new leadership during benchmark pullbacks or consolidations.',
+    columns: ['symbol', 'companyName', 'ecosystem', 'theme', 'characterChange', 'rollingRs', 'anchoredRs', 'ytdAvwap', 'dailyExpansion', 'actions'],
   },
   {
     key: 'research',

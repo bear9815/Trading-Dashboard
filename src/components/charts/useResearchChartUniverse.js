@@ -13,6 +13,7 @@ import {
   resolveLatestAnchorDate,
 } from '../../utils/tradeReviewChart.js'
 import { buildSqueezeSeries } from '../../utils/squeezeAnalytics.js'
+import { buildCharacterChangeSeries, buildCharacterChangeSnapshot } from '../../utils/characterChangeSignal.js'
 
 const WATCHLIST_HISTORY_TTL_MS = 6 * 60 * 60 * 1000
 const WATCHLIST_HISTORY_CONCURRENCY = 8
@@ -135,6 +136,8 @@ export function buildChartDataFromBars(
       weeklyKeltnerShades: [],
       dailyAnchoredRsGradient: [],
       weeklyRollingRsGradient: [],
+      dailyCharacterChangeBands: [],
+      dailyCharacterChangeSnapshot: { label: 'needs_data', score: null },
       dailySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], setupReadiness: [], triggerMarkers: [], snapshot: { stateLabel: 'No Data', triggerState: 'No Data', setupReadinessScore: null } },
       weeklySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], setupReadiness: [], triggerMarkers: [], snapshot: { stateLabel: 'No Data', triggerState: 'No Data', setupReadinessScore: null } },
       dailySqueezeSnapshot: { stateLabel: 'No Data' },
@@ -151,6 +154,8 @@ export function buildChartDataFromBars(
       weeklyKeltnerShades: [],
       dailyAnchoredRsGradient: [],
       weeklyRollingRsGradient: [],
+      dailyCharacterChangeBands: [],
+      dailyCharacterChangeSnapshot: { label: 'needs_data', score: null },
       dailySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], setupReadiness: [], triggerMarkers: [], snapshot: { stateLabel: 'No Data', triggerState: 'No Data', setupReadinessScore: null } },
       weeklySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], setupReadiness: [], triggerMarkers: [], snapshot: { stateLabel: 'No Data', triggerState: 'No Data', setupReadinessScore: null } },
       dailySqueezeSnapshot: { stateLabel: 'No Data' },
@@ -182,6 +187,11 @@ export function buildChartDataFromBars(
   }
   const dailySqueeze = buildSqueezeSeries(dailyBars)
   const weeklySqueeze = buildSqueezeSeries(weeklyBars)
+  const dailyCharacterChangeBands = buildCharacterChangeSeries(
+    dailyBars,
+    benchmarkDailyBars,
+    dailyRollingRsGradient
+  )
   return {
     dailyBars,
     weeklyBars,
@@ -198,6 +208,12 @@ export function buildChartDataFromBars(
       ? collapseRollingGradientToWeekly(weeklyBars, dailyRollingRsGradient)
       : calculateRsGradient(weeklyBars, benchmarkWeeklyBars, tradeReviewChartSettings?.weeklyRs)),
     ytdAvwap: buildYtdAvwapSnapshot(dailyBars, new Date()),
+    dailyCharacterChangeBands,
+    dailyCharacterChangeSnapshot: buildCharacterChangeSnapshot(
+      dailyBars,
+      benchmarkDailyBars,
+      dailyRollingRsGradient
+    ),
     dailySqueeze,
     weeklySqueeze,
     dailySqueezeSnapshot: dailySqueeze.snapshot,

@@ -44,5 +44,5 @@ test('daily pane preserves the current visible span while selecting anchored AVW
   assert.match(source, /const preservedVisibleBarsRef = useRef\(null\)/)
   assert.match(source, /const shouldRestoreVisibleBars = Number\.isFinite\(preservedVisibleBarsRef\.current\) && lastRequestedRangeRef\.current === dailyRangeMonths/)
   assert.match(source, /preservedVisibleBarsRef\.current = Math\.max\(/)
-  assert.match(source, /selectedAnchorId, showRsGradient\]/)
+  assert.match(source, /selectedAnchorId, showCharacterChange, showRsGradient\]/)
 })

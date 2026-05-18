@@ -127,6 +127,15 @@ function matchesFitFilter(row, fitBySymbol, fitFilter) {
   return fit?.fitColor === fitFilter
 }
 
+function matchesCharacterFilter(row, characterChangeBySymbol, characterFilter) {
+  if (!characterFilter || characterFilter === 'all') return true
+  const snapshot = characterChangeBySymbol[row.symbol]
+  if (characterFilter === 'active') return Boolean(snapshot?.isActive)
+  if (characterFilter === 'market_headwind') return Boolean(snapshot?.isActive && snapshot?.isMarketHeadwind)
+  if (characterFilter === 'needs_data') return snapshot?.label === 'needs_data' || !snapshot
+  return true
+}
+
 function compareFitRows(a, b, fitBySymbol, rankBySymbol, sortDir) {
   const af = fitBySymbol[a.symbol] || buildWatchlistFitSignal()
   const bf = fitBySymbol[b.symbol] || buildWatchlistFitSignal()
@@ -154,6 +163,7 @@ function numericSortValue(row, sortKey, snapshots) {
   if (sortKey === 'dailyExpansion') return snapshots.squeezeBySymbol?.[symbol]?.daily?.expansionScore
   if (sortKey === 'weeklyCompression') return snapshots.squeezeBySymbol?.[symbol]?.weekly?.compressionScore
   if (sortKey === 'weeklyExpansion') return snapshots.squeezeBySymbol?.[symbol]?.weekly?.expansionScore
+  if (sortKey === 'characterChange') return snapshots.characterChangeBySymbol?.[symbol]?.score
   return null
 }
 
@@ -171,10 +181,13 @@ export function filterAndSortWatchlistRows({
   finraBySymbol = {},
   finraEstimateBySymbol = {},
   squeezeBySymbol = {},
+  characterChangeBySymbol = {},
+  characterFilter = 'all',
 } = {}) {
   const base = rows
     .filter(row => matchesQuery(row, query))
     .filter(row => matchesFitFilter(row, fitBySymbol, fitFilter))
+    .filter(row => matchesCharacterFilter(row, characterChangeBySymbol, characterFilter))
 
   return [...base].sort((a, b) => {
     if (sortKey === 'momentum') {
@@ -187,7 +200,7 @@ export function filterAndSortWatchlistRows({
       return compareFitRows(a, b, fitBySymbol, rankBySymbol, sortDir)
     }
 
-    const numericSnapshots = { anchoredRsBySymbol, rollingRsBySymbol, ytdAvwapBySymbol, finraBySymbol, finraEstimateBySymbol, squeezeBySymbol }
+    const numericSnapshots = { anchoredRsBySymbol, rollingRsBySymbol, ytdAvwapBySymbol, finraBySymbol, finraEstimateBySymbol, squeezeBySymbol, characterChangeBySymbol }
     const an = numericSortValue(a, sortKey, numericSnapshots)
     const bn = numericSortValue(b, sortKey, numericSnapshots)
     if (Number.isFinite(an) || Number.isFinite(bn)) {

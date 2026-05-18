@@ -28,6 +28,7 @@ import { buildSqueezeSnapshot } from '../../utils/squeezeAnalytics.js'
 import { formatSqueezeMetric } from '../../utils/squeezeUi.js'
 import { INDUSTRY_ETF_UNIVERSE } from '../../utils/industryEtfUniverse.js'
 import { getChartsSymbolSortOptions } from '../../utils/watchlistTableConfig.js'
+import { buildCharacterChangeMap } from '../../utils/characterChangeSignal.js'
 
 const WATCHLIST_ORDER = DEFAULT_LIST_ORDER.reduce((next, id, index) => {
   next[id] = index
@@ -76,6 +77,21 @@ function fitBadgeTone(fitColor) {
   if (fitColor === 'orange') return 'border-amber-400/30 bg-amber-400/15 text-amber-100'
   if (fitColor === 'red') return 'border-rose-400/30 bg-rose-400/15 text-rose-100'
   return 'border-white/10 bg-white/[0.06] text-gray-300'
+}
+
+function characterBadgeTone(label) {
+  if (label === 'confirmed') return 'border-emerald-400/25 bg-emerald-400/[0.10] text-emerald-100'
+  if (label === 'emerging') return 'border-sky-400/25 bg-sky-400/[0.10] text-sky-100'
+  if (label === 'watching') return 'border-amber-400/25 bg-amber-400/[0.10] text-amber-100'
+  return 'border-white/10 bg-white/[0.04] text-gray-400'
+}
+
+function formatCharacterLabel(snapshot) {
+  if (!snapshot || snapshot.label === 'needs_data') return 'No Data'
+  if (snapshot.label === 'confirmed') return 'Confirmed'
+  if (snapshot.label === 'emerging') return 'Emerging'
+  if (snapshot.label === 'watching') return 'Watching'
+  return 'None'
 }
 
 function averageMetric(values) {
@@ -533,6 +549,7 @@ export default function Charts() {
   const ecosystemIpoEnabled = Boolean(tradeReviewChartSettings?.avwapPresets?.find(preset => preset.id === 'ipo')?.enabled)
   const dailyAnchoredRsEnabled = tradeReviewChartSettings?.researchChartsShowDailyAnchoredRs !== false
   const weeklyRollingRsEnabled = tradeReviewChartSettings?.researchChartsShowWeeklyRollingRs !== false
+  const characterChangeEnabled = Boolean(tradeReviewChartSettings?.researchChartsShowCharacterChange)
   const chartsWeeklyRightOffset = Number.isFinite(tradeReviewChartSettings?.researchChartsWeeklyRightOffset) ? tradeReviewChartSettings.researchChartsWeeklyRightOffset : 3
   const chartsDailyRightOffset = Number.isFinite(tradeReviewChartSettings?.researchChartsDailyRightOffset) ? tradeReviewChartSettings.researchChartsDailyRightOffset : 3
   const rollingRsWindow = tradeReviewChartSettings?.dailyRollingRs?.rsWindow ?? 63
@@ -582,6 +599,15 @@ export default function Charts() {
     })),
     [historyBarsBySymbol, symbols]
   )
+  const characterChangeBySymbol = useMemo(
+    () => buildCharacterChangeMap({
+      symbols,
+      historyBarsBySymbol,
+      benchmarkHistoryBars,
+      rollingRsBySymbol,
+    }),
+    [benchmarkHistoryBars, historyBarsBySymbol, rollingRsBySymbol, symbols]
+  )
 
   const filteredEcosystemGroups = useMemo(() => {
     const groups = buildEcosystemSidebarGroups(
@@ -619,6 +645,7 @@ export default function Charts() {
       if (sortKey === 'dailyExpansion') return squeezeBySymbol[row.symbol]?.daily?.expansionScore
       if (sortKey === 'weeklyCompression') return squeezeBySymbol[row.symbol]?.weekly?.compressionScore
       if (sortKey === 'weeklyExpansion') return squeezeBySymbol[row.symbol]?.weekly?.expansionScore
+      if (sortKey === 'characterChange') return characterChangeBySymbol[row.symbol]?.score
       if (sortKey === 'finraShortInterest') return coerceNumeric(row.finraShortInterest)
       if (sortKey === 'finraEstimatedShortInterest') return coerceNumeric(row.finraEstimatedShortInterest)
       return null
@@ -637,7 +664,7 @@ export default function Charts() {
       if (aSafe !== bSafe) return sortDir === 'asc' ? aSafe - bSafe : bSafe - aSafe
       return a.symbol.localeCompare(b.symbol)
     })
-  }, [anchoredRsBySymbol, filteredRows, rollingRsBySymbol, sortDir, sortKey, squeezeBySymbol, ytdAvwapBySymbol])
+  }, [anchoredRsBySymbol, characterChangeBySymbol, filteredRows, rollingRsBySymbol, sortDir, sortKey, squeezeBySymbol, ytdAvwapBySymbol])
 
   const sortedEcosystemGroups = useMemo(() => {
     const base = [...filteredEcosystemGroups]
@@ -1022,6 +1049,8 @@ export default function Charts() {
               onToggleWeeklyRs={() => setTradeReviewChartSettings({ researchChartsShowWeeklyRollingRs: !weeklyRollingRsEnabled })}
               dailyAnchoredRsEnabled={dailyAnchoredRsEnabled}
               onToggleDailyAnchoredRs={() => setTradeReviewChartSettings({ researchChartsShowDailyAnchoredRs: !dailyAnchoredRsEnabled })}
+              characterChangeEnabled={characterChangeEnabled}
+              onToggleCharacterChange={() => setTradeReviewChartSettings({ researchChartsShowCharacterChange: !characterChangeEnabled })}
               onAddAvwap={isEcosystemMode ? null : handleToggleAddAvwap}
               onAddAvwapBand={isEcosystemMode ? null : handleToggleAddAvwapBand}
               addAvwapMode={addAvwapMode}
@@ -1252,6 +1281,7 @@ export default function Charts() {
                   const anchored = anchoredRsBySymbol[row.symbol]
                   const ytd = ytdAvwapBySymbol[row.symbol]
                   const squeeze = squeezeBySymbol[row.symbol]
+                  const character = characterChangeBySymbol[row.symbol]
                   return (
                     <button
                       key={row.symbol}
@@ -1296,6 +1326,9 @@ export default function Charts() {
                           </div>
                           <p className="mt-1 truncate text-[11px] text-gray-500">{row.companyName || row.ecosystem || '—'}</p>
                           <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-medium">
+                            <span className={`rounded-full border px-2 py-1 ${characterBadgeTone(character?.label)}`}>
+                              C {formatCharacterLabel(character)} {Number.isFinite(character?.score) ? character.score : ''}
+                            </span>
                             <span className="rounded-full border border-cyan-400/15 bg-cyan-400/[0.08] px-2 py-1 text-cyan-100">
                               R {formatSigned(rolling?.zScore, 1, 'z')}
                             </span>

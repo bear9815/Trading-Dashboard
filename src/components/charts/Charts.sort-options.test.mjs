@@ -7,6 +7,7 @@ test('Charts symbol sort options include all shared watchlist-supported metrics'
     getChartsSymbolSortOptions().map(option => option.key),
     [
       'symbol',
+      'characterChange',
       'rollingRs',
       'anchoredRs',
       'ytdAvwap',

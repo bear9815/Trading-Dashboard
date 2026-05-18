@@ -117,7 +117,30 @@ function drawRsGradient(ctx, chart, rows, width, height) {
   }
 }
 
-function drawOverlays(canvas, chart, priceSeries, bands, rsGradient = []) {
+function drawCharacterChangeBands(ctx, chart, rows, width, height) {
+  if (!rows?.length) return
+  const active = rows.filter(row => row?.isActive)
+  if (!active.length) return
+  const timeScale = chart.timeScale()
+  const sorted = [...rows].sort((a, b) => a.time.localeCompare(b.time))
+
+  for (let index = 0; index < sorted.length; index += 1) {
+    const row = sorted[index]
+    if (!row.isActive) continue
+    const x = timeScale.timeToCoordinate(row.time)
+    if (x == null) continue
+
+    const prevX = index > 0 ? timeScale.timeToCoordinate(sorted[index - 1].time) : null
+    const nextX = index < sorted.length - 1 ? timeScale.timeToCoordinate(sorted[index + 1].time) : null
+    const left = prevX == null ? x - 4 : x - Math.abs(x - prevX) / 2
+    const right = nextX == null ? x + Math.abs(x - (prevX ?? x - 8)) / 2 : x + Math.abs(nextX - x) / 2
+
+    ctx.fillStyle = row.color || 'rgba(34, 197, 94, 0.14)'
+    ctx.fillRect(Math.max(0, left), 0, Math.min(width, right) - Math.max(0, left), height)
+  }
+}
+
+function drawOverlays(canvas, chart, priceSeries, bands, rsGradient = [], characterChangeBands = []) {
   if (!canvas || !chart || !priceSeries) return
   const rect = canvas.getBoundingClientRect()
   const dpr = window.devicePixelRatio || 1
@@ -128,6 +151,7 @@ function drawOverlays(canvas, chart, priceSeries, bands, rsGradient = []) {
   ctx.clearRect(0, 0, rect.width, rect.height)
 
   drawRsGradient(ctx, chart, rsGradient, rect.width, rect.height)
+  drawCharacterChangeBands(ctx, chart, characterChangeBands, rect.width, rect.height)
   drawShadeBands(ctx, chart, priceSeries, bands)
 }
 
@@ -160,6 +184,7 @@ function LightweightPane({
   rightOffset,
   className = '',
   showRsGradient = false,
+  showCharacterChange = false,
   onChartClick,
   draggableAnchors = [],
   onMoveAnchor,
@@ -254,9 +279,12 @@ function LightweightPane({
     const rsGradient = showRsGradient
       ? (kind === 'weekly' ? data.weeklyRollingRsGradient : data.dailyAnchoredRsGradient)
       : []
+    const characterChangeBands = kind === 'daily' && showCharacterChange
+      ? data.dailyCharacterChangeBands
+      : []
     const redraw = () => {
       requestAnimationFrame(() => {
-        drawOverlays(shadeCanvasRef.current, chart, priceSeries, bands, rsGradient)
+        drawOverlays(shadeCanvasRef.current, chart, priceSeries, bands, rsGradient, characterChangeBands)
       })
     }
 
@@ -428,7 +456,7 @@ function LightweightPane({
       resetDrag()
       chart.remove()
     }
-  }, [chartType, dailyRangeMonths, data, draggableAnchors, height, kind, onChartClick, onEditAnchor, onMoveAnchor, onSelectAnchor, rightOffset, selectedAnchorId, showRsGradient])
+  }, [chartType, dailyRangeMonths, data, draggableAnchors, height, kind, onChartClick, onEditAnchor, onMoveAnchor, onSelectAnchor, rightOffset, selectedAnchorId, showCharacterChange, showRsGradient])
 
   return (
     <div className={`relative w-full ${className}`} style={height ? { height } : undefined}>
@@ -467,6 +495,8 @@ export default function ResearchMultiTimeframeChart({
   onToggleWeeklyRs,
   dailyAnchoredRsEnabled = false,
   onToggleDailyAnchoredRs,
+  characterChangeEnabled = false,
+  onToggleCharacterChange,
   onAddAvwap,
   onAddAvwapBand,
   onChartClick,
@@ -539,6 +569,18 @@ export default function ResearchMultiTimeframeChart({
                 }`}
               >
                 Rolling Z
+              </button>
+            ) : null}
+            {onToggleCharacterChange ? (
+              <button
+                onClick={onToggleCharacterChange}
+                className={`px-2 py-0.5 text-[10px] font-semibold rounded border transition-colors ${
+                  characterChangeEnabled
+                    ? 'bg-[#0ea5e9]/20 border-[#0ea5e9]/40 text-[#075985]'
+                    : 'bg-white/70 border-black/10 text-[#505760]'
+                }`}
+              >
+                Character
               </button>
             ) : null}
             {onAddAvwap ? (
@@ -704,6 +746,7 @@ export default function ResearchMultiTimeframeChart({
               dailyRangeMonths={dailyRangeMonths}
               rightOffset={dailyRightOffset}
               showRsGradient={dailyAnchoredRsEnabled}
+              showCharacterChange={characterChangeEnabled}
               onChartClick={addAvwapMode || addAvwapBandMode ? onChartClick : null}
               draggableAnchors={(data.avwapOverlays || []).filter(overlay => overlay.kind === 'manual')}
               onMoveAnchor={onMoveManualAnchor}

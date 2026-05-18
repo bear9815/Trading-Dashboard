@@ -31,6 +31,7 @@ import {
   aggregateWeeklyBars,
 } from '../../utils/tradeReviewChart.js'
 import { buildWatchlistFitMap, filterAndSortWatchlistRows } from '../../utils/watchlistFitSignal.js'
+import { buildCharacterChangeMap } from '../../utils/characterChangeSignal.js'
 import {
   buildCondensedEcosystemRows,
   buildCondensedEcosystemSourceMap,
@@ -63,6 +64,7 @@ import { formatSqueezeMetric, formatSqueezeStateBadge, getSqueezeMetricTone, get
 const SORT_OPTIONS = [
   ['momentum', 'Momentum Rank'],
   ['fit', 'Fit Score'],
+  ['characterChange', 'Character'],
   ['dailyCompression', 'Daily Compression'],
   ['dailyExpansion', 'Daily Expansion'],
   ['weeklyCompression', 'Weekly Compression'],
@@ -80,6 +82,13 @@ const FIT_FILTER_OPTIONS = [
   ['green', 'Green'],
   ['orange', 'Orange'],
   ['red', 'Red'],
+  ['needs_data', 'Needs Data'],
+]
+
+const CHARACTER_FILTER_OPTIONS = [
+  ['all', 'All'],
+  ['active', 'Active'],
+  ['market_headwind', 'Market Headwind'],
   ['needs_data', 'Needs Data'],
 ]
 
@@ -348,6 +357,42 @@ function RsCell({ snapshot, loading = false, footerLabel = null }) {
       </span>
       <p className="text-[10px] text-gray-600">EMA {formatZScore(snapshot.signalLine)}</p>
       {footerLabel && <p className="text-[10px] text-gray-600">{footerLabel}</p>}
+    </div>
+  )
+}
+
+function characterTone(label) {
+  if (label === 'confirmed') return 'text-accent-green border-accent-green/25 bg-accent-green/10'
+  if (label === 'emerging') return 'text-accent-blue border-accent-blue/25 bg-accent-blue/10'
+  if (label === 'watching') return 'text-accent-yellow border-accent-yellow/25 bg-accent-yellow/10'
+  if (label === 'needs_data') return 'text-gray-500 border-white/10 bg-white/[0.03]'
+  return 'text-gray-500 border-white/10 bg-white/[0.02]'
+}
+
+function marketStateLabel(marketState) {
+  if (marketState === 'pullback') return 'Pullback'
+  if (marketState === 'consolidation') return 'Consolidation'
+  if (marketState === 'neutral') return 'Neutral'
+  return 'No Data'
+}
+
+function CharacterChangeCell({ snapshot }) {
+  if (!snapshot || snapshot.label === 'needs_data') return <span className="text-gray-600">Needs data</span>
+  const label = snapshot.label === 'confirmed'
+    ? 'Confirmed'
+    : snapshot.label === 'emerging'
+      ? 'Emerging'
+      : snapshot.label === 'watching'
+        ? 'Watching'
+        : 'None'
+  return (
+    <div className="space-y-1">
+      <span className={`inline-flex items-center rounded px-2 py-1 text-xs font-semibold border ${characterTone(snapshot.label)}`}>
+        {label} {Number.isFinite(snapshot.score) ? `${snapshot.score}` : ''}
+      </span>
+      <p className="text-[10px] text-gray-600">
+        {marketStateLabel(snapshot.marketState)} · {snapshot.windowLength || 0}d
+      </p>
     </div>
   )
 }
@@ -1051,6 +1096,7 @@ export default function ThemeWatchlist({
   const [sortKey, setSortKey] = useState('momentum')
   const [sortDir, setSortDir] = useState('asc')
   const [fitFilter, setFitFilter] = useState('all')
+  const [characterFilter, setCharacterFilter] = useState('all')
   const [editingSymbol, setEditingSymbol] = useState(null)
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [verifyingSymbols, setVerifyingSymbols] = useState({})
@@ -1186,6 +1232,15 @@ export default function ThemeWatchlist({
       }]
     })),
     [historyBarsBySymbol, symbols]
+  )
+  const characterChangeBySymbol = useMemo(
+    () => buildCharacterChangeMap({
+      symbols,
+      historyBarsBySymbol,
+      benchmarkHistoryBars,
+      rollingRsBySymbol,
+    }),
+    [benchmarkHistoryBars, historyBarsBySymbol, rollingRsBySymbol, symbols]
   )
 
   const visibleColumnOrder = useMemo(
@@ -1492,6 +1547,12 @@ export default function ThemeWatchlist({
     { id: 'dependencies', label: 'Dependencies', cellClassName: 'px-3 py-2.5 text-gray-400 min-w-[180px]', render: row => arrayText(row.dependencies) || '—' },
     { id: 'relatedDriver', label: 'Related Driver', cellClassName: 'px-3 py-2.5 text-accent-yellow min-w-[150px]', render: row => row.relatedDriver },
     {
+      id: 'characterChange',
+      label: 'Character Change',
+      cellClassName: 'px-3 py-2.5 min-w-[150px]',
+      render: (row) => <CharacterChangeCell snapshot={characterChangeBySymbol[row.symbol]} />,
+    },
+    {
       id: 'anchoredRs',
       label: 'Anchored RS',
       cellClassName: 'px-3 py-2.5 min-w-[120px]',
@@ -1620,6 +1681,7 @@ export default function ThemeWatchlist({
   ]), [
     anchoredRsBySymbol,
     anchoredRsLoading,
+    characterChangeBySymbol,
     finraBySymbol,
     finraEstimateBySymbol,
     finraLoading,
@@ -1657,14 +1719,16 @@ export default function ThemeWatchlist({
       rankBySymbol,
       fitBySymbol,
       fitFilter,
+      characterFilter,
       anchoredRsBySymbol,
       rollingRsBySymbol,
       ytdAvwapBySymbol,
       finraBySymbol,
       finraEstimateBySymbol,
       squeezeBySymbol,
+      characterChangeBySymbol,
     })
-  }, [anchoredRsBySymbol, finraBySymbol, finraEstimateBySymbol, fitBySymbol, fitFilter, query, rankBySymbol, rollingRsBySymbol, rows, selectedThemeGroupKey, sortDir, sortKey, squeezeBySymbol, themeGrouping, ytdAvwapBySymbol])
+  }, [anchoredRsBySymbol, characterChangeBySymbol, characterFilter, finraBySymbol, finraEstimateBySymbol, fitBySymbol, fitFilter, query, rankBySymbol, rollingRsBySymbol, rows, selectedThemeGroupKey, sortDir, sortKey, squeezeBySymbol, themeGrouping, ytdAvwapBySymbol])
 
   const selectedDisplaySymbol = useMemo(() => {
     if (selectedSymbol && filteredRows.some(row => row.symbol === selectedSymbol)) return selectedSymbol
@@ -2225,6 +2289,7 @@ export default function ThemeWatchlist({
       sortKey,
       sortDir,
       fitFilter,
+      characterFilter,
       columnOrder,
       hiddenColumns,
       activeColumnPreset,
@@ -2252,6 +2317,7 @@ export default function ThemeWatchlist({
     setSortKey(view.sortKey || 'momentum')
     setSortDir(view.sortDir || 'asc')
     setFitFilter(view.fitFilter || 'all')
+    setCharacterFilter(view.characterFilter || 'all')
     updateColumnLayout({
       columnOrder: view.columnOrder || columnOrder,
       hiddenColumns: view.hiddenColumns || hiddenColumns,
@@ -2803,6 +2869,24 @@ export default function ThemeWatchlist({
                   }`}
                 >
                   {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1 flex-wrap">
+              {CHARACTER_FILTER_OPTIONS.map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => {
+                    setCharacterFilter(value)
+                    setPage(1)
+                  }}
+                  className={`px-2.5 py-1 rounded-lg border text-xs transition-all ${
+                    characterFilter === value
+                      ? 'bg-accent-blue/15 border-accent-blue/25 text-accent-blue'
+                      : 'bg-white/[0.02] border-white/10 text-gray-500 hover:text-gray-300 hover:border-white/20'
+                  }`}
+                >
+                  Character: {label}
                 </button>
               ))}
             </div>

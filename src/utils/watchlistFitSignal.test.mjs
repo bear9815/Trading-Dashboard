@@ -224,3 +224,59 @@ const weeklyExpansionSorted = filterAndSortWatchlistRows({
 })
 
 assert.deepEqual(weeklyExpansionSorted.map(row => row.symbol), ['BBB', 'DDD', 'AAA', 'CCC'])
+
+const characterSorted = filterAndSortWatchlistRows({
+  rows,
+  query: '',
+  sortKey: 'characterChange',
+  sortDir: 'desc',
+  rankBySymbol,
+  fitBySymbol: fitMap,
+  fitFilter: 'all',
+  characterChangeBySymbol: {
+    AAA: { score: 84, label: 'confirmed', isActive: true, isMarketHeadwind: true },
+    BBB: { score: 62, label: 'emerging', isActive: true, isMarketHeadwind: false },
+    CCC: { score: 12, label: 'none', isActive: false, isMarketHeadwind: false },
+    DDD: { score: null, label: 'needs_data', isActive: false, isMarketHeadwind: false },
+  },
+})
+
+assert.deepEqual(characterSorted.map(row => row.symbol), ['AAA', 'BBB', 'CCC', 'DDD'])
+
+const activeCharacterOnly = filterAndSortWatchlistRows({
+  rows,
+  query: '',
+  sortKey: 'characterChange',
+  sortDir: 'desc',
+  rankBySymbol,
+  fitBySymbol: fitMap,
+  fitFilter: 'all',
+  characterFilter: 'active',
+  characterChangeBySymbol: {
+    AAA: { score: 84, label: 'confirmed', isActive: true, isMarketHeadwind: true },
+    BBB: { score: 62, label: 'emerging', isActive: true, isMarketHeadwind: false },
+    CCC: { score: 12, label: 'none', isActive: false, isMarketHeadwind: false },
+    DDD: { score: null, label: 'needs_data', isActive: false, isMarketHeadwind: false },
+  },
+})
+
+assert.deepEqual(activeCharacterOnly.map(row => row.symbol), ['AAA', 'BBB'])
+
+const marketHeadwindOnly = filterAndSortWatchlistRows({
+  rows,
+  query: '',
+  sortKey: 'characterChange',
+  sortDir: 'desc',
+  rankBySymbol,
+  fitBySymbol: fitMap,
+  fitFilter: 'all',
+  characterFilter: 'market_headwind',
+  characterChangeBySymbol: {
+    AAA: { score: 84, label: 'confirmed', isActive: true, isMarketHeadwind: true },
+    BBB: { score: 62, label: 'emerging', isActive: true, isMarketHeadwind: false },
+    CCC: { score: 12, label: 'none', isActive: false, isMarketHeadwind: false },
+    DDD: { score: null, label: 'needs_data', isActive: false, isMarketHeadwind: false },
+  },
+})
+
+assert.deepEqual(marketHeadwindOnly.map(row => row.symbol), ['AAA'])

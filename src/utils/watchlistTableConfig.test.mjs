@@ -11,6 +11,7 @@ import {
 
 assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('symbol'))
 assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('actions'))
+assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('characterChange'))
 assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('dailyCompression'))
 assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('weeklyExpansion'))
 assert.ok(WATCHLIST_COLUMN_PRESETS.length >= 4)
@@ -20,6 +21,7 @@ assert.deepEqual(
   getChartsSymbolSortOptions().map(option => option.key),
   [
     'symbol',
+    'characterChange',
     'rollingRs',
     'anchoredRs',
     'ytdAvwap',
@@ -39,6 +41,7 @@ const trendCoilPreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === '
 const expansionHunterPreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'expansion_hunter')
 const themeLeadershipPreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'theme_leadership')
 const crowdedCoiledPreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'crowded_vs_coiled')
+const characterChangePreset = WATCHLIST_COLUMN_PRESETS.find(preset => preset.key === 'character_change')
 assert.ok(compactPreset)
 assert.ok(squeezePreset)
 assert.ok(squeezeScoutPreset)
@@ -46,6 +49,7 @@ assert.ok(trendCoilPreset)
 assert.ok(expansionHunterPreset)
 assert.ok(themeLeadershipPreset)
 assert.ok(crowdedCoiledPreset)
+assert.ok(characterChangePreset)
 assert.ok(squeezePreset.columns.includes('dailyCompression'))
 assert.ok(squeezePreset.columns.includes('squeezeState'))
 assert.deepEqual(
@@ -67,6 +71,10 @@ assert.deepEqual(
 assert.deepEqual(
   crowdedCoiledPreset.columns,
   ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyCompression', 'weeklyCompression', 'finraShortInterest', 'finraEstimatedShortInterest', 'squeezeState', 'actions']
+)
+assert.deepEqual(
+  characterChangePreset.columns,
+  ['symbol', 'companyName', 'ecosystem', 'theme', 'characterChange', 'rollingRs', 'anchoredRs', 'ytdAvwap', 'dailyExpansion', 'actions']
 )
 assert.deepEqual(
   applyColumnPreset(compactPreset.key).hiddenColumns,
