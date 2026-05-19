@@ -5,9 +5,11 @@ import {
   APP_PAGES,
   APP_PAGE_STORAGE_KEY,
   buildPageHash,
+  getJournalSectionFromLocationLike,
   getPageFromLocationLike,
   getRestoredPage,
   isAppPage,
+  isJournalSection,
 } from './appNavigation.js'
 
 test('isAppPage only accepts known dashboard pages', () => {
@@ -66,4 +68,12 @@ test('getRestoredPage falls back to persisted page when location has no app page
 
 test('storage key is stable for hard reload recovery', () => {
   assert.equal(APP_PAGE_STORAGE_KEY, 'trading-dashboard:page')
+})
+
+test('journal sections include daily check-ins route', () => {
+  assert.equal(isJournalSection('daily-checkins'), true)
+  assert.equal(getJournalSectionFromLocationLike(
+    { hash: '#journal', state: { page: 'journal', journalSection: 'daily-checkins' } },
+    'entries'
+  ), 'daily-checkins')
 })

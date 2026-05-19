@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react'
-import { Plus, ChevronDown, Trash2, BookOpen, Target, Repeat, CalendarCheck, Flag, CheckCircle2 } from 'lucide-react'
+import { Plus, ChevronDown, Trash2, BookOpen, Target, Repeat, CalendarCheck, Flag, CheckCircle2, Sun, Zap } from 'lucide-react'
 import { useJournalStore } from '../../store/useJournalStore.js'
 import { formatDate } from '../../utils/formatters.js'
 import { isDashboardJournalEntry } from '../../utils/dashboardThoughts.js'
@@ -281,10 +281,147 @@ function EntriesTab() {
   )
 }
 
+function formatDailyCheckinDate(dateStr) {
+  if (!dateStr) return ''
+  const [year, month, day] = String(dateStr).split('-').map(Number)
+  return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
+function DailyCheckinCard({ checkin, onDelete }) {
+  const [open, setOpen] = useState(false)
+  const isMorning = checkin.mode === 'morning'
+  const Icon = isMorning ? Sun : Zap
+  const accent = isMorning ? '#ffa502' : '#3d84ff'
+  const title = isMorning ? 'Morning Pulse' : 'Afternoon Check-in'
+
+  return (
+    <div className="card">
+      <button className="flex w-full items-start justify-between gap-3 text-left" onClick={() => setOpen(v => !v)}>
+        <div className="min-w-0">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold"
+              style={{ borderColor: `${accent}45`, background: `${accent}14`, color: accent }}
+            >
+              <Icon size={11} />
+              {title}
+            </span>
+            <span className="text-xs text-gray-500">{formatDailyCheckinDate(checkin.date)}</span>
+            {checkin.riskLevel !== '' && checkin.riskLevel != null && (
+              <span className="mono text-xs text-gray-500">risk {checkin.riskLevel}/5</span>
+            )}
+          </div>
+          <p className="text-sm font-medium text-gray-200">{checkin.state || 'Check-in saved'}</p>
+          <p className="mt-1 line-clamp-1 text-sm text-gray-500">
+            {checkin.primaryResponse || checkin.actionResponse || checkin.notes || 'No notes recorded.'}
+          </p>
+        </div>
+        <ChevronDown size={16} className={`mt-0.5 shrink-0 text-gray-600 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="mt-4 space-y-3 text-sm">
+          {[
+            [isMorning ? 'Biggest risk to the plan' : 'What changed since the open', checkin.primaryResponse],
+            [isMorning ? 'Disciplined execution looks like' : 'Next best action from here', checkin.actionResponse],
+            ['Notes', checkin.notes],
+          ].map(([label, value]) => value ? (
+            <div key={label}>
+              <p className="mb-0.5 text-xs text-gray-600">{label}</p>
+              <p className="whitespace-pre-wrap leading-relaxed text-gray-300">{value}</p>
+            </div>
+          ) : null)}
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            {checkin.submittedAt && (
+              <span className="text-xs text-gray-600">Submitted {formatDate(checkin.submittedAt, 'time')}</span>
+            )}
+            <button onClick={() => onDelete(checkin.id)} className="btn-danger ml-auto flex items-center gap-1 py-1 text-xs">
+              <Trash2 size={10} />
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DailyCheckinsTab() {
+  const { dailyCheckins = [], deleteDailyCheckin, lastSaveError, lastCloudSaveError } = useJournalStore()
+  const [modeFilter, setModeFilter] = useState('all')
+
+  const sorted = useMemo(() => (
+    [...dailyCheckins]
+      .filter(item => modeFilter === 'all' || item.mode === modeFilter)
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(a.mode || '').localeCompare(String(b.mode || '')))
+  ), [dailyCheckins, modeFilter])
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-gray-200">Daily Check-ins</p>
+          <p className="mt-0.5 text-xs text-gray-600">Morning Pulse and Afternoon Check-in records.</p>
+        </div>
+        <div className="flex gap-1 rounded-xl border border-white/10 bg-white/[0.02] p-1">
+          {[
+            ['all', 'All'],
+            ['morning', 'Morning'],
+            ['afternoon', 'Afternoon'],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => setModeFilter(value)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                modeFilter === value ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {lastSaveError && (
+        <div className="rounded-lg border border-accent-red/25 bg-accent-red/10 px-3 py-2">
+          <p className="text-sm text-accent-red">
+            Local save warning: {lastSaveError}. Export a backup from Settings before clearing browser data.
+          </p>
+        </div>
+      )}
+      {!lastSaveError && lastCloudSaveError && (
+        <div className="rounded-lg border border-accent-yellow/25 bg-accent-yellow/10 px-3 py-2">
+          <p className="text-sm text-accent-yellow">
+            Saved locally. Cloud backup warning: {lastCloudSaveError}.
+          </p>
+        </div>
+      )}
+
+      {sorted.length === 0 ? (
+        <div className="card py-12 text-center text-sm text-gray-500">
+          No daily check-ins recorded yet.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {sorted.map(checkin => (
+            <DailyCheckinCard key={checkin.id} checkin={checkin} onDelete={deleteDailyCheckin} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main Journal (tabbed) ──────────────────────────────────────────────────
 
 const TABS = [
   { id: 'entries', label: 'Journal Entries',    icon: BookOpen },
+  { id: 'daily-checkins', label: 'Daily Check-ins', icon: CheckCircle2 },
   { id: 'goals',   label: 'Goals & Priorities', icon: Target   },
   { id: 'habits',  label: 'Habits',             icon: Repeat   },
   { id: 'weekly-review', label: 'Weekly Review', icon: CalendarCheck },
@@ -330,6 +467,7 @@ export default function Journal({ initialSection = 'entries', selectedSection = 
       </div>
 
       {activeTab === 'entries' && <EntriesTab />}
+      {activeTab === 'daily-checkins' && <DailyCheckinsTab />}
       {activeTab === 'goals'   && <GoalsTab />}
       {activeTab === 'habits'  && <HabitsTab />}
       {activeTab === 'weekly-review' && <WeeklyReviewTab />}

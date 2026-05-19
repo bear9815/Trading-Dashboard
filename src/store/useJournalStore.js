@@ -27,6 +27,7 @@ function itemTime(item = {}) {
 }
 
 function stableIdentity(item = {}, collection = '') {
+  if ((collection === 'dailyCheckins' || collection === 'dailyCheckinDrafts') && item.date && item.mode) return `${item.date}:${item.mode}`
   if (item.id) return String(item.id)
   if (collection === 'weeklyScorecards' && item.weekKey) return String(item.weekKey)
   if (collection === 'entries') return [item.timestamp, item.noteText, item.objective, item.marketState].filter(Boolean).join('|')
@@ -69,6 +70,8 @@ function normalizeJournalState(state = {}) {
     priorities = [],
     goals = [],
     checkins = [],
+    dailyCheckins = [],
+    dailyCheckinDrafts = [],
     tradingThoughts = [],
     weeklyScorecards = [],
   } = state || {}
@@ -78,6 +81,8 @@ function normalizeJournalState(state = {}) {
     priorities,
     goals,
     checkins,
+    dailyCheckins,
+    dailyCheckinDrafts,
     tradingThoughts,
     weeklyScorecards: weeklyScorecards.map(normalizeWeeklyScorecardSnapshot),
   }
@@ -110,6 +115,18 @@ export function mergeJournalState({ localState = {}, cloudState = {} } = {}) {
       localItems: local.checkins,
       cloudItems: cloud.checkins,
       collection: 'checkins',
+      sort: (a, b) => itemTime(b) - itemTime(a),
+    }),
+    dailyCheckins: mergeByIdentity({
+      localItems: local.dailyCheckins,
+      cloudItems: cloud.dailyCheckins,
+      collection: 'dailyCheckins',
+      sort: (a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(a.mode || '').localeCompare(String(b.mode || '')),
+    }),
+    dailyCheckinDrafts: mergeByIdentity({
+      localItems: local.dailyCheckinDrafts,
+      cloudItems: cloud.dailyCheckinDrafts,
+      collection: 'dailyCheckinDrafts',
       sort: (a, b) => itemTime(b) - itemTime(a),
     }),
     tradingThoughts: mergeByIdentity({
@@ -150,6 +167,62 @@ function readRescueBackup() {
   }
 }
 
+function normalizeCheckinMode(mode) {
+  return mode === 'afternoon' ? 'afternoon' : 'morning'
+}
+
+function dailyCheckinKey(date, mode) {
+  const normalizedDate = String(date || '').trim()
+  if (!normalizedDate) return ''
+  return `${normalizedDate}:${normalizeCheckinMode(mode)}`
+}
+
+function sortDailyCheckins(items = []) {
+  return [...items].sort((a, b) => (
+    String(b.date || '').localeCompare(String(a.date || '')) ||
+    String(a.mode || '').localeCompare(String(b.mode || '')) ||
+    itemTime(b) - itemTime(a)
+  ))
+}
+
+function normalizeDailyFields(fields = {}) {
+  return {
+    state: String(fields.state || '').trim(),
+    riskLevel: fields.riskLevel === '' || fields.riskLevel == null ? '' : Number(fields.riskLevel),
+    primaryResponse: String(fields.primaryResponse || '').trim(),
+    actionResponse: String(fields.actionResponse || '').trim(),
+    notes: String(fields.notes || '').trim(),
+  }
+}
+
+function buildDailyCheckinSummary(record = {}) {
+  const title = record.mode === 'afternoon' ? 'Afternoon Check-in' : 'Morning Pulse'
+  const parts = []
+  if (record.state) parts.push(record.state)
+  if (record.riskLevel !== '' && record.riskLevel != null && Number.isFinite(Number(record.riskLevel))) {
+    parts.push(`risk ${record.riskLevel}/5`)
+  }
+  if (record.primaryResponse) parts.push(record.primaryResponse)
+  if (record.actionResponse) parts.push(`Next: ${record.actionResponse}`)
+  if (record.notes) parts.push(`Notes: ${record.notes}`)
+  return `${title}: ${parts.filter(Boolean).join(' · ') || 'Submitted.'}`
+}
+
+function getPersistableJournalState(state = {}) {
+  const {
+    entries = [],
+    priorities = [],
+    goals = [],
+    checkins = [],
+    dailyCheckins = [],
+    dailyCheckinDrafts = [],
+    tradingThoughts = [],
+    weeklyScorecards = [],
+  } = state
+
+  return { entries, priorities, goals, checkins, dailyCheckins, dailyCheckinDrafts, tradingThoughts, weeklyScorecards }
+}
+
 async function persistLocal(state) {
   writeRescueBackup(state)
   const result = await writeDurableJson(JOURNAL_STORAGE_KEY, { state })
@@ -181,6 +254,8 @@ export const useJournalStore = create((set, get) => ({
   priorities:      [],
   goals:           [],
   checkins:        [],
+  dailyCheckins:   [],
+  dailyCheckinDrafts: [],
   tradingThoughts: [],
   weeklyScorecards: [],
   cloudReady:      false,
@@ -208,12 +283,14 @@ export const useJournalStore = create((set, get) => ({
     const localState = rescueState
       ? mergeJournalState({ localState: rescueState, cloudState: parsed?.state || {} })
       : normalizeJournalState(parsed?.state || {})
-    const { entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards } = localState
+    const { entries, priorities, goals, checkins, dailyCheckins, dailyCheckinDrafts, tradingThoughts, weeklyScorecards } = localState
     set({
       entries,
       priorities,
       goals,
       checkins,
+      dailyCheckins,
+      dailyCheckinDrafts,
       tradingThoughts,
       weeklyScorecards,
       cloudReady: true,
@@ -280,14 +357,14 @@ export const useJournalStore = create((set, get) => ({
   },
 
   clearLocalState: () => set({
-    entries: [], priorities: [], goals: [], checkins: [], tradingThoughts: [], weeklyScorecards: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null, lastCloudSaveError: null,
+    entries: [], priorities: [], goals: [], checkins: [], dailyCheckins: [], dailyCheckinDrafts: [], tradingThoughts: [], weeklyScorecards: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null, lastCloudSaveError: null,
   }),
 
   // ── Internal sync helper ───────────────────────────────────────────────────
   _sync: () => {
-    const { entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards } = get()
+    const persistableState = getPersistableJournalState(get())
     const savedAt = new Date().toISOString()
-    const savePromise = persistLocal({ entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards })
+    const savePromise = persistLocal(persistableState)
       .then(result => {
         if (result.ok) {
           set({ lastSaveError: null, lastSavedAt: savedAt })
@@ -296,7 +373,7 @@ export const useJournalStore = create((set, get) => ({
         }
         return result
       })
-    saveToCloud({ entries, priorities, goals, checkins, tradingThoughts, weeklyScorecards })
+    saveToCloud(persistableState)
       .then(result => {
         if (result.ok || result.skipped) set({ lastCloudSaveError: null })
         else set({ lastCloudSaveError: result.message || 'Cloud backup failed.' })
@@ -401,6 +478,143 @@ export const useJournalStore = create((set, get) => ({
   deleteCheckin: (id) => {
     set(s => ({ checkins: s.checkins.filter(c => c.id !== id) }))
     get()._sync()
+  },
+
+  // ── Daily Trading Check-ins ─────────────────────────────────────────────────
+
+  upsertDailyCheckinDraft: ({ date, mode = 'morning', fields = {} } = {}) => {
+    const key = dailyCheckinKey(date, mode)
+    if (!key) return null
+
+    const now = new Date().toISOString()
+    let savedDraft = null
+    set(s => {
+      const existing = s.dailyCheckinDrafts.find(item => dailyCheckinKey(item.date, item.mode) === key)
+      const draft = {
+        id: existing?.id || uuidv4(),
+        date: String(date),
+        mode: normalizeCheckinMode(mode),
+        startedAt: existing?.startedAt || now,
+        createdAt: existing?.createdAt || now,
+        ...normalizeDailyFields({ ...existing, ...fields }),
+        updatedAt: now,
+      }
+      savedDraft = draft
+      return {
+        dailyCheckinDrafts: [
+          draft,
+          ...s.dailyCheckinDrafts.filter(item => dailyCheckinKey(item.date, item.mode) !== key),
+        ],
+      }
+    })
+    const saved = get()._sync()
+    return { ...savedDraft, saved }
+  },
+
+  clearDailyCheckinDraft: (date, mode = 'morning') => {
+    const key = dailyCheckinKey(date, mode)
+    if (!key) return null
+    set(s => ({
+      dailyCheckinDrafts: s.dailyCheckinDrafts.filter(item => dailyCheckinKey(item.date, item.mode) !== key),
+    }))
+    return get()._sync()
+  },
+
+  getDailyCheckinDraft: (date, mode = 'morning') => {
+    const key = dailyCheckinKey(date, mode)
+    return get().dailyCheckinDrafts.find(item => dailyCheckinKey(item.date, item.mode) === key) || null
+  },
+
+  getDailyCheckinByDateAndMode: (date, mode = 'morning') => {
+    const key = dailyCheckinKey(date, mode)
+    return get().dailyCheckins.find(item => dailyCheckinKey(item.date, item.mode) === key) || null
+  },
+
+  submitDailyCheckin: ({ date, mode = 'morning', fields = {} } = {}) => {
+    const key = dailyCheckinKey(date, mode)
+    if (!key) return null
+
+    const now = new Date().toISOString()
+    let savedRecord = null
+    let savedThought = null
+    let savedEntry = null
+
+    set(s => {
+      const existing = s.dailyCheckins.find(item => dailyCheckinKey(item.date, item.mode) === key)
+      const recordBase = {
+        id: existing?.id || uuidv4(),
+        date: String(date),
+        mode: normalizeCheckinMode(mode),
+        startedAt: existing?.startedAt || now,
+        submittedAt: existing?.submittedAt || now,
+        ...normalizeDailyFields({ ...existing, ...fields }),
+        updatedAt: now,
+      }
+      const summaryText = buildDailyCheckinSummary(recordBase)
+      const summaryTimestamp = now
+
+      let tradingThoughts = s.tradingThoughts
+      let entries = s.entries
+      const existingThoughtId = existing?.summaryThoughtId
+      const existingEntryId = existing?.summaryEntryId
+
+      if (existingThoughtId && tradingThoughts.some(item => item.id === existingThoughtId)) {
+        tradingThoughts = tradingThoughts.map(item => (
+          item.id === existingThoughtId
+            ? { ...item, text: summaryText, tag: recordBase.mode === 'afternoon' ? 'insight' : 'discipline', timestamp: new Date(summaryTimestamp).getTime(), source: 'daily-checkin' }
+            : item
+        ))
+        savedThought = tradingThoughts.find(item => item.id === existingThoughtId)
+      } else {
+        savedThought = {
+          id: uuidv4(),
+          text: summaryText,
+          tag: recordBase.mode === 'afternoon' ? 'insight' : 'discipline',
+          timestamp: new Date(summaryTimestamp).getTime(),
+          source: 'daily-checkin',
+        }
+        tradingThoughts = [savedThought, ...tradingThoughts]
+      }
+
+      const builtEntry = {
+        ...buildDashboardJournalEntry(summaryText, summaryTimestamp),
+        source: 'daily-checkin',
+      }
+      if (existingEntryId && entries.some(item => item.id === existingEntryId)) {
+        entries = entries.map(item => (
+          item.id === existingEntryId ? { ...builtEntry, id: existingEntryId } : item
+        ))
+        savedEntry = entries.find(item => item.id === existingEntryId)
+      } else {
+        savedEntry = { ...builtEntry, id: uuidv4() }
+        entries = [savedEntry, ...entries]
+      }
+
+      const record = {
+        ...recordBase,
+        summaryThoughtId: savedThought.id,
+        summaryEntryId: savedEntry.id,
+      }
+      savedRecord = record
+
+      return {
+        dailyCheckins: sortDailyCheckins([
+          record,
+          ...s.dailyCheckins.filter(item => dailyCheckinKey(item.date, item.mode) !== key),
+        ]),
+        dailyCheckinDrafts: s.dailyCheckinDrafts.filter(item => dailyCheckinKey(item.date, item.mode) !== key),
+        tradingThoughts,
+        entries,
+      }
+    })
+
+    const saved = get()._sync()
+    return { record: savedRecord, thought: savedThought, entry: savedEntry, saved }
+  },
+
+  deleteDailyCheckin: (id) => {
+    set(s => ({ dailyCheckins: s.dailyCheckins.filter(item => item.id !== id) }))
+    return get()._sync()
   },
 
   // ── Trading Thoughts ───────────────────────────────────────────────────────

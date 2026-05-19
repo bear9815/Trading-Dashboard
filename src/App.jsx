@@ -8,7 +8,7 @@ import { setAnthropicFallbackKey } from './utils/ai.js'
 import { setSchwabToken, setSchwabTokenGetter } from './utils/marketData.js'
 import PageErrorBoundary from './components/PageErrorBoundary.jsx'
 import MorningCheckin from './components/shared/MorningCheckin.jsx'
-import TradingReminderPopup from './components/shared/TradingReminderPopup.jsx'
+import DailyCheckinPopup from './components/shared/DailyCheckinPopup.jsx'
 import WeeklyScorecardPopup from './components/scorecard/WeeklyScorecardPopup.jsx'
 import { useSchwabStore } from './store/useSchwabStore.js'
 import { useTradeStore } from './store/useTradeStore.js'
@@ -320,7 +320,7 @@ export default function App() {
       {showImport && <ImportModal onClose={() => setShowImport(false)} />}
       <QuickAddTrade />
       <MorningCheckin openRequest={morningCheckinRequest} />
-      <TradingReminderPopup openRequest={reminderOpenRequest} />
+      <DailyCheckinPopup openRequest={reminderOpenRequest} />
       <WeeklyScorecardPopup onOpenWeeklyReview={() => setPage('journal', { journalSection: 'weekly-review' })} />
     </div>
   )

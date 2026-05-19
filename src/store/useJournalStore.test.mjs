@@ -342,6 +342,159 @@ test('trading reminder thoughts write a synchronous rescue backup before Indexed
   }
 })
 
+test('daily check-in drafts restore from durable IndexedDB storage when localStorage is empty', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  const previousIndexedDB = globalThis.indexedDB
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
+  globalThis.indexedDB = createIndexedDBMock()
+
+  try {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      dailyCheckins: [],
+      dailyCheckinDrafts: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+      lastSaveError: null,
+      lastSavedAt: null,
+    })
+
+    const result = useJournalStore.getState().upsertDailyCheckinDraft({
+      date: '2026-05-05',
+      mode: 'morning',
+      fields: {
+        state: 'Focused',
+        riskLevel: 2,
+        primaryResponse: 'Chasing gaps is the biggest risk.',
+        actionResponse: 'Wait for the first clean pullback.',
+        notes: 'Protect attention.',
+      },
+    })
+    await result.saved
+    localStorageMock.clear()
+
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      dailyCheckins: [],
+      dailyCheckinDrafts: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+      lastSaveError: null,
+      lastSavedAt: null,
+    })
+    await useJournalStore.getState().loadFromLocal()
+
+    const restoredDraft = useJournalStore.getState().getDailyCheckinDraft('2026-05-05', 'morning')
+    assert.equal(restoredDraft.state, 'Focused')
+    assert.equal(restoredDraft.primaryResponse, 'Chasing gaps is the biggest risk.')
+    assert.equal(restoredDraft.notes, 'Protect attention.')
+  } finally {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      dailyCheckins: [],
+      dailyCheckinDrafts: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+      lastSaveError: null,
+      lastSavedAt: null,
+    })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+    if (previousIndexedDB === undefined) {
+      delete globalThis.indexedDB
+    } else {
+      globalThis.indexedDB = previousIndexedDB
+    }
+  }
+})
+
+test('daily check-in drafts write a synchronous rescue backup before IndexedDB settles', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  const previousIndexedDB = globalThis.indexedDB
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
+  delete globalThis.indexedDB
+
+  try {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      dailyCheckins: [],
+      dailyCheckinDrafts: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+      lastSaveError: null,
+      lastSavedAt: null,
+    })
+
+    const result = useJournalStore.getState().upsertDailyCheckinDraft({
+      date: '2026-05-08',
+      mode: 'afternoon',
+      fields: {
+        state: 'Drifting',
+        riskLevel: 4,
+        primaryResponse: 'Breadth faded after the open.',
+        actionResponse: 'Cut size and wait.',
+        notes: 'Need reset.',
+      },
+    })
+    const backup = JSON.parse(localStorageMock.getItem('risk-tool-journal:backup') || '{}')
+
+    assert.equal(backup.state.dailyCheckinDrafts[0].mode, 'afternoon')
+    assert.equal(backup.state.dailyCheckinDrafts[0].notes, 'Need reset.')
+
+    await result.saved
+  } finally {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      dailyCheckins: [],
+      dailyCheckinDrafts: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+      lastSaveError: null,
+      lastSavedAt: null,
+    })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+    if (previousIndexedDB === undefined) {
+      delete globalThis.indexedDB
+    } else {
+      globalThis.indexedDB = previousIndexedDB
+    }
+  }
+})
+
 test('legacy localStorage journal payload migrates into durable storage', async () => {
   const previousLocalStorage = globalThis.localStorage
   const previousIndexedDB = globalThis.indexedDB
@@ -727,6 +880,104 @@ test('dashboard thoughts persist into both trading thoughts and journal entries'
   }
 })
 
+test('submitted daily check-ins persist as source records, clear drafts, and mirror a concise journal thought', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
+
+  try {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      dailyCheckins: [],
+      dailyCheckinDrafts: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+
+    const draft = useJournalStore.getState().upsertDailyCheckinDraft({
+      date: '2026-05-04',
+      mode: 'morning',
+      fields: {
+        state: 'Focused',
+        riskLevel: 2,
+        primaryResponse: 'Opening strength could tempt me to chase.',
+        actionResponse: 'Wait for confirmed follow-through.',
+        notes: 'Keep position size normal.',
+      },
+    })
+    await draft.saved
+
+    const result = useJournalStore.getState().submitDailyCheckin({
+      date: '2026-05-04',
+      mode: 'morning',
+      fields: {
+        state: 'Focused',
+        riskLevel: 2,
+        primaryResponse: 'Opening strength could tempt me to chase.',
+        actionResponse: 'Wait for confirmed follow-through.',
+        notes: 'Keep position size normal.',
+      },
+    })
+    await result.saved
+
+    const stateAfterSave = useJournalStore.getState()
+    assert.equal(stateAfterSave.dailyCheckinDrafts.length, 0)
+    assert.equal(stateAfterSave.dailyCheckins.length, 1)
+    assert.equal(stateAfterSave.dailyCheckins[0].date, '2026-05-04')
+    assert.equal(stateAfterSave.dailyCheckins[0].mode, 'morning')
+    assert.equal(stateAfterSave.dailyCheckins[0].state, 'Focused')
+    assert.equal(stateAfterSave.dailyCheckins[0].summaryThoughtId, stateAfterSave.tradingThoughts[0].id)
+    assert.equal(stateAfterSave.dailyCheckins[0].summaryEntryId, stateAfterSave.entries[0].id)
+    assert.match(stateAfterSave.tradingThoughts[0].text, /^Morning Pulse:/)
+    assert.match(stateAfterSave.tradingThoughts[0].text, /Opening strength/)
+    assert.equal(isDashboardJournalEntry(stateAfterSave.entries[0]), true)
+
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      dailyCheckins: [],
+      dailyCheckinDrafts: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+    await useJournalStore.getState().loadFromLocal()
+
+    const restoredState = useJournalStore.getState()
+    assert.equal(restoredState.dailyCheckins.length, 1)
+    assert.equal(restoredState.dailyCheckins[0].primaryResponse, 'Opening strength could tempt me to chase.')
+    assert.equal(restoredState.dailyCheckinDrafts.length, 0)
+    assert.equal(restoredState.tradingThoughts.length, 1)
+    assert.match(restoredState.tradingThoughts[0].text, /^Morning Pulse:/)
+  } finally {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      dailyCheckins: [],
+      dailyCheckinDrafts: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+    })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+  }
+})
+
 test('mergeJournalState preserves local-only notes and chooses the newest duplicate records', () => {
   assert.equal(typeof journalStoreModule.mergeJournalState, 'function')
 
@@ -767,4 +1018,45 @@ test('mergeJournalState preserves local-only notes and chooses the newest duplic
   assert.equal(merged.entries.find(entry => entry.id === 'entry-shared').noteText, 'Newer local note')
   assert.deepEqual(merged.tradingThoughts.map(thought => thought.id), ['thought-local', 'thought-cloud'])
   assert.equal(merged.weeklyScorecards[0].notes, 'Local scorecard')
+})
+
+test('mergeJournalState dedupes daily check-ins and drafts by date and mode with newest update winning', () => {
+  const merged = journalStoreModule.mergeJournalState({
+    localState: {
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      dailyCheckins: [
+        { id: 'local-morning', date: '2026-05-06', mode: 'morning', state: 'Focused', updatedAt: '2026-05-06T15:00:00.000Z' },
+      ],
+      dailyCheckinDrafts: [
+        { id: 'local-afternoon-draft', date: '2026-05-06', mode: 'afternoon', notes: 'Newer draft', updatedAt: '2026-05-06T15:00:00.000Z' },
+      ],
+    },
+    cloudState: {
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      dailyCheckins: [
+        { id: 'cloud-morning', date: '2026-05-06', mode: 'morning', state: 'Hesitant', updatedAt: '2026-05-06T12:00:00.000Z' },
+        { id: 'cloud-afternoon', date: '2026-05-06', mode: 'afternoon', state: 'On Plan', updatedAt: '2026-05-06T16:00:00.000Z' },
+      ],
+      dailyCheckinDrafts: [
+        { id: 'cloud-afternoon-draft', date: '2026-05-06', mode: 'afternoon', notes: 'Older draft', updatedAt: '2026-05-06T12:00:00.000Z' },
+      ],
+    },
+  })
+
+  assert.deepEqual(merged.dailyCheckins.map(item => `${item.date}:${item.mode}:${item.state}`), [
+    '2026-05-06:afternoon:On Plan',
+    '2026-05-06:morning:Focused',
+  ])
+  assert.equal(merged.dailyCheckinDrafts.length, 1)
+  assert.equal(merged.dailyCheckinDrafts[0].notes, 'Newer draft')
 })

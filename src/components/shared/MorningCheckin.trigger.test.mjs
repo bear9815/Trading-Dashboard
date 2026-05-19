@@ -12,6 +12,8 @@ test('App and MorningCheckin support manual pre-market opens and first-open-of-d
 
   assert.match(appSource, /requestedMode:\s*'pre-market'/)
   assert.match(appSource, /<MorningCheckin openRequest=\{morningCheckinRequest\} \/>/)
+  assert.match(appSource, /DailyCheckinPopup/)
+  assert.doesNotMatch(appSource, /TradingReminderPopup/)
   assert.match(morningSource, /openRequest/)
   assert.match(morningSource, /shouldDisplayMorningCheckin/)
 })

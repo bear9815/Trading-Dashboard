@@ -25,6 +25,7 @@ const LEGACY_PAGE_ALIASES = {
 
 export const JOURNAL_SECTIONS = [
   'entries',
+  'daily-checkins',
   'goals',
   'habits',
   'weekly-review',
