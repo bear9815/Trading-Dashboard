@@ -1275,6 +1275,7 @@ function LogTab() {
   const liveAccountBalance = useLiveMarketStore(s => s.liveAccountBalance)
   const tradingThoughts    = useJournalStore(s => s.tradingThoughts)
   const journalEntries     = useJournalStore(s => s.entries)
+  const dailyCheckins      = useJournalStore(s => s.dailyCheckins)
 
   // Use live balance (with unrealized P&L) when RiskPanel has fetched prices
   const accountBalance = liveAccountBalance > 0 ? liveAccountBalance : getAccountBalance()
@@ -1381,10 +1382,10 @@ function LogTab() {
     const lastEntry    = sorted.find(e => e.date < targetDate) ?? sorted[0] ?? null
     const lastRiskMode = lastEntry?.riskMode ?? null
     // Pre-fill Prior Day Notes from the last trading day's saved notes (skip weekends)
-    const priorThoughtsText = buildPriorDayNotesText({ tradingThoughts, journalEntries, targetDate })
+    const priorThoughtsText = buildPriorDayNotesText({ tradingThoughts, journalEntries, dailyCheckins, targetDate })
     // New entry: pre-fill cash deployed + effective exposure (if ATR already resolved)
     return blankForm(targetDate, autoCash, autoEffective, lastRiskMode, lastEntry, priorThoughtsText)
-  }, [mode, editingEntry, editDate, autoCash, autoEffective, sorted, tradingThoughts, journalEntries])
+  }, [mode, editingEntry, editDate, autoCash, autoEffective, sorted, tradingThoughts, journalEntries, dailyCheckins])
 
   return (
     <div className="space-y-4">

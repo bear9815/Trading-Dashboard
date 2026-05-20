@@ -16,6 +16,13 @@ export function priorTradingDayString(dateStr) {
   return localDateString(date)
 }
 
+function isWeekendDateString(dateStr) {
+  const [year, month, day] = String(dateStr || '').split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  const dayOfWeek = date.getDay()
+  return dayOfWeek === 0 || dayOfWeek === 6
+}
+
 export function buildPriorTradingThoughtsText(tradingThoughts = [], targetDate) {
   const priorDay = priorTradingDayString(targetDate)
   const priorThoughts = tradingThoughts.filter(thought =>
@@ -54,15 +61,54 @@ function extractPriorJournalText(entry) {
     .trim()
 }
 
-export function buildPriorDayNotesText({ tradingThoughts = [], journalEntries = [], targetDate } = {}) {
+function dailyCheckinModeLabel(mode) {
+  if (mode === 'morning') return 'Morning Pulse'
+  if (mode === 'afternoon') return 'Afternoon Check-in'
+  return 'Daily Check-in'
+}
+
+function formatDailyCheckinText(checkin) {
+  const parts = []
+  const state = String(checkin?.state || '').trim()
+  const riskLevel = String(checkin?.riskLevel ?? '').trim()
+  const primaryResponse = String(checkin?.primaryResponse || '').trim()
+  const actionResponse = String(checkin?.actionResponse || '').trim()
+  const notes = String(checkin?.notes || '').trim()
+
+  if (state) parts.push(state)
+  if (riskLevel) parts.push(`risk ${riskLevel}/5`)
+  if (primaryResponse) parts.push(primaryResponse)
+  if (actionResponse) parts.push(`Next: ${actionResponse}`)
+  if (notes) parts.push(`Notes: ${notes}`)
+
+  if (!parts.length) return ''
+  return `${dailyCheckinModeLabel(checkin?.mode)}: ${parts.join(' · ')}`
+}
+
+export function buildPriorDayNotesText({ tradingThoughts = [], journalEntries = [], dailyCheckins = [], targetDate } = {}) {
   const priorDay = priorTradingDayString(targetDate)
+  const includeDailyCheckins = !isWeekendDateString(targetDate)
   const items = [
     ...tradingThoughts
-      .filter(thought => thought?.timestamp && localDateString(new Date(thought.timestamp)) === priorDay)
+      .filter(thought =>
+        thought?.source !== 'daily-checkin'
+        && thought?.timestamp
+        && localDateString(new Date(thought.timestamp)) === priorDay
+      )
       .map(thought => ({ text: thought.text, timestamp: thought.timestamp })),
     ...journalEntries
-      .filter(entry => entry?.timestamp && localDateString(new Date(entry.timestamp)) === priorDay)
+      .filter(entry =>
+        entry?.source !== 'daily-checkin'
+        && entry?.timestamp
+        && localDateString(new Date(entry.timestamp)) === priorDay
+      )
       .map(entry => ({ text: extractPriorJournalText(entry), timestamp: entry.timestamp })),
+    ...(includeDailyCheckins ? dailyCheckins
+      .filter(checkin => checkin?.date === priorDay)
+      .map(checkin => ({
+        text: formatDailyCheckinText(checkin),
+        timestamp: checkin.submittedAt || checkin.updatedAt || checkin.startedAt || checkin.date,
+      })) : []),
   ]
     .map(item => ({ ...item, text: String(item.text || '').trim() }))
     .filter(item => item.text)

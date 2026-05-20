@@ -55,3 +55,118 @@ test('buildPriorDayNotesText carries thoughts, dashboard journal notes, and full
     '• Market was constructive but extended.\n\nKeep sizing modest.\n\nFOMO crept up after lunch.\n\nWait for confirmation.',
   ].join('\n'))
 })
+
+test('buildPriorDayNotesText carries friday daily check-ins into monday morning notes', () => {
+  const result = priorTradingThoughts.buildPriorDayNotesText({
+    dailyCheckins: [
+      {
+        date: '2026-05-01',
+        mode: 'morning',
+        state: 'Focused',
+        riskLevel: 2,
+        primaryResponse: 'Do not chase opening strength.',
+        actionResponse: 'Wait for confirmed follow-through.',
+        notes: 'Size normally.',
+        submittedAt: '2026-05-01T14:00:00-05:00',
+      },
+      {
+        date: '2026-05-01',
+        mode: 'afternoon',
+        state: 'On Plan',
+        riskLevel: 1,
+        primaryResponse: 'Breadth improved after lunch.',
+        actionResponse: 'Hold winners and avoid fresh risk.',
+        notes: 'No overtrading.',
+        submittedAt: '2026-05-01T19:00:00-05:00',
+      },
+      {
+        date: '2026-04-30',
+        mode: 'afternoon',
+        notes: 'Thursday should not carry.',
+        submittedAt: '2026-04-30T19:00:00-05:00',
+      },
+    ],
+    targetDate: '2026-05-04',
+  })
+
+  assert.equal(result, [
+    '• Morning Pulse: Focused · risk 2/5 · Do not chase opening strength. · Next: Wait for confirmed follow-through. · Notes: Size normally.',
+    '• Afternoon Check-in: On Plan · risk 1/5 · Breadth improved after lunch. · Next: Hold winners and avoid fresh risk. · Notes: No overtrading.',
+  ].join('\n'))
+})
+
+test('buildPriorDayNotesText carries monday daily check-ins into tuesday morning notes', () => {
+  const result = priorTradingThoughts.buildPriorDayNotesText({
+    dailyCheckins: [
+      {
+        date: '2026-05-04',
+        mode: 'afternoon',
+        state: 'Drifting',
+        riskLevel: 4,
+        primaryResponse: 'Started forcing trades after lunch.',
+        actionResponse: 'Stop trading and review.',
+        submittedAt: '2026-05-04T19:00:00-05:00',
+      },
+    ],
+    targetDate: '2026-05-05',
+  })
+
+  assert.equal(result, '• Afternoon Check-in: Drifting · risk 4/5 · Started forcing trades after lunch. · Next: Stop trading and review.')
+})
+
+test('buildPriorDayNotesText does not carry daily check-ins into weekend morning dates', () => {
+  const result = priorTradingThoughts.buildPriorDayNotesText({
+    dailyCheckins: [
+      {
+        date: '2026-05-01',
+        mode: 'morning',
+        state: 'Focused',
+        primaryResponse: 'Friday note should wait until Monday.',
+        submittedAt: '2026-05-01T14:00:00-05:00',
+      },
+    ],
+    targetDate: '2026-05-02',
+  })
+
+  assert.equal(result, '')
+})
+
+test('buildPriorDayNotesText filters daily check-in mirror notes to avoid duplicates', () => {
+  const result = priorTradingThoughts.buildPriorDayNotesText({
+    tradingThoughts: [
+      {
+        text: 'Morning Pulse: Focused · risk 2/5 · Do not chase opening strength.',
+        timestamp: new Date('2026-05-01T14:00:00-05:00').getTime(),
+        source: 'daily-checkin',
+      },
+      {
+        text: 'Independent non-check-in thought.',
+        timestamp: new Date('2026-05-01T15:00:00-05:00').getTime(),
+      },
+    ],
+    journalEntries: [
+      {
+        entryType: 'dashboard-note',
+        noteText: 'Morning Pulse: Focused · risk 2/5 · Do not chase opening strength.',
+        timestamp: '2026-05-01T14:00:00-05:00',
+        source: 'daily-checkin',
+      },
+    ],
+    dailyCheckins: [
+      {
+        date: '2026-05-01',
+        mode: 'morning',
+        state: 'Focused',
+        riskLevel: 2,
+        primaryResponse: 'Do not chase opening strength.',
+        submittedAt: '2026-05-01T14:00:00-05:00',
+      },
+    ],
+    targetDate: '2026-05-04',
+  })
+
+  assert.equal(result, [
+    '• Morning Pulse: Focused · risk 2/5 · Do not chase opening strength.',
+    '• Independent non-check-in thought.',
+  ].join('\n'))
+})
