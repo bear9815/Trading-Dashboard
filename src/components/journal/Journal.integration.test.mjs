@@ -13,3 +13,12 @@ test('journal exposes weekly review and supports an externally selected section'
   assert.match(source, /weekly-review/)
   assert.match(source, /WeeklyReviewTab|WeeklyReview/)
 })
+
+test('daily check-ins tab exposes durable storage health state', async () => {
+  const source = await readFile(journalPath, 'utf8')
+
+  assert.match(source, /dailyCheckinsSyncStatus/)
+  assert.match(source, /dailyCheckinsLastSyncedAt/)
+  assert.match(source, /dailyCheckinsSyncError/)
+  assert.match(source, /Storage Health/)
+})

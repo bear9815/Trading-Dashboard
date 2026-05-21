@@ -882,8 +882,51 @@ test('dashboard thoughts persist into both trading thoughts and journal entries'
 
 test('submitted daily check-ins persist as source records, clear drafts, and mirror a concise journal thought', async () => {
   const previousLocalStorage = globalThis.localStorage
+  const previousFetch = globalThis.fetch
   const localStorageMock = createLocalStorageMock()
   globalThis.localStorage = localStorageMock
+  globalThis.fetch = async (url, options = {}) => {
+    if (url === '/api/daily-checkins' && options.method === 'POST') {
+      const body = JSON.parse(options.body)
+      return {
+        ok: true,
+        async json() {
+          return {
+            ok: true,
+            record: {
+              id: 'server-morning',
+              ...body,
+              submittedAt: '2026-05-04T14:00:00.000Z',
+              updatedAt: '2026-05-04T14:00:00.000Z',
+            },
+          }
+        },
+      }
+    }
+    if (url === '/api/daily-checkins' || String(url).startsWith('/api/daily-checkins?')) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            ok: true,
+            records: [{
+              id: 'server-morning',
+              date: '2026-05-04',
+              mode: 'morning',
+              state: 'Focused',
+              riskLevel: 2,
+              primaryResponse: 'Opening strength could tempt me to chase.',
+              actionResponse: 'Wait for confirmed follow-through.',
+              notes: 'Keep position size normal.',
+              submittedAt: '2026-05-04T14:00:00.000Z',
+              updatedAt: '2026-05-04T14:00:00.000Z',
+            }],
+          }
+        },
+      }
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
 
   try {
     useJournalStore.setState({
@@ -954,6 +997,7 @@ test('submitted daily check-ins persist as source records, clear drafts, and mir
     const restoredState = useJournalStore.getState()
     assert.equal(restoredState.dailyCheckins.length, 1)
     assert.equal(restoredState.dailyCheckins[0].primaryResponse, 'Opening strength could tempt me to chase.')
+    assert.equal(restoredState.dailyCheckinsSyncStatus, 'synced')
     assert.equal(restoredState.dailyCheckinDrafts.length, 0)
     assert.equal(restoredState.tradingThoughts.length, 1)
     assert.match(restoredState.tradingThoughts[0].text, /^Morning Pulse:/)
@@ -974,6 +1018,90 @@ test('submitted daily check-ins persist as source records, clear drafts, and mir
       delete globalThis.localStorage
     } else {
       globalThis.localStorage = previousLocalStorage
+    }
+    if (previousFetch === undefined) {
+      delete globalThis.fetch
+    } else {
+      globalThis.fetch = previousFetch
+    }
+  }
+})
+
+test('daily check-in submit keeps the local draft and does not show submitted records when the durable API fails', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  const previousFetch = globalThis.fetch
+  const localStorageMock = createLocalStorageMock()
+  globalThis.localStorage = localStorageMock
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 503,
+    async json() {
+      return { ok: false, error: 'Daily check-in ledger unavailable.' }
+    },
+  })
+
+  try {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      dailyCheckins: [],
+      dailyCheckinDrafts: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+      dailyCheckinsSyncStatus: 'idle',
+      dailyCheckinsSyncError: null,
+    })
+
+    const result = useJournalStore.getState().submitDailyCheckin({
+      date: '2026-05-04',
+      mode: 'afternoon',
+      fields: {
+        state: 'Drifting',
+        riskLevel: 4,
+        primaryResponse: 'I started forcing trades.',
+        actionResponse: 'Stop trading.',
+        notes: 'Needs durable retry.',
+      },
+    })
+    const saved = await result.saved
+
+    const state = useJournalStore.getState()
+    assert.equal(saved.ok, false)
+    assert.equal(state.dailyCheckins.length, 0)
+    assert.equal(state.entries.length, 0)
+    assert.equal(state.tradingThoughts.length, 0)
+    assert.equal(state.dailyCheckinDrafts.length, 1)
+    assert.equal(state.dailyCheckinDrafts[0].notes, 'Needs durable retry.')
+    assert.equal(state.dailyCheckinsSyncStatus, 'error')
+    assert.match(state.dailyCheckinsSyncError, /ledger unavailable/i)
+  } finally {
+    useJournalStore.setState({
+      entries: [],
+      priorities: [],
+      goals: [],
+      checkins: [],
+      dailyCheckins: [],
+      dailyCheckinDrafts: [],
+      tradingThoughts: [],
+      weeklyScorecards: [],
+      cloudReady: false,
+      cloudUserId: null,
+      dailyCheckinsSyncStatus: 'idle',
+      dailyCheckinsSyncError: null,
+    })
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+    if (previousFetch === undefined) {
+      delete globalThis.fetch
+    } else {
+      globalThis.fetch = previousFetch
     }
   }
 })

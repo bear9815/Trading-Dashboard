@@ -352,7 +352,16 @@ function DailyCheckinCard({ checkin, onDelete }) {
 }
 
 function DailyCheckinsTab() {
-  const { dailyCheckins = [], deleteDailyCheckin, lastSaveError, lastCloudSaveError } = useJournalStore()
+  const {
+    dailyCheckins = [],
+    dailyCheckinDrafts = [],
+    deleteDailyCheckin,
+    lastSaveError,
+    lastCloudSaveError,
+    dailyCheckinsSyncStatus,
+    dailyCheckinsLastSyncedAt,
+    dailyCheckinsSyncError,
+  } = useJournalStore()
   const [modeFilter, setModeFilter] = useState('all')
 
   const sorted = useMemo(() => (
@@ -385,6 +394,36 @@ function DailyCheckinsTab() {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">Storage Health</p>
+            <p className="mt-1 text-sm text-gray-300">
+              {dailyCheckinsSyncStatus === 'synced' && 'Durable ledger connected.'}
+              {dailyCheckinsSyncStatus === 'syncing' && 'Checking durable ledger...'}
+              {dailyCheckinsSyncStatus === 'error' && 'Durable ledger needs attention.'}
+              {(!dailyCheckinsSyncStatus || dailyCheckinsSyncStatus === 'idle') && 'Waiting for durable ledger check.'}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className={`text-xs font-semibold ${
+              dailyCheckinsSyncStatus === 'synced' ? 'text-accent-green' : dailyCheckinsSyncStatus === 'error' ? 'text-accent-red' : 'text-accent-yellow'
+            }`}>
+              {dailyCheckinsSyncStatus || 'idle'}
+            </p>
+            <p className="mt-0.5 text-xs text-gray-600">
+              {dailyCheckinsLastSyncedAt ? `Last sync ${formatDate(dailyCheckinsLastSyncedAt, 'time')}` : 'No verified sync yet'}
+            </p>
+          </div>
+        </div>
+        {(dailyCheckinsSyncError || dailyCheckinDrafts.length > 0) && (
+          <p className="mt-2 text-xs text-gray-500">
+            {dailyCheckinsSyncError ? `${dailyCheckinsSyncError} ` : ''}
+            {dailyCheckinDrafts.length > 0 ? `${dailyCheckinDrafts.length} local draft${dailyCheckinDrafts.length === 1 ? '' : 's'} waiting for submit/retry.` : ''}
+          </p>
+        )}
       </div>
 
       {lastSaveError && (

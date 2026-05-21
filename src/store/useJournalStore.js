@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { v4 as uuidv4 } from 'uuid'
 import { supabase } from '../lib/supabase.js'
 import { buildDashboardJournalEntry, extractJournalEntryText } from '../utils/dashboardThoughts.js'
+import { deleteDailyCheckinFromApi, fetchDailyCheckinsFromApi, submitDailyCheckinToApi } from '../utils/dailyCheckinsApi.js'
 import { readDurableJson, writeDurableJson } from '../utils/durableLocalJson.js'
 import { normalizeWeeklyScorecardSnapshot } from '../utils/weeklyScorecard.js'
 
@@ -208,6 +209,113 @@ function buildDailyCheckinSummary(record = {}) {
   return `${title}: ${parts.filter(Boolean).join(' · ') || 'Submitted.'}`
 }
 
+function normalizeDailyRecord(record = {}) {
+  const now = new Date().toISOString()
+  return {
+    id: record.id || uuidv4(),
+    date: String(record.date || ''),
+    mode: normalizeCheckinMode(record.mode),
+    startedAt: record.startedAt || record.submittedAt || record.updatedAt || now,
+    submittedAt: record.submittedAt || record.updatedAt || now,
+    createdAt: record.createdAt || record.submittedAt || record.updatedAt || now,
+    ...normalizeDailyFields(record),
+    updatedAt: record.updatedAt || now,
+    summaryThoughtId: record.summaryThoughtId,
+    summaryEntryId: record.summaryEntryId,
+  }
+}
+
+function applySubmittedDailyCheckinToState(state, incomingRecord) {
+  const now = incomingRecord.updatedAt || new Date().toISOString()
+  const key = dailyCheckinKey(incomingRecord.date, incomingRecord.mode)
+  const existing = state.dailyCheckins.find(item => dailyCheckinKey(item.date, item.mode) === key)
+  const recordBase = normalizeDailyRecord({
+    ...existing,
+    ...incomingRecord,
+    id: incomingRecord.id || existing?.id,
+  })
+  const summaryText = buildDailyCheckinSummary(recordBase)
+  const summaryTimestamp = now
+
+  let tradingThoughts = state.tradingThoughts
+  let entries = state.entries
+  const existingThoughtId = existing?.summaryThoughtId || recordBase.summaryThoughtId
+  const existingEntryId = existing?.summaryEntryId || recordBase.summaryEntryId
+  let savedThought = null
+  let savedEntry = null
+
+  if (existingThoughtId && tradingThoughts.some(item => item.id === existingThoughtId)) {
+    tradingThoughts = tradingThoughts.map(item => (
+      item.id === existingThoughtId
+        ? { ...item, text: summaryText, tag: recordBase.mode === 'afternoon' ? 'insight' : 'discipline', timestamp: new Date(summaryTimestamp).getTime(), source: 'daily-checkin' }
+        : item
+    ))
+    savedThought = tradingThoughts.find(item => item.id === existingThoughtId)
+  } else {
+    savedThought = {
+      id: uuidv4(),
+      text: summaryText,
+      tag: recordBase.mode === 'afternoon' ? 'insight' : 'discipline',
+      timestamp: new Date(summaryTimestamp).getTime(),
+      source: 'daily-checkin',
+    }
+    tradingThoughts = [savedThought, ...tradingThoughts]
+  }
+
+  const builtEntry = {
+    ...buildDashboardJournalEntry(summaryText, summaryTimestamp),
+    source: 'daily-checkin',
+  }
+  if (existingEntryId && entries.some(item => item.id === existingEntryId)) {
+    entries = entries.map(item => (
+      item.id === existingEntryId ? { ...builtEntry, id: existingEntryId } : item
+    ))
+    savedEntry = entries.find(item => item.id === existingEntryId)
+  } else {
+    savedEntry = { ...builtEntry, id: uuidv4() }
+    entries = [savedEntry, ...entries]
+  }
+
+  const record = {
+    ...recordBase,
+    summaryThoughtId: savedThought.id,
+    summaryEntryId: savedEntry.id,
+  }
+
+  return {
+    dailyCheckins: sortDailyCheckins([
+      record,
+      ...state.dailyCheckins.filter(item => dailyCheckinKey(item.date, item.mode) !== key),
+    ]),
+    dailyCheckinDrafts: state.dailyCheckinDrafts.filter(item => dailyCheckinKey(item.date, item.mode) !== key),
+    tradingThoughts,
+    entries,
+    savedRecord: record,
+    savedThought,
+    savedEntry,
+  }
+}
+
+function mergeServerDailyCheckinsIntoState(state, records = []) {
+  let nextState = {
+    ...state,
+    dailyCheckins: state.dailyCheckins || [],
+    dailyCheckinDrafts: state.dailyCheckinDrafts || [],
+    tradingThoughts: state.tradingThoughts || [],
+    entries: state.entries || [],
+  }
+  for (const record of records) {
+    const applied = applySubmittedDailyCheckinToState(nextState, record)
+    nextState = { ...nextState, ...applied }
+  }
+  return {
+    dailyCheckins: nextState.dailyCheckins,
+    dailyCheckinDrafts: nextState.dailyCheckinDrafts,
+    tradingThoughts: nextState.tradingThoughts,
+    entries: nextState.entries,
+  }
+}
+
 function getPersistableJournalState(state = {}) {
   const {
     entries = [],
@@ -263,6 +371,9 @@ export const useJournalStore = create((set, get) => ({
   lastSaveError:   null,
   lastSavedAt:     null,
   lastCloudSaveError: null,
+  dailyCheckinsSyncStatus: 'idle',
+  dailyCheckinsLastSyncedAt: null,
+  dailyCheckinsSyncError: null,
 
   // ── Cloud ──────────────────────────────────────────────────────────────────
 
@@ -279,7 +390,11 @@ export const useJournalStore = create((set, get) => ({
       return
     }
     const parsed = result.value
-    if (!parsed && !rescueState) { set({ cloudReady: true, cloudUserId: null }); return }
+    if (!parsed && !rescueState) {
+      set({ cloudReady: true, cloudUserId: null })
+      await get().syncDailyCheckinsFromServer().saved
+      return
+    }
     const localState = rescueState
       ? mergeJournalState({ localState: rescueState, cloudState: parsed?.state || {} })
       : normalizeJournalState(parsed?.state || {})
@@ -298,6 +413,7 @@ export const useJournalStore = create((set, get) => ({
       lastSaveError: null,
     })
     if (rescueState) persistLocal(localState)
+    await get().syncDailyCheckinsFromServer().saved
   },
 
   loadFromCloud: async (userId) => {
@@ -357,7 +473,7 @@ export const useJournalStore = create((set, get) => ({
   },
 
   clearLocalState: () => set({
-    entries: [], priorities: [], goals: [], checkins: [], dailyCheckins: [], dailyCheckinDrafts: [], tradingThoughts: [], weeklyScorecards: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null, lastCloudSaveError: null,
+    entries: [], priorities: [], goals: [], checkins: [], dailyCheckins: [], dailyCheckinDrafts: [], tradingThoughts: [], weeklyScorecards: [], cloudReady: false, cloudUserId: null, lastSaveError: null, lastSavedAt: null, lastCloudSaveError: null, dailyCheckinsSyncStatus: 'idle', dailyCheckinsLastSyncedAt: null, dailyCheckinsSyncError: null,
   }),
 
   // ── Internal sync helper ───────────────────────────────────────────────────
@@ -482,6 +598,33 @@ export const useJournalStore = create((set, get) => ({
 
   // ── Daily Trading Check-ins ─────────────────────────────────────────────────
 
+  syncDailyCheckinsFromServer: ({ date } = {}) => {
+    set({ dailyCheckinsSyncStatus: 'syncing', dailyCheckinsSyncError: null })
+    const syncedAt = new Date().toISOString()
+    const saved = fetchDailyCheckinsFromApi({ date })
+      .then(records => {
+        set(s => ({
+          ...mergeServerDailyCheckinsIntoState(s, records),
+          dailyCheckinsSyncStatus: 'synced',
+          dailyCheckinsLastSyncedAt: syncedAt,
+          dailyCheckinsSyncError: null,
+        }))
+        return persistLocal(getPersistableJournalState(get())).then(result => {
+          if (result.ok) set({ lastSaveError: null, lastSavedAt: syncedAt })
+          else set({ lastSaveError: result.message || 'Local save failed.', lastSavedAt: null })
+          return { ok: true, records }
+        })
+      })
+      .catch(error => {
+        set({
+          dailyCheckinsSyncStatus: 'error',
+          dailyCheckinsSyncError: error?.message || 'Daily check-in sync failed.',
+        })
+        return { ok: false, message: error?.message || 'Daily check-in sync failed.' }
+      })
+    return { saved }
+  },
+
   upsertDailyCheckinDraft: ({ date, mode = 'morning', fields = {} } = {}) => {
     const key = dailyCheckinKey(date, mode)
     if (!key) return null
@@ -532,89 +675,79 @@ export const useJournalStore = create((set, get) => ({
 
   submitDailyCheckin: ({ date, mode = 'morning', fields = {} } = {}) => {
     const key = dailyCheckinKey(date, mode)
-    if (!key) return null
+    if (!key) return { saved: Promise.resolve({ ok: false, message: 'date is required.' }) }
 
-    const now = new Date().toISOString()
-    let savedRecord = null
-    let savedThought = null
-    let savedEntry = null
+    set({ dailyCheckinsSyncStatus: 'syncing', dailyCheckinsSyncError: null })
+    const payload = {
+      date: String(date),
+      mode: normalizeCheckinMode(mode),
+      ...normalizeDailyFields(fields),
+    }
+    const saved = submitDailyCheckinToApi({ record: payload })
+      .then(async () => {
+        const records = await fetchDailyCheckinsFromApi({ date: String(date) })
+        const verified = records.find(item => dailyCheckinKey(item.date, item.mode) === key)
+        if (!verified) throw new Error('Daily check-in save could not be verified.')
 
-    set(s => {
-      const existing = s.dailyCheckins.find(item => dailyCheckinKey(item.date, item.mode) === key)
-      const recordBase = {
-        id: existing?.id || uuidv4(),
-        date: String(date),
-        mode: normalizeCheckinMode(mode),
-        startedAt: existing?.startedAt || now,
-        submittedAt: existing?.submittedAt || now,
-        ...normalizeDailyFields({ ...existing, ...fields }),
-        updatedAt: now,
-      }
-      const summaryText = buildDailyCheckinSummary(recordBase)
-      const summaryTimestamp = now
-
-      let tradingThoughts = s.tradingThoughts
-      let entries = s.entries
-      const existingThoughtId = existing?.summaryThoughtId
-      const existingEntryId = existing?.summaryEntryId
-
-      if (existingThoughtId && tradingThoughts.some(item => item.id === existingThoughtId)) {
-        tradingThoughts = tradingThoughts.map(item => (
-          item.id === existingThoughtId
-            ? { ...item, text: summaryText, tag: recordBase.mode === 'afternoon' ? 'insight' : 'discipline', timestamp: new Date(summaryTimestamp).getTime(), source: 'daily-checkin' }
-            : item
-        ))
-        savedThought = tradingThoughts.find(item => item.id === existingThoughtId)
-      } else {
-        savedThought = {
-          id: uuidv4(),
-          text: summaryText,
-          tag: recordBase.mode === 'afternoon' ? 'insight' : 'discipline',
-          timestamp: new Date(summaryTimestamp).getTime(),
-          source: 'daily-checkin',
+        let applied = null
+        set(s => {
+          applied = applySubmittedDailyCheckinToState(s, verified)
+          return {
+            dailyCheckins: applied.dailyCheckins,
+            dailyCheckinDrafts: applied.dailyCheckinDrafts,
+            tradingThoughts: applied.tradingThoughts,
+            entries: applied.entries,
+            dailyCheckinsSyncStatus: 'synced',
+            dailyCheckinsLastSyncedAt: new Date().toISOString(),
+            dailyCheckinsSyncError: null,
+          }
+        })
+        const localResult = await persistLocal(getPersistableJournalState(get()))
+        if (localResult.ok) set({ lastSaveError: null, lastSavedAt: new Date().toISOString() })
+        else set({ lastSaveError: localResult.message || 'Local save failed.', lastSavedAt: null })
+        return {
+          ok: true,
+          record: applied?.savedRecord || verified,
+          thought: applied?.savedThought,
+          entry: applied?.savedEntry,
+          local: localResult,
         }
-        tradingThoughts = [savedThought, ...tradingThoughts]
-      }
-
-      const builtEntry = {
-        ...buildDashboardJournalEntry(summaryText, summaryTimestamp),
-        source: 'daily-checkin',
-      }
-      if (existingEntryId && entries.some(item => item.id === existingEntryId)) {
-        entries = entries.map(item => (
-          item.id === existingEntryId ? { ...builtEntry, id: existingEntryId } : item
-        ))
-        savedEntry = entries.find(item => item.id === existingEntryId)
-      } else {
-        savedEntry = { ...builtEntry, id: uuidv4() }
-        entries = [savedEntry, ...entries]
-      }
-
-      const record = {
-        ...recordBase,
-        summaryThoughtId: savedThought.id,
-        summaryEntryId: savedEntry.id,
-      }
-      savedRecord = record
-
-      return {
-        dailyCheckins: sortDailyCheckins([
-          record,
-          ...s.dailyCheckins.filter(item => dailyCheckinKey(item.date, item.mode) !== key),
-        ]),
-        dailyCheckinDrafts: s.dailyCheckinDrafts.filter(item => dailyCheckinKey(item.date, item.mode) !== key),
-        tradingThoughts,
-        entries,
-      }
-    })
-
-    const saved = get()._sync()
-    return { record: savedRecord, thought: savedThought, entry: savedEntry, saved }
+      })
+      .catch(async error => {
+        const draftResult = get().upsertDailyCheckinDraft({ date, mode, fields })
+        if (draftResult?.saved) await draftResult.saved
+        set({
+          dailyCheckinsSyncStatus: 'error',
+          dailyCheckinsSyncError: error?.message || 'Daily check-in ledger unavailable.',
+        })
+        return { ok: false, message: error?.message || 'Daily check-in ledger unavailable.' }
+      })
+    return { saved }
   },
 
   deleteDailyCheckin: (id) => {
-    set(s => ({ dailyCheckins: s.dailyCheckins.filter(item => item.id !== id) }))
-    return get()._sync()
+    set({ dailyCheckinsSyncStatus: 'syncing', dailyCheckinsSyncError: null })
+    const saved = deleteDailyCheckinFromApi({ id })
+      .then(async () => {
+        set(s => ({
+          dailyCheckins: s.dailyCheckins.filter(item => item.id !== id),
+          dailyCheckinsSyncStatus: 'synced',
+          dailyCheckinsLastSyncedAt: new Date().toISOString(),
+          dailyCheckinsSyncError: null,
+        }))
+        const localResult = await persistLocal(getPersistableJournalState(get()))
+        if (localResult.ok) set({ lastSaveError: null, lastSavedAt: new Date().toISOString() })
+        else set({ lastSaveError: localResult.message || 'Local save failed.', lastSavedAt: null })
+        return localResult
+      })
+      .catch(error => {
+        set({
+          dailyCheckinsSyncStatus: 'error',
+          dailyCheckinsSyncError: error?.message || 'Daily check-in delete failed.',
+        })
+        return { ok: false, message: error?.message || 'Daily check-in delete failed.' }
+      })
+    return { saved }
   },
 
   // ── Trading Thoughts ───────────────────────────────────────────────────────

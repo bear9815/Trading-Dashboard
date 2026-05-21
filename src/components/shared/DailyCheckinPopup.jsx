@@ -109,6 +109,7 @@ export default function DailyCheckinPopup({ openRequest = { signal: 0, requested
     getDailyCheckinByDateAndMode,
     lastSaveError,
     lastCloudSaveError,
+    dailyCheckinsSyncError,
   } = useJournalStore()
   const { habits, completions, logCompletion, removeCompletion, isCompleted } = useHabitsStore()
   const { getEntryByDate } = useMorningStore()
@@ -496,11 +497,11 @@ export default function DailyCheckinPopup({ openRequest = { signal: 0, requested
             </button>
           </div>
 
-          {(lastSaveError || lastCloudSaveError) && (
+          {(lastSaveError || lastCloudSaveError || dailyCheckinsSyncError) && (
             <div className="px-7 pb-6">
-              {lastSaveError ? (
+              {lastSaveError || dailyCheckinsSyncError ? (
                 <p className="rounded-lg border border-accent-red/25 bg-accent-red/10 px-3 py-2 text-sm text-accent-red">
-                  Local save warning: {lastSaveError}. Keep this popup open until you export a backup from Settings.
+                  Save warning: {lastSaveError || dailyCheckinsSyncError}. Your draft is kept locally; retry Submit before closing if possible.
                 </p>
               ) : (
                 <p className="rounded-lg border border-accent-yellow/25 bg-accent-yellow/10 px-3 py-2 text-sm text-accent-yellow">
