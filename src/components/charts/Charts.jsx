@@ -24,8 +24,8 @@ import { buildWatchlistFitMap } from '../../utils/watchlistFitSignal.js'
 import { resolveTickerToName } from '../../utils/marketData.js'
 import { buildCondensedEcosystemRows, normalizeEcosystemGroupingMode, normalizeEcosystemKey } from '../../utils/condensedEcosystems.js'
 import { buildEcosystemCompositeBars } from '../../utils/ecosystemCompositeChart.js'
-import { buildSqueezeSnapshot } from '../../utils/squeezeAnalytics.js'
-import { formatSqueezeMetric } from '../../utils/squeezeUi.js'
+import { buildBeardySqueezeSnapshot, buildSqueezeSnapshot } from '../../utils/squeezeAnalytics.js'
+import { formatBeardySqueezeLabel, formatSqueezeMetric, getBeardySqueezeTone } from '../../utils/squeezeUi.js'
 import { INDUSTRY_ETF_UNIVERSE } from '../../utils/industryEtfUniverse.js'
 import { getChartsSymbolSortOptions } from '../../utils/watchlistTableConfig.js'
 import { buildCharacterChangeMap } from '../../utils/characterChangeSignal.js'
@@ -592,9 +592,12 @@ export default function Charts() {
   const squeezeBySymbol = useMemo(
     () => Object.fromEntries(symbols.map(symbol => {
       const dailyBars = historyBarsBySymbol[symbol] || []
+      const weeklyBars = aggregateWeeklyBars(dailyBars)
       return [symbol, {
         daily: buildSqueezeSnapshot(dailyBars),
-        weekly: buildSqueezeSnapshot(aggregateWeeklyBars(dailyBars)),
+        weekly: buildSqueezeSnapshot(weeklyBars),
+        dailyBeardy: buildBeardySqueezeSnapshot(dailyBars),
+        weeklyBeardy: buildBeardySqueezeSnapshot(weeklyBars),
       }]
     })),
     [historyBarsBySymbol, symbols]
@@ -645,6 +648,8 @@ export default function Charts() {
       if (sortKey === 'dailyExpansion') return squeezeBySymbol[row.symbol]?.daily?.expansionScore
       if (sortKey === 'weeklyCompression') return squeezeBySymbol[row.symbol]?.weekly?.compressionScore
       if (sortKey === 'weeklyExpansion') return squeezeBySymbol[row.symbol]?.weekly?.expansionScore
+      if (sortKey === 'dailyBeardySqueeze') return squeezeBySymbol[row.symbol]?.dailyBeardy?.score
+      if (sortKey === 'weeklyBeardySqueeze') return squeezeBySymbol[row.symbol]?.weeklyBeardy?.score
       if (sortKey === 'characterChange') return characterChangeBySymbol[row.symbol]?.score
       if (sortKey === 'finraShortInterest') return coerceNumeric(row.finraShortInterest)
       if (sortKey === 'finraEstimatedShortInterest') return coerceNumeric(row.finraEstimatedShortInterest)
@@ -1340,6 +1345,12 @@ export default function Charts() {
                             </span>
                             <span className="rounded-full border border-emerald-400/15 bg-emerald-400/[0.08] px-2 py-1 text-emerald-100">
                               DE {formatSqueezeMetric(squeeze?.daily?.expansionScore)}
+                            </span>
+                            <span className={`rounded-full border px-2 py-1 ${getBeardySqueezeTone(squeeze?.dailyBeardy?.level)}`}>
+                              BD {formatBeardySqueezeLabel(squeeze?.dailyBeardy)}
+                            </span>
+                            <span className={`rounded-full border px-2 py-1 ${getBeardySqueezeTone(squeeze?.weeklyBeardy?.level)}`}>
+                              BW {formatBeardySqueezeLabel(squeeze?.weeklyBeardy)}
                             </span>
                           </div>
                         </div>

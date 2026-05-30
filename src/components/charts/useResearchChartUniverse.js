@@ -12,7 +12,7 @@ import {
   calculateRsGradient,
   resolveLatestAnchorDate,
 } from '../../utils/tradeReviewChart.js'
-import { buildSqueezeSeries } from '../../utils/squeezeAnalytics.js'
+import { buildBeardySqueezeSeries, buildSqueezeSeries } from '../../utils/squeezeAnalytics.js'
 import { buildCharacterChangeSeries, buildCharacterChangeSnapshot } from '../../utils/characterChangeSignal.js'
 
 const WATCHLIST_HISTORY_TTL_MS = 6 * 60 * 60 * 1000
@@ -140,6 +140,8 @@ export function buildChartDataFromBars(
       dailyCharacterChangeSnapshot: { label: 'needs_data', score: null },
       dailySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], setupReadiness: [], triggerMarkers: [], snapshot: { stateLabel: 'No Data', triggerState: 'No Data', setupReadinessScore: null } },
       weeklySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], setupReadiness: [], triggerMarkers: [], snapshot: { stateLabel: 'No Data', triggerState: 'No Data', setupReadinessScore: null } },
+      dailyBeardySqueeze: { dots: [], momentum: [], snapshot: { label: 'No Data', level: 'no-data', score: null } },
+      weeklyBeardySqueeze: { dots: [], momentum: [], snapshot: { label: 'No Data', level: 'no-data', score: null } },
       dailySqueezeSnapshot: { stateLabel: 'No Data' },
       weeklySqueezeSnapshot: { stateLabel: 'No Data' },
     }
@@ -158,6 +160,8 @@ export function buildChartDataFromBars(
       dailyCharacterChangeSnapshot: { label: 'needs_data', score: null },
       dailySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], setupReadiness: [], triggerMarkers: [], snapshot: { stateLabel: 'No Data', triggerState: 'No Data', setupReadinessScore: null } },
       weeklySqueeze: { bbw: [], bbwSignal: [], bbwPercentile: [], bbwPercentileSignal: [], trueRangePercentile: [], trueRangeSignal: [], compression: [], expansion: [], setupReadiness: [], triggerMarkers: [], snapshot: { stateLabel: 'No Data', triggerState: 'No Data', setupReadinessScore: null } },
+      dailyBeardySqueeze: { dots: [], momentum: [], snapshot: { label: 'No Data', level: 'no-data', score: null } },
+      weeklyBeardySqueeze: { dots: [], momentum: [], snapshot: { label: 'No Data', level: 'no-data', score: null } },
       dailySqueezeSnapshot: { stateLabel: 'No Data' },
       weeklySqueezeSnapshot: { stateLabel: 'No Data' },
     }
@@ -187,6 +191,8 @@ export function buildChartDataFromBars(
   }
   const dailySqueeze = buildSqueezeSeries(dailyBars)
   const weeklySqueeze = buildSqueezeSeries(weeklyBars)
+  const dailyBeardySqueeze = buildBeardySqueezeSeries(dailyBars)
+  const weeklyBeardySqueeze = buildBeardySqueezeSeries(weeklyBars)
   const dailyCharacterChangeBands = buildCharacterChangeSeries(
     dailyBars,
     benchmarkDailyBars,
@@ -216,6 +222,8 @@ export function buildChartDataFromBars(
     ),
     dailySqueeze,
     weeklySqueeze,
+    dailyBeardySqueeze,
+    weeklyBeardySqueeze,
     dailySqueezeSnapshot: dailySqueeze.snapshot,
     weeklySqueezeSnapshot: weeklySqueeze.snapshot,
   }

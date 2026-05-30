@@ -15,6 +15,8 @@ export const DEFAULT_WATCHLIST_COLUMN_ORDER = [
   'dailyExpansion',
   'weeklyCompression',
   'weeklyExpansion',
+  'dailyBeardySqueeze',
+  'weeklyBeardySqueeze',
   'squeezeState',
   'finraShortInterest',
   'finraEstimatedShortInterest',
@@ -33,6 +35,8 @@ export const WATCHLIST_SYMBOL_SORT_OPTIONS = [
   { key: 'dailyExpansion', label: 'Daily Expansion', chartsSupported: true },
   { key: 'weeklyCompression', label: 'Weekly Compression', chartsSupported: true },
   { key: 'weeklyExpansion', label: 'Weekly Expansion', chartsSupported: true },
+  { key: 'dailyBeardySqueeze', label: 'Daily Beardy Squeeze', chartsSupported: true },
+  { key: 'weeklyBeardySqueeze', label: 'Weekly Beardy Squeeze', chartsSupported: true },
   { key: 'finraShortInterest', label: 'FINRA Short %', chartsSupported: true },
   { key: 'finraEstimatedShortInterest', label: 'Est. Short %', chartsSupported: true },
 ]
@@ -72,13 +76,13 @@ export const WATCHLIST_COLUMN_PRESETS = [
     key: 'squeeze',
     label: 'Squeeze',
     description: 'Daily and weekly coil/expansion setup scan for volatility expansion work.',
-    columns: ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyCompression', 'dailyExpansion', 'weeklyCompression', 'weeklyExpansion', 'squeezeState', 'actions'],
+    columns: ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyBeardySqueeze', 'weeklyBeardySqueeze', 'dailyCompression', 'dailyExpansion', 'weeklyCompression', 'weeklyExpansion', 'squeezeState', 'actions'],
   },
   {
     key: 'squeeze_scout',
     label: 'Squeeze Scout',
     description: 'Best default volatility layout for daily and weekly compression and expansion scouting.',
-    columns: ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyCompression', 'dailyExpansion', 'weeklyCompression', 'weeklyExpansion', 'squeezeState', 'actions'],
+    columns: ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyBeardySqueeze', 'weeklyBeardySqueeze', 'dailyCompression', 'dailyExpansion', 'weeklyCompression', 'weeklyExpansion', 'squeezeState', 'actions'],
   },
   {
     key: 'trend_coil',

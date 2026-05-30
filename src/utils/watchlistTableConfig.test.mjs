@@ -13,7 +13,9 @@ assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('symbol'))
 assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('actions'))
 assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('characterChange'))
 assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('dailyCompression'))
+assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('dailyBeardySqueeze'))
 assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('weeklyExpansion'))
+assert.ok(DEFAULT_WATCHLIST_COLUMN_ORDER.includes('weeklyBeardySqueeze'))
 assert.ok(WATCHLIST_COLUMN_PRESETS.length >= 4)
 assert.ok(WATCHLIST_SYMBOL_SORT_OPTIONS.some(option => option.key === 'finraShortInterest'))
 assert.ok(WATCHLIST_SYMBOL_SORT_OPTIONS.some(option => option.key === 'finraEstimatedShortInterest'))
@@ -29,6 +31,8 @@ assert.deepEqual(
     'dailyExpansion',
     'weeklyCompression',
     'weeklyExpansion',
+    'dailyBeardySqueeze',
+    'weeklyBeardySqueeze',
     'finraShortInterest',
     'finraEstimatedShortInterest',
   ]
@@ -54,7 +58,7 @@ assert.ok(squeezePreset.columns.includes('dailyCompression'))
 assert.ok(squeezePreset.columns.includes('squeezeState'))
 assert.deepEqual(
   squeezeScoutPreset.columns,
-  ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyCompression', 'dailyExpansion', 'weeklyCompression', 'weeklyExpansion', 'squeezeState', 'actions']
+  ['symbol', 'companyName', 'ecosystem', 'theme', 'dailyBeardySqueeze', 'weeklyBeardySqueeze', 'dailyCompression', 'dailyExpansion', 'weeklyCompression', 'weeklyExpansion', 'squeezeState', 'actions']
 )
 assert.deepEqual(
   trendCoilPreset.columns,

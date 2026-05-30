@@ -163,6 +163,8 @@ function numericSortValue(row, sortKey, snapshots) {
   if (sortKey === 'dailyExpansion') return snapshots.squeezeBySymbol?.[symbol]?.daily?.expansionScore
   if (sortKey === 'weeklyCompression') return snapshots.squeezeBySymbol?.[symbol]?.weekly?.compressionScore
   if (sortKey === 'weeklyExpansion') return snapshots.squeezeBySymbol?.[symbol]?.weekly?.expansionScore
+  if (sortKey === 'dailyBeardySqueeze') return snapshots.squeezeBySymbol?.[symbol]?.dailyBeardy?.score
+  if (sortKey === 'weeklyBeardySqueeze') return snapshots.squeezeBySymbol?.[symbol]?.weeklyBeardy?.score
   if (sortKey === 'characterChange') return snapshots.characterChangeBySymbol?.[symbol]?.score
   return null
 }

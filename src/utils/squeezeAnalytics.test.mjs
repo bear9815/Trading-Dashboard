@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {
+  buildBeardySqueezeSeries,
   buildSqueezeSnapshot,
   buildSqueezeSeries,
   formatSqueezeStateBadge,
@@ -84,3 +85,50 @@ assert.equal(
   }),
   'D firing / W turning'
 )
+
+function buildOscillatingBars({ length = 60, amplitude = 1, range = 1 } = {}) {
+  const bars = []
+  let previousClose = 100
+  const date = new Date('2026-01-01T00:00:00Z')
+
+  for (let index = 0; index < length; index += 1) {
+    const close = 100 + (amplitude * Math.sin(index * 0.7))
+    const open = previousClose
+    const high = Math.max(open, close) + (range / 2)
+    const low = Math.min(open, close) - (range / 2)
+    bars.push({
+      time: date.toISOString().slice(0, 10),
+      open,
+      high,
+      low,
+      close,
+      volume: 1000 + index,
+    })
+    previousClose = close
+    date.setUTCDate(date.getUTCDate() + 1)
+  }
+
+  return bars
+}
+
+const highBeardy = buildBeardySqueezeSeries(buildOscillatingBars({ amplitude: 1, range: 1 })).snapshot
+assert.equal(highBeardy.level, 'high')
+assert.equal(highBeardy.label, 'High Squeeze')
+assert.equal(highBeardy.score, 3)
+assert.equal(highBeardy.isSqueezing, true)
+
+const midBeardy = buildBeardySqueezeSeries(buildOscillatingBars({ amplitude: 2, range: 1 })).snapshot
+assert.equal(midBeardy.level, 'mid')
+assert.equal(midBeardy.label, 'Mid Squeeze')
+assert.equal(midBeardy.score, 2)
+
+const lowBeardy = buildBeardySqueezeSeries(buildOscillatingBars({ amplitude: 3, range: 1 })).snapshot
+assert.equal(lowBeardy.level, 'low')
+assert.equal(lowBeardy.label, 'Low Squeeze')
+assert.equal(lowBeardy.score, 1)
+
+const noBeardy = buildBeardySqueezeSeries(buildOscillatingBars({ amplitude: 5, range: 1 })).snapshot
+assert.equal(noBeardy.level, 'none')
+assert.equal(noBeardy.label, 'No Squeeze')
+assert.equal(noBeardy.score, 0)
+assert.equal(noBeardy.isSqueezing, false)

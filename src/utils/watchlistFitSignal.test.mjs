@@ -225,6 +225,24 @@ const weeklyExpansionSorted = filterAndSortWatchlistRows({
 
 assert.deepEqual(weeklyExpansionSorted.map(row => row.symbol), ['BBB', 'DDD', 'AAA', 'CCC'])
 
+const dailyBeardySqueezeSorted = filterAndSortWatchlistRows({
+  rows,
+  query: '',
+  sortKey: 'dailyBeardySqueeze',
+  sortDir: 'desc',
+  rankBySymbol,
+  fitBySymbol: fitMap,
+  fitFilter: 'all',
+  squeezeBySymbol: {
+    AAA: { dailyBeardy: { score: 1 } },
+    BBB: { dailyBeardy: { score: 3 } },
+    CCC: { dailyBeardy: { score: 0 } },
+    DDD: { dailyBeardy: { score: 2 } },
+  },
+})
+
+assert.deepEqual(dailyBeardySqueezeSorted.map(row => row.symbol), ['BBB', 'DDD', 'AAA', 'CCC'])
+
 const characterSorted = filterAndSortWatchlistRows({
   rows,
   query: '',

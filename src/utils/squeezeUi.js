@@ -19,9 +19,21 @@ function stateTone(label) {
   return 'border-white/10 bg-white/[0.04] text-gray-400'
 }
 
+function beardyTone(level) {
+  if (level === 'high') return 'border-orange-400/35 bg-orange-400/15 text-orange-100'
+  if (level === 'mid') return 'border-red-400/35 bg-red-400/15 text-red-100'
+  if (level === 'low') return 'border-neutral-400/25 bg-neutral-900/70 text-neutral-100'
+  if (level === 'none') return 'border-emerald-400/25 bg-emerald-400/10 text-emerald-100'
+  return 'border-white/10 bg-white/[0.04] text-gray-400'
+}
+
 export function formatSqueezeMetric(value, decimals = 0) {
   if (!Number.isFinite(value)) return '—'
   return value.toFixed(decimals)
+}
+
+export function formatBeardySqueezeLabel(snapshot) {
+  return snapshot?.shortLabel || snapshot?.label || 'N/A'
 }
 
 export function getSqueezeMetricTone(value, options) {
@@ -30,6 +42,10 @@ export function getSqueezeMetricTone(value, options) {
 
 export function getSqueezeStateTone(label) {
   return stateTone(label)
+}
+
+export function getBeardySqueezeTone(level) {
+  return beardyTone(level)
 }
 
 export { formatSqueezeStateBadge }

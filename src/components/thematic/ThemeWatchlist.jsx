@@ -58,8 +58,15 @@ import { collectReusableWatchlistRows, getSymbolsNeedingMapping, mergeTrustedCom
 import ResearchMultiTimeframeChart from '../charts/ResearchMultiTimeframeChart.jsx'
 import EcosystemVolatilityMap from './EcosystemVolatilityMap.jsx'
 import { buildTickerChartData, useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
-import { buildSqueezeSnapshot } from '../../utils/squeezeAnalytics.js'
-import { formatSqueezeMetric, formatSqueezeStateBadge, getSqueezeMetricTone, getSqueezeStateTone } from '../../utils/squeezeUi.js'
+import { buildBeardySqueezeSnapshot, buildSqueezeSnapshot } from '../../utils/squeezeAnalytics.js'
+import {
+  formatBeardySqueezeLabel,
+  formatSqueezeMetric,
+  formatSqueezeStateBadge,
+  getBeardySqueezeTone,
+  getSqueezeMetricTone,
+  getSqueezeStateTone,
+} from '../../utils/squeezeUi.js'
 
 const SORT_OPTIONS = [
   ['momentum', 'Momentum Rank'],
@@ -69,6 +76,8 @@ const SORT_OPTIONS = [
   ['dailyExpansion', 'Daily Expansion'],
   ['weeklyCompression', 'Weekly Compression'],
   ['weeklyExpansion', 'Weekly Expansion'],
+  ['dailyBeardySqueeze', 'Daily Beardy Squeeze'],
+  ['weeklyBeardySqueeze', 'Weekly Beardy Squeeze'],
   ['symbol', 'Symbol'],
   ['ecosystem', 'Ecosystem'],
   ['theme', 'Theme'],
@@ -486,9 +495,19 @@ function SqueezeMetricCell({ value }) {
   )
 }
 
+function BeardySqueezeCell({ snapshot }) {
+  return (
+    <span className={`inline-flex min-w-[72px] items-center justify-center rounded border px-2 py-1 text-xs font-semibold ${getBeardySqueezeTone(snapshot?.level)}`}>
+      {formatBeardySqueezeLabel(snapshot)}
+    </span>
+  )
+}
+
 function SqueezeStateCell({ snapshotPair }) {
   const daily = snapshotPair?.daily || null
   const weekly = snapshotPair?.weekly || null
+  const dailyBeardy = snapshotPair?.dailyBeardy || null
+  const weeklyBeardy = snapshotPair?.weeklyBeardy || null
   return (
     <div className="space-y-1">
       <span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-semibold ${getSqueezeStateTone(daily?.stateLabel || 'No Data')}`}>
@@ -496,6 +515,9 @@ function SqueezeStateCell({ snapshotPair }) {
       </span>
       <p className="text-[10px] text-gray-600">
         {daily?.stateLabel || 'No Data'} · {weekly?.stateLabel || 'No Data'}
+      </p>
+      <p className="text-[10px] text-gray-600">
+        Beardy D {formatBeardySqueezeLabel(dailyBeardy)} · W {formatBeardySqueezeLabel(weeklyBeardy)}
       </p>
     </div>
   )
@@ -1226,9 +1248,12 @@ export default function ThemeWatchlist({
   const squeezeBySymbol = useMemo(
     () => Object.fromEntries(symbols.map(symbol => {
       const dailyBars = historyBarsBySymbol[symbol] || []
+      const weeklyBars = aggregateWeeklyBars(dailyBars)
       return [symbol, {
         daily: buildSqueezeSnapshot(dailyBars),
-        weekly: buildSqueezeSnapshot(aggregateWeeklyBars(dailyBars)),
+        weekly: buildSqueezeSnapshot(weeklyBars),
+        dailyBeardy: buildBeardySqueezeSnapshot(dailyBars),
+        weeklyBeardy: buildBeardySqueezeSnapshot(weeklyBars),
       }]
     })),
     [historyBarsBySymbol, symbols]
@@ -1605,6 +1630,18 @@ export default function ThemeWatchlist({
       label: 'Weekly Expansion',
       cellClassName: 'px-3 py-2.5 min-w-[132px]',
       render: (row) => <SqueezeMetricCell value={squeezeBySymbol[row.symbol]?.weekly?.expansionScore} />,
+    },
+    {
+      id: 'dailyBeardySqueeze',
+      label: 'Daily Beardy',
+      cellClassName: 'px-3 py-2.5 min-w-[118px]',
+      render: (row) => <BeardySqueezeCell snapshot={squeezeBySymbol[row.symbol]?.dailyBeardy} />,
+    },
+    {
+      id: 'weeklyBeardySqueeze',
+      label: 'Weekly Beardy',
+      cellClassName: 'px-3 py-2.5 min-w-[122px]',
+      render: (row) => <BeardySqueezeCell snapshot={squeezeBySymbol[row.symbol]?.weeklyBeardy} />,
     },
     {
       id: 'squeezeState',

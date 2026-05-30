@@ -38,6 +38,12 @@ function sma(values, period) {
   return out
 }
 
+function rollingSmaValue(values, index, period) {
+  const window = values.slice(index - period + 1, index + 1).filter(Number.isFinite)
+  if (window.length < period) return null
+  return window.reduce((sum, value) => sum + value, 0) / window.length
+}
+
 function ema(values, period) {
   const resolvedPeriod = Math.max(1, Number(period) || 1)
   const k = 2 / (resolvedPeriod + 1)
@@ -72,6 +78,61 @@ function trueRanges(bars) {
       Math.abs(bar.low - prevClose)
     )
   })
+}
+
+function highestValue(values, index, period) {
+  const window = values.slice(index - period + 1, index + 1).filter(Number.isFinite)
+  if (window.length < period) return null
+  return Math.max(...window)
+}
+
+function lowestValue(values, index, period) {
+  const window = values.slice(index - period + 1, index + 1).filter(Number.isFinite)
+  if (window.length < period) return null
+  return Math.min(...window)
+}
+
+function linearRegressionAt(values, index, period) {
+  const window = values.slice(index - period + 1, index + 1)
+  if (window.length < period || !window.every(Number.isFinite)) return null
+  const xMean = (period - 1) / 2
+  const yMean = window.reduce((sum, value) => sum + value, 0) / period
+  let numerator = 0
+  let denominator = 0
+  for (let offset = 0; offset < period; offset += 1) {
+    const xDelta = offset - xMean
+    numerator += xDelta * (window[offset] - yMean)
+    denominator += xDelta ** 2
+  }
+  if (denominator === 0) return null
+  const slope = numerator / denominator
+  const intercept = yMean - (slope * xMean)
+  return intercept + (slope * (period - 1))
+}
+
+function classifyBeardySqueeze({
+  bbUpper,
+  bbLower,
+  kcUpperHigh,
+  kcLowerHigh,
+  kcUpperMid,
+  kcLowerMid,
+  kcUpperLow,
+  kcLowerLow,
+}) {
+  const values = [bbUpper, bbLower, kcUpperHigh, kcLowerHigh, kcUpperMid, kcLowerMid, kcUpperLow, kcLowerLow]
+  if (!values.every(Number.isFinite)) {
+    return { level: 'no-data', label: 'No Data', shortLabel: 'N/A', score: null, isSqueezing: false }
+  }
+
+  const high = bbLower >= kcLowerHigh || bbUpper <= kcUpperHigh
+  const mid = bbLower >= kcLowerMid || bbUpper <= kcUpperMid
+  const low = bbLower >= kcLowerLow || bbUpper <= kcUpperLow
+
+  if (high) return { level: 'high', label: 'High Squeeze', shortLabel: 'High', score: 3, isSqueezing: true }
+  if (mid) return { level: 'mid', label: 'Mid Squeeze', shortLabel: 'Mid', score: 2, isSqueezing: true }
+  if (low) return { level: 'low', label: 'Low Squeeze', shortLabel: 'Low', score: 1, isSqueezing: true }
+  return { level: 'none', label: 'No Squeeze', shortLabel: 'None', score: 0, isSqueezing: false }
 }
 
 function rollingPercentRank(values, lookback) {
@@ -146,6 +207,126 @@ function buildTriggerState(compressionScore, expansionScore, trueRangePercentile
   if (compressionScore >= 58) return 'Compressed'
   if (expansionScore >= 72) return 'Crowded'
   return 'Loose'
+}
+
+export function buildBeardySqueezeSeries(bars = [], options = {}) {
+  const cleaned = cleanBars(bars)
+  const length = Math.max(2, Number(options?.length) || 20)
+  const bbMultiplier = Number.isFinite(Number(options?.bbMultiplier)) ? Number(options.bbMultiplier) : 2
+  const kcHighMultiplier = Number.isFinite(Number(options?.kcHighMultiplier)) ? Number(options.kcHighMultiplier) : 1
+  const kcMidMultiplier = Number.isFinite(Number(options?.kcMidMultiplier)) ? Number(options.kcMidMultiplier) : 1.5
+  const kcLowMultiplier = Number.isFinite(Number(options?.kcLowMultiplier)) ? Number(options.kcLowMultiplier) : 2
+
+  const emptySnapshot = {
+    level: 'no-data',
+    label: 'No Data',
+    shortLabel: 'N/A',
+    score: null,
+    isSqueezing: false,
+    momentum: null,
+    momentumDirection: 'flat',
+  }
+
+  if (cleaned.length < length) {
+    return {
+      dots: [],
+      momentum: [],
+      snapshot: emptySnapshot,
+    }
+  }
+
+  const closes = cleaned.map(bar => bar.close)
+  const highs = cleaned.map(bar => bar.high)
+  const lows = cleaned.map(bar => bar.low)
+  const tr = trueRanges(cleaned)
+  const momentumSource = closes.map((close, index) => {
+    const basis = rollingSmaValue(closes, index, length)
+    const high = highestValue(highs, index, length)
+    const low = lowestValue(lows, index, length)
+    if (![basis, high, low].every(Number.isFinite)) return null
+    return close - (((high + low) / 2 + basis) / 2)
+  })
+  const dots = []
+  const momentumRows = []
+  let snapshot = emptySnapshot
+
+  for (let index = 0; index < cleaned.length; index += 1) {
+    const closeBasis = rollingSmaValue(closes, index, length)
+    const trBasis = rollingSmaValue(tr, index, length)
+    const closeWindow = closes.slice(index - length + 1, index + 1)
+    const closeDeviation = closeWindow.length >= length ? standardDeviation(closeWindow) * bbMultiplier : null
+    const highestHigh = highestValue(highs, index, length)
+    const lowestLow = lowestValue(lows, index, length)
+
+    if (![closeBasis, trBasis, closeDeviation, highestHigh, lowestLow].every(Number.isFinite)) {
+      continue
+    }
+
+    const bbUpper = closeBasis + closeDeviation
+    const bbLower = closeBasis - closeDeviation
+    const squeeze = classifyBeardySqueeze({
+      bbUpper,
+      bbLower,
+      kcUpperHigh: closeBasis + (trBasis * kcHighMultiplier),
+      kcLowerHigh: closeBasis - (trBasis * kcHighMultiplier),
+      kcUpperMid: closeBasis + (trBasis * kcMidMultiplier),
+      kcLowerMid: closeBasis - (trBasis * kcMidMultiplier),
+      kcUpperLow: closeBasis + (trBasis * kcLowMultiplier),
+      kcLowerLow: closeBasis - (trBasis * kcLowMultiplier),
+    })
+
+    const momentumBasis = ((highestHigh + lowestLow) / 2 + closeBasis) / 2
+    const momentum = linearRegressionAt(momentumSource, index, length)
+    const previousMomentum = momentumRows.at(-1)?.value
+    const momentumDirection = !Number.isFinite(momentum) || !Number.isFinite(previousMomentum)
+      ? 'flat'
+      : momentum > previousMomentum
+        ? 'rising'
+        : momentum < previousMomentum
+          ? 'falling'
+          : 'flat'
+
+    const row = {
+      time: cleaned[index].time,
+      ...squeeze,
+      value: 0,
+    }
+    dots.push(row)
+
+    if (Number.isFinite(momentum)) {
+      momentumRows.push({
+        time: cleaned[index].time,
+        value: Math.round(momentum * 1000) / 1000,
+        direction: momentumDirection,
+        positive: momentum > 0,
+      })
+    }
+
+    snapshot = {
+      ...squeeze,
+      momentum: Number.isFinite(momentum) ? Math.round(momentum * 1000) / 1000 : null,
+      momentumDirection,
+      bbUpper,
+      bbLower,
+      kcUpperHigh: closeBasis + (trBasis * kcHighMultiplier),
+      kcLowerHigh: closeBasis - (trBasis * kcHighMultiplier),
+      kcUpperMid: closeBasis + (trBasis * kcMidMultiplier),
+      kcLowerMid: closeBasis - (trBasis * kcMidMultiplier),
+      kcUpperLow: closeBasis + (trBasis * kcLowMultiplier),
+      kcLowerLow: closeBasis - (trBasis * kcLowMultiplier),
+      momentumBasis,
+    }
+  }
+
+  return {
+    dots,
+    momentum: momentumRows,
+    snapshot,
+  }
+}
+
+export function buildBeardySqueezeSnapshot(bars = [], options = {}) {
+  return buildBeardySqueezeSeries(bars, options).snapshot
 }
 
 export function formatSqueezeStateBadge({ daily = null, weekly = null } = {}) {

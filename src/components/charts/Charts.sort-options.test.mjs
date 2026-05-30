@@ -15,6 +15,8 @@ test('Charts symbol sort options include all shared watchlist-supported metrics'
       'dailyExpansion',
       'weeklyCompression',
       'weeklyExpansion',
+      'dailyBeardySqueeze',
+      'weeklyBeardySqueeze',
       'finraShortInterest',
       'finraEstimatedShortInterest',
     ]
