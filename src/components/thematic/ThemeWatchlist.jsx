@@ -1227,7 +1227,7 @@ export default function ThemeWatchlist({
     [symbols, rowsBySymbol]
   )
   const liquidRows = useMemo(
-    () => liquidSymbols.map(symbol => liquidRowsBySymbol[symbol]).filter(Boolean),
+    () => liquidSymbols.map(symbol => liquidRowsBySymbol[symbol] || { symbol }),
     [liquidRowsBySymbol, liquidSymbols]
   )
   const trimmedTradingViewVerifyUrl = tradingViewVerifyUrl.trim()
@@ -2082,6 +2082,99 @@ export default function ThemeWatchlist({
       setSortDir(nextKey === 'fit' ? 'desc' : 'asc')
     }
     setPage(1)
+  }
+
+  function updateScreenThreshold(key, value) {
+    setScreenThresholdsByRecipe(current => ({
+      ...current,
+      [activeScreenRecipe.id]: {
+        ...(current[activeScreenRecipe.id] || activeScreenRecipe.defaults),
+        [key]: value,
+      },
+    }))
+    setScreenPreview(null)
+  }
+
+  async function handleRunLiquidScreen() {
+    if (!liquidSymbols.length) {
+      setError('Import your Liquid list before running a screen.')
+      return
+    }
+    if (activeScreenRecipe.id === 'liquid_trend' && !latestAnchorDate) {
+      setError('Add at least one anchor date in Trade Review chart settings before running Liquid Trend.')
+      return
+    }
+
+    setScreeningLoading(true)
+    setError('')
+    setStatus(`Screening Liquid for ${activeScreenRecipe.name}…`)
+    try {
+      const { benchmarkBars, symbolBarsBySymbol, errorsBySymbol } = await loadHistoryUniverse()
+      const liquidAnchoredRsBySymbol = {}
+      const liquidRollingRsBySymbol = {}
+      const liquidYtdAvwapBySymbol = {}
+      const liquidSqueezeBySymbol = {}
+
+      for (const symbol of liquidSymbols) {
+        const bars = symbolBarsBySymbol[symbol] || []
+        if (errorsBySymbol[symbol]) {
+          liquidAnchoredRsBySymbol[symbol] = { zScore: null, error: errorsBySymbol[symbol] }
+          liquidRollingRsBySymbol[symbol] = { zScore: null, error: errorsBySymbol[symbol] }
+          liquidYtdAvwapBySymbol[symbol] = { distancePct: null, error: errorsBySymbol[symbol] }
+          liquidSqueezeBySymbol[symbol] = {
+            daily: { compressionScore: null },
+            weekly: { compressionScore: null },
+            dailyBeardy: { score: null },
+            weeklyBeardy: { score: null },
+          }
+          continue
+        }
+
+        const weeklyBars = aggregateWeeklyBars(bars)
+        liquidAnchoredRsBySymbol[symbol] = buildAnchoredRsSnapshot(bars, benchmarkBars, tradeReviewChartSettings)
+        liquidRollingRsBySymbol[symbol] = buildRollingRsSnapshot(bars, benchmarkBars, tradeReviewChartSettings)
+        liquidYtdAvwapBySymbol[symbol] = buildYtdAvwapSnapshot(bars, new Date())
+        liquidSqueezeBySymbol[symbol] = {
+          daily: buildSqueezeSnapshot(bars),
+          weekly: buildSqueezeSnapshot(weeklyBars),
+          dailyBeardy: buildBeardySqueezeSnapshot(bars),
+          weeklyBeardy: buildBeardySqueezeSnapshot(weeklyBars),
+        }
+      }
+
+      const liquidFitBySymbol = buildWatchlistFitMap({
+        symbols: liquidSymbols,
+        anchoredRsBySymbol: liquidAnchoredRsBySymbol,
+        rollingRsBySymbol: liquidRollingRsBySymbol,
+      })
+      const preview = evaluateWatchlistScreen({
+        recipeId: activeScreenRecipe.id,
+        thresholds: activeScreenThresholds,
+        rows: liquidRows,
+        fitBySymbol: liquidFitBySymbol,
+        anchoredRsBySymbol: liquidAnchoredRsBySymbol,
+        rollingRsBySymbol: liquidRollingRsBySymbol,
+        ytdAvwapBySymbol: liquidYtdAvwapBySymbol,
+        squeezeBySymbol: liquidSqueezeBySymbol,
+      })
+      setScreenPreview(preview)
+      setStatus(
+        `Screened Liquid for ${activeScreenRecipe.name}: ${preview.count} match${preview.count === 1 ? '' : 'es'} ready to preview.`
+      )
+    } catch (event) {
+      setError(event?.message || 'Liquid screen failed.')
+    } finally {
+      setScreeningLoading(false)
+    }
+  }
+
+  function handleReplaceScreenedWatchlist() {
+    if (!screenPreview) return
+    replaceList(screenPreview.recipe.destinationListId, screenPreview.symbols, screenPreview.rowsBySymbol)
+    setActiveList(screenPreview.recipe.destinationListId)
+    setStatus(
+      `Replaced ${screenDestinationList?.name || screenPreview.recipe.name} with ${screenPreview.count} screened symbol${screenPreview.count === 1 ? '' : 's'} from Liquid.`
+    )
   }
 
   function handleEcosystemSort(nextKey) {
