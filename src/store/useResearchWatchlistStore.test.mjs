@@ -9,6 +9,7 @@ import {
   MARKET_LEADERS_LIST_ID,
   QQQ_LIST_ID,
   rebuildTrustedSymbolMemory,
+  SQUEEZE_LIST_ID,
   syncListsWithTrustedCompanyMemory,
   TOP_100_LIST_ID,
   useResearchWatchlistStore,
@@ -43,6 +44,7 @@ test('research watchlist exposes the expected default list order and labels', ()
     QQQ_LIST_ID,
     IPO_LIST_ID,
     FLAG_LIST_ID,
+    SQUEEZE_LIST_ID,
   ])
   assert.deepEqual(lists.map(list => list.name), [
     'Market Leaders',
@@ -52,6 +54,7 @@ test('research watchlist exposes the expected default list order and labels', ()
     'QQQ',
     'IPO',
     'Flag',
+    'Squeeze',
   ])
 })
 
@@ -121,6 +124,56 @@ test('persist merge backfills Top 100 and QQQ without disturbing existing three-
   assert.deepEqual(merged.listsById[IPO_LIST_ID].symbols, [])
   assert.equal(merged.listsById[FLAG_LIST_ID].name, 'Flag')
   assert.deepEqual(merged.listsById[FLAG_LIST_ID].symbols, [])
+  assert.equal(merged.listsById[SQUEEZE_LIST_ID].name, 'Squeeze')
+  assert.deepEqual(merged.listsById[SQUEEZE_LIST_ID].symbols, [])
+})
+
+test('replaceList updates a non-active destination list while preserving normalized rows', async () => {
+  const previousLocalStorage = globalThis.localStorage
+  globalThis.localStorage = createLocalStorageMock()
+
+  try {
+    useResearchWatchlistStore.setState({
+      activeListId: LIQUID_LIST_ID,
+      listsById: {
+        ...useResearchWatchlistStore.getState().listsById,
+        [LIQUID_LIST_ID]: {
+          ...useResearchWatchlistStore.getState().listsById[LIQUID_LIST_ID],
+          symbols: ['NVDA'],
+          rowsBySymbol: {
+            NVDA: { symbol: 'NVDA', companyName: 'NVIDIA Corporation' },
+          },
+        },
+        [SQUEEZE_LIST_ID]: {
+          ...useResearchWatchlistStore.getState().listsById[SQUEEZE_LIST_ID],
+          symbols: ['OLD'],
+          rowsBySymbol: {
+            OLD: { symbol: 'OLD', companyName: 'Old Co' },
+          },
+        },
+      },
+    })
+
+    useResearchWatchlistStore.getState().replaceList(SQUEEZE_LIST_ID, ['nvda', ' app ', 'NVDA'], {
+      NVDA: { symbol: 'nvda', companyName: 'NVIDIA Corporation' },
+      APP: { symbol: 'APP', companyName: 'AppLovin Corporation' },
+      OLD: { symbol: 'OLD', companyName: 'Old Co' },
+    })
+
+    const state = useResearchWatchlistStore.getState()
+    assert.equal(state.activeListId, LIQUID_LIST_ID)
+    assert.deepEqual(state.listsById[SQUEEZE_LIST_ID].symbols, ['NVDA', 'APP'])
+    assert.deepEqual(Object.keys(state.listsById[SQUEEZE_LIST_ID].rowsBySymbol).sort(), ['APP', 'NVDA'])
+    assert.equal(state.listsById[SQUEEZE_LIST_ID].rowsBySymbol.NVDA.symbol, 'NVDA')
+    assert.equal(state.listsById[SQUEEZE_LIST_ID].rowsBySymbol.APP.companyName, 'AppLovin Corporation')
+    await new Promise(resolve => setTimeout(resolve, 0))
+  } finally {
+    if (previousLocalStorage === undefined) {
+      delete globalThis.localStorage
+    } else {
+      globalThis.localStorage = previousLocalStorage
+    }
+  }
 })
 
 test('syncListsWithTrustedCompanyMemory propagates trusted company names across all lists containing the symbol', () => {
@@ -389,11 +442,14 @@ test('resetWorkspaceState rebuilds the IPO watchlist after QQQ', async () => {
       QQQ_LIST_ID,
       IPO_LIST_ID,
       FLAG_LIST_ID,
+      SQUEEZE_LIST_ID,
     ])
     assert.equal(state.listsById[IPO_LIST_ID].name, 'IPO')
     assert.deepEqual(state.listsById[IPO_LIST_ID].symbols, [])
     assert.equal(state.listsById[FLAG_LIST_ID].name, 'Flag')
     assert.deepEqual(state.listsById[FLAG_LIST_ID].symbols, [])
+    assert.equal(state.listsById[SQUEEZE_LIST_ID].name, 'Squeeze')
+    assert.deepEqual(state.listsById[SQUEEZE_LIST_ID].symbols, [])
     await new Promise(resolve => setTimeout(resolve, 0))
   } finally {
     if (previousLocalStorage === undefined) {

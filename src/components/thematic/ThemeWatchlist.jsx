@@ -4,7 +4,7 @@ import {
   RefreshCw, Table2, Trash2, Upload, X, Bookmark, Network, TrendingUp, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { parseChartMeta } from '../../store/useWatchlistStore.js'
-import { DEFAULT_LIST_ORDER, MARKET_LEADERS_LIST_ID, useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
+import { DEFAULT_LIST_ORDER, LIQUID_LIST_ID, MARKET_LEADERS_LIST_ID, useResearchWatchlistStore } from '../../store/useResearchWatchlistStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useThematicStore } from '../../store/useThematicStore.js'
 import { useResearchLibraryStore } from '../../store/useResearchLibraryStore.js'
@@ -31,6 +31,11 @@ import {
   aggregateWeeklyBars,
 } from '../../utils/tradeReviewChart.js'
 import { buildWatchlistFitMap, filterAndSortWatchlistRows } from '../../utils/watchlistFitSignal.js'
+import {
+  evaluateWatchlistScreen,
+  WATCHLIST_SCREENER_RECIPE_ORDER,
+  WATCHLIST_SCREENER_RECIPES,
+} from '../../utils/watchlistScreener.js'
 import { buildCharacterChangeMap } from '../../utils/characterChangeSignal.js'
 import {
   buildCondensedEcosystemRows,
@@ -1069,6 +1074,7 @@ export default function ThemeWatchlist({
     symbolMemoryBySymbol,
     setActiveList,
     replaceWatchlist,
+    replaceList,
     upsertRows,
     updateRow,
     removeSymbol,
@@ -1085,8 +1091,11 @@ export default function ThemeWatchlist({
   const { tradeReviewChartSettings, setTradeReviewChartSettings } = useSettingsStore()
   const analyticsMode = mode === 'analytics'
   const activeList = listsById[activeListId]
+  const liquidList = listsById[LIQUID_LIST_ID]
   const symbols = activeList?.symbols || []
+  const liquidSymbols = liquidList?.symbols || []
   const rowsBySymbol = activeList?.rowsBySymbol || {}
+  const liquidRowsBySymbol = liquidList?.rowsBySymbol || {}
   const savedViews = activeList?.savedViews || []
   const columnOrder = activeList?.columnOrder || DEFAULT_WATCHLIST_COLUMN_ORDER
   const hiddenColumns = activeList?.hiddenColumns || []
@@ -1141,9 +1150,22 @@ export default function ThemeWatchlist({
   const [finraLoading, setFinraLoading] = useState(false)
   const [finraLoadedKey, setFinraLoadedKey] = useState('')
   const [page, setPage] = useState(1)
+  const [screenRecipeId, setScreenRecipeId] = useState('liquid_trend')
+  const [screenThresholdsByRecipe, setScreenThresholdsByRecipe] = useState(() => (
+    Object.fromEntries(WATCHLIST_SCREENER_RECIPE_ORDER.map(recipeId => [
+      recipeId,
+      { ...WATCHLIST_SCREENER_RECIPES[recipeId].defaults },
+    ]))
+  ))
+  const [screenPreview, setScreenPreview] = useState(null)
+  const [screeningLoading, setScreeningLoading] = useState(false)
   const pageSize = 40
   const fileRef = useRef(null)
   const symbolsKey = useMemo(() => symbols.join('|'), [symbols])
+  const screenerUniverseSymbols = useMemo(
+    () => [...new Set([...symbols, ...liquidSymbols])],
+    [liquidSymbols, symbols]
+  )
   const anchoredRsSettingsKey = useMemo(
     () => JSON.stringify({
       benchmarkSymbol: tradeReviewChartSettings?.benchmarkSymbol || 'SPY',
@@ -1204,6 +1226,10 @@ export default function ThemeWatchlist({
     () => symbols.map(symbol => rowsBySymbol[symbol]).filter(Boolean),
     [symbols, rowsBySymbol]
   )
+  const liquidRows = useMemo(
+    () => liquidSymbols.map(symbol => liquidRowsBySymbol[symbol]).filter(Boolean),
+    [liquidRowsBySymbol, liquidSymbols]
+  )
   const trimmedTradingViewVerifyUrl = tradingViewVerifyUrl.trim()
   const activeTradingViewSource = tradingViewVerifyMeta.url === trimmedTradingViewVerifyUrl ? tradingViewVerifyMeta : null
 
@@ -1238,13 +1264,16 @@ export default function ThemeWatchlist({
     historyBarsBySymbol,
     loadHistoryUniverse,
   } = useResearchChartUniverse({
-    symbols,
+    symbols: screenerUniverseSymbols,
     latestAnchorDate,
     minimumHistoryDays: 366 * 5,
     rollingRsWindow,
     rollingLookback: tradeReviewChartSettings?.dailyRollingRs?.lookback ?? 50,
     tradeReviewChartSettings,
   })
+  const activeScreenRecipe = WATCHLIST_SCREENER_RECIPES[screenRecipeId] || WATCHLIST_SCREENER_RECIPES.liquid_trend
+  const activeScreenThresholds = screenThresholdsByRecipe[activeScreenRecipe.id] || activeScreenRecipe.defaults
+  const screenDestinationList = listsById[activeScreenRecipe.destinationListId]
   const squeezeBySymbol = useMemo(
     () => Object.fromEntries(symbols.map(symbol => {
       const dailyBars = historyBarsBySymbol[symbol] || []

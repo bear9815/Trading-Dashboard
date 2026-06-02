@@ -18,6 +18,7 @@ export const TOP_100_LIST_ID = 'top-100'
 export const QQQ_LIST_ID = 'qqq'
 export const IPO_LIST_ID = 'ipo'
 export const FLAG_LIST_ID = 'flag'
+export const SQUEEZE_LIST_ID = 'squeeze'
 
 export const DEFAULT_LIST_ORDER = [
   MARKET_LEADERS_LIST_ID,
@@ -27,6 +28,7 @@ export const DEFAULT_LIST_ORDER = [
   QQQ_LIST_ID,
   IPO_LIST_ID,
   FLAG_LIST_ID,
+  SQUEEZE_LIST_ID,
 ]
 const DEFAULT_COLUMN_PRESET = applyColumnPreset('compact')
 const DEFAULT_LISTS = {
@@ -129,6 +131,22 @@ const DEFAULT_LISTS = {
   [FLAG_LIST_ID]: {
     id: FLAG_LIST_ID,
     name: 'Flag',
+    symbols: [],
+    rowsBySymbol: {},
+    savedViews: [],
+    columnOrder: [...DEFAULT_COLUMN_PRESET.columnOrder],
+    hiddenColumns: [...DEFAULT_COLUMN_PRESET.hiddenColumns],
+    activeColumnPreset: DEFAULT_COLUMN_PRESET.presetKey,
+    controlsCollapsed: true,
+    collapsedPanels: {},
+    ecosystemGroupingMode: 'normal',
+    condensedEcosystemOverrides: {},
+    themeAnalyticsHistory: { theme: [], ecosystem: [] },
+    lastUpdated: null,
+  },
+  [SQUEEZE_LIST_ID]: {
+    id: SQUEEZE_LIST_ID,
+    name: 'Squeeze',
     symbols: [],
     rowsBySymbol: {},
     savedViews: [],
@@ -333,6 +351,7 @@ function ensureWorkspaceShape(state) {
       [QQQ_LIST_ID]: { ...DEFAULT_LISTS[QQQ_LIST_ID] },
       [IPO_LIST_ID]: { ...DEFAULT_LISTS[IPO_LIST_ID] },
       [FLAG_LIST_ID]: { ...DEFAULT_LISTS[FLAG_LIST_ID] },
+      [SQUEEZE_LIST_ID]: { ...DEFAULT_LISTS[SQUEEZE_LIST_ID] },
     }, rebuildTrustedSymbolMemory({
       [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {
         symbols: state?.symbols || [],
@@ -346,6 +365,7 @@ function ensureWorkspaceShape(state) {
       [QQQ_LIST_ID]: { ...DEFAULT_LISTS[QQQ_LIST_ID] },
       [IPO_LIST_ID]: { ...DEFAULT_LISTS[IPO_LIST_ID] },
       [FLAG_LIST_ID]: { ...DEFAULT_LISTS[FLAG_LIST_ID] },
+      [SQUEEZE_LIST_ID]: { ...DEFAULT_LISTS[SQUEEZE_LIST_ID] },
     }, persistedSymbolMemory)).listsById,
     symbolMemoryBySymbol: rebuildTrustedSymbolMemory({
       [MARKET_LEADERS_LIST_ID]: makeListPatch(DEFAULT_LISTS[MARKET_LEADERS_LIST_ID], {
@@ -360,6 +380,7 @@ function ensureWorkspaceShape(state) {
       [QQQ_LIST_ID]: { ...DEFAULT_LISTS[QQQ_LIST_ID] },
       [IPO_LIST_ID]: { ...DEFAULT_LISTS[IPO_LIST_ID] },
       [FLAG_LIST_ID]: { ...DEFAULT_LISTS[FLAG_LIST_ID] },
+      [SQUEEZE_LIST_ID]: { ...DEFAULT_LISTS[SQUEEZE_LIST_ID] },
     }, persistedSymbolMemory),
   }
 }
@@ -385,6 +406,44 @@ export const useResearchWatchlistStore = create(
         themeAnalyticsHistory: { theme: [], ecosystem: [] },
         lastUpdated: null,
       }))),
+
+      replaceList: (listId, symbols, rowsBySymbolPatch = {}) => set(state => {
+        const resolvedListId = String(listId || '').trim()
+        const target = state.listsById?.[resolvedListId] || DEFAULT_LISTS[resolvedListId]
+        if (!target) return state
+
+        const normalizedSymbols = normalizeSymbols(symbols)
+        const nextRowsBySymbol = {}
+        const nextMemory = { ...(state.symbolMemoryBySymbol || {}) }
+
+        for (const symbol of normalizedSymbols) {
+          const row = rowsBySymbolPatch?.[symbol] || rowsBySymbolPatch?.[String(symbol || '').toLowerCase()]
+          if (!row) continue
+          const nextRow = {
+            ...row,
+            symbol,
+            updatedAt: new Date().toISOString(),
+          }
+          nextRowsBySymbol[symbol] = nextRow
+          const remembered = mergeRememberedRow(nextMemory[symbol], nextRow)
+          if (remembered) nextMemory[symbol] = remembered
+        }
+
+        const synchronized = syncListsWithTrustedCompanyMemory({
+          ...state.listsById,
+          [resolvedListId]: makeListPatch(target, {
+            symbols: normalizedSymbols,
+            rowsBySymbol: nextRowsBySymbol,
+            themeAnalyticsHistory: { theme: [], ecosystem: [] },
+            lastUpdated: new Date().toISOString(),
+          }),
+        }, nextMemory)
+
+        return {
+          listsById: synchronized.listsById,
+          symbolMemoryBySymbol: nextMemory,
+        }
+      }),
 
       addSymbols: (symbols) => set(state => updateActiveList(state, current => ({
         symbols: [...current.symbols, ...(symbols || [])],
