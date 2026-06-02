@@ -2624,6 +2624,151 @@ export default function ThemeWatchlist({
                   />
                 </div>
               </div>
+              <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <ListFilter size={13} className="text-accent-green" />
+                    <div>
+                      <p className="text-sm font-semibold text-white">Screen From Liquid</p>
+                      <p className="text-[11px] text-gray-500">
+                        Source {liquidSymbols.length} Liquid symbol{liquidSymbols.length === 1 ? '' : 's'} · target {screenDestinationList?.name || activeScreenRecipe.name}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={screenRecipeId}
+                      onChange={event => {
+                        setScreenRecipeId(event.target.value)
+                        setScreenPreview(null)
+                      }}
+                      className="bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-xs font-semibold text-gray-200 focus:outline-none focus:border-accent-blue/50"
+                    >
+                      {WATCHLIST_SCREENER_RECIPE_ORDER.map(recipeId => (
+                        <option key={recipeId} value={recipeId}>{WATCHLIST_SCREENER_RECIPES[recipeId].name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleRunLiquidScreen}
+                      disabled={screeningLoading || !liquidSymbols.length}
+                      className="flex items-center justify-center gap-2 rounded-lg border border-accent-green/25 bg-accent-green/12 px-3 py-2 text-xs font-semibold text-accent-green transition-all hover:bg-accent-green/18 disabled:opacity-40"
+                    >
+                      <RefreshCw size={12} className={screeningLoading ? 'animate-spin' : ''} />
+                      {screeningLoading ? 'Screening…' : 'Run Screen'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleReplaceScreenedWatchlist}
+                      disabled={!screenPreview}
+                      className="flex items-center justify-center gap-2 rounded-lg border border-accent-blue/25 bg-accent-blue/12 px-3 py-2 text-xs font-semibold text-accent-blue transition-all hover:bg-accent-blue/18 disabled:opacity-40"
+                    >
+                      <Bookmark size={12} />
+                      Replace Watchlist
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {activeScreenRecipe.id === 'liquid_trend' ? (
+                    <>
+                      <label className="text-[11px] text-gray-500">
+                        Fit Score
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={activeScreenThresholds.minFitScore ?? ''}
+                          onChange={event => updateScreenThreshold('minFitScore', Number(event.target.value))}
+                          className="mt-1 w-full rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-accent-blue/50"
+                        />
+                      </label>
+                      <label className="text-[11px] text-gray-500">
+                        Anchored Z
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={activeScreenThresholds.minAnchoredRsZ ?? ''}
+                          onChange={event => updateScreenThreshold('minAnchoredRsZ', Number(event.target.value))}
+                          className="mt-1 w-full rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-accent-blue/50"
+                        />
+                      </label>
+                      <label className="text-[11px] text-gray-500">
+                        Rolling Z
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={activeScreenThresholds.minRollingRsZ ?? ''}
+                          onChange={event => updateScreenThreshold('minRollingRsZ', Number(event.target.value))}
+                          className="mt-1 w-full rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-accent-blue/50"
+                        />
+                      </label>
+                      <label className="text-[11px] text-gray-500">
+                        Max YTD %
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={activeScreenThresholds.maxYtdAvwapDistancePct ?? ''}
+                          onChange={event => updateScreenThreshold('maxYtdAvwapDistancePct', event.target.value === '' ? null : Number(event.target.value))}
+                          className="mt-1 w-full rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-accent-blue/50"
+                        />
+                      </label>
+                    </>
+                  ) : (
+                    <>
+                      <label className="text-[11px] text-gray-500">
+                        Compression
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={activeScreenThresholds.minCompressionScore ?? ''}
+                          onChange={event => updateScreenThreshold('minCompressionScore', Number(event.target.value))}
+                          className="mt-1 w-full rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-accent-blue/50"
+                        />
+                      </label>
+                      <label className="text-[11px] text-gray-500">
+                        Beardy
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={activeScreenThresholds.minBeardyScore ?? ''}
+                          onChange={event => updateScreenThreshold('minBeardyScore', Number(event.target.value))}
+                          className="mt-1 w-full rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-accent-blue/50"
+                        />
+                      </label>
+                      <label className="col-span-2 flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs text-gray-400">
+                        <input
+                          type="checkbox"
+                          checked={activeScreenThresholds.excludeWeakFit !== false}
+                          onChange={event => updateScreenThreshold('excludeWeakFit', event.target.checked)}
+                          className="accent-accent-green"
+                        />
+                        Exclude weak fit
+                      </label>
+                    </>
+                  )}
+                </div>
+
+                {screenPreview ? (
+                  <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="font-semibold text-gray-300">
+                        {screenPreview.count} match{screenPreview.count === 1 ? '' : 'es'}
+                      </span>
+                      <span className="text-gray-500">
+                        {screenPreview.skippedMissingData.length} missing data · {screenPreview.excludedWeakFit.length} weak fit
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-400 line-clamp-2">
+                      {screenPreview.symbols.length ? screenPreview.symbols.join(', ') : 'No matches.'}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
             </div>
           )}
         </div>
