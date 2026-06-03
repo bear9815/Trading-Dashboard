@@ -14,3 +14,10 @@ test('ThemeWatchlist exposes Liquid screener controls and preview replacement fl
   assert.match(source, /Run Screen/)
   assert.match(source, /Replace Watchlist/)
 })
+
+test('ThemeWatchlist exposes full-list TradingView export in the watchlist header', () => {
+  assert.match(source, /handleExportActiveListTradingView/)
+  assert.match(source, /filtered:\s*false/)
+  assert.match(source, /Download the active watchlist as newline-separated symbols for TradingView import/)
+  assert.match(source, /Export List/)
+})

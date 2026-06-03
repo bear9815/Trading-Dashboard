@@ -2471,6 +2471,21 @@ export default function ThemeWatchlist({
     setStatus(`Exported ${filteredRows.length} filtered symbol${filteredRows.length === 1 ? '' : 's'} for TradingView.`)
   }
 
+  function handleExportActiveListTradingView() {
+    const exportFile = buildTradingViewExportFile({
+      listName: activeList?.name || 'Watchlist',
+      symbols,
+      filtered: false,
+    })
+    if (!exportFile.content) {
+      setError('Import a watchlist first.')
+      return
+    }
+    setError('')
+    downloadTextFile(exportFile.content, exportFile.filename)
+    setStatus(`Exported ${symbols.length} symbol${symbols.length === 1 ? '' : 's'} from ${activeList?.name || 'the active watchlist'} for TradingView.`)
+  }
+
   function applyView(view) {
     setQuery(view.query || '')
     setSortKey(view.sortKey || 'momentum')
@@ -2503,24 +2518,35 @@ export default function ThemeWatchlist({
       </div>
 
       <div className="p-4 space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          {watchlists.map(list => (
-            <button
-              key={list.id}
-              onClick={() => setActiveList(list.id)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all ${
-                activeListId === list.id
-                  ? 'border-accent-blue/30 bg-accent-blue/15 text-accent-blue'
-                  : 'border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/20'
-              }`}
-            >
-              <Bookmark size={12} />
-              {list.name}
-              <span className={`px-1.5 py-0.5 rounded-full ${activeListId === list.id ? 'bg-accent-blue/20 text-accent-blue' : 'bg-white/[0.05] text-gray-500'}`}>
-                {list.symbols.length}
-              </span>
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {watchlists.map(list => (
+              <button
+                key={list.id}
+                onClick={() => setActiveList(list.id)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold transition-all ${
+                  activeListId === list.id
+                    ? 'border-accent-blue/30 bg-accent-blue/15 text-accent-blue'
+                    : 'border-white/10 text-gray-400 hover:text-gray-200 hover:border-white/20'
+                }`}
+              >
+                <Bookmark size={12} />
+                {list.name}
+                <span className={`px-1.5 py-0.5 rounded-full ${activeListId === list.id ? 'bg-accent-blue/20 text-accent-blue' : 'bg-white/[0.05] text-gray-500'}`}>
+                  {list.symbols.length}
+                </span>
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={handleExportActiveListTradingView}
+            disabled={!symbols.length}
+            className="flex items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-gray-400 transition-all hover:border-white/20 hover:text-gray-200 disabled:opacity-40"
+            title="Download the active watchlist as newline-separated symbols for TradingView import"
+          >
+            <Download size={12} />
+            Export List
+          </button>
         </div>
         <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
           <button

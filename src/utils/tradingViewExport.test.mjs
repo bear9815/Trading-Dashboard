@@ -22,3 +22,14 @@ test('buildTradingViewExportFile falls back to a generic name when the list name
   assert.equal(result.filename, 'watchlist-filtered-tradingview.txt')
   assert.equal(result.content, 'APP')
 })
+
+test('buildTradingViewExportFile can name a full-list TradingView export', () => {
+  const result = buildTradingViewExportFile({
+    listName: 'Market Leaders',
+    symbols: ['NVDA', 'APP'],
+    filtered: false,
+  })
+
+  assert.equal(result.filename, 'market-leaders-list-tradingview.txt')
+  assert.equal(result.content, 'NVDA\nAPP')
+})

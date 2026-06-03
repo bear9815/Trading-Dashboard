@@ -12,15 +12,16 @@ function slugifyListName(value) {
   return slug || 'watchlist'
 }
 
-export function buildTradingViewExportFile({ listName = '', symbols = [] } = {}) {
+export function buildTradingViewExportFile({ listName = '', symbols = [], filtered = true } = {}) {
   const normalizedSymbols = [...new Set(
     symbols
       .map(normalizeExportSymbol)
       .filter(Boolean)
   )]
+  const scope = filtered ? 'filtered' : 'list'
 
   return {
-    filename: `${slugifyListName(listName)}-filtered-tradingview.txt`,
+    filename: `${slugifyListName(listName)}-${scope}-tradingview.txt`,
     content: normalizedSymbols.join('\n'),
   }
 }
