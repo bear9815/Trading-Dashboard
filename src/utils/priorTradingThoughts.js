@@ -68,21 +68,21 @@ function dailyCheckinModeLabel(mode) {
 }
 
 function formatDailyCheckinText(checkin) {
-  const parts = []
+  const lines = []
   const state = String(checkin?.state || '').trim()
   const riskLevel = String(checkin?.riskLevel ?? '').trim()
   const primaryResponse = String(checkin?.primaryResponse || '').trim()
   const actionResponse = String(checkin?.actionResponse || '').trim()
   const notes = String(checkin?.notes || '').trim()
 
-  if (state) parts.push(state)
-  if (riskLevel) parts.push(`risk ${riskLevel}/5`)
-  if (primaryResponse) parts.push(primaryResponse)
-  if (actionResponse) parts.push(`Next: ${actionResponse}`)
-  if (notes) parts.push(`Notes: ${notes}`)
+  if (state) lines.push(`State: ${state}`)
+  if (riskLevel) lines.push(`Risk: ${riskLevel}/5`)
+  if (primaryResponse) lines.push(`Response: ${primaryResponse}`)
+  if (actionResponse) lines.push(`Next: ${actionResponse}`)
+  if (notes) lines.push(`Notes: ${notes}`)
 
-  if (!parts.length) return ''
-  return `${dailyCheckinModeLabel(checkin?.mode)}: ${parts.join(' · ')}`
+  if (!lines.length) return ''
+  return [dailyCheckinModeLabel(checkin?.mode), ...lines.map(line => `  ${line}`)].join('\n')
 }
 
 export function buildPriorDayNotesText({ tradingThoughts = [], journalEntries = [], dailyCheckins = [], targetDate } = {}) {

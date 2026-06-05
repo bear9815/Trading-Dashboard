@@ -90,8 +90,8 @@ test('buildPriorDayNotesText carries friday daily check-ins into monday morning 
   })
 
   assert.equal(result, [
-    '• Morning Pulse: Focused · risk 2/5 · Do not chase opening strength. · Next: Wait for confirmed follow-through. · Notes: Size normally.',
-    '• Afternoon Check-in: On Plan · risk 1/5 · Breadth improved after lunch. · Next: Hold winners and avoid fresh risk. · Notes: No overtrading.',
+    '• Morning Pulse\n  State: Focused\n  Risk: 2/5\n  Response: Do not chase opening strength.\n  Next: Wait for confirmed follow-through.\n  Notes: Size normally.',
+    '• Afternoon Check-in\n  State: On Plan\n  Risk: 1/5\n  Response: Breadth improved after lunch.\n  Next: Hold winners and avoid fresh risk.\n  Notes: No overtrading.',
   ].join('\n'))
 })
 
@@ -111,7 +111,7 @@ test('buildPriorDayNotesText carries monday daily check-ins into tuesday morning
     targetDate: '2026-05-05',
   })
 
-  assert.equal(result, '• Afternoon Check-in: Drifting · risk 4/5 · Started forcing trades after lunch. · Next: Stop trading and review.')
+  assert.equal(result, '• Afternoon Check-in\n  State: Drifting\n  Risk: 4/5\n  Response: Started forcing trades after lunch.\n  Next: Stop trading and review.')
 })
 
 test('buildPriorDayNotesText does not carry daily check-ins into weekend morning dates', () => {
@@ -166,7 +166,7 @@ test('buildPriorDayNotesText filters daily check-in mirror notes to avoid duplic
   })
 
   assert.equal(result, [
-    '• Morning Pulse: Focused · risk 2/5 · Do not chase opening strength.',
+    '• Morning Pulse\n  State: Focused\n  Risk: 2/5\n  Response: Do not chase opening strength.',
     '• Independent non-check-in thought.',
   ].join('\n'))
 })
