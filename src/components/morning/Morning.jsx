@@ -642,15 +642,11 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
             </FieldLabel>
             <ConfidencePicker value={form.confidence} onChange={v => set('confidence', v)} />
           </div>
-          <div>
-            <FieldLabel>Risk Mode for Today</FieldLabel>
-            <PillSelect value={form.riskMode} onChange={v => set('riskMode', v)} options={RISK_MODE_OPTIONS} />
-          </div>
         </div>
       </SectionCard>
 
-      {/* ── Market Internals ───────────────────────────────────────────── */}
-      <SectionCard accentColor="#3d84ff" icon={TrendingUp} title="Market Internals">
+      {/* ── Gameplan ───────────────────────────────────────────────────── */}
+      <SectionCard accentColor="#3d84ff" icon={TrendingUp} title="Gameplan">
         <div className="divide-y divide-white/[0.04]">
 
           {/* FOMO */}
@@ -660,18 +656,6 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
               <span className="text-[10px] text-gray-600">0 = calm · 100 = max FOMO</span>
             </div>
             <SliderInput value={form.fomo} onChange={v => set('fomo', v)} min={0} max={100} colorFn={fomoColor} placeholder="50" />
-          </div>
-
-          {/* Growth Stocks + Breakouts */}
-          <div className="py-5 grid grid-cols-1 sm:grid-cols-2 gap-0">
-            <div className="sm:pr-6 pb-4 sm:pb-0">
-              <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-2.5">Growth Stocks</p>
-              <LuxPillSelect value={form.growthStocks} onChange={v => set('growthStocks', v)} options={TREND_OPTIONS} />
-            </div>
-            <div className="sm:pl-6 sm:border-l sm:border-white/[0.05]">
-              <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-2.5">Breakouts</p>
-              <LuxPillSelect value={form.breakouts} onChange={v => set('breakouts', v)} options={BREAKOUT_OPTIONS} />
-            </div>
           </div>
 
           {/* Market environment */}
@@ -687,6 +671,21 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
           <div className="pt-5">
             <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-3">Credit Conditions</p>
             <LuxPillSelect value={form.creditConditions} onChange={v => set('creditConditions', v)} options={CREDIT_OPTIONS} />
+          </div>
+
+          {/* Risk mode */}
+          <div className="pt-5">
+            <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-3">Risk Mode for Today</p>
+            <PillSelect value={form.riskMode} onChange={v => set('riskMode', v)} options={RISK_MODE_OPTIONS} />
+          </div>
+
+          {/* Portfolio action */}
+          <div className="pt-5">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase">Portfolio Action</p>
+              <span className="text-[10px] text-gray-600">Pick the risk posture that fits today</span>
+            </div>
+            <LuxPillSelect value={form.gameplan} onChange={v => set('gameplan', v)} options={GAMEPLAN_OPTIONS} />
           </div>
 
         </div>
@@ -727,17 +726,6 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
             />
             <p className="text-xs text-gray-600 mt-1.5">ATR-weighted vs {useSettingsStore.getState().benchmarkSymbol || 'SPY'}</p>
           </div>
-        </div>
-      </SectionCard>
-
-      {/* ── Gameplan ───────────────────────────────────────────────────── */}
-      <SectionCard accentColor="#ffa502" icon={Zap} title="Gameplan">
-        <div>
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase">Portfolio Action</p>
-            <span className="text-[10px] text-gray-600">Pick the risk posture that fits today</span>
-          </div>
-          <LuxPillSelect value={form.gameplan} onChange={v => set('gameplan', v)} options={GAMEPLAN_OPTIONS} />
         </div>
       </SectionCard>
 
@@ -1462,7 +1450,6 @@ function LogTab() {
           <div className="space-y-2">
             {sorted.slice(0, 30).map(entry => {
               const ndx     = NDX_MCSI_OPTIONS.find(o => o.id === entry.ndxMcsi)
-              const growth  = TREND_OPTIONS.find(o => o.id === entry.growthStocks)
               const gameplan = GAMEPLAN_OPTIONS.find(o => o.id === entry.gameplan)
               const mode  = RISK_MODE_OPTIONS.find(o => o.id === entry.riskMode)
               const ment  = MENTAL_OPTIONS.find(o => o.id === entry.mentalState)
@@ -1487,7 +1474,6 @@ function LogTab() {
                           </span>
                         )}
                         {entry.sleepScore != null && <SleepScoreBadge score={entry.sleepScore} compact />}
-                        {growth && <span className={`text-xs ${growth.cls}`}>Growth: {growth.label}</span>}
                         {ndx && <span className={`text-xs ${ndx.cls}`}>{ndx.id}</span>}
                         {marketEnvironment && <span className={`text-xs ${marketEnvironment.cls}`}>Env: {marketEnvironment.label}</span>}
                         {gameplan && <span className={`text-xs ${gameplan.cls}`}>Plan: {gameplan.label}</span>}
