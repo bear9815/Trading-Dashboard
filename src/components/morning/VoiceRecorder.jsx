@@ -13,12 +13,11 @@ Return ONLY a valid JSON object with these exact fields (use null if a field is 
   "fearGreed": <number -5 to +5 in 0.5 steps: negative = fearful/cautious, 0 = neutral, positive = greedy/aggressive. null if unclear>,
   "ndxMcsi": <exactly one of: "Bearish", "Neutral/Bearish", "Neutral", "Neutral/Bullish", "Bullish". null if not mentioned>,
   "marketBias": <exactly one of: "Bearish", "Neutral", "Bullish". null if not clear from context>,
+  "marketEnvironment": <exactly one of: "Strong Uptrend", "Uptrend Under Pressure", "Consolidation / Base Building", "Choppy / Rotational", "Downtrend / Correction". null if not mentioned>,
+  "gameplan": <exactly one of: "Add New Exposure", "Add to Winners", "Hold Current Risk", "Trim Extended Names", "Cut Weak Positions", "Raise Cash", "Wait for Better Setups". null if not mentioned>,
   "confidence": <integer 1-5: 1=very low, 3=moderate, 5=very high confidence in their plan. null if unclear>,
   "mentalState": <exactly one of: "Anxious", "Cautious", "Calm", "Confident", "Focused". null if unclear>,
-  "riskMode": <exactly one of: "cautious" (hard times, 0.25%), "normal" (0.5%), "good" (0.75%), "great" (1%). null if not mentioned>,
-  "focusList": <string: comma-separated uppercase tickers mentioned as watchlist, e.g. "AAPL, NVDA, MSFT". null if none>,
-  "gameplan": <string: concise summary of their trading plan for the day. null if no plan mentioned>,
-  "lessons": <string: any lessons, rules, or process notes they mention. null if none>
+  "riskMode": <exactly one of: "cautious" (hard times, 0.25%), "normal" (0.5%), "good" (0.75%), "great" (1%). null if not mentioned>
 }
 
 Transcript: "${transcript.replace(/"/g, '\\"')}"
@@ -173,13 +172,12 @@ export default function VoiceRecorder({ onFieldsExtracted }) {
   const extractionSummary = extractedFields ? (() => {
     const parts = []
     if (extractedFields.marketBias) parts.push(`Bias: ${extractedFields.marketBias}`)
+    if (extractedFields.marketEnvironment) parts.push(`Env: ${extractedFields.marketEnvironment}`)
+    if (extractedFields.gameplan) parts.push(`Plan: ${extractedFields.gameplan}`)
     if (extractedFields.mentalState) parts.push(`Mind: ${extractedFields.mentalState}`)
     if (extractedFields.riskMode) parts.push(`Risk: ${extractedFields.riskMode}`)
     if (extractedFields.fomo != null) parts.push(`FOMO: ${extractedFields.fomo}`)
     if (extractedFields.confidence != null) parts.push(`Conf: ${extractedFields.confidence}/5`)
-    if (extractedFields.focusList) parts.push(`Watch: ${extractedFields.focusList}`)
-    const hasNotes = extractedFields.gameplan || extractedFields.lessons
-    if (hasNotes) parts.push('+ notes filled')
     return parts
   })() : []
 

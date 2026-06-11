@@ -706,6 +706,11 @@ function MorningEnvironmentSection({ trade }) {
                   Risk: {MORNING_RISK_LABELS[morningEntry.riskMode] || morningEntry.riskMode}
                 </span>
               )}
+              {morningEntry.gameplan && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-white/8 text-gray-300 border border-white/10">
+                  Plan: {morningEntry.gameplan}
+                </span>
+              )}
               {morningEntry.confidence != null && (
                 <span className="text-xs px-2 py-0.5 rounded-full bg-white/8 text-gray-300 border border-white/10">
                   Confidence: {morningEntry.confidence}/5

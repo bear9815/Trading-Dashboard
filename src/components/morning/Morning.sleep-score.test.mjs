@@ -28,10 +28,11 @@ test('Morning wires Garmin backfill and renders numeric sleep scores in analysis
   assert.match(source, /<SleepScoreBadge score=\{entry\.sleepScore\} compact \/>/)
 })
 
-test('Morning passes submitted daily check-ins into prior day notes prefill', async () => {
+test('Morning no longer pre-fills prior day notes or other free-text planning fields', async () => {
   const source = await readFile(componentPath, 'utf8')
 
-  assert.match(source, /const dailyCheckins\s*=\s*useJournalStore\(s => s\.dailyCheckins\)/)
-  assert.match(source, /buildPriorDayNotesText\(\{\s*tradingThoughts,\s*journalEntries,\s*dailyCheckins,\s*targetDate\s*\}\)/)
-  assert.match(source, /\[mode,\s*editingEntry,\s*editDate,\s*autoCash,\s*autoEffective,\s*sorted,\s*tradingThoughts,\s*journalEntries,\s*dailyCheckins\]/)
+  assert.doesNotMatch(source, /buildPriorDayNotesText/)
+  assert.doesNotMatch(source, /Focus List/)
+  assert.doesNotMatch(source, /Prior Day Notes/)
+  assert.doesNotMatch(source, /Lessons \/ Process/)
 })

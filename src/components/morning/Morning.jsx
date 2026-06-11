@@ -18,12 +18,10 @@ import { useMorningStore }  from '../../store/useMorningStore.js'
 import { useTradeStore }    from '../../store/useTradeStore.js'
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
-import { useJournalStore }  from '../../store/useJournalStore.js'
 import { calcCashDeployed, calcEffectiveExposure } from '../../utils/riskCalcs.js'
 import { fetchHistory, fetchATR14 }     from '../../utils/marketData.js'
 import { fetchGarminSleepScore } from '../../utils/garminSleepClient.js'
 import { formatCurrency }   from '../../utils/formatters.js'
-import { buildPriorDayNotesText } from '../../utils/priorTradingThoughts.js'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -112,6 +110,67 @@ const BREAKOUT_OPTIONS = [
   { id: 'Mixed',   label: 'Mixed',   cls: 'text-accent-yellow', color: '#ffa502' },
   { id: 'Working', label: 'Working', cls: 'text-accent-green',  color: '#00d084' },
 ]
+const MARKET_ENVIRONMENT_OPTIONS = [
+  {
+    id: 'Strong Uptrend',
+    label: 'Strong Uptrend',
+    cls: 'text-accent-green',
+    color: '#00d084',
+    description: 'Trends persist and momentum compounds.',
+    characteristics: ['Breakouts work', 'Pullbacks hold support', 'Relative strength leaders keep leading', 'Few failed setups'],
+    playbook: ['Maximum exposure', 'Add to winners', 'Wider profit targets', 'Let trends mature'],
+    examples: ['Early bull markets', 'Powerful sector/theme leadership'],
+  },
+  {
+    id: 'Uptrend Under Pressure',
+    label: 'Uptrend Under Pressure',
+    cls: 'text-accent-yellow',
+    color: '#ffa502',
+    description: 'Market still trending up, but cracks are appearing.',
+    characteristics: ['More failed breakouts', 'Increased volatility', 'Leaders begin violating key moving averages', 'Breadth deteriorates'],
+    playbook: ['Reduce exposure', 'Tighten risk', 'Take partial profits sooner', 'Be more selective'],
+    examples: ['Offense, but with a helmet on.'],
+  },
+  {
+    id: 'Consolidation / Base Building',
+    label: 'Consolidation / Base Building',
+    cls: 'text-accent-blue',
+    color: '#3d84ff',
+    description: 'Market moving sideways after a trend.',
+    characteristics: ['Range-bound indexes', 'Leaders building bases', 'Volatility contracts', 'Few follow-through moves'],
+    playbook: ['Smaller positions', 'Patience', 'Focus on watchlists', 'Buy only the best setups'],
+    examples: ['Preparing for the next directional move.'],
+  },
+  {
+    id: 'Choppy / Rotational',
+    label: 'Choppy / Rotational',
+    cls: 'text-orange-400',
+    color: '#fb923c',
+    description: 'Most difficult environment for momentum traders.',
+    characteristics: ['Breakouts fail quickly', 'Leadership rotates constantly', 'Indexes may look fine', 'Follow-through is poor'],
+    playbook: ['Cut risk significantly', 'Trade less', 'Take profits faster', 'Be willing to sit in cash'],
+    examples: ['Protect capital.'],
+  },
+  {
+    id: 'Downtrend / Correction',
+    label: 'Downtrend / Correction',
+    cls: 'text-accent-red',
+    color: '#ff4757',
+    description: 'Market is actively hostile to swing longs.',
+    characteristics: ['Failed breakouts everywhere', 'Leaders breaking down', 'Lower highs and lower lows', 'High volatility'],
+    playbook: ['Mostly cash', 'Very selective longs', 'No leverage', 'Focus on defense'],
+    examples: ['Survival mode.'],
+  },
+]
+const GAMEPLAN_OPTIONS = [
+  { id: 'Add New Exposure', label: 'Add New Exposure', cls: 'text-accent-green', color: '#00d084' },
+  { id: 'Add to Winners', label: 'Add to Winners', cls: 'text-emerald-300', color: '#34d399' },
+  { id: 'Hold Current Risk', label: 'Hold Current Risk', cls: 'text-accent-blue', color: '#3d84ff' },
+  { id: 'Trim Extended Names', label: 'Trim Extended Names', cls: 'text-accent-yellow', color: '#ffa502' },
+  { id: 'Cut Weak Positions', label: 'Cut Weak Positions', cls: 'text-orange-400', color: '#fb923c' },
+  { id: 'Raise Cash', label: 'Raise Cash', cls: 'text-accent-red', color: '#ff4757' },
+  { id: 'Wait for Better Setups', label: 'Wait for Better Setups', cls: 'text-gray-300', color: '#9ca3af' },
+]
 
 // ── Reusable pill selector ────────────────────────────────────────────────────
 
@@ -163,6 +222,67 @@ function LuxPillSelect({ value, onChange, options }) {
           {opt.label}
         </button>
       ))}
+    </div>
+  )
+}
+
+function MarketEnvironmentSelect({ value, onChange, options }) {
+  return (
+    <div className="flex flex-wrap gap-2.5">
+      {options.map((opt) => {
+        const active = value === opt.id
+        return (
+          <div key={opt.id} className="group relative">
+            <button
+              type="button"
+              onClick={() => onChange(active ? '' : opt.id)}
+              style={active ? {
+                color: opt.color,
+                borderColor: `${opt.color}70`,
+                backgroundColor: `${opt.color}14`,
+                boxShadow: `0 0 14px ${opt.color}1a, inset 0 1px 0 ${opt.color}18`,
+              } : {}}
+              className={`px-3 py-1.5 rounded-md border text-xs font-medium tracking-wide transition-all duration-150 ${
+                active
+                  ? ''
+                  : 'text-gray-500 border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14] hover:text-gray-300 hover:bg-white/[0.04]'
+              }`}
+            >
+              {opt.label}
+            </button>
+
+            <div className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden w-[320px] rounded-xl border border-white/10 bg-surface-100/95 p-3 shadow-2xl shadow-black/40 backdrop-blur-md group-hover:block group-focus-within:block">
+              <div className="space-y-2.5">
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: opt.color }}>{opt.label}</p>
+                  <p className="mt-1 text-xs leading-relaxed text-gray-300">{opt.description}</p>
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500">Characteristics</p>
+                  <ul className="mt-1 space-y-1 text-xs text-gray-300">
+                    {opt.characteristics.map((item) => <li key={item}>• {item}</li>)}
+                  </ul>
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500">Playbook</p>
+                  <ul className="mt-1 space-y-1 text-xs text-gray-300">
+                    {opt.playbook.map((item) => <li key={item}>• {item}</li>)}
+                  </ul>
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500">Examples</p>
+                  <ul className="mt-1 space-y-1 text-xs text-gray-300">
+                    {opt.examples.map((item) => <li key={item}>• {item}</li>)}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -409,72 +529,6 @@ function SectionCard({ accentColor = '#3d84ff', icon: Icon, title, children }) {
   )
 }
 
-// ── Bullet textarea ───────────────────────────────────────────────────────────
-
-function BulletTextarea({ value, onChange, placeholder, rows = 4 }) {
-  const BULLET = '• '
-
-  function handleKeyDown(e) {
-    const el = e.currentTarget
-    const { selectionStart, selectionEnd } = el
-    const val = el.value
-
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      const before = val.slice(0, selectionStart)
-      const after  = val.slice(selectionEnd)
-      // Start next line with a bullet
-      const insert = '\n' + BULLET
-      const next   = before + insert + after
-      onChange(next)
-      // Move cursor after the new bullet
-      requestAnimationFrame(() => {
-        el.selectionStart = el.selectionEnd = selectionStart + insert.length
-      })
-    }
-
-    if (e.key === 'Backspace') {
-      const lineStart = val.lastIndexOf('\n', selectionStart - 1) + 1
-      const linePrefix = val.slice(lineStart, selectionStart)
-      // If the cursor is right after a lone bullet, remove the whole bullet
-      if (linePrefix === BULLET && selectionStart === selectionEnd) {
-        e.preventDefault()
-        const next = val.slice(0, lineStart) + val.slice(selectionStart)
-        onChange(next)
-        requestAnimationFrame(() => {
-          el.selectionStart = el.selectionEnd = lineStart
-        })
-      }
-    }
-  }
-
-  function handleChange(e) {
-    let val = e.target.value
-    // Auto-prefix first line with bullet if user starts typing fresh
-    if (val && !val.startsWith(BULLET) && !val.startsWith('\n')) {
-      val = BULLET + val
-    }
-    onChange(val)
-  }
-
-  // Ensure existing value starts with bullet
-  const displayValue = value && !value.startsWith(BULLET) && !value.startsWith('\n')
-    ? BULLET + value
-    : value
-
-  return (
-    <textarea
-      value={displayValue}
-      onChange={handleChange}
-      onKeyDown={handleKeyDown}
-      placeholder={BULLET + placeholder}
-      rows={rows}
-      className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm
-                 text-gray-200 focus:outline-none focus:border-accent-blue/50 resize-none leading-relaxed"
-    />
-  )
-}
-
 // ── Field label ───────────────────────────────────────────────────────────────
 
 function FieldLabel({ children, hint }) {
@@ -488,7 +542,7 @@ function FieldLabel({ children, hint }) {
 
 // ── Empty blank entry ─────────────────────────────────────────────────────────
 
-function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode, lastEntry, priorThoughtsText) {
+function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode, lastEntry) {
   return {
     date,
     fomo:               50,
@@ -497,6 +551,7 @@ function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode, lastEntr
     // Pre-fill from previous day so user only changes what shifted
     growthStocks:       lastEntry?.growthStocks      || '',
     breakouts:          lastEntry?.breakouts         || '',
+    marketEnvironment: lastEntry?.marketEnvironment || '',
     creditConditions:   lastEntry?.creditConditions  || '',
     sleepScore:         null,
     sleepScoreSource:   null,
@@ -505,22 +560,16 @@ function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode, lastEntr
     confidence:         null,
     mentalState:        '',
     riskMode:           lastRiskMode ?? 'normal',
+    gameplan:           lastEntry?.gameplan || '',
     cashDeployed:       cashDeployed != null ? Math.round(cashDeployed * 10) / 10 : '',
     effectiveExposure:  effectiveExposure != null ? Math.round(effectiveExposure * 10) / 10 : '',
-    focusList:          '',
-    gameplan:           '',
-    priorDayNotes:      priorThoughtsText || '',
-    lessons:            '',
   }
 }
 
 // ── Main Morning Form ─────────────────────────────────────────────────────────
 
 function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, isNew }) {
-  const [form, setForm]           = useState(initial)
-  const [showNotes, setShowNotes] = useState(
-    !!(initial.focusList || initial.gameplan || initial.priorDayNotes || initial.lessons)
-  )
+  const [form, setForm] = useState(initial)
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }))
   const patch = useCallback((fields) => setForm(f => ({ ...f, ...fields })), [])
@@ -535,10 +584,6 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
   // Called by VoiceRecorder once Gemini extracts fields from transcript
   const handleVoiceFields = (fields) => {
     setForm(f => ({ ...f, ...fields }))
-    // Auto-expand notes section if any note fields were filled
-    if (fields.focusList || fields.gameplan || fields.lessons) {
-      setShowNotes(true)
-    }
   }
 
   const handleSave = (e) => {
@@ -629,6 +674,15 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
             </div>
           </div>
 
+          {/* Market environment */}
+          <div className="py-5">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase">Market Environment</p>
+              <span className="text-[10px] text-gray-600">Choose the backdrop you want to trade against</span>
+            </div>
+            <MarketEnvironmentSelect value={form.marketEnvironment} onChange={v => set('marketEnvironment', v)} options={MARKET_ENVIRONMENT_OPTIONS} />
+          </div>
+
           {/* Credit conditions */}
           <div className="pt-5">
             <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-3">Credit Conditions</p>
@@ -676,49 +730,14 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
         </div>
       </SectionCard>
 
-      {/* ── Notes & Gameplan (always open) ────────────────────────────── */}
-      <SectionCard accentColor="#ffa502" icon={Zap} title="Notes & Gameplan">
-        <div className="space-y-4">
-          <div>
-            <FieldLabel hint="comma-separated">Focus List</FieldLabel>
-            <input
-              type="text"
-              value={form.focusList}
-              onChange={e => set('focusList', e.target.value)}
-              placeholder="AAPL, NVDA, MSFT, …"
-              className="w-full bg-surface-300 border border-white/10 rounded-lg px-3 py-2.5 text-sm
-                         text-gray-200 focus:outline-none focus:border-accent-blue/50"
-            />
+      {/* ── Gameplan ───────────────────────────────────────────────────── */}
+      <SectionCard accentColor="#ffa502" icon={Zap} title="Gameplan">
+        <div>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase">Portfolio Action</p>
+            <span className="text-[10px] text-gray-600">Pick the risk posture that fits today</span>
           </div>
-          <div>
-            <FieldLabel>Gameplan</FieldLabel>
-            <BulletTextarea
-              value={form.gameplan}
-              onChange={v => set('gameplan', v)}
-              placeholder="What's the plan for today? Key levels, setups to watch…"
-              rows={5}
-            />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <FieldLabel>Prior Day Notes</FieldLabel>
-              <BulletTextarea
-                value={form.priorDayNotes}
-                onChange={v => set('priorDayNotes', v)}
-                placeholder="What happened yesterday?"
-                rows={4}
-              />
-            </div>
-            <div>
-              <FieldLabel>Lessons / Process</FieldLabel>
-              <BulletTextarea
-                value={form.lessons}
-                onChange={v => set('lessons', v)}
-                placeholder="What did you follow? What did you slip on?"
-                rows={4}
-              />
-            </div>
-          </div>
+          <LuxPillSelect value={form.gameplan} onChange={v => set('gameplan', v)} options={GAMEPLAN_OPTIONS} />
         </div>
       </SectionCard>
 
@@ -1236,9 +1255,6 @@ function LogTab() {
   const { benchmarkSymbol } = useSettingsStore()
   const liveEffectivePct   = useLiveMarketStore(s => s.liveEffectivePct)
   const liveAccountBalance = useLiveMarketStore(s => s.liveAccountBalance)
-  const tradingThoughts    = useJournalStore(s => s.tradingThoughts)
-  const journalEntries     = useJournalStore(s => s.entries)
-  const dailyCheckins      = useJournalStore(s => s.dailyCheckins)
 
   // Use live balance (with unrealized P&L) when RiskPanel has fetched prices
   const accountBalance = liveAccountBalance > 0 ? liveAccountBalance : getAccountBalance()
@@ -1341,14 +1357,10 @@ function LogTab() {
   const formInitial = useMemo(() => {
     if (mode === 'edit' && editingEntry) return { ...editingEntry }
     const targetDate = editDate || TODAY
-    // Carry forward selected fields from the most recent prior entry
     const lastEntry    = sorted.find(e => e.date < targetDate) ?? sorted[0] ?? null
     const lastRiskMode = lastEntry?.riskMode ?? null
-    // Pre-fill Prior Day Notes from the last trading day's saved notes (skip weekends)
-    const priorThoughtsText = buildPriorDayNotesText({ tradingThoughts, journalEntries, dailyCheckins, targetDate })
-    // New entry: pre-fill cash deployed + effective exposure (if ATR already resolved)
-    return blankForm(targetDate, autoCash, autoEffective, lastRiskMode, lastEntry, priorThoughtsText)
-  }, [mode, editingEntry, editDate, autoCash, autoEffective, sorted, tradingThoughts, journalEntries, dailyCheckins])
+    return blankForm(targetDate, autoCash, autoEffective, lastRiskMode, lastEntry)
+  }, [mode, editingEntry, editDate, autoCash, autoEffective, sorted])
 
   return (
     <div className="space-y-4">
@@ -1451,8 +1463,10 @@ function LogTab() {
             {sorted.slice(0, 30).map(entry => {
               const ndx     = NDX_MCSI_OPTIONS.find(o => o.id === entry.ndxMcsi)
               const growth  = TREND_OPTIONS.find(o => o.id === entry.growthStocks)
+              const gameplan = GAMEPLAN_OPTIONS.find(o => o.id === entry.gameplan)
               const mode  = RISK_MODE_OPTIONS.find(o => o.id === entry.riskMode)
               const ment  = MENTAL_OPTIONS.find(o => o.id === entry.mentalState)
+              const marketEnvironment = MARKET_ENVIRONMENT_OPTIONS.find(o => o.id === entry.marketEnvironment)
               const credit  = CREDIT_OPTIONS.find(o => o.id === entry.creditConditions)
 
               return (
@@ -1475,6 +1489,8 @@ function LogTab() {
                         {entry.sleepScore != null && <SleepScoreBadge score={entry.sleepScore} compact />}
                         {growth && <span className={`text-xs ${growth.cls}`}>Growth: {growth.label}</span>}
                         {ndx && <span className={`text-xs ${ndx.cls}`}>{ndx.id}</span>}
+                        {marketEnvironment && <span className={`text-xs ${marketEnvironment.cls}`}>Env: {marketEnvironment.label}</span>}
+                        {gameplan && <span className={`text-xs ${gameplan.cls}`}>Plan: {gameplan.label}</span>}
                         {credit && <span className={`text-xs ${credit.cls}`}>Credit: {credit.label}</span>}
                         {mode && <span className={`text-xs ${mode.cls}`}>{mode.label} {mode.pct}</span>}
                         {ment && <span className={`text-xs ${ment.cls}`}>{ment.label}</span>}
@@ -1490,13 +1506,6 @@ function LogTab() {
                           {entry.cashDeployed != null && <span>Deployed <span className="mono text-gray-300">{entry.cashDeployed}%</span></span>}
                           {entry.effectiveExposure != null && <span>Effective <span className="mono text-accent-blue">{entry.effectiveExposure}%</span></span>}
                         </div>
-                      )}
-                      {/* Gameplan preview */}
-                      {entry.gameplan && (
-                        <p className="text-xs text-gray-500 truncate">{entry.gameplan.slice(0, 120)}</p>
-                      )}
-                      {entry.focusList && (
-                        <p className="text-xs text-gray-600 mono mt-0.5">{entry.focusList}</p>
                       )}
                     </div>
                     {/* Actions */}
