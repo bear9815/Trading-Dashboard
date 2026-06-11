@@ -493,14 +493,10 @@ function blankForm(date, cashDeployed, effectiveExposure, lastRiskMode, lastEntr
     date,
     fomo:               50,
     fearGreed:          0,
-    nasdaqNetHL:        '',
     ndxMcsi:            '',
     // Pre-fill from previous day so user only changes what shifted
     growthStocks:       lastEntry?.growthStocks      || '',
     breakouts:          lastEntry?.breakouts         || '',
-    shortTermTrend:     lastEntry?.shortTermTrend    || '',
-    intermediateTrend:  lastEntry?.intermediateTrend || '',
-    longTermTrend:      lastEntry?.longTermTrend     || '',
     creditConditions:   lastEntry?.creditConditions  || '',
     sleepScore:         null,
     sleepScoreSource:   null,
@@ -621,45 +617,15 @@ function MorningForm({ initial, onSave, onCancel, autoEffective, atrFetching, is
             <SliderInput value={form.fomo} onChange={v => set('fomo', v)} min={0} max={100} colorFn={fomoColor} placeholder="50" />
           </div>
 
-          {/* NASDAQ + Growth Stocks + Breakouts */}
-          <div className="py-5 grid grid-cols-1 sm:grid-cols-3 gap-0">
+          {/* Growth Stocks + Breakouts */}
+          <div className="py-5 grid grid-cols-1 sm:grid-cols-2 gap-0">
             <div className="sm:pr-6 pb-4 sm:pb-0">
-              <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-2.5">NASDAQ Net H/L</p>
-              <input
-                type="number"
-                value={form.nasdaqNetHL}
-                onChange={e => set('nasdaqNetHL', e.target.value === '' ? '' : parseFloat(e.target.value))}
-                placeholder="−34 or +74"
-                className="w-full bg-white/[0.03] border border-white/[0.07] rounded-lg px-3 py-2 text-sm mono
-                           text-gray-200 focus:outline-none focus:border-accent-blue/40 placeholder:text-gray-700"
-              />
-            </div>
-            <div className="sm:px-6 sm:border-l sm:border-white/[0.05] pb-4 sm:pb-0">
               <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-2.5">Growth Stocks</p>
               <LuxPillSelect value={form.growthStocks} onChange={v => set('growthStocks', v)} options={TREND_OPTIONS} />
             </div>
             <div className="sm:pl-6 sm:border-l sm:border-white/[0.05]">
               <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-2.5">Breakouts</p>
               <LuxPillSelect value={form.breakouts} onChange={v => set('breakouts', v)} options={BREAKOUT_OPTIONS} />
-            </div>
-          </div>
-
-          {/* Trend structure */}
-          <div className="py-5">
-            <p className="text-[10px] font-semibold tracking-[0.13em] text-gray-500 uppercase mb-4">Trend Structure</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-0">
-              <div className="sm:pr-6 pb-4 sm:pb-0">
-                <p className="text-[10px] text-gray-600 mb-2.5">Short-Term</p>
-                <LuxPillSelect value={form.shortTermTrend} onChange={v => set('shortTermTrend', v)} options={TREND_OPTIONS} />
-              </div>
-              <div className="sm:px-6 sm:border-l sm:border-white/[0.05] pb-4 sm:pb-0">
-                <p className="text-[10px] text-gray-600 mb-2.5">Intermediate</p>
-                <LuxPillSelect value={form.intermediateTrend} onChange={v => set('intermediateTrend', v)} options={TREND_OPTIONS} />
-              </div>
-              <div className="sm:pl-6 sm:border-l sm:border-white/[0.05]">
-                <p className="text-[10px] text-gray-600 mb-2.5">Long-Term</p>
-                <LuxPillSelect value={form.longTermTrend} onChange={v => set('longTermTrend', v)} options={TREND_OPTIONS} />
-              </div>
             </div>
           </div>
 
@@ -863,7 +829,6 @@ function AnalysisTab({ entries }) {
         fullDate: e.date,
         fomo:      e.fomo,
         fearGreed: e.fearGreed != null ? e.fearGreed * 10 : null, // scale to 0-100 for same axis
-        nasdaqHL:  e.nasdaqNetHL,
         raw_fearGreed: e.fearGreed,
       })),
     [sorted]
@@ -944,7 +909,7 @@ function AnalysisTab({ entries }) {
           Sentiment Timeline
         </h3>
         <p className="text-xs text-gray-600 mb-4">
-          FOMO (0–100), Fear/Greed scaled to same axis (×10), NASDAQ Net H/L
+          FOMO (0–100) and Fear/Greed scaled to the same axis (×10)
         </p>
         {sentimentData.length < 2 ? (
           <p className="text-xs text-gray-500 text-center py-6">Need at least 2 entries with FOMO / Fear-Greed data.</p>
@@ -954,11 +919,9 @@ function AnalysisTab({ entries }) {
               <CartesianGrid stroke="#ffffff08" vertical={false} />
               <XAxis dataKey="date" tick={{ fill: '#6b7280', fontSize: 11 }} tickLine={false} />
               <YAxis yAxisId="left" tick={{ fill: '#6b7280', fontSize: 11 }} tickLine={false} axisLine={false} domain={[-120, 120]} />
-              <YAxis yAxisId="right" orientation="right" tick={{ fill: '#6b7280', fontSize: 11 }} tickLine={false} axisLine={false} />
               <Tooltip content={<CustomTooltip />} />
               <Legend wrapperStyle={{ fontSize: 11, color: '#6b7280' }} />
               <ReferenceLine yAxisId="left" y={0} stroke="#ffffff15" />
-              <Bar yAxisId="right" dataKey="nasdaqHL" name="NASDAQ Net H/L" fill="#3d84ff" opacity={0.35} radius={[2,2,0,0]} />
               <Line yAxisId="left" type="monotone" dataKey="fomo" name="FOMO" stroke="#ff4757" strokeWidth={2} dot={false} />
               <Line yAxisId="left" type="monotone" dataKey="fearGreed" name="Fear/Greed ×10" stroke="#ffa502" strokeWidth={2} dot={false} strokeDasharray="4 2" />
             </ComposedChart>
@@ -1490,8 +1453,6 @@ function LogTab() {
               const growth  = TREND_OPTIONS.find(o => o.id === entry.growthStocks)
               const mode  = RISK_MODE_OPTIONS.find(o => o.id === entry.riskMode)
               const ment  = MENTAL_OPTIONS.find(o => o.id === entry.mentalState)
-              const stTrend = TREND_OPTIONS.find(o => o.id === entry.shortTermTrend)
-              const ltTrend = TREND_OPTIONS.find(o => o.id === entry.longTermTrend)
               const credit  = CREDIT_OPTIONS.find(o => o.id === entry.creditConditions)
 
               return (
@@ -1514,8 +1475,6 @@ function LogTab() {
                         {entry.sleepScore != null && <SleepScoreBadge score={entry.sleepScore} compact />}
                         {growth && <span className={`text-xs ${growth.cls}`}>Growth: {growth.label}</span>}
                         {ndx && <span className={`text-xs ${ndx.cls}`}>{ndx.id}</span>}
-                        {stTrend && <span className={`text-xs ${stTrend.cls}`}>ST: {stTrend.label}</span>}
-                        {ltTrend && <span className={`text-xs ${ltTrend.cls}`}>LT: {ltTrend.label}</span>}
                         {credit && <span className={`text-xs ${credit.cls}`}>Credit: {credit.label}</span>}
                         {mode && <span className={`text-xs ${mode.cls}`}>{mode.label} {mode.pct}</span>}
                         {ment && <span className={`text-xs ${ment.cls}`}>{ment.label}</span>}
@@ -1530,9 +1489,6 @@ function LogTab() {
                         <div className="flex items-center gap-3 text-xs text-gray-500 mb-1">
                           {entry.cashDeployed != null && <span>Deployed <span className="mono text-gray-300">{entry.cashDeployed}%</span></span>}
                           {entry.effectiveExposure != null && <span>Effective <span className="mono text-accent-blue">{entry.effectiveExposure}%</span></span>}
-                          {entry.nasdaqNetHL !== '' && entry.nasdaqNetHL != null && (
-                            <span>NASDAQ H/L <span className={`mono ${entry.nasdaqNetHL >= 0 ? 'text-accent-green' : 'text-accent-red'}`}>{entry.nasdaqNetHL > 0 ? '+' : ''}{entry.nasdaqNetHL}</span></span>
-                          )}
                         </div>
                       )}
                       {/* Gameplan preview */}

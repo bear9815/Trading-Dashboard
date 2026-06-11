@@ -11,7 +11,6 @@ Return ONLY a valid JSON object with these exact fields (use null if a field is 
 {
   "fomo": <integer 0-100: estimate their FOMO/chasing urge from their language. Calm = 0-30, moderate = 30-60, high FOMO = 60-100. null if unclear>,
   "fearGreed": <number -5 to +5 in 0.5 steps: negative = fearful/cautious, 0 = neutral, positive = greedy/aggressive. null if unclear>,
-  "nasdaqNetHL": <integer: NASDAQ Net New Highs minus Lows they mention, e.g. -34 or +74. null if not mentioned>,
   "ndxMcsi": <exactly one of: "Bearish", "Neutral/Bearish", "Neutral", "Neutral/Bullish", "Bullish". null if not mentioned>,
   "marketBias": <exactly one of: "Bearish", "Neutral", "Bullish". null if not clear from context>,
   "confidence": <integer 1-5: 1=very low, 3=moderate, 5=very high confidence in their plan. null if unclear>,
