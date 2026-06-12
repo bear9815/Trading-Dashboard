@@ -3,61 +3,59 @@ import assert from 'node:assert/strict'
 
 import { buildQqqBasketPlan } from './qqqBasketSizer.js'
 
-test('buildQqqBasketPlan sizes valid rows with equal ATR risk and matches the requested QQQ multiple when feasible', () => {
+test('higher ATR stop multipliers reduce planned share counts when sizing off ATR percent', () => {
+  const base = buildQqqBasketPlan({
+    accountValue: 100000,
+    atrStopMultiple: 1,
+    targetQqqMultiple: 1,
+    plannedRows: [
+      { symbol: 'NVDA', price: 100, atrPct: 5, betaToQqq: 1, currentShares: 0 },
+    ],
+  })
+
+  const wider = buildQqqBasketPlan({
+    accountValue: 100000,
+    atrStopMultiple: 2,
+    targetQqqMultiple: 1,
+    plannedRows: [
+      { symbol: 'NVDA', price: 100, atrPct: 5, betaToQqq: 1, currentShares: 0 },
+    ],
+  })
+
+  assert.ok(wider.plannedRows[0].plannedShares < base.plannedRows[0].plannedShares)
+})
+
+test('including current positions reduces the additional planned buys needed to reach target', () => {
   const result = buildQqqBasketPlan({
     accountValue: 100000,
     atrStopMultiple: 1,
-    targetQqqMultiple: 1.5,
-    rows: [
-      { symbol: 'NVDA', price: 100, atr: 5, betaToQqq: 1.5 },
-      { symbol: 'AMZN', price: 50, atr: 2.5, betaToQqq: 1.5 },
-    ],
-  })
-
-  assert.equal(result.status, 'ok')
-  assert.equal(result.validRows.length, 2)
-  assert.equal(result.invalidRows.length, 0)
-  assert.equal(result.validRows[0].atrRiskDollars, result.validRows[1].atrRiskDollars)
-  assert.equal(result.summary.targetQqqMultiple, 1.5)
-  assert.equal(result.summary.achievedQqqMultiple, 1.5)
-})
-
-test('buildQqqBasketPlan caps sizing when the requested QQQ multiple would exceed account capital', () => {
-  const result = buildQqqBasketPlan({
-    accountValue: 10000,
-    atrStopMultiple: 1,
-    targetQqqMultiple: 2,
-    rows: [
-      { symbol: 'TSLA', price: 200, atr: 10, betaToQqq: 1 },
-      { symbol: 'META', price: 200, atr: 10, betaToQqq: 1 },
-    ],
-  })
-
-  assert.equal(result.status, 'capped')
-  assert.equal(result.summary.totalCapitalDeployed, 10000)
-  assert.ok(result.summary.achievedQqqMultiple < 2)
-  assert.match(result.warnings.join(' '), /capital/i)
-})
-
-test('buildQqqBasketPlan excludes rows with invalid fetched metrics and recalculates across the remaining names', () => {
-  const result = buildQqqBasketPlan({
-    accountValue: 50000,
-    atrStopMultiple: 1.5,
     targetQqqMultiple: 1,
-    rows: [
-      { symbol: 'MSFT', price: 400, atr: 8, betaToQqq: 1 },
-      { symbol: 'BROKEN', price: 25, atr: 0, betaToQqq: 1.1 },
-      { symbol: 'NOBETA', price: 30, atr: 3, betaToQqq: null },
+    includeCurrentPositions: true,
+    currentRows: [
+      { symbol: 'AAPL', price: 100, atrPct: 4, betaToQqq: 1, currentShares: 400 },
+    ],
+    plannedRows: [
+      { symbol: 'NVDA', price: 100, atrPct: 4, betaToQqq: 1, currentShares: 0 },
     ],
   })
 
-  assert.equal(result.validRows.length, 1)
-  assert.deepEqual(
-    result.invalidRows.map(row => [row.symbol, row.reason]),
-    [
-      ['BROKEN', 'invalid_atr'],
-      ['NOBETA', 'invalid_beta'],
-    ]
-  )
-  assert.equal(result.validRows[0].symbol, 'MSFT')
+  assert.equal(result.currentSummary.currentQqqMultiple, 0.4)
+  assert.equal(result.plannedRows[0].plannedShares, 600)
+  assert.equal(result.combinedSummary.achievedQqqMultiple, 1)
+})
+
+test('rows missing beta stay visible but are excluded from beta targeting coverage', () => {
+  const result = buildQqqBasketPlan({
+    accountValue: 100000,
+    atrStopMultiple: 1,
+    targetQqqMultiple: 1,
+    plannedRows: [
+      { symbol: 'NVDA', price: 100, atrPct: 5, betaToQqq: 1, currentShares: 0 },
+      { symbol: 'SHOP', price: 100, atrPct: 5, betaToQqq: null, currentShares: 0 },
+    ],
+  })
+
+  assert.equal(result.plannedRows.length, 2)
+  assert.equal(result.plannedRows[1].betaEligible, false)
+  assert.ok(result.combinedSummary.betaCoveragePct < 100)
 })
