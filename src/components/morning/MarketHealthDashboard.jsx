@@ -17,7 +17,7 @@ import { resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
 import {
   buildMarketHealthCardModel,
   MARKET_HEALTH_SYMBOLS,
-  MARKET_HEALTH_ZSCORE_PERIOD_OPTIONS,
+  MARKET_HEALTH_ROLLING_PERIOD_OPTIONS,
 } from '../../utils/marketHealth.js'
 
 function formatSigned(value, decimals = 2, suffix = '') {
@@ -161,7 +161,7 @@ function MarketHealthCard({ card, error }) {
 
       <div className="mt-3 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.14em] text-gray-500">
         <span>{card.shading.mode === 'anchored' ? 'Anchored shading' : 'Rolling shading'}</span>
-        <span>{card.shading.period}D</span>
+        <span>{card.shading.mode === 'anchored' ? formatAnchorLabel(card.shading.anchorDate) : `${card.shading.period}D`}</span>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
@@ -193,7 +193,7 @@ export default function MarketHealthDashboard() {
   const [error, setError] = useState('')
   const [errorsBySymbol, setErrorsBySymbol] = useState({})
   const [shadingMode, setShadingMode] = useState('rolling')
-  const [zScorePeriod, setZScorePeriod] = useState(63)
+  const [rollingPeriod, setRollingPeriod] = useState(63)
 
   const symbols = useMemo(
     () => MARKET_HEALTH_SYMBOLS.map(entry => entry.marketSymbol),
@@ -223,8 +223,8 @@ export default function MarketHealthDashboard() {
     setSelectedAnchorDate(latestAnchorDate || anchorDateOptions[anchorDateOptions.length - 1] || '')
   }, [anchorDateOptions, latestAnchorDate, selectedAnchorDate])
 
-  const rollingRsWindow = Math.max(marketHealthSettings?.dailyRollingRs?.rsWindow ?? 63, zScorePeriod)
-  const rollingLookback = Math.max(marketHealthSettings?.dailyRollingRs?.lookback ?? 50, zScorePeriod)
+  const rollingRsWindow = rollingPeriod
+  const rollingLookback = marketHealthSettings?.dailyRollingRs?.lookback ?? 50
 
   const {
     benchmarkHistoryBars,
@@ -263,9 +263,9 @@ export default function MarketHealthDashboard() {
       historyBarsBySymbol[entry.marketSymbol] || [],
       benchmarkHistoryBars,
       marketHealthSettings,
-      { shadingMode, zScorePeriod, selectedAnchorDate }
+      { shadingMode, rollingPeriod, selectedAnchorDate }
     ))
-  }, [benchmarkHistoryBars, historyBarsBySymbol, marketHealthSettings, selectedAnchorDate, shadingMode, zScorePeriod])
+  }, [benchmarkHistoryBars, historyBarsBySymbol, marketHealthSettings, rollingPeriod, selectedAnchorDate, shadingMode])
 
   return (
     <section className="space-y-4">
@@ -303,10 +303,10 @@ export default function MarketHealthDashboard() {
           formatOption={(option) => option === 'anchored' ? 'Anchored' : 'Rolling'}
         />
         <ToggleGroup
-          label="Z-Score Period"
-          options={MARKET_HEALTH_ZSCORE_PERIOD_OPTIONS}
-          value={zScorePeriod}
-          onChange={setZScorePeriod}
+          label="Rolling Window"
+          options={MARKET_HEALTH_ROLLING_PERIOD_OPTIONS}
+          value={rollingPeriod}
+          onChange={setRollingPeriod}
           formatOption={(option) => `${option}D`}
         />
         <ToggleGroup

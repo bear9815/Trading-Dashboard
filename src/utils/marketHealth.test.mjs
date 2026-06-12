@@ -8,7 +8,7 @@ import {
 import {
   MARKET_HEALTH_SYMBOLS,
   buildMarketHealthCardModel,
-  MARKET_HEALTH_ZSCORE_PERIOD_OPTIONS,
+  MARKET_HEALTH_ROLLING_PERIOD_OPTIONS,
 } from './marketHealth.js'
 
 function buildBars(length, startClose, step, driftCycle = 0) {
@@ -37,8 +37,8 @@ test('MARKET_HEALTH_SYMBOLS keeps sectors first, then SMH and BTC display mappin
   assert.equal(MARKET_HEALTH_SYMBOLS.at(-1).marketSymbol, 'BTC-USD')
 })
 
-test('market health exposes the supported z-score period presets', () => {
-  assert.deepEqual(MARKET_HEALTH_ZSCORE_PERIOD_OPTIONS, [5, 21, 63, 126])
+test('market health exposes the supported rolling RS window presets', () => {
+  assert.deepEqual(MARKET_HEALTH_ROLLING_PERIOD_OPTIONS, [5, 21, 63, 126])
 })
 
 test('buildMarketHealthCardModel reuses rolling and anchored RS snapshots', () => {
@@ -139,21 +139,21 @@ test('buildMarketHealthCardModel can switch shading mode and period independentl
     symbolBars,
     benchmarkBars,
     settings,
-    { shadingMode: 'rolling', zScorePeriod: 63, selectedAnchorDate: '2026-01-02' }
+    { shadingMode: 'rolling', rollingPeriod: 63, selectedAnchorDate: '2026-01-02' }
   )
   const rolling21 = buildMarketHealthCardModel(
     { symbol: 'XLF', marketSymbol: 'XLF' },
     symbolBars,
     benchmarkBars,
     settings,
-    { shadingMode: 'rolling', zScorePeriod: 21, selectedAnchorDate: '2026-01-02' }
+    { shadingMode: 'rolling', rollingPeriod: 21, selectedAnchorDate: '2026-01-02' }
   )
   const anchored126 = buildMarketHealthCardModel(
     { symbol: 'XLF', marketSymbol: 'XLF' },
     symbolBars,
     benchmarkBars,
     settings,
-    { shadingMode: 'anchored', zScorePeriod: 126, selectedAnchorDate: '2025-09-02' }
+    { shadingMode: 'anchored', rollingPeriod: 21, selectedAnchorDate: '2025-09-02' }
   )
 
   assert.equal(rolling63.shading.mode, 'rolling')
@@ -162,7 +162,7 @@ test('buildMarketHealthCardModel can switch shading mode and period independentl
   assert.equal(rolling21.shading.period, 21)
   assert.equal(rolling21.rolling.rsWindow, 21)
   assert.equal(anchored126.shading.mode, 'anchored')
-  assert.equal(anchored126.shading.period, 126)
+  assert.equal(anchored126.shading.anchorDate, '2025-09-02')
   assert.equal(anchored126.anchored.anchorDate, '2025-09-02')
   assert.deepEqual(rolling63.sparkline, anchored126.sparkline)
   assert.notDeepEqual(
@@ -189,14 +189,14 @@ test('buildMarketHealthCardModel respects the selected anchored z-score date', (
     symbolBars,
     benchmarkBars,
     settings,
-    { selectedAnchorDate: '2025-11-03', shadingMode: 'anchored', zScorePeriod: 63 }
+    { selectedAnchorDate: '2025-11-03', shadingMode: 'anchored', rollingPeriod: 63 }
   )
   const lateAnchor = buildMarketHealthCardModel(
     { symbol: 'XLV', marketSymbol: 'XLV' },
     symbolBars,
     benchmarkBars,
     settings,
-    { selectedAnchorDate: '2026-02-02', shadingMode: 'anchored', zScorePeriod: 63 }
+    { selectedAnchorDate: '2026-02-02', shadingMode: 'anchored', rollingPeriod: 63 }
   )
 
   assert.equal(earlyAnchor.anchored.anchorDate, '2025-11-03')
