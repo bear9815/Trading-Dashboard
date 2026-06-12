@@ -22,7 +22,7 @@ export const MARKET_HEALTH_SYMBOLS = [
   { symbol: 'BTC', marketSymbol: 'BTC-USD', label: 'Bitcoin' },
 ]
 
-export const MARKET_HEALTH_ZSCORE_PERIOD_OPTIONS = [21, 63, 126, 252]
+export const MARKET_HEALTH_ZSCORE_PERIOD_OPTIONS = [5, 21, 63, 126]
 
 function normalizedPriceRows(symbolBars = []) {
   return (symbolBars || [])
@@ -63,12 +63,32 @@ function normalizeZScorePeriod(period, fallback = 63) {
     : fallback
 }
 
+function buildRollingSettings(settings = {}, zScorePeriod = null) {
+  const hasOverride = zScorePeriod != null
+  const period = normalizeZScorePeriod(zScorePeriod, settings?.dailyRollingRs?.rsWindow ?? 63)
+  return {
+    ...(settings || {}),
+    dailyRollingRs: {
+      ...(settings?.dailyRollingRs || {}),
+      rsWindow: period,
+      lookback: hasOverride
+        ? Math.max(period, Number(settings?.dailyRollingRs?.lookback) || period)
+        : (Number(settings?.dailyRollingRs?.lookback) || period),
+    },
+  }
+}
+
+function buildAnchoredSettings(settings = {}, selectedAnchorDate = null) {
+  if (!selectedAnchorDate) return settings || {}
+  return {
+    ...(settings || {}),
+    anchorDates: [selectedAnchorDate],
+  }
+}
+
 function buildRollingBackdrop(symbolBars = [], benchmarkBars = [], settings = {}, points = 90, zScorePeriod = 63) {
-  const gradient = calculateRollingRsGradient(symbolBars, benchmarkBars, {
-    ...(settings?.dailyRollingRs || {}),
-    rsWindow: normalizeZScorePeriod(zScorePeriod, settings?.dailyRollingRs?.rsWindow ?? 63),
-    lookback: normalizeZScorePeriod(zScorePeriod, settings?.dailyRollingRs?.lookback ?? 50),
-  })
+  const rollingSettings = buildRollingSettings(settings, zScorePeriod)
+  const gradient = calculateRollingRsGradient(symbolBars, benchmarkBars, rollingSettings?.dailyRollingRs)
   const gradientByTime = new Map(
     gradient.map(row => [row.time, row])
   )
@@ -81,10 +101,11 @@ function buildRollingBackdrop(symbolBars = [], benchmarkBars = [], settings = {}
 }
 
 function buildAnchoredBackdrop(symbolBars = [], benchmarkBars = [], settings = {}, points = 90, zScorePeriod = 63) {
-  const anchorDate = resolveLatestAnchorDate(settings?.anchorDates)
+  const anchoredSettings = buildAnchoredSettings(settings, settings?._marketHealthSelectedAnchorDate)
+  const anchorDate = resolveLatestAnchorDate(anchoredSettings?.anchorDates)
   const gradient = calculateAnchoredRsGradient(symbolBars, benchmarkBars, anchorDate, {
-    ...(settings?.dailyAnchoredRs || {}),
-    lookback: normalizeZScorePeriod(zScorePeriod, settings?.dailyAnchoredRs?.lookback ?? 50),
+    ...(anchoredSettings?.dailyAnchoredRs || {}),
+    lookback: normalizeZScorePeriod(zScorePeriod, anchoredSettings?.dailyAnchoredRs?.lookback ?? 50),
   })
   const gradientByTime = new Map(
     gradient.map(row => [row.time, row])
@@ -105,8 +126,11 @@ export function getZScoreTone(snapshot) {
 }
 
 export function buildMarketHealthCardModel(entry, symbolBars = [], benchmarkBars = [], settings = {}, viewOptions = {}) {
-  const rolling = buildRollingRsSnapshot(symbolBars, benchmarkBars, settings)
-  const anchored = buildAnchoredRsSnapshot(symbolBars, benchmarkBars, settings)
+  const selectedAnchorDate = viewOptions?.selectedAnchorDate || null
+  const rollingSettings = buildRollingSettings(settings, viewOptions?.zScorePeriod)
+  const anchoredSettings = buildAnchoredSettings(settings, selectedAnchorDate)
+  const rolling = buildRollingRsSnapshot(symbolBars, benchmarkBars, rollingSettings)
+  const anchored = buildAnchoredRsSnapshot(symbolBars, benchmarkBars, anchoredSettings)
   const sparkline = buildPriceSparkline(symbolBars)
   const shadingMode = viewOptions?.shadingMode === 'anchored' ? 'anchored' : 'rolling'
   const zScorePeriod = normalizeZScorePeriod(
@@ -116,8 +140,14 @@ export function buildMarketHealthCardModel(entry, symbolBars = [], benchmarkBars
       : (settings?.dailyRollingRs?.rsWindow ?? 63)
   )
   const backdrop = shadingMode === 'anchored'
-    ? buildAnchoredBackdrop(symbolBars, benchmarkBars, settings, sparkline.length || 90, zScorePeriod)
-    : buildRollingBackdrop(symbolBars, benchmarkBars, settings, sparkline.length || 90, zScorePeriod)
+    ? buildAnchoredBackdrop(
+      symbolBars,
+      benchmarkBars,
+      { ...anchoredSettings, _marketHealthSelectedAnchorDate: selectedAnchorDate },
+      sparkline.length || 90,
+      zScorePeriod
+    )
+    : buildRollingBackdrop(symbolBars, benchmarkBars, rollingSettings, sparkline.length || 90, zScorePeriod)
 
   return {
     ...entry,
@@ -128,6 +158,7 @@ export function buildMarketHealthCardModel(entry, symbolBars = [], benchmarkBars
     shading: {
       mode: shadingMode,
       period: zScorePeriod,
+      anchorDate: selectedAnchorDate || anchored.anchorDate || null,
     },
     rollingTone: getZScoreTone(rolling),
     anchoredTone: getZScoreTone(anchored),

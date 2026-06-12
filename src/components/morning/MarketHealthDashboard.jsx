@@ -26,6 +26,13 @@ function formatSigned(value, decimals = 2, suffix = '') {
   return `${sign}${value.toFixed(decimals)}${suffix}`
 }
 
+function formatAnchorLabel(value) {
+  if (!value) return '—'
+  const [year, month, day] = String(value).split('-')
+  if (!year || !month || !day) return value
+  return `${month}/${day}/${year.slice(2)}`
+}
+
 function toneCopy(tone) {
   if (tone === 'constructive') return { label: 'Constructive', pill: 'bg-emerald-500/12 text-emerald-300 border-emerald-400/25' }
   if (tone === 'pulling_back') return { label: 'Pullback', pill: 'bg-amber-500/12 text-amber-300 border-amber-400/25' }
@@ -201,6 +208,21 @@ export default function MarketHealthDashboard() {
     () => resolveLatestAnchorDate(marketHealthSettings?.anchorDates),
     [marketHealthSettings?.anchorDates]
   )
+  const anchorDateOptions = useMemo(
+    () => (marketHealthSettings?.anchorDates || []).filter(Boolean),
+    [marketHealthSettings?.anchorDates]
+  )
+  const [selectedAnchorDate, setSelectedAnchorDate] = useState(latestAnchorDate || '')
+
+  useEffect(() => {
+    if (!anchorDateOptions.length) {
+      setSelectedAnchorDate('')
+      return
+    }
+    if (selectedAnchorDate && anchorDateOptions.includes(selectedAnchorDate)) return
+    setSelectedAnchorDate(latestAnchorDate || anchorDateOptions[anchorDateOptions.length - 1] || '')
+  }, [anchorDateOptions, latestAnchorDate, selectedAnchorDate])
+
   const rollingRsWindow = Math.max(marketHealthSettings?.dailyRollingRs?.rsWindow ?? 63, zScorePeriod)
   const rollingLookback = Math.max(marketHealthSettings?.dailyRollingRs?.lookback ?? 50, zScorePeriod)
 
@@ -241,9 +263,9 @@ export default function MarketHealthDashboard() {
       historyBarsBySymbol[entry.marketSymbol] || [],
       benchmarkHistoryBars,
       marketHealthSettings,
-      { shadingMode, zScorePeriod }
+      { shadingMode, zScorePeriod, selectedAnchorDate }
     ))
-  }, [benchmarkHistoryBars, historyBarsBySymbol, marketHealthSettings, shadingMode, zScorePeriod])
+  }, [benchmarkHistoryBars, historyBarsBySymbol, marketHealthSettings, selectedAnchorDate, shadingMode, zScorePeriod])
 
   return (
     <section className="space-y-4">
@@ -286,6 +308,13 @@ export default function MarketHealthDashboard() {
           value={zScorePeriod}
           onChange={setZScorePeriod}
           formatOption={(option) => `${option}D`}
+        />
+        <ToggleGroup
+          label="Anchor Date"
+          options={anchorDateOptions}
+          value={selectedAnchorDate}
+          onChange={setSelectedAnchorDate}
+          formatOption={formatAnchorLabel}
         />
       </div>
 
