@@ -8,6 +8,7 @@ test('higher ATR stop multipliers reduce planned share counts when sizing off AT
     accountValue: 100000,
     atrStopMultiple: 1,
     targetQqqMultiple: 1,
+    benchmarkAtrPct: 4,
     plannedRows: [
       { symbol: 'NVDA', price: 100, atrPct: 5, betaToQqq: 1, currentShares: 0 },
     ],
@@ -17,6 +18,7 @@ test('higher ATR stop multipliers reduce planned share counts when sizing off AT
     accountValue: 100000,
     atrStopMultiple: 2,
     targetQqqMultiple: 1,
+    benchmarkAtrPct: 4,
     plannedRows: [
       { symbol: 'NVDA', price: 100, atrPct: 5, betaToQqq: 1, currentShares: 0 },
     ],
@@ -30,6 +32,7 @@ test('including current positions reduces the additional planned buys needed to 
     accountValue: 100000,
     atrStopMultiple: 1,
     targetQqqMultiple: 1,
+    benchmarkAtrPct: 4,
     includeCurrentPositions: true,
     currentRows: [
       { symbol: 'AAPL', price: 100, atrPct: 4, betaToQqq: 1, currentShares: 400 },
@@ -49,9 +52,10 @@ test('rows missing beta stay visible but are excluded from beta targeting covera
     accountValue: 100000,
     atrStopMultiple: 1,
     targetQqqMultiple: 1,
+    benchmarkAtrPct: 4,
     plannedRows: [
       { symbol: 'NVDA', price: 100, atrPct: 5, betaToQqq: 1, currentShares: 0 },
-      { symbol: 'SHOP', price: 100, atrPct: 5, betaToQqq: null, currentShares: 0 },
+      { symbol: 'SHOP', price: 100, atrPct: 5, betaToQqq: null, currentShares: 100 },
     ],
   })
 

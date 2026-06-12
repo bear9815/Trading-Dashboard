@@ -2421,7 +2421,11 @@ export default function RiskPanel({ selectedAccount }) {
         </div>
 
         {riskWorkspace === 'basket-sizer' ? (
-          <BasketSizerPanel liveBalance={liveBalance} />
+          <BasketSizerPanel
+            liveBalance={liveBalance}
+            selectedAccount={selectedAccount}
+            openTrades={openTrades}
+          />
         ) : positions.length === 0 ? (
           <p className="text-sm text-gray-500 text-center py-8">No open positions</p>
         ) : (
