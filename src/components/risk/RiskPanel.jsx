@@ -12,6 +12,7 @@ import { calcWinRate, calcAvgR } from '../../utils/metrics.js'
 import { fetchQuotes, fetchATR14, fetchSectors, computeSchwabMAE } from '../../utils/marketData.js'
 import OpenHeatMeter from './OpenHeatMeter.jsx'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
+import BasketSizerPanel from './BasketSizerPanel.jsx'
 
 function useHoverTooltip(delay = 300) {
   const [visible, setVisible] = useState(false)
@@ -1618,6 +1619,7 @@ export default function RiskPanel({ selectedAccount }) {
   const [riskDragCol, setRiskDragCol]         = useState(null)
   const [riskDragOverCol, setRiskDragOverCol] = useState(null)
   const [showRiskColMenu, setShowRiskColMenu] = useState(false)
+  const [riskWorkspace, setRiskWorkspace]     = useState('open-positions')
   const riskColMenuRef = useRef(null)
 
   useEffect(() => {
@@ -2275,126 +2277,152 @@ export default function RiskPanel({ selectedAccount }) {
 
       {/* ── Position Risk Breakdown ──────────────────────────────────────── */}
       <div className="card">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Position Risk Breakdown</p>
-            <h3 className="text-base font-semibold text-white">Open Positions</h3>
+            <h3 className="text-base font-semibold text-white">
+              {riskWorkspace === 'basket-sizer' ? 'Basket Sizer' : 'Open Positions'}
+            </h3>
           </div>
-          <div className="flex items-center gap-3">
-            {lastRefresh && (() => {
-              const minsAgo = Math.floor((Date.now() - lastRefresh.getTime()) / 60_000)
-              const isStale = minsAgo >= 5
-              const inMktHrs = isMarketHours()
-              return (
-                <span className={`text-xs flex items-center gap-1 ${
-                  isStale && inMktHrs ? 'text-accent-yellow' : 'text-gray-600'
-                }`} title={isStale && inMktHrs ? 'Prices may be outdated — click Refresh' : ''}>
-                  {isStale && inMktHrs && <AlertTriangle size={10} />}
-                  {minsAgo === 0 ? 'Just updated' : `Updated ${minsAgo}m ago`}
-                  {inMktHrs && !isStale && <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse ml-0.5" title="Auto-refreshing" />}
-                </span>
-              )
-            })()}
-            <button
-              onClick={refreshPrices}
-              disabled={fetching || openTrades.length === 0}
-              className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-40"
-              title="Fetch current market prices"
-            >
-              <RefreshCw size={12} className={fetching ? 'animate-spin' : ''} />
-              {fetching ? 'Fetching…' : 'Refresh Prices'}
-            </button>
-            <div className="relative" ref={riskColMenuRef}>
-              <button
-                onClick={() => setShowRiskColMenu(v => !v)}
-                className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
-                title="Customize columns"
-              >
-                <Settings2 size={14} />
-              </button>
-              {showRiskColMenu && (
-                <div className="absolute right-0 top-7 z-50 bg-surface-100 border border-white/10 rounded-lg shadow-xl p-2 w-72">
-                  <div className="flex items-center justify-between gap-2 px-2 pb-2 border-b border-white/5 mb-2">
-                    <div>
-                      <p className="text-xs text-gray-400 font-semibold uppercase tracking-[0.18em]">Risk Columns</p>
-                      <p className="text-[11px] text-gray-600 mt-0.5">Show, hide, and reorder the table</p>
-                    </div>
-                    <button
-                      onClick={() => setRiskVisibleColumns(DEFAULT_RISK_VISIBLE_COLUMNS)}
-                      className="text-[11px] text-accent-blue hover:text-white transition-colors"
-                    >
-                      Reset
-                    </button>
-                  </div>
-                  <div className="px-2 pb-1.5">
-                    <p className="text-[11px] text-gray-500 mb-1.5">Visible columns</p>
-                    <div className="space-y-1 max-h-80 overflow-y-auto pr-1">
-                      {riskColOrder.map(key => {
-                        const col = RISK_COLUMN_META[key]
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex gap-0.5 bg-surface-300 rounded p-0.5 border border-white/5">
+              {[
+                { id: 'open-positions', label: 'Open Positions' },
+                { id: 'basket-sizer', label: 'Basket Sizer' },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setRiskWorkspace(tab.id)}
+                  className={`text-[11px] font-semibold px-2.5 py-1 rounded transition-all ${
+                    riskWorkspace === tab.id
+                      ? 'bg-accent-blue text-white shadow'
+                      : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            {riskWorkspace === 'open-positions' && (
+              <>
+                {lastRefresh && (() => {
+                  const minsAgo = Math.floor((Date.now() - lastRefresh.getTime()) / 60_000)
+                  const isStale = minsAgo >= 5
+                  const inMktHrs = isMarketHours()
+                  return (
+                    <span className={`text-xs flex items-center gap-1 ${
+                      isStale && inMktHrs ? 'text-accent-yellow' : 'text-gray-600'
+                    }`} title={isStale && inMktHrs ? 'Prices may be outdated — click Refresh' : ''}>
+                      {isStale && inMktHrs && <AlertTriangle size={10} />}
+                      {minsAgo === 0 ? 'Just updated' : `Updated ${minsAgo}m ago`}
+                      {inMktHrs && !isStale && <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse ml-0.5" title="Auto-refreshing" />}
+                    </span>
+                  )
+                })()}
+                <button
+                  onClick={refreshPrices}
+                  disabled={fetching || openTrades.length === 0}
+                  className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-40"
+                  title="Fetch current market prices"
+                >
+                  <RefreshCw size={12} className={fetching ? 'animate-spin' : ''} />
+                  {fetching ? 'Fetching…' : 'Refresh Prices'}
+                </button>
+                <div className="relative" ref={riskColMenuRef}>
+                  <button
+                    onClick={() => setShowRiskColMenu(v => !v)}
+                    className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors"
+                    title="Customize columns"
+                  >
+                    <Settings2 size={14} />
+                  </button>
+                  {showRiskColMenu && (
+                    <div className="absolute right-0 top-7 z-50 bg-surface-100 border border-white/10 rounded-lg shadow-xl p-2 w-72">
+                      <div className="flex items-center justify-between gap-2 px-2 pb-2 border-b border-white/5 mb-2">
+                        <div>
+                          <p className="text-xs text-gray-400 font-semibold uppercase tracking-[0.18em]">Risk Columns</p>
+                          <p className="text-[11px] text-gray-600 mt-0.5">Show, hide, and reorder the table</p>
+                        </div>
+                        <button
+                          onClick={() => setRiskVisibleColumns(DEFAULT_RISK_VISIBLE_COLUMNS)}
+                          className="text-[11px] text-accent-blue hover:text-white transition-colors"
+                        >
+                          Reset
+                        </button>
+                      </div>
+                      <div className="px-2 pb-1.5">
+                        <p className="text-[11px] text-gray-500 mb-1.5">Visible columns</p>
+                        <div className="space-y-1 max-h-80 overflow-y-auto pr-1">
+                          {riskColOrder.map(key => {
+                            const col = RISK_COLUMN_META[key]
+                            if (!col) return null
+                            const checked = visibleRiskCols.includes(key)
+                            return (
+                              <label
+                                key={`toggle-${key}`}
+                                className="flex items-start gap-2.5 px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer transition-colors"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    const next = checked
+                                      ? visibleRiskCols.filter(colKey => colKey !== key)
+                                      : [...visibleRiskCols, key]
+                                    if (next.length > 0) setRiskVisibleColumns(next)
+                                  }}
+                                  className="mt-0.5 accent-blue-500"
+                                />
+                                <span className="min-w-0">
+                                  <span className="block text-sm text-gray-200">{col.label}</span>
+                                  <span className="block text-[11px] leading-4 text-gray-600">{col.description}</span>
+                                </span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-gray-500 px-2 pt-2 pb-1.5 border-t border-white/5 mb-1">Drag visible columns to reorder</p>
+                      {visibleRiskCols.map(key => {
+                        const col = RISK_COLUMNS.find(c => c.key === key)
                         if (!col) return null
-                        const checked = visibleRiskCols.includes(key)
                         return (
-                          <label
-                            key={`toggle-${key}`}
-                            className="flex items-start gap-2.5 px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer transition-colors"
+                          <div
+                            key={key}
+                            draggable
+                            onDragStart={() => setRiskDragCol(key)}
+                            onDragOver={e => { e.preventDefault(); setRiskDragOverCol(key) }}
+                            onDrop={() => {
+                              if (!riskDragCol || riskDragCol === key) { setRiskDragCol(null); setRiskDragOverCol(null); return }
+                              const next = [...riskColOrder]
+                              const from = next.indexOf(riskDragCol)
+                              const to   = next.indexOf(key)
+                              next.splice(from, 1)
+                              next.splice(to, 0, riskDragCol)
+                              setRiskColumnOrder(next)
+                              setRiskDragCol(null); setRiskDragOverCol(null)
+                            }}
+                            onDragEnd={() => { setRiskDragCol(null); setRiskDragOverCol(null) }}
+                            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded text-sm transition-colors cursor-default
+                              ${riskDragOverCol === key && riskDragCol !== key ? 'border-t-2 border-accent-blue' : ''}
+                              ${riskDragCol === key ? 'opacity-40' : 'hover:bg-white/5 text-gray-300'}`}
                           >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => {
-                                const next = checked
-                                  ? visibleRiskCols.filter(colKey => colKey !== key)
-                                  : [...visibleRiskCols, key]
-                                if (next.length > 0) setRiskVisibleColumns(next)
-                              }}
-                              className="mt-0.5 accent-blue-500"
-                            />
-                            <span className="min-w-0">
-                              <span className="block text-sm text-gray-200">{col.label}</span>
-                              <span className="block text-[11px] leading-4 text-gray-600">{col.description}</span>
-                            </span>
-                          </label>
+                            <span className="text-gray-600 cursor-grab select-none text-base leading-none">⠿</span>
+                            <span>{col.label}</span>
+                          </div>
                         )
                       })}
                     </div>
-                  </div>
-                  <p className="text-[11px] text-gray-500 px-2 pt-2 pb-1.5 border-t border-white/5 mb-1">Drag visible columns to reorder</p>
-                  {visibleRiskCols.map(key => {
-                    const col = RISK_COLUMNS.find(c => c.key === key)
-                    if (!col) return null
-                    return (
-                      <div
-                        key={key}
-                        draggable
-                        onDragStart={() => setRiskDragCol(key)}
-                        onDragOver={e => { e.preventDefault(); setRiskDragOverCol(key) }}
-                        onDrop={() => {
-                          if (!riskDragCol || riskDragCol === key) { setRiskDragCol(null); setRiskDragOverCol(null); return }
-                          const next = [...riskColOrder]
-                          const from = next.indexOf(riskDragCol)
-                          const to   = next.indexOf(key)
-                          next.splice(from, 1)
-                          next.splice(to, 0, riskDragCol)
-                          setRiskColumnOrder(next)
-                          setRiskDragCol(null); setRiskDragOverCol(null)
-                        }}
-                        onDragEnd={() => { setRiskDragCol(null); setRiskDragOverCol(null) }}
-                        className={`flex items-center gap-2 w-full px-2 py-1.5 rounded text-sm transition-colors cursor-default
-                          ${riskDragOverCol === key && riskDragCol !== key ? 'border-t-2 border-accent-blue' : ''}
-                          ${riskDragCol === key ? 'opacity-40' : 'hover:bg-white/5 text-gray-300'}`}
-                      >
-                        <span className="text-gray-600 cursor-grab select-none text-base leading-none">⠿</span>
-                        <span>{col.label}</span>
-                      </div>
-                    )
-                  })}
+                  )}
                 </div>
-              )}
-            </div>
+              </>
+            )}
           </div>
         </div>
 
-        {positions.length === 0 ? (
+        {riskWorkspace === 'basket-sizer' ? (
+          <BasketSizerPanel liveBalance={liveBalance} />
+        ) : positions.length === 0 ? (
           <p className="text-sm text-gray-500 text-center py-8">No open positions</p>
         ) : (
           <>

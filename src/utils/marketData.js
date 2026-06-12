@@ -600,6 +600,96 @@ export async function fetchQuotes(symbols) {
 
 // ── Beta / Correlation ────────────────────────────────────────────────────────
 
+function buildReturnsByDate(closes) {
+  const returns = new Map()
+  const ordered = [...(closes || [])]
+    .filter(row => row && row.time && Number.isFinite(Number(row.close)))
+    .sort((a, b) => String(a.time).localeCompare(String(b.time)))
+
+  for (let i = 1; i < ordered.length; i++) {
+    const prev = Number(ordered[i - 1].close)
+    const cur = Number(ordered[i].close)
+    if (prev > 0 && Number.isFinite(cur)) {
+      returns.set(ordered[i].time, (cur - prev) / prev)
+    }
+  }
+
+  return returns
+}
+
+export function calculateBetaFromCloses({ symbolCloses, benchmarkCloses }) {
+  const symbolReturns = buildReturnsByDate(symbolCloses)
+  const benchmarkReturns = buildReturnsByDate(benchmarkCloses)
+  const overlappingDates = [...symbolReturns.keys()].filter(date => benchmarkReturns.has(date)).sort()
+
+  if (overlappingDates.length < 2) {
+    throw new Error('Too few overlapping closes to calculate beta')
+  }
+
+  const symbolSeries = overlappingDates.map(date => symbolReturns.get(date))
+  const benchmarkSeries = overlappingDates.map(date => benchmarkReturns.get(date))
+  const mean = arr => arr.reduce((sum, value) => sum + value, 0) / arr.length
+  const meanSymbol = mean(symbolSeries)
+  const meanBenchmark = mean(benchmarkSeries)
+
+  let covariance = 0
+  let benchmarkVariance = 0
+  let symbolVariance = 0
+  for (let i = 0; i < overlappingDates.length; i++) {
+    const symbolDelta = symbolSeries[i] - meanSymbol
+    const benchmarkDelta = benchmarkSeries[i] - meanBenchmark
+    covariance += symbolDelta * benchmarkDelta
+    benchmarkVariance += benchmarkDelta * benchmarkDelta
+    symbolVariance += symbolDelta * symbolDelta
+  }
+
+  covariance /= overlappingDates.length
+  benchmarkVariance /= overlappingDates.length
+  symbolVariance /= overlappingDates.length
+
+  if (benchmarkVariance <= 0) {
+    throw new Error('Benchmark variance is zero; beta is undefined')
+  }
+
+  const beta = covariance / benchmarkVariance
+  const correlation = symbolVariance > 0
+    ? covariance / Math.sqrt(symbolVariance * benchmarkVariance)
+    : 0
+
+  return {
+    beta: Math.round(beta * 1000) / 1000,
+    correlation: Math.round(correlation * 1000) / 1000,
+    n: overlappingDates.length,
+  }
+}
+
+export async function fetchBetasVsBenchmark(symbols, benchmarkSymbol = 'QQQ', options = {}) {
+  const lookbackDays = Number.isFinite(Number(options.lookbackDays)) ? Number(options.lookbackDays) : 180
+  const endDate = options.endDate ? new Date(options.endDate) : new Date()
+  const startDate = options.startDate ? new Date(options.startDate) : new Date(endDate)
+  if (!options.startDate) startDate.setDate(startDate.getDate() - lookbackDays)
+
+  const uniqueSymbols = [...new Set((symbols || []).map(symbol => String(symbol || '').trim().toUpperCase()).filter(Boolean))]
+  const benchmarkHistory = await fetchHistory(benchmarkSymbol, startDate, endDate)
+  const results = new Map()
+
+  await Promise.allSettled(
+    uniqueSymbols.map(async symbol => {
+      const history = await fetchHistory(symbol, startDate, endDate)
+      const stats = calculateBetaFromCloses({
+        symbolCloses: history,
+        benchmarkCloses: benchmarkHistory,
+      })
+      results.set(symbol, {
+        ...stats,
+        benchmarkSymbol,
+      })
+    })
+  )
+
+  return results
+}
+
 /**
  * Compute portfolio beta + correlation vs a benchmark (e.g. 'SPY').
  *
