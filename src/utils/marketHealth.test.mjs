@@ -8,6 +8,7 @@ import {
 import {
   MARKET_HEALTH_SYMBOLS,
   buildMarketHealthCardModel,
+  MARKET_HEALTH_ZSCORE_PERIOD_OPTIONS,
 } from './marketHealth.js'
 
 function buildBars(length, startClose, step, driftCycle = 0) {
@@ -34,6 +35,10 @@ test('MARKET_HEALTH_SYMBOLS keeps sectors first, then SMH and BTC display mappin
     ['XLK', 'XLC', 'XLB', 'XLE', 'XLI', 'XLU', 'XLY', 'XLF', 'XLP', 'XLV', 'XLRE', 'SMH', 'BTC']
   )
   assert.equal(MARKET_HEALTH_SYMBOLS.at(-1).marketSymbol, 'BTC-USD')
+})
+
+test('market health exposes the supported z-score period presets', () => {
+  assert.deepEqual(MARKET_HEALTH_ZSCORE_PERIOD_OPTIONS, [21, 63, 126, 252])
 })
 
 test('buildMarketHealthCardModel reuses rolling and anchored RS snapshots', () => {
@@ -63,9 +68,9 @@ test('buildMarketHealthCardModel reuses rolling and anchored RS snapshots', () =
   assert.equal(card.sparkline.at(0).value, 100)
   assert.ok(card.sparkline.length <= 90)
   assert.ok(card.sparkline.every(point => Number.isFinite(point.value)))
-  assert.equal(card.sparkline.at(-1).time, card.rollingBackdrop.at(-1).time)
-  assert.ok(card.rollingBackdrop.every(point => point.value === 1))
-  assert.ok(card.rollingBackdrop.some(point => typeof point.color === 'string' && point.color.startsWith('rgba(')))
+  assert.equal(card.sparkline.at(-1).time, card.backdrop.at(-1).time)
+  assert.ok(card.backdrop.every(point => point.value === 1))
+  assert.ok(card.backdrop.some(point => typeof point.color === 'string' && point.color.startsWith('rgba(')))
 })
 
 test('buildMarketHealthCardModel keeps the mini-chart line independent from the SPY comparison series', () => {
@@ -93,4 +98,76 @@ test('buildMarketHealthCardModel keeps the mini-chart line independent from the 
 
   assert.deepEqual(cardA.sparkline, cardB.sparkline)
   assert.notEqual(cardA.rolling.zScore, cardB.rolling.zScore)
+})
+
+test('buildMarketHealthCardModel can switch shading mode and period independently of the line chart', () => {
+  const start = new Date('2025-05-01T00:00:00Z')
+  const benchmarkBars = Array.from({ length: 260 }, (_, index) => {
+    const date = new Date(start)
+    date.setUTCDate(start.getUTCDate() + index)
+    const close = 100 + (index * 0.18) + (Math.sin(index / 7) * 2.4) - (Math.cos(index / 11) * 1.7)
+    return {
+      time: date.toISOString().slice(0, 10),
+      open: close - 0.7,
+      high: close + 1.2,
+      low: close - 1.3,
+      close,
+      volume: 120000 + (index * 900),
+    }
+  })
+  const symbolBars = Array.from({ length: 260 }, (_, index) => {
+    const date = new Date(start)
+    date.setUTCDate(start.getUTCDate() + index)
+    const close = 82 + (index * 0.24) + (Math.sin(index / 4) * 4.8) + (Math.cos(index / 15) * 2.6)
+    return {
+      time: date.toISOString().slice(0, 10),
+      open: close - 0.8,
+      high: close + 1.4,
+      low: close - 1.5,
+      close,
+      volume: 150000 + (index * 1100),
+    }
+  })
+  const settings = {
+    anchorDates: ['2026-01-02'],
+    dailyAnchoredRs: { lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
+    dailyRollingRs: { rsWindow: 63, lookback: 50, sensitivity: 2, opacity: 85, maLen: 9 },
+  }
+
+  const rolling63 = buildMarketHealthCardModel(
+    { symbol: 'XLF', marketSymbol: 'XLF' },
+    symbolBars,
+    benchmarkBars,
+    settings,
+    { shadingMode: 'rolling', zScorePeriod: 63 }
+  )
+  const rolling21 = buildMarketHealthCardModel(
+    { symbol: 'XLF', marketSymbol: 'XLF' },
+    symbolBars,
+    benchmarkBars,
+    settings,
+    { shadingMode: 'rolling', zScorePeriod: 21 }
+  )
+  const anchored126 = buildMarketHealthCardModel(
+    { symbol: 'XLF', marketSymbol: 'XLF' },
+    symbolBars,
+    benchmarkBars,
+    settings,
+    { shadingMode: 'anchored', zScorePeriod: 126 }
+  )
+
+  assert.equal(rolling63.shading.mode, 'rolling')
+  assert.equal(rolling63.shading.period, 63)
+  assert.equal(rolling21.shading.period, 21)
+  assert.equal(anchored126.shading.mode, 'anchored')
+  assert.equal(anchored126.shading.period, 126)
+  assert.deepEqual(rolling63.sparkline, anchored126.sparkline)
+  assert.notDeepEqual(
+    rolling63.backdrop.map(point => point.color),
+    rolling21.backdrop.map(point => point.color)
+  )
+  assert.notDeepEqual(
+    rolling63.backdrop.map(point => point.color),
+    anchored126.backdrop.map(point => point.color)
+  )
 })

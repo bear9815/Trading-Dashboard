@@ -1,7 +1,9 @@
 import {
   buildAnchoredRsSnapshot,
   buildRollingRsSnapshot,
+  calculateAnchoredRsGradient,
   calculateRollingRsGradient,
+  resolveLatestAnchorDate,
 } from './tradeReviewChart.js'
 
 export const MARKET_HEALTH_SYMBOLS = [
@@ -19,6 +21,8 @@ export const MARKET_HEALTH_SYMBOLS = [
   { symbol: 'SMH', marketSymbol: 'SMH', label: 'Semiconductors' },
   { symbol: 'BTC', marketSymbol: 'BTC-USD', label: 'Bitcoin' },
 ]
+
+export const MARKET_HEALTH_ZSCORE_PERIOD_OPTIONS = [21, 63, 126, 252]
 
 function normalizedPriceRows(symbolBars = []) {
   return (symbolBars || [])
@@ -53,8 +57,35 @@ export function buildPriceSparkline(symbolBars = [], points = 90) {
   }))
 }
 
-export function buildRollingBackdrop(symbolBars = [], benchmarkBars = [], settings = {}, points = 90) {
-  const gradient = calculateRollingRsGradient(symbolBars, benchmarkBars, settings?.dailyRollingRs)
+function normalizeZScorePeriod(period, fallback = 63) {
+  return MARKET_HEALTH_ZSCORE_PERIOD_OPTIONS.includes(Number(period))
+    ? Number(period)
+    : fallback
+}
+
+function buildRollingBackdrop(symbolBars = [], benchmarkBars = [], settings = {}, points = 90, zScorePeriod = 63) {
+  const gradient = calculateRollingRsGradient(symbolBars, benchmarkBars, {
+    ...(settings?.dailyRollingRs || {}),
+    rsWindow: normalizeZScorePeriod(zScorePeriod, settings?.dailyRollingRs?.rsWindow ?? 63),
+    lookback: normalizeZScorePeriod(zScorePeriod, settings?.dailyRollingRs?.lookback ?? 50),
+  })
+  const gradientByTime = new Map(
+    gradient.map(row => [row.time, row])
+  )
+
+  return buildPriceSparkline(symbolBars, points).map(point => ({
+    time: point.time,
+    value: 1,
+    color: withAlpha(gradientByTime.get(point.time)?.color),
+  }))
+}
+
+function buildAnchoredBackdrop(symbolBars = [], benchmarkBars = [], settings = {}, points = 90, zScorePeriod = 63) {
+  const anchorDate = resolveLatestAnchorDate(settings?.anchorDates)
+  const gradient = calculateAnchoredRsGradient(symbolBars, benchmarkBars, anchorDate, {
+    ...(settings?.dailyAnchoredRs || {}),
+    lookback: normalizeZScorePeriod(zScorePeriod, settings?.dailyAnchoredRs?.lookback ?? 50),
+  })
   const gradientByTime = new Map(
     gradient.map(row => [row.time, row])
   )
@@ -73,18 +104,31 @@ export function getZScoreTone(snapshot) {
   return 'constructive'
 }
 
-export function buildMarketHealthCardModel(entry, symbolBars = [], benchmarkBars = [], settings = {}) {
+export function buildMarketHealthCardModel(entry, symbolBars = [], benchmarkBars = [], settings = {}, viewOptions = {}) {
   const rolling = buildRollingRsSnapshot(symbolBars, benchmarkBars, settings)
   const anchored = buildAnchoredRsSnapshot(symbolBars, benchmarkBars, settings)
   const sparkline = buildPriceSparkline(symbolBars)
-  const rollingBackdrop = buildRollingBackdrop(symbolBars, benchmarkBars, settings, sparkline.length || 90)
+  const shadingMode = viewOptions?.shadingMode === 'anchored' ? 'anchored' : 'rolling'
+  const zScorePeriod = normalizeZScorePeriod(
+    viewOptions?.zScorePeriod,
+    shadingMode === 'anchored'
+      ? (settings?.dailyAnchoredRs?.lookback ?? 50)
+      : (settings?.dailyRollingRs?.rsWindow ?? 63)
+  )
+  const backdrop = shadingMode === 'anchored'
+    ? buildAnchoredBackdrop(symbolBars, benchmarkBars, settings, sparkline.length || 90, zScorePeriod)
+    : buildRollingBackdrop(symbolBars, benchmarkBars, settings, sparkline.length || 90, zScorePeriod)
 
   return {
     ...entry,
     rolling,
     anchored,
     sparkline,
-    rollingBackdrop,
+    backdrop,
+    shading: {
+      mode: shadingMode,
+      period: zScorePeriod,
+    },
     rollingTone: getZScoreTone(rolling),
     anchoredTone: getZScoreTone(anchored),
     hasData: sparkline.length > 1 && Number.isFinite(rolling?.zScore) && Number.isFinite(anchored?.zScore),

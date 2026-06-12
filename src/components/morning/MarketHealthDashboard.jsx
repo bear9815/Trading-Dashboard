@@ -14,7 +14,11 @@ import {
 import { useSettingsStore } from '../../store/useSettingsStore.js'
 import { useResearchChartUniverse } from '../charts/useResearchChartUniverse.js'
 import { resolveLatestAnchorDate } from '../../utils/tradeReviewChart.js'
-import { buildMarketHealthCardModel, MARKET_HEALTH_SYMBOLS } from '../../utils/marketHealth.js'
+import {
+  buildMarketHealthCardModel,
+  MARKET_HEALTH_SYMBOLS,
+  MARKET_HEALTH_ZSCORE_PERIOD_OPTIONS,
+} from '../../utils/marketHealth.js'
 
 function formatSigned(value, decimals = 2, suffix = '') {
   if (!Number.isFinite(value)) return '—'
@@ -72,6 +76,33 @@ function MetricChip({ label, snapshot, tone }) {
   )
 }
 
+function ToggleGroup({ label, options, value, onChange, formatOption }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">{label}</p>
+      <div className="flex flex-wrap gap-2">
+        {options.map(option => {
+          const active = option === value
+          return (
+            <button
+              key={option}
+              type="button"
+              onClick={() => onChange(option)}
+              className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] transition-all ${
+                active
+                  ? 'border-accent-blue/40 bg-accent-blue/15 text-accent-blue shadow-[0_0_20px_rgba(61,132,255,0.16)]'
+                  : 'border-white/10 bg-white/[0.03] text-gray-400 hover:border-white/20 hover:text-gray-200'
+              }`}
+            >
+              {formatOption ? formatOption(option) : option}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function MarketHealthCard({ card, error }) {
   const stroke = chartStroke(card)
   return (
@@ -100,7 +131,7 @@ function MarketHealthCard({ card, error }) {
               <ReferenceLine y={100} stroke="rgba(148,163,184,0.28)" strokeDasharray="3 3" />
               <Tooltip content={<ChartTooltip />} />
               <Bar dataKey={() => 1} yAxisId="bg" barSize={6} radius={[2, 2, 0, 0]} isAnimationActive={false}>
-                {card.rollingBackdrop.map((point, index) => (
+                {card.backdrop.map((point, index) => (
                   <Cell key={`${card.symbol}-shade-${point.time || index}`} fill={point.color} />
                 ))}
               </Bar>
@@ -119,6 +150,11 @@ function MarketHealthCard({ card, error }) {
             {error || 'Not enough relative history'}
           </div>
         )}
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.14em] text-gray-500">
+        <span>{card.shading.mode === 'anchored' ? 'Anchored shading' : 'Rolling shading'}</span>
+        <span>{card.shading.period}D</span>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
@@ -149,6 +185,8 @@ export default function MarketHealthDashboard() {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
   const [errorsBySymbol, setErrorsBySymbol] = useState({})
+  const [shadingMode, setShadingMode] = useState('rolling')
+  const [zScorePeriod, setZScorePeriod] = useState(63)
 
   const symbols = useMemo(
     () => MARKET_HEALTH_SYMBOLS.map(entry => entry.marketSymbol),
@@ -163,8 +201,8 @@ export default function MarketHealthDashboard() {
     () => resolveLatestAnchorDate(marketHealthSettings?.anchorDates),
     [marketHealthSettings?.anchorDates]
   )
-  const rollingRsWindow = marketHealthSettings?.dailyRollingRs?.rsWindow ?? 63
-  const rollingLookback = marketHealthSettings?.dailyRollingRs?.lookback ?? 50
+  const rollingRsWindow = Math.max(marketHealthSettings?.dailyRollingRs?.rsWindow ?? 63, zScorePeriod)
+  const rollingLookback = Math.max(marketHealthSettings?.dailyRollingRs?.lookback ?? 50, zScorePeriod)
 
   const {
     benchmarkHistoryBars,
@@ -202,9 +240,10 @@ export default function MarketHealthDashboard() {
       entry,
       historyBarsBySymbol[entry.marketSymbol] || [],
       benchmarkHistoryBars,
-      marketHealthSettings
+      marketHealthSettings,
+      { shadingMode, zScorePeriod }
     ))
-  }, [benchmarkHistoryBars, historyBarsBySymbol, marketHealthSettings])
+  }, [benchmarkHistoryBars, historyBarsBySymbol, marketHealthSettings, shadingMode, zScorePeriod])
 
   return (
     <section className="space-y-4">
@@ -216,7 +255,7 @@ export default function MarketHealthDashboard() {
           </div>
           <h3 className="mt-2 text-xl font-semibold text-white">Sector leadership and risk appetite at a glance</h3>
           <p className="mt-1 max-w-3xl text-sm leading-relaxed text-gray-400">
-            Mini normalized price charts with rolling z-score background shading and anchored/rolling z-score readouts, using the same SPY-based framework as your watchlists and charts.
+            Mini normalized price charts with selectable z-score shading and anchored/rolling z-score readouts, using the same SPY-based framework as your watchlists and charts.
           </p>
         </div>
         <button
@@ -231,6 +270,23 @@ export default function MarketHealthDashboard() {
           <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
           {refreshing ? 'Refreshing…' : 'Refresh'}
         </button>
+      </div>
+
+      <div className="grid gap-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+        <ToggleGroup
+          label="Shading"
+          options={['rolling', 'anchored']}
+          value={shadingMode}
+          onChange={setShadingMode}
+          formatOption={(option) => option === 'anchored' ? 'Anchored' : 'Rolling'}
+        />
+        <ToggleGroup
+          label="Z-Score Period"
+          options={MARKET_HEALTH_ZSCORE_PERIOD_OPTIONS}
+          value={zScorePeriod}
+          onChange={setZScorePeriod}
+          formatOption={(option) => `${option}D`}
+        />
       </div>
 
       {error && (
