@@ -2,178 +2,224 @@
 
 ## Context
 
-The Risk area currently focuses on monitoring existing positions and ATR-based open risk. There is not yet a planning tool for constructing a new long basket from a short list of tickers while keeping stop logic consistent and benchmarking the resulting basket against QQQ.
+The Risk area now includes a Basket Sizer that can size a planned long basket using ATR % and optionally include current account positions as the baseline. The next workflow change is to support a `core + satellite` construction model:
 
-The desired workflow is to enter 1-10 tickers, fetch current market data automatically, choose a shared stop distance in ATR units, and have the app recommend whole-share position sizes. The recommendation should size names using equal ATR risk per ticker while also translating the finished basket into QQQ-relative terms.
+- `Current positions` are the optional live baseline from the selected account.
+- `Core positions` are planned new buys entered manually, such as QQQ, TQQQ, or TECL.
+- `Satellite positions` are individual stock additions sized from ATR logic to close the remaining gap to the desired portfolio target.
+
+The user wants the planner to answer a portfolio construction question rather than just a basket question: "Given what I already own, what core ETF sleeve am I adding, and how large should the individual stock sleeve be to juice the portfolio toward my target QQQ multiple?"
 
 ## Goals
 
-- Add a new `Basket Sizer` tab inside the existing Risk surface.
-- Let the user enter:
-  - 1-10 stock tickers
-  - account value
-  - ATR stop multiple
-  - requested QQQ multiple
-- Fetch current price, ATR, and beta-to-QQQ for each ticker automatically.
-- Recommend long-only whole-share position sizes using equal ATR risk per ticker.
-- Derive the ATR risk budget from the requested QQQ multiple instead of asking the user to enter a separate risk budget.
-- Show both per-ticker sizing outputs and portfolio-level QQQ comparison outputs.
+- Keep the planner inside the existing `Basket Sizer` tab in Risk.
+- Add support for planned `Core` rows alongside the existing ATR-sized `Satellite` rows.
+- Let the user enter one blank core row by default, with an option to add more rows as needed.
+- Let each core row be entered either as:
+  - `% allocation of account`
+  - `share count`
+- Treat core rows as planned new buys, not replacements for existing positions.
+- Apply the requested `QQQ multiple` to the full post-trade portfolio:
+  - current positions
+  - planned core buys
+  - planned satellite buys
+- Keep `current`, `planned core`, `planned satellite`, and `combined post-trade` reporting clearly separated.
 
 ## Non-Goals
 
-- Support short positions in the first version.
-- Let the user manually override fetched price, ATR, or beta values in the first version.
-- Add streaming or auto-refreshing quotes inside the planner.
-- Change existing open-position calculations in the main Risk table.
-- Modify proprietary routing under `api/hunterbrook/` or `api/hunterbrook-sub/`.
+- Automatically infer or optimize core rows.
+- Merge current and planned shares into a single opaque position list.
+- Auto-scale user-entered core rows when capital is tight.
+- Add short-planning support for the new planned rows.
+- Persist core rows globally outside the local Risk workflow.
 
 ## Proposed UX
 
-Add a new `Basket Sizer` tab within `src/components/risk/RiskPanel.jsx`. This tab should feel like a planning workspace rather than an extension of the live open-position table.
-
-The tab should have three sections:
+The `Basket Sizer` tab remains a planning workspace inside `src/components/risk/RiskPanel.jsx`, but it is split into three logical layers:
 
 - `Inputs`
-  - multiline or tokenized ticker input for 1-10 symbols
-  - account value input
-  - ATR stop multiple input
-  - requested QQQ multiple input
-  - manual `Fetch / Recalculate` action
-- `Per-ticker results`
-  - one row per valid ticker with fetched data and computed size outputs
-- `Portfolio summary`
-  - aggregate deployment, cash usage, beta framing, and QQQ comparison metrics
+  - account value
+  - ATR stop multiple
+  - requested QQQ multiple
+  - include-current-positions toggle
+- `Core`
+  - one blank row by default
+  - `Add Core Position` button for more rows
+  - each row contains:
+    - ticker
+    - mode selector: `% allocation` or `share count`
+    - value input
+  - fetched outputs per row:
+    - last price
+    - beta to QQQ if available
+    - implied shares if using allocation %
+    - implied allocation if using share count
+- `Satellite`
+  - multiline ticker entry for 1-10 individual-stock symbols
+  - automatic fetch of price, ATR %, and beta-to-QQQ
+  - manual ATR % override when ATR data is missing
 
-Add a compact helper line near the portfolio summary explaining the sizing model in plain language, such as:
+Output sections should stay explicit:
 
-`Equal ATR risk per name using a stop at X ATR, calibrated to a requested QQQ-relative exposure.`
+- `Current Portfolio Snapshot`
+- `Planned Core Buys`
+- `Planned Satellite Buys`
+- `Combined Post-Trade Summary`
 
-Ticker fetch failures and invalid rows should remain visible inline. A single bad ticker should not block results for the rest of the basket.
+The default presentation should stay compact:
+
+- one blank core row
+- one satellite ticker input
+- no extra blank rows until the user adds them
 
 ## Calculation Model
 
-The first version is long-only. All selected names share the same ATR stop multiple.
+### 1. Current positions
 
-For each valid ticker:
+When `Include Current Positions` is on:
 
-- fetch latest price
-- fetch current ATR
-- fetch or derive beta relative to QQQ
-- compute stop distance:
-  - `stopDistance = atr * atrStopMultiple`
-- compute stop price:
-  - `stopPrice = lastPrice - stopDistance`
+- auto-load all open positions from the selected account
+- include longs, shorts, and hedges in the portfolio baseline
+- keep rows without beta visible, but exclude them from beta-targeting math
+- allow manual ATR % entry for rows missing ATR %
 
-Equal ATR risk means every valid ticker receives the same dollar risk budget before share rounding:
+When the toggle is off, the planner starts from zero current exposure.
 
-- `perTickerAtrRiskBudget = totalAtrRiskBudget / validTickerCount`
+### 2. Core positions
 
-Raw share size for each ticker is:
+Core rows are planned new buys and always remain separate from current holdings.
 
-- `rawShares = perTickerAtrRiskBudget / stopDistance`
+Each row is entered in one of two modes:
 
-Recommended shares are:
+- `% allocation`
+  - converts to target dollars using `allocationPct * accountValue`
+  - converts to whole shares with `floor(targetDollars / price)`
+- `share count`
+  - uses the entered whole-share count directly
 
-- `shares = floor(rawShares)`
+Core rows contribute:
 
-Derived per-ticker outputs:
+- planned shares
+- planned market value
+- beta contribution if beta is available
+- implied allocation % when entered by share count
 
-- last price
-- ATR
-- beta to QQQ
-- stop price
-- stop distance in dollars
-- raw shares
-- recommended whole shares
-- position value
-- ATR risk dollars based on rounded shares
-- beta contribution
+Core rows do not use ATR sizing. They create the base exposure sleeve that satellites work around.
 
-Derived portfolio outputs:
+### 3. Satellite positions
 
-- number of valid tickers used
-- total capital deployed
-- cash remaining versus account value
-- total ATR risk from rounded shares
-- aggregate beta to QQQ
-- requested QQQ multiple
-- achieved QQQ multiple
-- slippage from target caused by capital limits, missing data, or rounding
+Satellite rows remain ATR-driven and long-only.
 
-## Derived-Budget Calibration
+For each valid satellite row:
 
-ATR risk targeting drives the share counts. QQQ-relative metrics are the calibration target and reporting lens.
+- fetch price
+- fetch ATR %
+- fetch beta relative to QQQ
+- compute stop %:
+  - `stopPct = atrPct * atrStopMultiple`
+- compute stop distance in dollars:
+  - `stopDistance = price * (stopPct / 100)`
 
-The planner should derive the total ATR risk budget from the requested QQQ multiple using the selected basket's current inputs:
+The stock's own ATR stop width determines its per-share risk. Wider stops should reduce planned satellite shares.
 
-1. Fetch price, ATR, and beta-to-QQQ for each valid ticker.
-2. Assume a shared per-ticker ATR risk budget.
-3. Convert that shared budget into raw shares for each name using ATR stop distance.
-4. Convert shares into dollar exposure and beta contribution.
-5. Solve for the shared ATR risk budget that gets the basket as close as possible to the requested QQQ multiple.
-6. Apply whole-share rounding and recalculate achieved exposure.
+### 4. Portfolio targeting order
 
-This can be implemented with a direct scaling formula when the underlying math remains linear before rounding. After rounding, recompute final basket metrics from rounded shares and report the achieved result. If the requested QQQ multiple cannot be achieved because the rounded basket would exceed account value, the tool should clip to the maximum feasible basket under the capital constraint and report the achieved exposure instead of pretending the target was met.
+The requested `QQQ multiple` applies to the full combined portfolio.
 
-If no feasible basket can be built with at least one share in each valid ticker under the account value constraint, the tool should surface a clear validation state instead of partial nonsense math.
+Sizing order:
 
-## Data Requirements
+1. Start with `current` positions if included.
+2. Add `core` planned buys exactly as entered.
+3. Measure the combined `current + core` portfolio versus the requested QQQ multiple.
+4. Compute the remaining QQQ-equivalent exposure gap, if any.
+5. Size `satellite` rows from their own ATR stop widths to close as much of that remaining gap as possible.
+6. Recompute the final combined portfolio after whole-share rounding and any buying-power cap.
 
-The planner should reuse existing market-data patterns where possible rather than introducing a separate fetch stack.
+This means:
 
-Required fetched inputs per ticker:
+- `Core` sets the broad base exposure.
+- `Satellites` fill the remaining gap.
+- If `current + core` already meet or exceed target, planned satellite shares should go to zero.
 
-- latest price
-- ATR
-- beta relative to QQQ
+## Capital and Constraint Rules
 
-If the current codebase does not already expose a reusable beta-to-QQQ fetch helper, add one in the shared market-data layer rather than embedding beta-fetch logic directly in the Risk component tree.
+- Remaining buying power is measured after current long exposure and planned core buys.
+- Core rows stay as directly requested inputs even if they consume most of the available capital.
+- If satellite sizing would exceed remaining buying power, cap satellites first.
+- If a core row entered by allocation % is missing price, keep it visible and warn that it cannot be sized yet.
+- If a row is missing beta:
+  - keep it visible
+  - exclude it from beta targeting
+  - reflect the reduced `beta coverage %` in summary reporting
+- If a satellite row is missing ATR %:
+  - show a warning
+  - allow manual ATR % entry inline
 
-The QQQ benchmark itself may also need a current ATR or comparable volatility input if the app displays an explicit `ATR exposure equivalent versus QQQ`. If included in the first version, compute that from the same shared market-data layer and make the label explicit that it is a comparison metric, not a sizing input.
+## Required Reporting
 
-## Error Handling
+The planner should always report:
 
-- If a ticker fails price or ATR fetch, mark the row invalid and exclude it from sizing.
-- If beta-to-QQQ is unavailable for any ticker, mark that row invalid and exclude it from both calibration and share sizing, then recompute equal ATR risk across the remaining valid rows.
-- If ATR is zero or non-finite, mark the row invalid.
-- If the rounded share count is zero, show the row as included in analysis but unsized.
-- If total capital required exceeds account value, cap the basket at the highest feasible shared ATR risk budget and show an over-target warning.
-- If fewer than one valid ticker remains after fetch/validation, do not show portfolio recommendations.
+- `Current portfolio`
+  - long exposure
+  - short exposure
+  - available buying power
+  - current QQQ multiple
+  - beta coverage %
+- `Planned core buys`
+  - planned capital deployed
+  - core-added QQQ equivalent exposure
+  - core QQQ multiple contribution
+- `Planned satellite buys`
+  - planned shares
+  - planned capital deployed
+  - ATR-risk dollars
+  - satellite-added QQQ equivalent exposure
+- `Combined post-trade portfolio`
+  - total capital deployed
+  - cash remaining
+  - target QQQ multiple
+  - achieved QQQ multiple
+  - beta coverage %
+  - current/core/satellite/final QQQ framing
 
 ## Component and State Shape
 
-Keep the new planner state local to the Risk feature unless there is already a planning-store pattern worth reusing. The first version does not need to persist basket inputs globally.
+Keep planner state local to the Risk feature.
 
 Recommended structure:
 
-- extend `src/components/risk/RiskPanel.jsx` to add tab state and mount the planner
-- create a dedicated planner component under `src/components/risk/`
-- move the basket sizing math into a focused utility under `src/utils/` so it can be tested independently of the UI
-- keep market-data fetch concerns inside shared data helpers, not inside rendering code
+- extend `src/components/risk/BasketSizerPanel.jsx` to manage:
+  - core row state
+  - satellite ticker input
+  - manual ATR % overrides
+- extend `src/utils/qqqBasketSizer.js` so the pure calculation utility accepts:
+  - current rows
+  - core rows
+  - satellite rows
+- keep market-data fetch logic in shared helpers rather than embedding data logic in rendering branches
 
-The sizing utility should take normalized numeric inputs and return:
+The sizing utility should return:
 
-- valid rows
-- invalid rows with reasons
-- rounded share recommendations
-- portfolio summary metrics
-- warnings and constraint flags
+- current rows and current summary
+- core rows and core summary
+- satellite rows and satellite summary
+- combined summary
+- invalid rows
+- warnings
 
 ## Testing
 
-- Add unit tests for the new sizing utility covering:
-  - equal ATR risk allocation
-  - derived-budget calibration toward a requested QQQ multiple
-  - whole-share rounding behavior
-  - capital-constrained clipping
-  - missing-data invalidation
-- Add a focused component test for the Risk tab workflow covering:
-  - input entry
-  - manual fetch/recalculate
-  - rendering valid and invalid rows
-  - showing portfolio summary and warnings
-- Run the targeted new tests and the relevant Risk-area verification before completing implementation.
+- Add utility tests covering:
+  - core allocation % rows reducing the remaining satellite gap
+  - core share-count rows contributing directly to exposure
+  - satellites collapsing to zero when current + core already meet target
+  - missing beta coverage staying visible but excluded from targeting math
+- Extend the Risk tab source-level/component coverage to assert:
+  - the presence of a Core section
+  - the add-core action
+  - core/satellite terminology in the planner
+- Run the focused new tests plus the existing full test suite and production build before completion.
 
 ## Versioning
 
-This is a new user-visible workflow inside Risk, so bump `package.json` with a minor version when implementation lands.
+This is another user-visible Risk workflow expansion, so bump `package.json` with a minor version when implementation lands.

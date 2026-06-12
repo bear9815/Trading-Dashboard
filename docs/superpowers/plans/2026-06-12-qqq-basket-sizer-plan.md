@@ -1,291 +1,149 @@
-# QQQ Basket Sizer Implementation Plan
+# QQQ Basket Sizer Core + Satellite Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a Basket Sizer tab inside Risk that fetches price, ATR, and beta-to-QQQ for 1-10 symbols and recommends equal-ATR-risk long position sizes calibrated to a requested QQQ multiple.
+**Goal:** Extend the Risk tab Basket Sizer so it can size a combined portfolio using three layers: optional current positions, planned core buys entered manually, and ATR-sized satellite stock additions that close the remaining gap to a requested QQQ multiple.
 
-**Architecture:** Introduce a pure basket-sizing utility that accepts normalized ticker metrics and returns row-level sizing plus portfolio summaries, then add a shared market-data helper to fetch beta-to-QQQ for symbols. Mount a focused `BasketSizerPanel` component inside `RiskPanel` behind a new tab so the existing open-position tables stay isolated from the planning workflow.
+**Architecture:** Keep the market-data fetch workflow in `BasketSizerPanel`, but extend the pure `buildQqqBasketPlan` utility so it accepts current rows, core rows, and satellite rows and returns layer-specific summaries plus a combined post-trade summary. Update the UI to collect core inputs, preserve manual ATR % overrides, and render separate current/core/satellite/final sections.
 
 **Tech Stack:** React 18, Vite, Tailwind CSS, Node test runner
 
 ---
 
-### Task 1: Add the failing basket-sizing utility tests
+### Task 1: Update the utility tests for the new portfolio model
 
 **Files:**
-- Create: `src/utils/qqqBasketSizer.test.mjs`
-- Test: `src/utils/qqqBasketSizer.test.mjs`
+- Modify: `src/utils/qqqBasketSizer.test.mjs`
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Add failing tests for core rows and remaining-gap sizing**
 
-```js
-import test from 'node:test'
-import assert from 'node:assert/strict'
+Cover these behaviors:
 
-import { buildQqqBasketPlan } from './qqqBasketSizer.js'
+- core rows entered as allocation % reduce the remaining satellite buy size
+- core rows entered as share count contribute directly to exposure
+- satellites size to zero when `current + core` already meet or exceed target
+- rows missing beta stay visible but reduce beta coverage instead of crashing targeting
 
-test('buildQqqBasketPlan sizes valid rows with equal ATR risk and matches the requested QQQ multiple when feasible', () => {
-  const result = buildQqqBasketPlan({
-    accountValue: 100000,
-    atrStopMultiple: 1,
-    targetQqqMultiple: 1.5,
-    rows: [
-      { symbol: 'NVDA', price: 100, atr: 5, betaToQqq: 1.2 },
-      { symbol: 'AMZN', price: 50, atr: 2.5, betaToQqq: 0.8 },
-    ],
-  })
-
-  assert.equal(result.status, 'ok')
-  assert.equal(result.validRows.length, 2)
-  assert.equal(result.invalidRows.length, 0)
-  assert.equal(result.validRows[0].shares, result.validRows[1].shares)
-  assert.equal(result.validRows[0].atrRiskDollars, result.validRows[1].atrRiskDollars)
-  assert.equal(result.summary.targetQqqMultiple, 1.5)
-  assert.equal(result.summary.achievedQqqMultiple, 1.5)
-})
-
-test('buildQqqBasketPlan caps sizing when the requested QQQ multiple would exceed account capital', () => {
-  const result = buildQqqBasketPlan({
-    accountValue: 10000,
-    atrStopMultiple: 1,
-    targetQqqMultiple: 2,
-    rows: [
-      { symbol: 'TSLA', price: 200, atr: 10, betaToQqq: 1 },
-      { symbol: 'META', price: 200, atr: 10, betaToQqq: 1 },
-    ],
-  })
-
-  assert.equal(result.status, 'capped')
-  assert.equal(result.summary.totalCapitalDeployed, 10000)
-  assert.ok(result.summary.achievedQqqMultiple < 2)
-  assert.match(result.warnings.join(' '), /capital/i)
-})
-
-test('buildQqqBasketPlan excludes rows with invalid fetched metrics and recalculates across the remaining names', () => {
-  const result = buildQqqBasketPlan({
-    accountValue: 50000,
-    atrStopMultiple: 1.5,
-    targetQqqMultiple: 1,
-    rows: [
-      { symbol: 'MSFT', price: 400, atr: 8, betaToQqq: 1 },
-      { symbol: 'BROKEN', price: 25, atr: 0, betaToQqq: 1.1 },
-      { symbol: 'NOBETA', price: 30, atr: 3, betaToQqq: null },
-    ],
-  })
-
-  assert.equal(result.validRows.length, 1)
-  assert.deepEqual(
-    result.invalidRows.map(row => [row.symbol, row.reason]),
-    [
-      ['BROKEN', 'invalid_atr'],
-      ['NOBETA', 'invalid_beta'],
-    ]
-  )
-  assert.equal(result.validRows[0].symbol, 'MSFT')
-})
-```
-
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 2: Run the focused test to verify the new cases fail**
 
 Run: `node --test src/utils/qqqBasketSizer.test.mjs`
-Expected: FAIL because `src/utils/qqqBasketSizer.js` does not exist yet.
+Expected: FAIL until the utility supports core rows.
 
-### Task 2: Implement the basket-sizing utility
+### Task 2: Extend the pure basket-sizing utility
 
 **Files:**
-- Create: `src/utils/qqqBasketSizer.js`
+- Modify: `src/utils/qqqBasketSizer.js`
 - Test: `src/utils/qqqBasketSizer.test.mjs`
 
-- [ ] **Step 1: Add the pure sizing engine**
+- [ ] **Step 1: Expand the utility contract**
 
-```js
-function round(value, digits = 2) {
-  if (!Number.isFinite(value)) return 0
-  const factor = 10 ** digits
-  return Math.round(value * factor) / factor
-}
+Update `buildQqqBasketPlan` to accept:
 
-export function buildQqqBasketPlan({ accountValue, atrStopMultiple, targetQqqMultiple, rows = [] }) {
-  // normalize rows, exclude invalid metrics, solve shared ATR risk budget,
-  // cap by capital, floor shares, and recalc summary from rounded shares
-}
-```
+- `includeCurrentPositions`
+- `currentRows`
+- `coreRows`
+- `plannedRows`
 
-- [ ] **Step 2: Run the focused utility test to verify it passes**
+Return:
+
+- `currentRows`, `currentSummary`
+- `coreRows`, `coreSummary`
+- `plannedRows`, `plannedSummary`
+- `combinedSummary`
+- `invalidRows`
+- `warnings`
+
+- [ ] **Step 2: Implement the layered calculation flow**
+
+Implement this order:
+
+1. Normalize current rows.
+2. Normalize core rows and convert allocation % rows into whole shares using fetched price.
+3. Compute `current + core` exposure and remaining buying power.
+4. Measure the remaining QQQ-equivalent exposure gap after current + core.
+5. Size satellite rows from ATR % and ATR stop width to close the remaining gap.
+6. Cap satellites by remaining buying power.
+7. Recompute all summaries from rounded values.
+
+- [ ] **Step 3: Run the focused utility test to verify it passes**
 
 Run: `node --test src/utils/qqqBasketSizer.test.mjs`
 Expected: PASS
 
-### Task 3: Add the failing market-data beta helper test
+### Task 3: Update the Basket Sizer UI for core entry
 
 **Files:**
-- Create: `src/utils/marketData.beta.test.mjs`
-- Test: `src/utils/marketData.beta.test.mjs`
-
-- [ ] **Step 1: Write the failing beta helper tests**
-
-```js
-import test from 'node:test'
-import assert from 'node:assert/strict'
-
-import { calculateBetaFromCloses } from './marketData.js'
-
-test('calculateBetaFromCloses derives beta from aligned daily closes', () => {
-  const result = calculateBetaFromCloses({
-    symbolCloses: [
-      { time: '2026-01-01', close: 100 },
-      { time: '2026-01-02', close: 110 },
-      { time: '2026-01-03', close: 121 },
-    ],
-    benchmarkCloses: [
-      { time: '2026-01-01', close: 100 },
-      { time: '2026-01-02', close: 105 },
-      { time: '2026-01-03', close: 110.25 },
-    ],
-  })
-
-  assert.equal(result.beta, 2)
-  assert.equal(result.n, 2)
-})
-
-test('calculateBetaFromCloses rejects too-few overlapping closes', () => {
-  assert.throws(
-    () => calculateBetaFromCloses({
-      symbolCloses: [{ time: '2026-01-01', close: 100 }],
-      benchmarkCloses: [{ time: '2026-01-01', close: 100 }],
-    }),
-    /overlapping/i
-  )
-})
-```
-
-- [ ] **Step 2: Run the beta test to verify it fails**
-
-Run: `node --test src/utils/marketData.beta.test.mjs`
-Expected: FAIL because `calculateBetaFromCloses` does not exist yet.
-
-### Task 4: Implement reusable beta helpers in market data
-
-**Files:**
-- Modify: `src/utils/marketData.js`
-- Test: `src/utils/marketData.beta.test.mjs`
-
-- [ ] **Step 1: Add a pure close-series beta calculator and a fetch helper**
-
-```js
-export function calculateBetaFromCloses({ symbolCloses, benchmarkCloses }) {
-  // build aligned daily return arrays, compute covariance / benchmark variance,
-  // and return { beta, correlation, n }
-}
-
-export async function fetchBetasVsBenchmark(symbols, benchmarkSymbol = 'QQQ', options = {}) {
-  // fetch benchmark history once, fetch symbol histories in parallel,
-  // and return Map<symbol, { beta, correlation, n, benchmarkSymbol }>
-}
-```
-
-- [ ] **Step 2: Run the beta helper test to verify it passes**
-
-Run: `node --test src/utils/marketData.beta.test.mjs`
-Expected: PASS
-
-### Task 5: Add the failing Risk tab source test
-
-**Files:**
-- Create: `src/components/risk/RiskPanel.basket-sizer.test.mjs`
+- Modify: `src/components/risk/BasketSizerPanel.jsx`
 - Test: `src/components/risk/RiskPanel.basket-sizer.test.mjs`
 
-- [ ] **Step 1: Write the failing source-level wiring test**
+- [ ] **Step 1: Add core row state and helpers**
 
-```js
-import test from 'node:test'
-import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import { fileURLToPath } from 'node:url'
+Add:
 
-const riskPanelPath = fileURLToPath(new URL('./RiskPanel.jsx', import.meta.url))
+- one blank core row by default
+- an `Add Core Position` action
+- row fields for `ticker`, `mode`, and `value`
+- helpers to normalize the rows before passing them into the sizing utility
 
-test('RiskPanel exposes a Basket Sizer tab and mounts the dedicated planner component', () => {
-  const source = fs.readFileSync(riskPanelPath, 'utf8')
+- [ ] **Step 2: Split the planner surface into Current, Core, Satellite, and Combined sections**
 
-  assert.match(source, /Basket Sizer/)
-  assert.match(source, /BasketSizerPanel/)
-})
-```
+Render:
 
-- [ ] **Step 2: Run the Risk tab wiring test to verify it fails**
+- `Current Portfolio Snapshot`
+- `Core Positions`
+- `Planned Core Buys`
+- `Satellite Positions`
+- `Planned Satellite Buys`
+- `Combined Post-Trade Summary`
 
-Run: `node --test src/components/risk/RiskPanel.basket-sizer.test.mjs`
-Expected: FAIL because the tab and planner component do not exist yet.
+Keep the current manual ATR % override flow for satellites and current rows.
 
-### Task 6: Implement the Risk Basket Sizer UI
+- [ ] **Step 3: Wire market-data fetches for core rows**
+
+Ensure the load step fetches quotes and beta for:
+
+- current position symbols when included
+- core row symbols
+- satellite row symbols
+
+Continue fetching ATR % only where it is needed for ATR-driven rows.
+
+### Task 4: Extend the Risk tab source-level coverage
 
 **Files:**
-- Create: `src/components/risk/BasketSizerPanel.jsx`
-- Modify: `src/components/risk/RiskPanel.jsx`
+- Modify: `src/components/risk/RiskPanel.basket-sizer.test.mjs`
+
+- [ ] **Step 1: Assert the new core planner surface exists**
+
+Check for:
+
+- `Core Positions`
+- `Add Core Position`
+- `Planned Core Buys`
+- `Planned Satellite Buys`
+
+- [ ] **Step 2: Run the Risk source test**
+
+Run: `node --test src/components/risk/RiskPanel.basket-sizer.test.mjs`
+Expected: PASS
+
+### Task 5: Bump the version and verify the app
+
+**Files:**
 - Modify: `package.json`
-- Test: `src/components/risk/RiskPanel.basket-sizer.test.mjs`
+- Modify: `package-lock.json`
 
-- [ ] **Step 1: Add the dedicated planner component**
+- [ ] **Step 1: Bump the app version**
 
-```jsx
-export default function BasketSizerPanel({ liveBalance }) {
-  // local inputs for symbols, account value, ATR stop multiple, QQQ multiple
-  // fetch quotes + ATR + beta on demand
-  // render invalid rows, valid rows, and portfolio summary
-}
-```
+Because this is a meaningful new Risk workflow, bump from `0.37.0` to `0.38.0`.
 
-- [ ] **Step 2: Add a tab toggle inside RiskPanel and mount the planner**
+- [ ] **Step 2: Run verification**
 
-```jsx
-const [riskWorkspace, setRiskWorkspace] = useState('open-positions')
+Run:
 
-{[
-  { id: 'open-positions', label: 'Open Positions' },
-  { id: 'basket-sizer', label: 'Basket Sizer' },
-].map(tab => (
-  <button key={tab.id} onClick={() => setRiskWorkspace(tab.id)}>
-    {tab.label}
-  </button>
-))}
+- `node --test src/utils/qqqBasketSizer.test.mjs`
+- `node --test src/components/risk/RiskPanel.basket-sizer.test.mjs`
+- `npm test`
+- `npm run build`
 
-{riskWorkspace === 'basket-sizer' ? (
-  <BasketSizerPanel liveBalance={liveBalance} />
-) : (
-  /* existing open positions content */
-)}
-```
-
-- [ ] **Step 3: Bump the app version**
-
-```json
-"version": "0.36.0"
-```
-
-- [ ] **Step 4: Run the Risk tab wiring test to verify it passes**
-
-Run: `node --test src/components/risk/RiskPanel.basket-sizer.test.mjs`
-Expected: PASS
-
-### Task 7: Verify the affected feature set
-
-**Files:**
-- Test: `src/utils/qqqBasketSizer.test.mjs`
-- Test: `src/utils/marketData.beta.test.mjs`
-- Test: `src/components/risk/RiskPanel.basket-sizer.test.mjs`
-
-- [ ] **Step 1: Run the focused tests together**
-
-Run: `node --test src/utils/qqqBasketSizer.test.mjs src/utils/marketData.beta.test.mjs src/components/risk/RiskPanel.basket-sizer.test.mjs`
-Expected: PASS
-
-- [ ] **Step 2: Run the full project test suite**
-
-Run: `npm test`
-Expected: PASS
-
-- [ ] **Step 3: Run the production build**
-
-Run: `npm run build`
-Expected: exit 0
+Expected: PASS, aside from any already-known non-blocking warnings that predate this feature.

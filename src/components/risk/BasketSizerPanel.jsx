@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react'
 
 import { fetchATR14, fetchBetasVsBenchmark, fetchQuotes } from '../../utils/marketData.js'
 import { buildQqqBasketPlan } from '../../utils/qqqBasketSizer.js'
-import { formatCurrency, formatPct } from '../../utils/formatters.js'
+import { formatCurrency } from '../../utils/formatters.js'
 
 function parseTickerList(value) {
   return [...new Set(
@@ -39,8 +39,24 @@ function buildCurrentPositionRows(openTrades) {
   return [...bySymbol.entries()].map(([symbol, currentShares]) => ({ symbol, currentShares }))
 }
 
+let nextCoreRowId = 1
+
+function createCoreRow() {
+  return {
+    id: `core-${nextCoreRowId++}`,
+    symbol: '',
+    mode: 'allocation_pct',
+    value: '',
+  }
+}
+
+function sumShares(rows, key) {
+  return (rows || []).reduce((sum, row) => sum + (Number(row?.[key]) || 0), 0)
+}
+
 export default function BasketSizerPanel({ liveBalance = 0, selectedAccount = 'All', openTrades = [] }) {
   const [tickerInput, setTickerInput] = useState('')
+  const [coreInputRows, setCoreInputRows] = useState(() => [createCoreRow()])
   const [accountValueInput, setAccountValueInput] = useState(liveBalance > 0 ? String(Math.round(liveBalance)) : '')
   const [atrStopMultipleInput, setAtrStopMultipleInput] = useState('1')
   const [qqqMultipleInput, setQqqMultipleInput] = useState('1')
@@ -61,15 +77,46 @@ export default function BasketSizerPanel({ liveBalance = 0, selectedAccount = 'A
   const accountValue = Number(accountValueInput)
   const atrStopMultiple = Number(atrStopMultipleInput)
   const qqqMultiple = Number(qqqMultipleInput)
+  const activeCoreRows = useMemo(
+    () => coreInputRows.filter(row => String(row.symbol || '').trim() || String(row.value || '').trim()),
+    [coreInputRows]
+  )
+  const coreSymbols = useMemo(
+    () => [...new Set(activeCoreRows.map(row => String(row.symbol || '').trim().toUpperCase()).filter(Boolean))],
+    [activeCoreRows]
+  )
 
   const validationMessage = useMemo(() => {
-    if (tickers.length === 0) return 'Enter 1-10 tickers to size a basket.'
+    if (tickers.length === 0) return 'Enter 1-10 tickers to size a satellite basket.'
     if (tickers.length > 10) return 'Use 10 tickers or fewer in one basket.'
     if (!Number.isFinite(accountValue) || accountValue <= 0) return 'Enter an account value greater than zero.'
     if (!Number.isFinite(atrStopMultiple) || atrStopMultiple <= 0) return 'Enter an ATR stop multiple greater than zero.'
     if (!Number.isFinite(qqqMultiple) || qqqMultiple <= 0) return 'Enter a QQQ multiple greater than zero.'
+
+    for (const row of activeCoreRows) {
+      if (!String(row.symbol || '').trim()) return 'Complete each active core row with a ticker symbol.'
+      if (!Number.isFinite(Number(row.value)) || Number(row.value) <= 0) {
+        return 'Enter a positive allocation or share count for each active core row.'
+      }
+    }
+
     return ''
-  }, [accountValue, atrStopMultiple, qqqMultiple, tickers.length])
+  }, [accountValue, activeCoreRows, atrStopMultiple, qqqMultiple, tickers.length])
+
+  function updateCoreRow(id, patch) {
+    setCoreInputRows(rows => rows.map(row => (row.id === id ? { ...row, ...patch } : row)))
+  }
+
+  function addCoreRow() {
+    setCoreInputRows(rows => [...rows, createCoreRow()])
+  }
+
+  function removeCoreRow(id) {
+    setCoreInputRows(rows => {
+      if (rows.length === 1) return [createCoreRow()]
+      return rows.filter(row => row.id !== id)
+    })
+  }
 
   async function handleRecalculate() {
     if (validationMessage) {
@@ -82,42 +129,42 @@ export default function BasketSizerPanel({ liveBalance = 0, selectedAccount = 'A
 
     try {
       const currentSymbols = includeCurrentPositions ? currentPositionRows.map(row => row.symbol) : []
-      const symbolsToLoad = [...new Set([...tickers, ...currentSymbols])]
-      const [quotes, betaMap, qqqAtr] = await Promise.all([
+      const atrSymbols = [...new Set([...tickers, ...currentSymbols])]
+      const symbolsToLoad = [...new Set([...tickers, ...coreSymbols, ...currentSymbols])]
+
+      const [quotes, betaMap, qqqAtr, atrResults] = await Promise.all([
         fetchQuotes(symbolsToLoad),
         fetchBetasVsBenchmark(symbolsToLoad, 'QQQ'),
         fetchATR14('QQQ'),
+        Promise.all(
+          atrSymbols.map(async symbol => {
+            const manualAtrPct = Number(manualAtrPctBySymbol[symbol])
+            try {
+              const atrData = await fetchATR14(symbol)
+              return [symbol, atrData]
+            } catch {
+              return [symbol, Number.isFinite(manualAtrPct) && manualAtrPct > 0 ? { atrPct: manualAtrPct, atr: null } : null]
+            }
+          })
+        ),
       ])
 
-      const metricRows = await Promise.all(
-        symbolsToLoad.map(async symbol => {
+      const atrBySymbol = new Map(atrResults)
+      const metricBySymbol = new Map(
+        symbolsToLoad.map(symbol => {
           const quote = quotes.get(symbol)
-          const manualAtrPct = Number(manualAtrPctBySymbol[symbol])
-          let atrPct = null
-          let atr = null
-
-          try {
-            const atrData = await fetchATR14(symbol)
-            atrPct = atrData.atrPct
-            atr = atrData.atr
-          } catch {
-            if (Number.isFinite(manualAtrPct) && manualAtrPct > 0) {
-              atrPct = manualAtrPct
-            }
-          }
-
           const betaStats = betaMap.get(symbol)
-          return {
+          const atrData = atrBySymbol.get(symbol)
+          return [symbol, {
             symbol,
             price: quote?.price ?? null,
-            atrPct,
-            atr,
+            atrPct: atrData?.atrPct ?? null,
+            atr: atrData?.atr ?? null,
             betaToQqq: betaStats?.beta ?? null,
-          }
+          }]
         })
       )
 
-      const metricBySymbol = new Map(metricRows.map(row => [row.symbol, row]))
       const currentRows = includeCurrentPositions
         ? currentPositionRows.map(row => ({
             ...metricBySymbol.get(row.symbol),
@@ -125,7 +172,22 @@ export default function BasketSizerPanel({ liveBalance = 0, selectedAccount = 'A
             currentShares: row.currentShares,
           }))
         : []
+
       const currentSharesBySymbol = new Map(currentRows.map(row => [row.symbol, row.currentShares]))
+
+      const coreRows = activeCoreRows
+        .map(row => {
+          const symbol = String(row.symbol || '').trim().toUpperCase()
+          const metrics = metricBySymbol.get(symbol) || {}
+          return {
+            ...metrics,
+            symbol,
+            mode: row.mode,
+            value: row.value,
+          }
+        })
+        .filter(row => row.symbol)
+
       const plannedRows = tickers.map(symbol => ({
         ...metricBySymbol.get(symbol),
         symbol,
@@ -139,6 +201,7 @@ export default function BasketSizerPanel({ liveBalance = 0, selectedAccount = 'A
         benchmarkAtrPct: qqqAtr?.atrPct,
         includeCurrentPositions,
         currentRows,
+        coreRows,
         plannedRows,
       })
 
@@ -159,35 +222,26 @@ export default function BasketSizerPanel({ liveBalance = 0, selectedAccount = 'A
   }
 
   const currentSummary = result?.currentSummary
+  const coreSummary = result?.coreSummary
   const plannedSummary = result?.plannedSummary
   const combinedSummary = result?.combinedSummary
   const includedCurrentRows = result?.currentRows || []
+  const coreResultRows = result?.coreRows || []
   const standaloneCurrentRows = includedCurrentRows.filter(
     row => !result?.plannedRows?.some(plannedRow => plannedRow.symbol === row.symbol)
   )
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-4">
-        <div className="card-sm space-y-3">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] gap-4">
+        <div className="card-sm space-y-4">
           <div>
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Basket Inputs</p>
-            <h4 className="text-sm font-semibold text-white">ATR-driven planned additions</h4>
+            <h4 className="text-sm font-semibold text-white">Current + Core + Satellite planner</h4>
             <p className="text-xs text-gray-500 mt-1">
-              Shares per ticker are driven by each stock&apos;s ATR % and stop width. The QQQ multiple acts as the portfolio exposure lever.
+              Core positions set the base exposure. Satellite stocks use ATR % and your stop width to fill the remaining gap to the target QQQ multiple.
             </p>
           </div>
-
-          <label className="block">
-            <span className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Tickers</span>
-            <textarea
-              value={tickerInput}
-              onChange={event => setTickerInput(event.target.value)}
-              placeholder="NVDA, AMZN, MSFT"
-              className="input mt-1 min-h-24 text-sm mono"
-            />
-            <span className="mt-1 block text-[11px] text-gray-600">{tickers.length}/10 symbols</span>
-          </label>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="block">
@@ -233,8 +287,81 @@ export default function BasketSizerPanel({ liveBalance = 0, selectedAccount = 'A
             <span className="text-xs text-gray-600">
               {includeCurrentPositions
                 ? `Using ${selectedAccount} account open positions as the portfolio baseline`
-                : 'Plan the basket without current holdings'}
+                : 'Plan the portfolio without current holdings'}
             </span>
+          </label>
+
+          <div className="rounded-xl border border-white/5 bg-black/10 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Core Positions</p>
+                <p className="text-xs text-gray-500">Start with one core row and add more only if you need them.</p>
+              </div>
+              <button onClick={addCoreRow} className="btn-ghost text-xs flex items-center gap-1.5">
+                <Plus size={12} />
+                Add Core Position
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {coreInputRows.map((row, index) => (
+                <div key={row.id} className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_140px_120px_40px] gap-2 items-end">
+                  <label className="block">
+                    <span className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Ticker</span>
+                    <input
+                      type="text"
+                      value={row.symbol}
+                      onChange={event => updateCoreRow(row.id, { symbol: event.target.value.toUpperCase() })}
+                      placeholder={index === 0 ? 'QQQ' : 'Ticker'}
+                      className="input mt-1 text-sm mono"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Mode</span>
+                    <select
+                      value={row.mode}
+                      onChange={event => updateCoreRow(row.id, { mode: event.target.value })}
+                      className="input mt-1 text-sm"
+                    >
+                      <option value="allocation_pct">% Allocation</option>
+                      <option value="share_count">Share Count</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-[11px] uppercase tracking-[0.18em] text-gray-500">
+                      {row.mode === 'share_count' ? 'Shares' : 'Allocation %'}
+                    </span>
+                    <input
+                      type="number"
+                      step={row.mode === 'share_count' ? '1' : '0.1'}
+                      value={row.value}
+                      onChange={event => updateCoreRow(row.id, { value: event.target.value })}
+                      placeholder={row.mode === 'share_count' ? '50' : '25'}
+                      className="input mt-1 text-sm mono"
+                    />
+                  </label>
+                  <button
+                    onClick={() => removeCoreRow(row.id)}
+                    disabled={coreInputRows.length === 1}
+                    className="btn-ghost h-10 flex items-center justify-center disabled:opacity-40"
+                    aria-label={`Remove core row ${index + 1}`}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Satellite Positions</span>
+            <textarea
+              value={tickerInput}
+              onChange={event => setTickerInput(event.target.value)}
+              placeholder="NVDA, AMZN, MSFT"
+              className="input mt-1 min-h-24 text-sm mono"
+            />
+            <span className="mt-1 block text-[11px] text-gray-600">{tickers.length}/10 symbols</span>
           </label>
 
           <div className="flex items-center gap-3 flex-wrap">
@@ -272,18 +399,24 @@ export default function BasketSizerPanel({ liveBalance = 0, selectedAccount = 'A
                 <p className="mono text-accent-blue font-semibold">{combinedSummary.targetQqqMultiple.toFixed(2)}x</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Achieved QQQ</p>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Final QQQ</p>
                 <p className="mono text-white font-semibold">{combinedSummary.achievedQqqMultiple.toFixed(2)}x</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Current Shares</p>
-                <p className="mono text-white font-semibold">{includedCurrentRows.length}</p>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Current QQQ</p>
+                <p className="mono text-white font-semibold">{combinedSummary.currentQqqMultiple.toFixed(2)}x</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Planned Shares</p>
-                <p className="mono text-white font-semibold">
-                  {result.plannedRows.reduce((sum, row) => sum + (row.plannedShares || 0), 0).toLocaleString()}
-                </p>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Core-Added QQQ</p>
+                <p className="mono text-white font-semibold">{combinedSummary.coreQqqMultiple.toFixed(2)}x</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Satellite-Added QQQ</p>
+                <p className="mono text-white font-semibold">{combinedSummary.satelliteQqqMultiple.toFixed(2)}x</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Beta Coverage</p>
+                <p className="mono text-white font-semibold">{formatPlainPct(combinedSummary.betaCoveragePct, 1)}</p>
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Capital Deployed</p>
@@ -294,17 +427,17 @@ export default function BasketSizerPanel({ liveBalance = 0, selectedAccount = 'A
                 <p className="mono text-white font-semibold">{formatCurrency(combinedSummary.cashRemaining)}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">ATR Risk</p>
-                <p className="mono text-white font-semibold">{formatCurrency(combinedSummary.totalAtrRiskDollars)}</p>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Core Capital</p>
+                <p className="mono text-white font-semibold">{formatCurrency(coreSummary?.coreCapitalDeployed || 0)}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Beta Coverage</p>
-                <p className="mono text-white font-semibold">{formatPlainPct(combinedSummary.betaCoveragePct, 1)}</p>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Satellite ATR Risk</p>
+                <p className="mono text-white font-semibold">{formatCurrency(combinedSummary.totalAtrRiskDollars)}</p>
               </div>
             </div>
           ) : (
             <p className="text-sm text-gray-500">
-              Fetch the basket to see current, planned, and combined portfolio risk.
+              Fetch the planner to see current, core, satellite, and final portfolio risk.
             </p>
           )}
 
@@ -321,7 +454,7 @@ export default function BasketSizerPanel({ liveBalance = 0, selectedAccount = 'A
           <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
             <div>
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Current Portfolio Snapshot</p>
-              <h4 className="text-sm font-semibold text-white">Baseline before planned buys</h4>
+              <h4 className="text-sm font-semibold text-white">Baseline before core and satellite buys</h4>
             </div>
             <div className="text-xs text-gray-500">
               Current QQQ: <span className="mono text-white">{currentSummary.currentQqqMultiple.toFixed(2)}x</span>
@@ -360,11 +493,24 @@ export default function BasketSizerPanel({ liveBalance = 0, selectedAccount = 'A
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {standaloneCurrentRows.map(row => (
+                  {includedCurrentRows.map(row => (
                     <tr key={`current-${row.symbol}`}>
                       <td className="py-2 mono text-white">{row.symbol}</td>
                       <td className="py-2 text-right mono text-gray-300">{row.currentShares.toLocaleString()}</td>
-                      <td className="py-2 text-right mono text-gray-300">{formatPlainPct(row.atrPct)}</td>
+                      <td className="py-2 text-right">
+                        {row.atrPct != null ? (
+                          <span className="mono text-gray-300">{formatPlainPct(row.atrPct)}</span>
+                        ) : (
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={manualAtrPctBySymbol[row.symbol] || ''}
+                            onChange={event => setManualAtrPctBySymbol(prev => ({ ...prev, [row.symbol]: event.target.value }))}
+                            placeholder="ATR %"
+                            className="input w-20 text-xs mono ml-auto"
+                          />
+                        )}
+                      </td>
                       <td className="py-2 text-right mono text-gray-300">{row.betaToQqq != null ? row.betaToQqq.toFixed(2) : '—'}</td>
                       <td className="py-2 text-right text-gray-400">{row.betaEligible ? 'Yes' : 'No'}</td>
                     </tr>
@@ -376,16 +522,67 @@ export default function BasketSizerPanel({ liveBalance = 0, selectedAccount = 'A
         </div>
       )}
 
+      <div className="card-sm">
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Planned Core Buys</p>
+            <h4 className="text-sm font-semibold text-white">Base exposure sleeve</h4>
+          </div>
+          {coreSummary && (
+            <div className="text-xs text-gray-500">
+              Core QQQ: <span className="mono text-white">{coreSummary.coreQqqMultiple.toFixed(2)}x</span>
+            </div>
+          )}
+        </div>
+
+        {coreResultRows.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-white/5 text-gray-500 uppercase tracking-[0.18em]">
+                  <th className="text-left pb-2 font-medium">Ticker</th>
+                  <th className="text-right pb-2 font-medium">Mode</th>
+                  <th className="text-right pb-2 font-medium">Input</th>
+                  <th className="text-right pb-2 font-medium">Price</th>
+                  <th className="text-right pb-2 font-medium">Planned Shares</th>
+                  <th className="text-right pb-2 font-medium">Capital</th>
+                  <th className="text-right pb-2 font-medium">Implied Allocation</th>
+                  <th className="text-right pb-2 font-medium">Beta</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {coreResultRows.map(row => (
+                  <tr key={`core-${row.symbol}`}>
+                    <td className="py-2 mono text-white">{row.symbol}</td>
+                    <td className="py-2 text-right text-gray-300">{row.mode === 'share_count' ? 'Share Count' : '% Allocation'}</td>
+                    <td className="py-2 text-right mono text-gray-300">
+                      {row.mode === 'share_count' ? Number(row.inputValue || 0).toLocaleString() : formatPlainPct(row.inputValue)}
+                    </td>
+                    <td className="py-2 text-right mono text-gray-300">{row.price != null ? formatCurrency(row.price) : '—'}</td>
+                    <td className="py-2 text-right mono text-white">{(row.plannedShares || 0).toLocaleString()}</td>
+                    <td className="py-2 text-right mono text-white">{formatCurrency(row.plannedMarketValue || 0)}</td>
+                    <td className="py-2 text-right mono text-gray-300">{formatPlainPct(row.impliedAllocationPct, 2)}</td>
+                    <td className="py-2 text-right mono text-gray-300">{row.betaToQqq != null ? row.betaToQqq.toFixed(2) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">Add a core row if you want a fixed ETF sleeve before satellites are sized.</p>
+        )}
+      </div>
+
       {result?.plannedRows?.length ? (
         <div className="card-sm">
           <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
             <div>
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Planned Additions</p>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Planned Satellite Buys</p>
               <h4 className="text-sm font-semibold text-white">Current shares, planned shares, combined shares</h4>
             </div>
             {plannedSummary && (
               <div className="text-xs text-gray-500">
-                Planned ATR risk: <span className="mono text-white">{formatCurrency(plannedSummary.plannedAtrRiskDollars)}</span>
+                Satellite ATR risk: <span className="mono text-white">{formatCurrency(plannedSummary.plannedAtrRiskDollars)}</span>
               </div>
             )}
           </div>
@@ -449,6 +646,39 @@ export default function BasketSizerPanel({ liveBalance = 0, selectedAccount = 'A
               ))}
             </div>
           )}
+        </div>
+      ) : null}
+
+      {combinedSummary ? (
+        <div className="card-sm">
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-0.5">Combined Post-Trade Portfolio</p>
+              <h4 className="text-sm font-semibold text-white">Current, core, and satellite together</h4>
+            </div>
+            <div className="text-xs text-gray-500">
+              Total shares planned: <span className="mono text-white">{sumShares(coreResultRows, 'plannedShares') + sumShares(result.plannedRows, 'plannedShares')}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Current QQQ</p>
+              <p className="mono text-white font-semibold">{combinedSummary.currentQqqMultiple.toFixed(2)}x</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">After Core</p>
+              <p className="mono text-white font-semibold">{combinedSummary.coreQqqMultiple.toFixed(2)}x</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Satellite Add</p>
+              <p className="mono text-white font-semibold">{combinedSummary.satelliteQqqMultiple.toFixed(2)}x</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Final QQQ</p>
+              <p className="mono text-accent-blue font-semibold">{combinedSummary.achievedQqqMultiple.toFixed(2)}x</p>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

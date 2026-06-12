@@ -18,6 +18,18 @@ function roundPct(value, digits = 3) {
   return Math.round(n * factor) / factor
 }
 
+function summarizeRows({ accountValue, rows, qqqEquivalentExposure }) {
+  const grossExposure = rows.reduce((sum, row) => sum + (row.grossMarketValue ?? 0), 0)
+  const betaCoveredGross = rows.reduce((sum, row) => sum + (row.betaEligible ? (row.grossMarketValue ?? 0) : 0), 0)
+
+  return {
+    grossExposure: round(grossExposure, 2),
+    qqqEquivalentExposure: round(qqqEquivalentExposure, 2),
+    betaCoveragePct: grossExposure > 0 ? roundPct((betaCoveredGross / grossExposure) * 100, 1) : 0,
+    achievedQqqMultiple: accountValue > 0 ? roundPct(qqqEquivalentExposure / accountValue, 3) : 0,
+  }
+}
+
 function normalizeCurrentRows(rows) {
   return (rows || [])
     .map(row => {
@@ -51,6 +63,83 @@ function normalizeCurrentRows(rows) {
     .filter(Boolean)
 }
 
+function normalizeCoreRows(rows, accountValue) {
+  const normalizedRows = []
+  const invalidRows = []
+
+  for (const row of rows || []) {
+    const symbol = String(row?.symbol || '').trim().toUpperCase()
+    const price = toNumber(row?.price)
+    const betaToQqq = toNumber(row?.betaToQqq)
+    const mode = row?.mode === 'share_count' ? 'share_count' : 'allocation_pct'
+    const value = toNumber(row?.value)
+
+    if (!symbol && (value == null || value <= 0)) continue
+    if (!symbol) {
+      invalidRows.push({ symbol: 'CORE', reason: 'missing_core_symbol' })
+      continue
+    }
+    if (price == null || price <= 0) {
+      invalidRows.push({ symbol, reason: 'invalid_price' })
+      normalizedRows.push({
+        symbol,
+        price: null,
+        betaToQqq,
+        mode,
+        inputValue: value,
+        betaEligible: betaToQqq != null,
+        plannedShares: 0,
+        plannedMarketValue: 0,
+        impliedAllocationPct: 0,
+        exclusionReason: 'invalid_price',
+      })
+      continue
+    }
+    if (value == null || value <= 0) {
+      invalidRows.push({ symbol, reason: 'invalid_core_value' })
+      continue
+    }
+
+    let targetDollars = 0
+    let plannedShares = 0
+    let allocationPct = 0
+
+    if (mode === 'share_count') {
+      plannedShares = Math.max(0, Math.floor(value))
+      targetDollars = plannedShares * price
+      allocationPct = accountValue > 0 ? (targetDollars / accountValue) * 100 : 0
+    } else {
+      allocationPct = value
+      targetDollars = accountValue * (allocationPct / 100)
+      plannedShares = Math.max(0, Math.floor(targetDollars / price))
+    }
+
+    const plannedMarketValue = round(plannedShares * price, 2)
+    const impliedAllocationPct = accountValue > 0 ? roundPct((plannedMarketValue / accountValue) * 100, 2) : 0
+    const betaEligible = betaToQqq != null
+    const betaContribution = betaEligible ? plannedMarketValue * betaToQqq : 0
+
+    normalizedRows.push({
+      symbol,
+      price,
+      betaToQqq,
+      mode,
+      inputValue: value,
+      targetDollars: round(targetDollars, 2),
+      plannedShares,
+      plannedMarketValue,
+      grossMarketValue: plannedMarketValue,
+      requestedAllocationPct: mode === 'allocation_pct' ? roundPct(allocationPct, 2) : null,
+      impliedAllocationPct,
+      betaEligible,
+      betaContribution: round(betaContribution, 2),
+      exclusionReason: null,
+    })
+  }
+
+  return { normalizedRows, invalidRows }
+}
+
 function normalizePlannedRows(rows, atrStopMultiple) {
   const normalizedRows = []
   const invalidRows = []
@@ -78,6 +167,7 @@ function normalizePlannedRows(rows, atrStopMultiple) {
         betaEligible: betaToQqq != null,
         plannedShares: 0,
         combinedShares: currentShares,
+        grossMarketValue: Math.abs(currentShares * price),
         excludedFromSizing: true,
         exclusionReason: 'missing_atr_pct',
       })
@@ -112,17 +202,6 @@ function normalizePlannedRows(rows, atrStopMultiple) {
   return { normalizedRows, invalidRows }
 }
 
-function summarizeRows({ accountValue, rows, qqqEquivalentExposure }) {
-  const grossExposure = rows.reduce((sum, row) => sum + (row.grossMarketValue ?? Math.abs((row.shares ?? row.currentShares ?? 0) * row.price)), 0)
-  const betaCoveredGross = rows.reduce((sum, row) => sum + (row.betaEligible ? (row.grossMarketValue ?? Math.abs((row.shares ?? row.currentShares ?? 0) * row.price)) : 0), 0)
-  return {
-    grossExposure: round(grossExposure, 2),
-    qqqEquivalentExposure: round(qqqEquivalentExposure, 2),
-    betaCoveragePct: grossExposure > 0 ? roundPct((betaCoveredGross / grossExposure) * 100, 1) : 0,
-    achievedQqqMultiple: accountValue > 0 ? roundPct(qqqEquivalentExposure / accountValue, 3) : 0,
-  }
-}
-
 export function buildQqqBasketPlan({
   accountValue,
   atrStopMultiple,
@@ -130,6 +209,7 @@ export function buildQqqBasketPlan({
   benchmarkAtrPct,
   includeCurrentPositions = false,
   currentRows = [],
+  coreRows = [],
   plannedRows = [],
 }) {
   const account = toNumber(accountValue)
@@ -150,37 +230,32 @@ export function buildQqqBasketPlan({
     return { status: 'invalid', warnings: ['Benchmark ATR % must be greater than zero.'] }
   }
 
+  const warnings = []
+  let status = 'ok'
+
   const normalizedCurrentRows = includeCurrentPositions ? normalizeCurrentRows(currentRows) : []
   const currentBySymbol = new Map(normalizedCurrentRows.map(row => [row.symbol, row]))
-  const { normalizedRows: normalizedPlannedRows, invalidRows } = normalizePlannedRows(
+  const { normalizedRows: normalizedCoreRows, invalidRows: coreInvalidRows } = normalizeCoreRows(coreRows, account)
+  const { normalizedRows: normalizedPlannedRows, invalidRows: plannedInvalidRows } = normalizePlannedRows(
     plannedRows.map(row => ({
       ...row,
       currentShares: row.currentShares ?? currentBySymbol.get(String(row?.symbol || '').trim().toUpperCase())?.currentShares ?? 0,
     })),
     stopMultiple
   )
+  const invalidRows = [...coreInvalidRows, ...plannedInvalidRows]
 
-  const warnings = []
-  let status = 'ok'
+  const currentBetaExposure = round(normalizedCurrentRows.reduce((sum, row) => sum + row.betaContribution, 0), 2)
+  const currentLongExposure = round(normalizedCurrentRows.reduce((sum, row) => sum + row.longMarketValue, 0), 2)
+  const currentShortExposure = round(normalizedCurrentRows.reduce((sum, row) => sum + row.shortMarketValue, 0), 2)
 
-  const currentBetaExposure = normalizedCurrentRows.reduce((sum, row) => sum + row.betaContribution, 0)
-  const currentLongExposure = normalizedCurrentRows.reduce((sum, row) => sum + row.longMarketValue, 0)
-  const availableBuyingPower = Math.max(account - currentLongExposure, 0)
+  const coreCapitalDeployed = round(normalizedCoreRows.reduce((sum, row) => sum + (row.plannedMarketValue || 0), 0), 2)
+  const coreQqqEquivalentExposure = round(normalizedCoreRows.reduce((sum, row) => sum + (row.betaContribution || 0), 0), 2)
+  const availableBuyingPowerBeforeCore = round(Math.max(account - currentLongExposure, 0), 2)
+  const availableBuyingPowerAfterCore = round(Math.max(account - currentLongExposure - coreCapitalDeployed, 0), 2)
+  const currentPlusCoreQqqExposure = round(currentBetaExposure + coreQqqEquivalentExposure, 2)
   const targetQqqExposure = targetMultiple * account
-  const additionalQqqExposureNeeded = Math.max(0, targetQqqExposure - currentBetaExposure)
-
-  const sizedPlannedRows = normalizedPlannedRows.filter(row => !row.excludedFromSizing)
-  let requestedRiskPerTicker = 0
-  if (additionalQqqExposureNeeded > 0) {
-    const eligibleTargetRows = sizedPlannedRows.filter(row => row.betaEligible)
-    if (eligibleTargetRows.length === 0) {
-      status = 'invalid'
-      warnings.push('No beta-covered planned rows are available to close the QQQ exposure gap.')
-    } else {
-      const totalPlannedRiskBudget = additionalQqqExposureNeeded * (benchmarkAtr / 100)
-      requestedRiskPerTicker = totalPlannedRiskBudget / eligibleTargetRows.length
-    }
-  }
+  const additionalQqqExposureNeeded = Math.max(0, targetQqqExposure - currentPlusCoreQqqExposure)
 
   if (includeCurrentPositions && normalizedCurrentRows.some(row => row.atrPctMissing)) {
     warnings.push('Some current positions are missing ATR % and need a manual override for full ATR coverage.')
@@ -188,22 +263,51 @@ export function buildQqqBasketPlan({
   if (normalizedPlannedRows.some(row => row.exclusionReason === 'missing_atr_pct')) {
     warnings.push('Some planned rows are missing ATR % and need a manual override before they can be sized.')
   }
-  if (normalizedCurrentRows.some(row => !row.betaEligible) || normalizedPlannedRows.some(row => !row.betaEligible)) {
+  if (
+    normalizedCurrentRows.some(row => !row.betaEligible) ||
+    normalizedCoreRows.some(row => !row.betaEligible) ||
+    normalizedPlannedRows.some(row => !row.betaEligible)
+  ) {
     warnings.push('Beta coverage is partial. Rows without beta stay visible but are excluded from beta targeting math.')
+  }
+  if (normalizedCoreRows.some(row => row.exclusionReason === 'invalid_price')) {
+    warnings.push('Some core rows are missing a usable price and could not be converted into shares.')
+  }
+  if (coreCapitalDeployed > availableBuyingPowerBeforeCore) {
+    status = 'capped'
+    warnings.push('Planned core buys consume more than the remaining long buying power before satellites are added.')
+  }
+
+  const eligibleTargetRows = normalizedPlannedRows.filter(row => !row.excludedFromSizing && row.betaEligible)
+  let requestedRiskPerTicker = 0
+  if (additionalQqqExposureNeeded > 0) {
+    if (eligibleTargetRows.length === 0) {
+      status = 'invalid'
+      warnings.push('No beta-covered planned rows are available to close the QQQ exposure gap.')
+    } else {
+      const totalPlannedRiskBudget = additionalQqqExposureNeeded * (benchmarkAtr / 100)
+      requestedRiskPerTicker = totalPlannedRiskBudget / eligibleTargetRows.length
+    }
+  } else {
+    warnings.push('Current positions plus planned core buys already meet or exceed the requested QQQ multiple, so no additional long shares are needed.')
   }
 
   let totalPlannedCapital = 0
   const plannedRowsWithSizing = normalizedPlannedRows.map(row => {
-    if (row.excludedFromSizing || !row.betaEligible) {
+    if (row.excludedFromSizing || !row.betaEligible || requestedRiskPerTicker <= 0) {
+      const currentMarketValue = round(row.currentShares * row.price, 2)
+      const currentBetaContribution = row.betaEligible ? round(currentMarketValue * row.betaToQqq, 2) : 0
       return {
         ...row,
         plannedShares: 0,
         combinedShares: row.currentShares,
         plannedMarketValue: 0,
-        combinedMarketValue: round(row.currentShares * row.price, 2),
+        combinedMarketValue: currentMarketValue,
+        grossMarketValue: Math.abs(currentMarketValue),
         plannedBetaContribution: 0,
-        combinedBetaContribution: row.betaEligible ? round((row.currentShares * row.price) * row.betaToQqq, 2) : 0,
+        combinedBetaContribution: currentBetaContribution,
         plannedAtrRiskDollars: 0,
+        rawShares: 0,
       }
     }
 
@@ -211,10 +315,11 @@ export function buildQqqBasketPlan({
     const plannedShares = Math.max(0, Math.floor(rawShares))
     const combinedShares = row.currentShares + plannedShares
     const plannedMarketValue = round(plannedShares * row.price, 2)
-    totalPlannedCapital += plannedMarketValue
     const combinedMarketValue = round(combinedShares * row.price, 2)
-    const plannedBetaContribution = row.betaEligible ? round(plannedMarketValue * row.betaToQqq, 2) : 0
-    const currentBetaContribution = row.betaEligible ? round((row.currentShares * row.price) * row.betaToQqq, 2) : 0
+    const plannedBetaContribution = round(plannedMarketValue * row.betaToQqq, 2)
+    const currentBetaContribution = round((row.currentShares * row.price) * row.betaToQqq, 2)
+
+    totalPlannedCapital += plannedMarketValue
 
     return {
       ...row,
@@ -223,6 +328,7 @@ export function buildQqqBasketPlan({
       combinedShares,
       plannedMarketValue,
       combinedMarketValue,
+      grossMarketValue: Math.abs(combinedMarketValue),
       plannedBetaContribution,
       combinedBetaContribution: round(currentBetaContribution + plannedBetaContribution, 2),
       plannedAtrRiskDollars: round(plannedShares * row.stopDistanceDollars, 2),
@@ -230,10 +336,10 @@ export function buildQqqBasketPlan({
   })
 
   let scaleFactor = 1
-  if (totalPlannedCapital > availableBuyingPower && totalPlannedCapital > 0) {
-    scaleFactor = availableBuyingPower / totalPlannedCapital
+  if (totalPlannedCapital > availableBuyingPowerAfterCore && totalPlannedCapital > 0) {
+    scaleFactor = availableBuyingPowerAfterCore / totalPlannedCapital
     status = status === 'invalid' ? status : 'capped'
-    warnings.push('Current long exposure plus planned buys were capped by remaining buying power.')
+    warnings.push('Planned satellite buys were capped by the remaining buying power after current positions and core buys.')
   }
 
   const scaledPlannedRows = scaleFactor < 1
@@ -243,14 +349,16 @@ export function buildQqqBasketPlan({
         const combinedShares = row.currentShares + plannedShares
         const plannedMarketValue = round(plannedShares * row.price, 2)
         const combinedMarketValue = round(combinedShares * row.price, 2)
-        const plannedBetaContribution = row.betaEligible ? round(plannedMarketValue * row.betaToQqq, 2) : 0
-        const currentBetaContribution = row.betaEligible ? round((row.currentShares * row.price) * row.betaToQqq, 2) : 0
+        const plannedBetaContribution = round(plannedMarketValue * row.betaToQqq, 2)
+        const currentBetaContribution = round((row.currentShares * row.price) * row.betaToQqq, 2)
+
         return {
           ...row,
           plannedShares,
           combinedShares,
           plannedMarketValue,
           combinedMarketValue,
+          grossMarketValue: Math.abs(combinedMarketValue),
           plannedBetaContribution,
           combinedBetaContribution: round(currentBetaContribution + plannedBetaContribution, 2),
           plannedAtrRiskDollars: round(plannedShares * row.stopDistanceDollars, 2),
@@ -258,19 +366,11 @@ export function buildQqqBasketPlan({
       })
     : plannedRowsWithSizing
 
-  const plannedSummary = {
-    plannedCapitalDeployed: round(scaledPlannedRows.reduce((sum, row) => sum + (row.plannedMarketValue || 0), 0), 2),
-    plannedAtrRiskDollars: round(scaledPlannedRows.reduce((sum, row) => sum + (row.plannedAtrRiskDollars || 0), 0), 2),
-    plannedQqqEquivalentExposure: round(scaledPlannedRows.reduce((sum, row) => sum + (row.plannedBetaContribution || 0), 0), 2),
-    requestedRiskPerTicker: round(requestedRiskPerTicker, 2),
-    appliedRiskPerTicker: round(requestedRiskPerTicker * scaleFactor, 2),
-  }
-
   const currentSummary = {
-    currentLongExposure: round(currentLongExposure, 2),
-    currentShortExposure: round(normalizedCurrentRows.reduce((sum, row) => sum + row.shortMarketValue, 0), 2),
-    currentQqqEquivalentExposure: round(currentBetaExposure, 2),
-    availableBuyingPower: round(availableBuyingPower, 2),
+    currentLongExposure,
+    currentShortExposure,
+    currentQqqEquivalentExposure: currentBetaExposure,
+    availableBuyingPower: availableBuyingPowerBeforeCore,
     ...summarizeRows({
       accountValue: account,
       rows: normalizedCurrentRows,
@@ -279,23 +379,56 @@ export function buildQqqBasketPlan({
   }
   currentSummary.currentQqqMultiple = currentSummary.achievedQqqMultiple
 
-  const combinedCoverageRows = [
-    ...normalizedCurrentRows.filter(row => !plannedRowsWithSizing.some(planned => planned.symbol === row.symbol)),
+  const coreSummary = {
+    coreCapitalDeployed,
+    coreQqqEquivalentExposure,
+    availableBuyingPowerAfterCore,
+    ...summarizeRows({
+      accountValue: account,
+      rows: normalizedCoreRows.map(row => ({
+        ...row,
+        grossMarketValue: row.plannedMarketValue || 0,
+      })),
+      qqqEquivalentExposure: coreQqqEquivalentExposure,
+    }),
+  }
+  coreSummary.coreQqqMultiple = coreSummary.achievedQqqMultiple
+
+  const plannedSummary = {
+    plannedCapitalDeployed: round(scaledPlannedRows.reduce((sum, row) => sum + (row.plannedMarketValue || 0), 0), 2),
+    plannedAtrRiskDollars: round(scaledPlannedRows.reduce((sum, row) => sum + (row.plannedAtrRiskDollars || 0), 0), 2),
+    plannedQqqEquivalentExposure: round(scaledPlannedRows.reduce((sum, row) => sum + (row.plannedBetaContribution || 0), 0), 2),
+    requestedRiskPerTicker: round(requestedRiskPerTicker, 2),
+    appliedRiskPerTicker: round(requestedRiskPerTicker * scaleFactor, 2),
+  }
+  plannedSummary.plannedQqqMultiple = account > 0 ? roundPct(plannedSummary.plannedQqqEquivalentExposure / account, 3) : 0
+
+  const combinedQqqEquivalentExposure = round(
+    currentBetaExposure + coreSummary.coreQqqEquivalentExposure + plannedSummary.plannedQqqEquivalentExposure,
+    2
+  )
+  const combinedGrossRows = [
+    ...normalizedCurrentRows,
+    ...normalizedCoreRows.map(row => ({
+      grossMarketValue: row.plannedMarketValue || 0,
+      betaEligible: row.betaEligible,
+    })),
     ...scaledPlannedRows.map(row => ({
-      ...row,
-      grossMarketValue: Math.abs(row.combinedMarketValue),
+      grossMarketValue: Math.abs(row.plannedMarketValue || 0),
       betaEligible: row.betaEligible,
     })),
   ]
-  const combinedQqqEquivalentExposure = currentBetaExposure + plannedSummary.plannedQqqEquivalentExposure
   const combinedSummary = {
-    totalCapitalDeployed: round(currentLongExposure + plannedSummary.plannedCapitalDeployed, 2),
-    cashRemaining: round(Math.max(availableBuyingPower - plannedSummary.plannedCapitalDeployed, 0), 2),
+    totalCapitalDeployed: round(currentLongExposure + coreSummary.coreCapitalDeployed + plannedSummary.plannedCapitalDeployed, 2),
+    cashRemaining: round(Math.max(availableBuyingPowerAfterCore - plannedSummary.plannedCapitalDeployed, 0), 2),
     totalAtrRiskDollars: plannedSummary.plannedAtrRiskDollars,
     targetQqqMultiple: roundPct(targetMultiple, 3),
+    currentQqqMultiple: currentSummary.currentQqqMultiple,
+    coreQqqMultiple: roundPct((currentBetaExposure + coreSummary.coreQqqEquivalentExposure) / account, 3),
+    satelliteQqqMultiple: plannedSummary.plannedQqqMultiple,
     ...summarizeRows({
       accountValue: account,
-      rows: combinedCoverageRows,
+      rows: combinedGrossRows,
       qqqEquivalentExposure: combinedQqqEquivalentExposure,
     }),
   }
@@ -304,17 +437,15 @@ export function buildQqqBasketPlan({
     : 0
   combinedSummary.slippageToTarget = roundPct(targetMultiple - combinedSummary.achievedQqqMultiple, 3)
 
-  if (additionalQqqExposureNeeded <= 0) {
-    warnings.push('Current positions already meet or exceed the requested QQQ multiple, so no additional long shares are needed.')
-  }
-
   return {
     status,
     invalidRows,
     warnings,
     currentRows: normalizedCurrentRows,
+    coreRows: normalizedCoreRows,
     plannedRows: scaledPlannedRows,
     currentSummary,
+    coreSummary,
     plannedSummary,
     combinedSummary,
   }
