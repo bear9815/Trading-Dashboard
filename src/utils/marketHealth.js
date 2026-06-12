@@ -1,6 +1,7 @@
 import {
   buildAnchoredRsSnapshot,
   buildRollingRsSnapshot,
+  calculateRollingRsGradient,
 } from './tradeReviewChart.js'
 
 export const MARKET_HEALTH_SYMBOLS = [
@@ -19,35 +20,49 @@ export const MARKET_HEALTH_SYMBOLS = [
   { symbol: 'BTC', marketSymbol: 'BTC-USD', label: 'Bitcoin' },
 ]
 
-function alignedRelativeRows(symbolBars = [], benchmarkBars = []) {
-  const benchmarkByTime = new Map(
-    (benchmarkBars || [])
-      .map(bar => [bar?.time, Number(bar?.close)])
-      .filter(([, close]) => Number.isFinite(close))
-  )
-
+function normalizedPriceRows(symbolBars = []) {
   return (symbolBars || [])
     .map(bar => {
       const close = Number(bar?.close)
-      const benchmarkClose = benchmarkByTime.get(bar?.time)
-      if (!bar?.time || !Number.isFinite(close) || !Number.isFinite(benchmarkClose) || benchmarkClose === 0) return null
+      if (!bar?.time || !Number.isFinite(close) || close <= 0) return null
       return {
         time: bar.time,
-        rsRatio: close / benchmarkClose,
+        close,
       }
     })
     .filter(Boolean)
 }
 
-export function buildRelativePerformanceSparkline(symbolBars = [], benchmarkBars = [], points = 90) {
-  const aligned = alignedRelativeRows(symbolBars, benchmarkBars)
-  const series = aligned.slice(-Math.max(10, Number(points) || 90))
-  const base = series[0]?.rsRatio
+function withAlpha(color, alpha = 0.18) {
+  if (typeof color !== 'string') return 'rgba(148, 163, 184, 0.12)'
+  const match = color.match(/^rgba\((\d+),\s*(\d+),\s*(\d+),\s*[\d.]+\)$/i)
+  if (!match) return color
+  const [, r, g, b] = match
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+export function buildPriceSparkline(symbolBars = [], points = 90) {
+  const normalized = normalizedPriceRows(symbolBars)
+  const series = normalized.slice(-Math.max(10, Number(points) || 90))
+  const base = series[0]?.close
   if (!Number.isFinite(base) || base === 0) return []
 
   return series.map(row => ({
     time: row.time,
-    value: Number((((row.rsRatio / base) * 100)).toFixed(3)),
+    value: Number((((row.close / base) * 100)).toFixed(3)),
+  }))
+}
+
+export function buildRollingBackdrop(symbolBars = [], benchmarkBars = [], settings = {}, points = 90) {
+  const gradient = calculateRollingRsGradient(symbolBars, benchmarkBars, settings?.dailyRollingRs)
+  const gradientByTime = new Map(
+    gradient.map(row => [row.time, row])
+  )
+
+  return buildPriceSparkline(symbolBars, points).map(point => ({
+    time: point.time,
+    value: 1,
+    color: withAlpha(gradientByTime.get(point.time)?.color),
   }))
 }
 
@@ -61,13 +76,15 @@ export function getZScoreTone(snapshot) {
 export function buildMarketHealthCardModel(entry, symbolBars = [], benchmarkBars = [], settings = {}) {
   const rolling = buildRollingRsSnapshot(symbolBars, benchmarkBars, settings)
   const anchored = buildAnchoredRsSnapshot(symbolBars, benchmarkBars, settings)
-  const sparkline = buildRelativePerformanceSparkline(symbolBars, benchmarkBars)
+  const sparkline = buildPriceSparkline(symbolBars)
+  const rollingBackdrop = buildRollingBackdrop(symbolBars, benchmarkBars, settings, sparkline.length || 90)
 
   return {
     ...entry,
     rolling,
     anchored,
     sparkline,
+    rollingBackdrop,
     rollingTone: getZScoreTone(rolling),
     anchoredTone: getZScoreTone(anchored),
     hasData: sparkline.length > 1 && Number.isFinite(rolling?.zScore) && Number.isFinite(anchored?.zScore),

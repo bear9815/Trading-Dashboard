@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, RefreshCw, TrendingUp } from 'lucide-react'
 import {
+  Bar,
+  Cell,
   Line,
-  LineChart,
+  ComposedChart,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -45,10 +47,11 @@ function chartStroke(card) {
 
 function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null
+  const linePoint = payload.find(item => item.dataKey === 'value') || payload[0]
   return (
     <div className="rounded-lg border border-white/10 bg-slate-950/95 px-2.5 py-2 shadow-xl">
       <p className="text-[10px] uppercase tracking-[0.14em] text-gray-500">{label}</p>
-      <p className="mt-1 text-sm font-medium text-white">{payload[0].value.toFixed(2)}</p>
+      <p className="mt-1 text-sm font-medium text-white">{linePoint?.value?.toFixed(2) ?? '—'}</p>
     </div>
   )
 }
@@ -77,7 +80,7 @@ function MarketHealthCard({ card, error }) {
         <div>
           <div className="flex items-center gap-2">
             <p className="text-lg font-semibold text-white">{card.symbol}</p>
-            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-gray-400">vs SPY</span>
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-gray-400">Z vs SPY</span>
           </div>
           <p className="mt-1 text-xs text-gray-400">{card.label}</p>
         </div>
@@ -90,11 +93,17 @@ function MarketHealthCard({ card, error }) {
       <div className="mt-4 h-28">
         {card.sparkline.length > 1 ? (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={card.sparkline}>
+            <ComposedChart data={card.sparkline}>
               <XAxis dataKey="time" hide />
               <YAxis hide domain={['dataMin - 1', 'dataMax + 1']} />
+              <YAxis yAxisId="bg" hide orientation="right" domain={[0, 1]} />
               <ReferenceLine y={100} stroke="rgba(148,163,184,0.28)" strokeDasharray="3 3" />
               <Tooltip content={<ChartTooltip />} />
+              <Bar dataKey={() => 1} yAxisId="bg" barSize={6} radius={[2, 2, 0, 0]} isAnimationActive={false}>
+                {card.rollingBackdrop.map((point, index) => (
+                  <Cell key={`${card.symbol}-shade-${point.time || index}`} fill={point.color} />
+                ))}
+              </Bar>
               <Line
                 type="monotone"
                 dataKey="value"
@@ -103,7 +112,7 @@ function MarketHealthCard({ card, error }) {
                 dot={false}
                 isAnimationActive={false}
               />
-            </LineChart>
+            </ComposedChart>
           </ResponsiveContainer>
         ) : (
           <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-white/10 bg-black/10 text-sm text-gray-500">
@@ -207,7 +216,7 @@ export default function MarketHealthDashboard() {
           </div>
           <h3 className="mt-2 text-xl font-semibold text-white">Sector leadership and risk appetite at a glance</h3>
           <p className="mt-1 max-w-3xl text-sm leading-relaxed text-gray-400">
-            Mini relative-strength charts versus SPY, paired with the same rolling and anchored z-score framework used in your watchlists and charts.
+            Mini normalized price charts with rolling z-score background shading and anchored/rolling z-score readouts, using the same SPY-based framework as your watchlists and charts.
           </p>
         </div>
         <button

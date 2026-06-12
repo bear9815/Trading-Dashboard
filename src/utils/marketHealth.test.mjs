@@ -63,4 +63,34 @@ test('buildMarketHealthCardModel reuses rolling and anchored RS snapshots', () =
   assert.equal(card.sparkline.at(0).value, 100)
   assert.ok(card.sparkline.length <= 90)
   assert.ok(card.sparkline.every(point => Number.isFinite(point.value)))
+  assert.equal(card.sparkline.at(-1).time, card.rollingBackdrop.at(-1).time)
+  assert.ok(card.rollingBackdrop.every(point => point.value === 1))
+  assert.ok(card.rollingBackdrop.some(point => typeof point.color === 'string' && point.color.startsWith('rgba(')))
+})
+
+test('buildMarketHealthCardModel keeps the mini-chart line independent from the SPY comparison series', () => {
+  const benchmarkBarsA = buildBars(180, 100, 0.2, 5)
+  const benchmarkBarsB = buildBars(180, 250, -0.15, 9)
+  const symbolBars = buildBars(180, 75, 0.35, 6)
+  const settings = {
+    anchorDates: ['2026-01-02'],
+    dailyAnchoredRs: { lookback: 20, sensitivity: 2, opacity: 85, maLen: 9 },
+    dailyRollingRs: { rsWindow: 21, lookback: 20, sensitivity: 2, opacity: 85, maLen: 9 },
+  }
+
+  const cardA = buildMarketHealthCardModel(
+    { symbol: 'XLK', marketSymbol: 'XLK' },
+    symbolBars,
+    benchmarkBarsA,
+    settings
+  )
+  const cardB = buildMarketHealthCardModel(
+    { symbol: 'XLK', marketSymbol: 'XLK' },
+    symbolBars,
+    benchmarkBarsB,
+    settings
+  )
+
+  assert.deepEqual(cardA.sparkline, cardB.sparkline)
+  assert.notEqual(cardA.rolling.zScore, cardB.rolling.zScore)
 })
