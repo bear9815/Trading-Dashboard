@@ -497,6 +497,13 @@ export async function fetchATR14(symbol) {
   }
 }
 
+export async function fetchRecentDailyBars(symbol, lookbackDays = 80) {
+  const end = new Date()
+  const start = new Date()
+  start.setDate(start.getDate() - lookbackDays)
+  return fetchHistory(symbol, start, end)
+}
+
 /**
  * Fetch historical 14-period ATR as of a trade entry date.
  * Uses completed daily candles before the entry date to avoid lookahead bias.

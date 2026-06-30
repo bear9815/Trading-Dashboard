@@ -9,7 +9,8 @@ import { useLiveMarketStore } from '../../store/useLiveMarketStore.js'
 import { buildOpenPositionRisk, calcEffectiveExposure, calcAtrPortfolioHeat } from '../../utils/riskCalcs.js'
 import { formatCurrency } from '../../utils/formatters.js'
 import { calcWinRate, calcAvgR } from '../../utils/metrics.js'
-import { fetchQuotes, fetchATR14, fetchSectors, computeSchwabMAE } from '../../utils/marketData.js'
+import { fetchQuotes, fetchATR14, fetchSectors, computeSchwabMAE, fetchRecentDailyBars } from '../../utils/marketData.js'
+import { getLatestKeltnerLowerBand, calcKeltnerDownside, summarizeKeltnerStress } from '../../utils/riskKeltner.js'
 import OpenHeatMeter from './OpenHeatMeter.jsx'
 import TickerTooltip from '../shared/TickerTooltip.jsx'
 import BasketSizerPanel from './BasketSizerPanel.jsx'
@@ -87,6 +88,7 @@ const RISK_COLUMNS = [
   { key: 'uplPct',     label: 'P&L % Acct',  description: 'Open profit or loss as % of account equity' },
   { key: 'riskDollar', label: 'Risk $',      description: 'Current stop-based dollar risk' },
   { key: 'riskPct',    label: 'Risk %',      description: 'Current stop-based risk as % of account' },
+  { key: 'keltnerRiskDollar', label: 'Keltner 21L Risk $', description: 'Downside from current price to the 21 EMA lower Keltner band at 0.5 for long positions.' },
   { key: 'atrHeatDollar', label: 'ATR Heat $', description: 'Open 1 ATR risk budget in dollars' },
   { key: 'atrHeatPct', label: 'ATR Heat %', description: 'Open 1 ATR risk budget as % of account' },
   { key: 'atrTier',    label: 'ATR Tier',    description: 'Planned or inferred ATR risk tier' },
@@ -109,6 +111,7 @@ const DEFAULT_RISK_VISIBLE_COLUMNS = [
   'upl',
   'riskDollar',
   'riskPct',
+  'keltnerRiskDollar',
   'atrHeatDollar',
   'atrTier',
   'heat',
@@ -130,6 +133,7 @@ const RISK_DEFAULT_WIDTHS = {
   uplPct:      85,
   riskDollar:  95,
   riskPct:     80,
+  keltnerRiskDollar: 120,
   atrHeatDollar: 105,
   atrHeatPct:   90,
   atrTier:      80,
@@ -143,7 +147,7 @@ const RISK_DEFAULT_WIDTHS = {
 
 const RISK_COLUMN_META = Object.fromEntries(RISK_COLUMNS.map(col => [col.key, col]))
 
-function getRowRiskMetrics(row, currentPrice, liveBalance, tpMultiplier, atrData) {
+function getRowRiskMetrics(row, currentPrice, liveBalance, tpMultiplier, atrData, keltnerBands = new Map()) {
   const isLong = (row.position ?? 'Long').toLowerCase() !== 'short'
   const origStop = row._originalStopLoss ?? row.stopLoss
   const riskPerShare = row.entryPrice && origStop ? Math.abs(row.entryPrice - origStop) : null
@@ -171,6 +175,13 @@ function getRowRiskMetrics(row, currentPrice, liveBalance, tpMultiplier, atrData
   const currentRiskPct = liveBalance > 0 && currentRiskDollar != null
     ? (currentRiskDollar / liveBalance) * 100
     : row.riskPct
+  const keltnerLower = keltnerBands.get(row.symbol) ?? null
+  const keltnerRiskDollar = calcKeltnerDownside({
+    currentPrice,
+    lowerBand: keltnerLower,
+    shares: row.positionSize || 0,
+    isLong,
+  })
   const stopGapPct = currentPrice != null && currentRiskPerSh != null && currentPrice > 0
     ? (currentRiskPerSh / currentPrice) * 100
     : null
@@ -226,6 +237,8 @@ function getRowRiskMetrics(row, currentPrice, liveBalance, tpMultiplier, atrData
     currentRiskPerSh,
     currentRiskDollar,
     currentRiskPct,
+    keltnerLower,
+    keltnerRiskDollar,
     stopGapPct,
     stopATR,
     targetR,
@@ -1585,6 +1598,8 @@ export default function RiskPanel({ selectedAccount }) {
   const [atrFetching, setAtrFetching]         = useState(false)
   const [atrError, setAtrError]               = useState(null)
   const [benchmarkAtrPct, setBenchmarkAtrPct] = useState(defaultBenchmarkAtr)
+  const [keltnerBars, setKeltnerBars]         = useState(new Map())
+  const [keltnerFetching, setKeltnerFetching] = useState(false)
 
   // Sector state
   const [sectorData, setSectorData]         = useState([])
@@ -1747,6 +1762,15 @@ export default function RiskPanel({ selectedAccount }) {
     })
   }, [positions, liveBalance])
 
+  const keltnerBands = useMemo(() => {
+    const next = new Map()
+    for (const [symbol, bars] of keltnerBars.entries()) {
+      const lower = getLatestKeltnerLowerBand(bars, 21, 0.5)
+      if (Number.isFinite(lower)) next.set(symbol, lower)
+    }
+    return next
+  }, [keltnerBars])
+
   // Sort grouped positions
   const sortedPositions = useMemo(() => {
     if (!sortCol) return groupedPositions
@@ -1754,8 +1778,8 @@ export default function RiskPanel({ selectedAccount }) {
     sorted.sort((a, b) => {
       const qA = quotes.get(a.symbol), qB = quotes.get(b.symbol)
       const cpA = qA?.price ?? null, cpB = qB?.price ?? null
-      const metricsA = getRowRiskMetrics(a, cpA, liveBalance, tpMultiplier, atrData)
-      const metricsB = getRowRiskMetrics(b, cpB, liveBalance, tpMultiplier, atrData)
+      const metricsA = getRowRiskMetrics(a, cpA, liveBalance, tpMultiplier, atrData, keltnerBands)
+      const metricsB = getRowRiskMetrics(b, cpB, liveBalance, tpMultiplier, atrData, keltnerBands)
       let av, bv
       switch (sortCol) {
         case '_symbol':   av = a.symbol; bv = b.symbol; break
@@ -1774,6 +1798,7 @@ export default function RiskPanel({ selectedAccount }) {
         case 'riskDollar': av = metricsA.currentRiskDollar ?? -Infinity; bv = metricsB.currentRiskDollar ?? -Infinity; break
         case 'riskPct':
         case 'heat':       av = metricsA.currentRiskPct ?? -Infinity; bv = metricsB.currentRiskPct ?? -Infinity; break
+        case 'keltnerRiskDollar': av = metricsA.keltnerRiskDollar ?? -Infinity; bv = metricsB.keltnerRiskDollar ?? -Infinity; break
         case 'atrHeatDollar': av = metricsA.atrHeatDollar ?? -Infinity; bv = metricsB.atrHeatDollar ?? -Infinity; break
         case 'atrHeatPct':    av = metricsA.atrHeatPct ?? -Infinity; bv = metricsB.atrHeatPct ?? -Infinity; break
         case 'atrTier':       av = metricsA.atrTier ?? ''; bv = metricsB.atrTier ?? ''; break
@@ -1788,7 +1813,7 @@ export default function RiskPanel({ selectedAccount }) {
       return sortDir === 'asc' ? av - bv : bv - av
     })
     return sorted
-  }, [groupedPositions, sortCol, sortDir, quotes, liveBalance, tpMultiplier, atrData])
+  }, [groupedPositions, sortCol, sortDir, quotes, liveBalance, tpMultiplier, atrData, keltnerBands])
 
   const handleSort = useCallback((col) => {
     if (sortCol === col) {
@@ -1828,10 +1853,23 @@ export default function RiskPanel({ selectedAccount }) {
   const nep = useMemo(() => {
     return groupedPositions.reduce((sum, group) => {
       const cp = quotes.get(group.symbol)?.price ?? null
-      return sum + (getRowRiskMetrics(group, cp, liveBalance, tpMultiplier, atrData).currentRiskDollar || 0)
+      return sum + (getRowRiskMetrics(group, cp, liveBalance, tpMultiplier, atrData, keltnerBands).currentRiskDollar || 0)
     }, 0)
-  }, [groupedPositions, quotes, liveBalance, tpMultiplier, atrData])
+  }, [groupedPositions, quotes, liveBalance, tpMultiplier, atrData, keltnerBands])
   const ner = liveBalance > 0 ? (nep / liveBalance) * 100 : 0
+
+  const keltnerStress = useMemo(() => {
+    const rows = groupedPositions.map(group => {
+      const currentPrice = quotes.get(group.symbol)?.price ?? null
+      const metrics = getRowRiskMetrics(group, currentPrice, liveBalance, tpMultiplier, atrData, keltnerBands)
+      return {
+        symbol: group.symbol,
+        isLong: metrics.isLong,
+        keltnerRiskDollar: metrics.keltnerRiskDollar,
+      }
+    })
+    return summarizeKeltnerStress(rows, liveBalance)
+  }, [groupedPositions, quotes, liveBalance, tpMultiplier, atrData, keltnerBands])
 
   // Effective exposure (ATR-weighted)
   const exposure = useMemo(
@@ -1946,6 +1984,24 @@ export default function RiskPanel({ selectedAccount }) {
     }
   }, [openTrades, benchmarkSymbol])
 
+  const fetchAllKeltnerBars = useCallback(async () => {
+    const symbols = [...new Set(openTrades.map(t => t.symbol).filter(Boolean))]
+    if (!symbols.length) return
+    setKeltnerFetching(true)
+    try {
+      const settled = await Promise.allSettled(
+        symbols.map(async sym => ({ sym, bars: await fetchRecentDailyBars(sym) }))
+      )
+      const map = new Map()
+      for (const result of settled) {
+        if (result.status === 'fulfilled') map.set(result.value.sym, result.value.bars)
+      }
+      setKeltnerBars(map)
+    } finally {
+      setKeltnerFetching(false)
+    }
+  }, [openTrades])
+
   // ── Benchmark switch with auto-ATR fetch ───────────────────────────────────
   const switchBenchmark = useCallback(async (newSymbol) => {
     if (newSymbol === benchmarkSymbol) return
@@ -1980,6 +2036,14 @@ export default function RiskPanel({ selectedAccount }) {
       fetchAllATRs()
     }
   }, [openTrades.length]) // eslint-disable-line
+
+  useEffect(() => {
+    const symbols = [...new Set(openTrades.map(t => t.symbol).filter(Boolean))]
+    const missingBars = symbols.some(symbol => !keltnerBars.has(symbol))
+    if (symbols.length > 0 && missingBars && !keltnerFetching) {
+      fetchAllKeltnerBars()
+    }
+  }, [openTrades, keltnerBars, keltnerFetching, fetchAllKeltnerBars])
 
   // ── Auto-compute open MAE in background for trades missing it ───────────────
   useEffect(() => {
@@ -2113,7 +2177,7 @@ export default function RiskPanel({ selectedAccount }) {
       </div>
 
       {/* ── Top widgets ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
         {/* Open Heat Gauge */}
         <div className="relative flex flex-col items-center justify-center p-5 rounded-xl bg-surface-50 border border-white/8 border-l-2 border-l-accent-yellow overflow-hidden">
           <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full opacity-[0.05] bg-accent-yellow blur-2xl pointer-events-none" />
@@ -2172,6 +2236,35 @@ export default function RiskPanel({ selectedAccount }) {
             </p>
             <p className="text-2xl font-bold mono text-white">{formatCurrency(nep)}</p>
             <p className="text-xs text-gray-500 mt-1">Dollar amount at risk if all stops hit</p>
+          </div>
+        </div>
+
+        <div className="relative flex flex-col gap-4 p-5 rounded-xl bg-surface-50 border border-white/8 border-l-2 border-l-accent-red/70 overflow-hidden">
+          <div className="absolute -top-4 -right-4 w-20 h-20 rounded-full opacity-[0.05] bg-accent-red blur-2xl pointer-events-none" />
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+              Keltner Stress
+              <InlineMetricHelp tooltipContent={<>
+                <p className="font-bold text-white text-sm mb-2">21 EMA lower Keltner stress</p>
+                <p className="text-gray-400 leading-relaxed mb-3">If your current longs retrace to the 21 EMA lower Keltner 0.5 band, this is the approximate open-book downside from here.</p>
+                <p className="text-gray-600">This is a technical retracement gauge, not a stop replacement.</p>
+              </>} />
+            </p>
+            <p className={`text-3xl font-bold mono ${keltnerStress.stressDollar > 0 ? 'text-accent-red' : 'text-gray-500'}`}>
+              {keltnerStress.stressDollar > 0 ? formatCurrency(keltnerStress.stressDollar) : '—'}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              {keltnerStress.includedLongCount > 0 ? `${keltnerStress.stressPct.toFixed(2)}% of account` : 'Need long quotes + daily bars'}
+            </p>
+          </div>
+          <div className="border-t border-white/10 pt-4">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Coverage</p>
+            <p className="text-sm text-gray-300">
+              {keltnerStress.includedLongCount} of {keltnerStress.totalLongCount} longs included
+            </p>
+            <p className="text-[11px] text-gray-600 mt-1">
+              {keltnerFetching ? 'Fetching daily bars…' : 'Uses current price to 21 EMA lower Keltner 0.5.'}
+            </p>
           </div>
         </div>
 
@@ -2501,7 +2594,8 @@ export default function RiskPanel({ selectedAccount }) {
                       atrHeatPct,
                       atrTier,
                       atrFlags,
-                    } = getRowRiskMetrics(group, currentPrice, liveBalance, tpMultiplier, atrData)
+                      keltnerRiskDollar,
+                    } = getRowRiskMetrics(group, currentPrice, liveBalance, tpMultiplier, atrData, keltnerBands)
                     const plColor = unrealizedPL == null ? '' : unrealizedPL >= 0 ? 'text-accent-green' : 'text-accent-red'
                     // Stale loser: held longer than avg loss AND still negative R
                     const isStale = daysSinceEntry != null && avgLossDays != null
@@ -2653,6 +2747,10 @@ export default function RiskPanel({ selectedAccount }) {
                               case 'riskPct':
                                 return <td key={key} className="py-2 text-right mono text-accent-yellow">
                                   {currentRiskPct > 0 ? `${currentRiskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
+                                </td>
+                              case 'keltnerRiskDollar':
+                                return <td key={key} className="py-2 text-right mono text-accent-red font-medium">
+                                  {keltnerRiskDollar != null ? formatCurrency(keltnerRiskDollar) : <span className="text-gray-600">—</span>}
                                 </td>
                               case 'atrHeatDollar':
                                 return <td key={key} className="py-2 text-right mono text-accent-blue font-medium">
@@ -2842,7 +2940,8 @@ export default function RiskPanel({ selectedAccount }) {
                             atrHeatPct: lotAtrHeatPct,
                             atrTier: lotAtrTier,
                             atrFlags: lotAtrFlags,
-                          } = getRowRiskMetrics(lotRow, currentPrice, liveBalance, tpMultiplier, atrData)
+                            keltnerRiskDollar: lotKeltnerRiskDollar,
+                          } = getRowRiskMetrics(lotRow, currentPrice, liveBalance, tpMultiplier, atrData, keltnerBands)
                           const lotPlClr  = lotUPL == null ? '' : lotUPL >= 0 ? 'text-accent-green' : 'text-accent-red'
                           return (
                             <tr key={lot.id} className="bg-white/[0.02] text-xs border-l-2 border-accent-blue/20">
@@ -2914,6 +3013,10 @@ export default function RiskPanel({ selectedAccount }) {
                                     return <td key={key} className="py-1.5 text-right mono text-accent-yellow/60">
                                       {lotCurrentRiskPct > 0 ? `${lotCurrentRiskPct.toFixed(2)}%` : <span className="text-gray-600">—</span>}
                                     </td>
+                                  case 'keltnerRiskDollar':
+                                    return <td key={key} className="py-1.5 text-right mono text-accent-red/70">
+                                      {lotKeltnerRiskDollar != null ? formatCurrency(lotKeltnerRiskDollar) : '—'}
+                                    </td>
                                   case 'atrHeatDollar':
                                     return <td key={key} className="py-1.5 text-right mono text-accent-blue/80">
                                       {lotAtrHeatDollar != null ? formatCurrency(lotAtrHeatDollar) : '—'}
@@ -2974,13 +3077,14 @@ export default function RiskPanel({ selectedAccount }) {
                     let totalCurrentR    = null
                     let totalMktVal      = null
                     let totalRiskDollar  = 0
+                    let totalKeltnerRiskDollar = 0
                     let totalSigmaDollar = 0
                     let totalAtrHeatDollar = 0
                     let totalAtrFlagCount = 0
                     for (const group of groupedPositions) {
                       const q  = quotes.get(group.symbol)
                       const cp = q?.price ?? null
-                      const metrics = getRowRiskMetrics(group, cp, liveBalance, tpMultiplier, atrData)
+                      const metrics = getRowRiskMetrics(group, cp, liveBalance, tpMultiplier, atrData, keltnerBands)
                       // Unrealized P&L: sum across individual lots so each lot's entry/size is exact
                       if (metrics.unrealizedPL != null) {
                         totalUnrealPL = (totalUnrealPL ?? 0) + metrics.unrealizedPL
@@ -2996,6 +3100,7 @@ export default function RiskPanel({ selectedAccount }) {
                       }
                       // Risk $: same formula as individual rows — current price to stop × shares
                       totalRiskDollar += metrics.currentRiskDollar ?? (group.riskDollar || 0)
+                      totalKeltnerRiskDollar += metrics.keltnerRiskDollar ?? 0
                       totalSigmaDollar += metrics.sigmaDollar ?? 0
                       totalAtrHeatDollar += metrics.atrHeatDollar ?? 0
                       totalAtrFlagCount += metrics.atrFlags?.length ?? 0
@@ -3023,6 +3128,8 @@ export default function RiskPanel({ selectedAccount }) {
                               return <td key={key} className="pt-2 text-right mono text-accent-red">{totalRiskDollar > 0 ? formatCurrency(totalRiskDollar) : '—'}</td>
                             case 'riskPct':
                               return <td key={key} className="pt-2 text-right mono text-accent-yellow">{totalRiskPct > 0 ? `${totalRiskPct.toFixed(2)}%` : '—'}</td>
+                            case 'keltnerRiskDollar':
+                              return <td key={key} className="pt-2 text-right mono text-accent-red">{totalKeltnerRiskDollar > 0 ? formatCurrency(totalKeltnerRiskDollar) : '—'}</td>
                             case 'atrHeatDollar':
                               return <td key={key} className="pt-2 text-right mono text-accent-blue">{totalAtrHeatDollar > 0 ? formatCurrency(totalAtrHeatDollar) : '—'}</td>
                             case 'atrHeatPct':
