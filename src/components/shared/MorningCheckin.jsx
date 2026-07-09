@@ -174,9 +174,13 @@ export default function MorningCheckin({ openRequest = { signal: 0, requestedMod
                     Check each statement honestly. You cannot trade well from an unregulated state.
                   </p>
                   {HOWELL_CHECKS.map(c => (
-                    <label
+                    <button
                       key={c.id}
-                      className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                      type="button"
+                      role="checkbox"
+                      aria-checked={!!howellChecks[c.id]}
+                      onClick={() => toggleHowell(c.id)}
+                      className={`flex w-full items-start gap-3 p-3 rounded-xl border text-left transition-all ${
                         howellChecks[c.id]
                           ? 'border-cyan-500/30 bg-cyan-500/5'
                           : 'border-white/8 bg-white/2 hover:border-white/15'
@@ -191,9 +195,8 @@ export default function MorningCheckin({ openRequest = { signal: 0, requestedMod
                           </svg>
                         )}
                       </div>
-                      <input type="checkbox" className="hidden" checked={!!howellChecks[c.id]} onChange={() => toggleHowell(c.id)} />
                       <span className="text-xs text-gray-300 leading-relaxed">{c.text}</span>
-                    </label>
+                    </button>
                   ))}
                 </div>
               )}
@@ -234,9 +237,13 @@ export default function MorningCheckin({ openRequest = { signal: 0, requestedMod
 
             <div className="px-6 py-5 space-y-2.5 max-h-[60vh] overflow-y-auto">
               {DOUGLAS_TRUTHS.map(t => (
-                <label
+                <button
                   key={t.num}
-                  className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                  type="button"
+                  role="checkbox"
+                  aria-checked={!!douglasChecks[t.num]}
+                  onClick={() => toggleDouglas(t.num)}
+                  className={`flex w-full items-start gap-3 p-3 rounded-xl border text-left transition-all ${
                     douglasChecks[t.num]
                       ? 'border-accent-blue/30 bg-accent-blue/5'
                       : 'border-white/8 bg-white/2 hover:border-white/15'
@@ -251,7 +258,6 @@ export default function MorningCheckin({ openRequest = { signal: 0, requestedMod
                       </svg>
                     )}
                   </div>
-                  <input type="checkbox" className="hidden" checked={!!douglasChecks[t.num]} onChange={() => toggleDouglas(t.num)} />
                   <div className="min-w-0">
                     <div className="flex items-baseline gap-2 mb-0.5">
                       <span className="text-[10px] font-bold text-accent-blue/60 mono">#{t.num}</span>
@@ -259,7 +265,7 @@ export default function MorningCheckin({ openRequest = { signal: 0, requestedMod
                     </div>
                     <p className="text-[11px] text-gray-500 leading-relaxed">{t.note}</p>
                   </div>
-                </label>
+                </button>
               ))}
             </div>
 
@@ -307,11 +313,17 @@ export default function MorningCheckin({ openRequest = { signal: 0, requestedMod
               </div>
 
               {/* Final acknowledgment */}
-              <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all mb-6 ${
-                declared
-                  ? 'border-accent-green/30 bg-accent-green/5'
-                  : 'border-white/8 bg-white/2 hover:border-white/15'
-              }`}>
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={declared}
+                onClick={() => setDeclared(v => !v)}
+                className={`mb-6 flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-all ${
+                  declared
+                    ? 'border-accent-green/30 bg-accent-green/5'
+                    : 'border-white/8 bg-white/2 hover:border-white/15'
+                }`}
+              >
                 <div className={`mt-0.5 w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-all ${
                   declared ? 'bg-accent-green border-accent-green' : 'border-gray-600'
                 }`}>
@@ -321,17 +333,23 @@ export default function MorningCheckin({ openRequest = { signal: 0, requestedMod
                     </svg>
                   )}
                 </div>
-                <input type="checkbox" className="hidden" checked={declared} onChange={() => setDeclared(v => !v)} />
                 <span className="text-xs text-gray-300 leading-relaxed">
                   I accept the risk. I am prepared for whatever comes. I trade my edge, not my emotions.
                 </span>
-              </label>
+              </button>
 
-              <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all mb-4 ${
-                meditationCompleted
-                  ? 'border-accent-blue/30 bg-accent-blue/5'
-                  : 'border-white/8 bg-white/2 hover:border-white/15'
-              } ${meditationHabitId ? '' : 'opacity-70'}`}>
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={meditationCompleted}
+                disabled={!meditationHabitId}
+                onClick={toggleMorningMeditation}
+                className={`mb-4 flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-all ${
+                  meditationCompleted
+                    ? 'border-accent-blue/30 bg-accent-blue/5'
+                    : 'border-white/8 bg-white/2 hover:border-white/15'
+                } ${meditationHabitId ? '' : 'opacity-70 cursor-not-allowed'}`}
+              >
                 <div className={`mt-0.5 w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-all ${
                   meditationCompleted ? 'bg-accent-blue border-accent-blue' : 'border-gray-600'
                 }`}>
@@ -341,13 +359,6 @@ export default function MorningCheckin({ openRequest = { signal: 0, requestedMod
                     </svg>
                   )}
                 </div>
-                <input
-                  type="checkbox"
-                  className="hidden"
-                  checked={meditationCompleted}
-                  disabled={!meditationHabitId}
-                  onChange={toggleMorningMeditation}
-                />
                 <div className="min-w-0">
                   <p className="text-xs text-gray-300 leading-relaxed">Morning Meditation</p>
                   <p className="mt-1 text-[11px] text-gray-500 leading-relaxed">
@@ -356,7 +367,7 @@ export default function MorningCheckin({ openRequest = { signal: 0, requestedMod
                       : 'Add a Meditation habit in Journal → Habits to track this automatically.'}
                   </p>
                 </div>
-              </label>
+              </button>
 
               {/* Enter the Arena */}
               <button
